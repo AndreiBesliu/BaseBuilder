@@ -25,10 +25,34 @@ preferință (eu prefer TypeScript). Până la un spike cronometrat de portare, 
 **1,5×** pe pragul de STAY și **zero marjă** pe pragul de FAIL. Asimetria e exprimată în marjă, nu
 în intenție.
 
-**Consecința care contează cel mai mult, și e neplăcută:** măsurătorile făcute pe mașina asta
-(Ryzen 9 7950X, 16C/32T, RTX 3060, 31 GB, desktop fără baterie, cu un iGPU AMD alături) pot produce
-**MOVE, GREY, SCOPE, FAIL-CANDIDAT sau NECONCLUDENT — niciodată STAY**. Mașina greșește sistematic
-în direcția care îmi convine. Vezi §2 pentru aritmetica exactă, și §12 pentru ce costă să repar asta.
+### Mașina pe care se măsoară, exact
+
+Verificată în Task Manager, 13.09.2026 — nu dedusă. Intră în metadatele fiecărei rulări.
+
+| | |
+|---|---|
+| CPU | AMD Ryzen 9 7950X · 16 nuclee / 32 de thread-uri · bază 4,50 GHz, observat 5,20 GHz |
+| Cache | L1 1 MB · L2 16 MB · **L3 64 MB** |
+| RAM | 31,1 GB |
+| **GPU 0** | **AMD Radeon(TM) Graphics (iGPU)** — enumerat PRIMUL |
+| GPU 1 | NVIDIA GeForce RTX 3060 · **12 GB dedicat** · driver 32.0.16.1656 · DirectX 12 (FL 12.2) |
+| Alimentare | desktop, fără baterie — deci gărzile de Energy Saver nu se aplică aici |
+
+Două lucruri care schimbă protocolul:
+
+1. **iGPU-ul AMD e GPU 0.** Un fallback tăcut pe el explică singur diferențe de 3× și n-ar produce
+   niciun mesaj de eroare. De asta condiția de invalidare nr. 2 (§7) cere `UNMASKED_RENDERER` să
+   conțină „RTX 3060", iar viewerul îl afișează acum în HUD, ca să se vadă înainte de rulare.
+2. **VRAM: 12 GB, nu 4.** `Win32_VideoController.AdapterRAM` raportează 4 GB — e un câmp pe 32 de
+   biți care se învârte, nu o măsurătoare. Dacă pragul de VRAM din §8 s-ar fi calibrat pe cifra aia,
+   ar fi fost de trei ori prea strict. **Al doilea instrument care minte în sesiunea asta.**
+
+**Consecința care contează cel mai mult, și e neplăcută:** măsurătorile făcute pe mașina asta pot
+produce **MOVE, GREY, SCOPE, FAIL-CANDIDAT sau NECONCLUDENT — niciodată STAY**. Greșește sistematic
+în direcția care îmi convine, pe toate axele deodată: GPU de ~5,5× peste clasa țintă, CPU de ~2×,
+și 64 MB de L3 plus 32 de thread-uri, adică o topologie în care meshingul mutat într-un worker **nu
+atinge deloc** main thread-ul — pe 6 nuclee, atinge. Topologia nu e un factor de scalat; niciun R
+n-o repară. Vezi §2 pentru aritmetică și §12 pentru ce costă să repar asta.
 
 ---
 
