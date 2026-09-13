@@ -41,8 +41,15 @@ export interface MacroSample {
 
 /** Scara verticala: cat inseamna amplitudinea maxima a zgomotului, in decimetri. */
 const HEIGHT_SCALE_DM = 1800
-/** Nivelul apei, in decimetri. Sub el e apa. */
-export const WATER_LEVEL_DM = -60
+/**
+ * Nivelul apei, in decimetri. Sub el e apa.
+ *
+ * Calibrat pe distributia MASURATA a inaltimilor, nu ales din intuitie
+ * (`node tools/height-distribution.mjs`): relieful merge de la -142 m la +148 m,
+ * cu mediana la +5,6 m. La -6 m, 40% din lume ar fi fost apa — prea mult pentru
+ * un joc despre asezari. La -30 m raman 24% apa: mari la margini, lacuri in bazine.
+ */
+export const WATER_LEVEL_DM = -300
 
 /**
  * Inaltimea bruta, in decimetri. Pura, fara stare.

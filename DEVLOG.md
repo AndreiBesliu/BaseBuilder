@@ -199,3 +199,56 @@ Randarea propriu-zisă: three.js, netezirea suprafeței cu marching-squares, sli
 acoperiș, camera. **Gate-ul de motor nu se poate rula încă** — el cere o măsurătoare de FPS pe GPU,
 nu una de CPU. Plus limita cunoscută a mesher-ului: fețele de la marginea chunkului sunt emise mereu,
 pentru că nu se consultă vecinul.
+
+---
+
+## 2026-09-13 — Sesiunea 1 (continuare): viewerul. Prima dată când se vede ceva
+
+**Model:** Claude Opus 5 · **Prompt:** „continua" + întrebarea „când pot vedea sau testa ceva"
+
+### Task Started
+
+Întrebarea owner-ului a schimbat prioritatea: tot ce exista era headless. Am construit viewerul —
+nu ca să fie joc, ci ca să existe ce privi și cu ce măsura gate-ul.
+
+### Task Completed
+
+`viewer/` (three.js + vite) + `src/render/heightfield.ts`. Peisajul e plan de triunghiuri ieftine;
+acolo unde s-a săpat apare geometrie de voxeli. **87/87 teste, typecheck curat pe ambele configurații.**
+
+Măsurat, cu panoul vizibil: **60 FPS** (16,7 ms median), **124 draw calls**, **240.590 de triunghiuri**,
+377 de chunk-uri, build inițial 136 ms.
+
+### Patru lucruri găsite privind, nu citind cod
+
+1. **`requestAnimationFrame` nu rulează când panoul e ascuns.** HUD-ul arăta „fps 0, p99 9008 ms".
+   Instrumentul, nu codul. Consecință pentru gate: **măsurătoarea de framerate cere o fereastră
+   vizibilă** — intră în protocol.
+2. **Nivelul apei era prost calibrat.** Era la −6 m, cu relief măsurat între −142 m și +148 m: 40% din
+   lume ieșea apă. Am rulat distribuția (`tools/height-distribution.mjs`) și am mutat pragul la −30 m
+   ⇒ 76% uscat. Numărul vine dintr-o măsurătoare, nu din intuiție.
+3. **Viewerul ateriza orb** într-un bazin la −80 m, adică sub apă. Acum caută determinist un loc
+   locuibil — teren peste apă, sol bun, relief moderat.
+4. **Winding greșit pe jumătate din fețe.** Mesher-ul emite aceeași ordine de colțuri pentru ambele
+   direcții ale unei axe, iar trecerea în spațiul lui three schimbă Y cu Z, ceea ce oglindește spațiul.
+   Rezultat: jumătate din fețe erau back-facing, eliminate de culling, și se vedea fundalul prin
+   geometrie. **Prima încercare de reparare a inversat exact pe dos** — am rezolvat-o analitic
+   (produsul vectorial pentru fața de sus dă −Y, dar trebuie +Y), nu prin încercări.
+
+### Ce se vede și e corect să se vadă
+
+Terasarea în trepte de 1 m pe suprafața promovată. **Nu e un bug — e pasul neimplementat din plan:**
+S6-8 cere netezirea suprafeței cu marching-squares, „ca zona săpată să nu citească Minecraft; treptele
+de 1 m rămân în DATE, nu în pixeli". Acum se vede exact de ce planul cere asta.
+
+La fel, seam-ul heightfield↔voxel (K16) e vizibil la granița zonei promovate. Prima dovadă vizuală a
+riscului numărul unu al arhitecturii.
+
+### Cum se rulează
+
+```
+npm --prefix games/kinstead run viewer      # http://localhost:5175
+```
+Drag rotește, rotița face zoom, Q/E mișcă nivelul de slice, click stânga sapă, Shift+click construiește.
+
+**Ce NU e:** nu e joc. Nu există pioni, joburi, nevoi, timp. E o unealtă de inspecție și de măsurare.

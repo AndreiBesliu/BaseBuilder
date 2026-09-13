@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kinstead — viewer de teren</title>
+<style>
+  :root {
+    --ink: #E9E5DC;
+    --ink-2: #A49D91;
+    --panel: rgba(23, 23, 21, .88);
+    --rule: #3a382f;
+    --frost: #63AEC0;
+    --ember: #D9764A;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0f10; }
+  canvas { display: block; }
+
+  #hud {
+    position: fixed; top: 12px; left: 12px;
+    font: 12px/1.5 "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    color: var(--ink); background: var(--panel);
+    border: 1px solid var(--rule); padding: 12px 14px;
+    min-width: 260px; backdrop-filter: blur(6px);
+  }
+  #hud h1 {
+    margin: 0 0 8px; font: 600 13px/1.2 "IBM Plex Mono", monospace;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--frost);
+  }
+  #hud .row { display: flex; justify-content: space-between; gap: 14px; }
+  #hud .row span:last-child { color: var(--ink); font-variant-numeric: tabular-nums; }
+  #hud .row span:first-child { color: var(--ink-2); }
+  #hud hr { border: 0; border-top: 1px solid var(--rule); margin: 9px 0; }
+  #hud .warn { color: var(--ember); }
+
+  #keys {
+    position: fixed; bottom: 12px; left: 12px;
+    font: 11px/1.7 "IBM Plex Mono", ui-monospace, monospace;
+    color: var(--ink-2); background: var(--panel);
+    border: 1px solid var(--rule); padding: 10px 14px;
+  }
+  #keys b { color: var(--ink); font-weight: 500; }
+
+  #busy {
+    position: fixed; inset: 0; display: grid; place-items: center;
+    background: #0d0f10; color: var(--ink-2);
+    font: 13px "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .1em;
+  }
+</style>
+</head>
+<body>
+  <div id="busy">se genereaza lumea…</div>
+  <div id="hud" hidden>
+    <h1>Kinstead</h1>
+    <div class="row"><span>fps</span><span id="fps">—</span></div>
+    <div class="row"><span>frame p99</span><span id="p99">—</span></div>
+    <div class="row"><span>draw calls</span><span id="calls">—</span></div>
+    <div class="row"><span>triunghiuri</span><span id="tris">—</span></div>
+    <hr>
+    <div class="row"><span>chunk-uri</span><span id="chunks">—</span></div>
+    <div class="row"><span>din care voxel</span><span id="promoted">—</span></div>
+    <div class="row"><span>quaduri voxel</span><span id="quads">—</span></div>
+    <hr>
+    <div class="row"><span>nivel slice</span><span id="slice">—</span></div>
+    <div class="row"><span>renderer</span><span id="backend">—</span></div>
+    <div class="row"><span>loc</span><span id="spot">—</span></div>
+  </div>
+  <div id="keys">
+    <b>drag</b> roteste · <b>rotita</b> zoom · <b>click dreapta+drag</b> panoramare<br>
+    <b>Q</b> / <b>E</b> coboara / urca nivelul de slice · <b>R</b> reseteaza slice<br>
+    <b>click stanga pe teren</b> sapa un voxel · <b>Shift+click</b> construieste
+  </div>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

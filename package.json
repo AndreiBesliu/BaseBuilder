@@ -8,14 +8,21 @@
     "node": ">=23"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.viewer.json",
     "discipline": "node tools/check-sim-discipline.mjs",
     "test": "node --test tests/",
     "check": "npm run discipline && npm run typecheck && npm run test",
-    "run:headless": "node src/harness/cli.ts"
+    "run:headless": "node src/harness/cli.ts",
+    "viewer": "vite",
+    "viewer:build": "vite build"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "typescript": "~5.9.0"
+    "@types/three": "^0.186.0",
+    "typescript": "~5.9.0",
+    "vite": "^8.3.0"
+  },
+  "dependencies": {
+    "three": "^0.186.0"
   }
 }
