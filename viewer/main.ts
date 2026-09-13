@@ -279,17 +279,24 @@ controls.update()
 let sliceLevel = VOXEL_LEVELS
 const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0)
 
+// Planul e MEREU activ, si cand slice-ul e oprit: impins atat de sus incat nu
+// taie nimic. Motivul e de masuratoare, nu de randare — numarul de clipping
+// planes intra in cheia de program a shaderului, deci comutarea 0↔1 forteaza o
+// recompilare, adica un cadru lung care arata exact ca un hiccup de streaming.
+// Cu planul constant, un cadru lung la schimbarea de nivel e o constatare reala.
+const SLICE_OFF = 1e6
+
 function applySlice(): void {
   if (sliceLevel >= VOXEL_LEVELS) {
-    renderer.clippingPlanes = []
+    clipPlane.constant = SLICE_OFF
     el('slice').textContent = 'toate'
   } else {
     clipPlane.constant = sliceLevel
-    renderer.clippingPlanes = [clipPlane]
     el('slice').textContent = `${sliceLevel} m`
   }
 }
 renderer.localClippingEnabled = true
+renderer.clippingPlanes = [clipPlane]
 applySlice()
 
 // --------------------------------------------------------------------------
@@ -316,22 +323,35 @@ renderer.domElement.addEventListener('click', (ev) => {
   const wy = Math.floor(p.z)
   const z = Math.round(p.y)
 
+  // Cine era deja promovat INAINTE de comanda. Diferenta de dupa spune exact
+  // ce mesh trebuie refacut.
+  const promotedBefore = new Set<number>()
+  for (const k of world.terrain.keys) {
+    if (world.terrain.chunks.get(k)!.voxels !== null) promotedBefore.add(k)
+  }
+
   const out = ev.shiftKey
     ? applyCommand(world, { kind: 'fill', wx, wy, z: z + 1, material: Material.PIATRA_CONSTRUITA })
     : applyCommand(world, { kind: 'dig', wx, wy, z })
 
   if (!out.ok) return
 
-  // Se reconstruieste DOAR chunk-ul atins si vecinii lui — apron-ul poate fi
-  // promovat de aceasta comanda, deci si ei s-au schimbat.
+  // Se reconstruieste chunk-ul atins plus vecinii care CHIAR s-au schimbat.
+  //
+  // `dig` promoveaza un apron de 3×3, dar numai prima data: la a doua sapatura
+  // in acelasi chunk, vecinii sunt deja promovati si mesh-ul lor e neschimbat.
+  // Varianta care remesh-uia mereu 3×3 platea 9× pretul pentru un singur chunk
+  // murdar — 5,4 ms in loc de ~0,6 — si ar fi intrat in gate ca „limita stivei".
   const cx = Math.floor(wx / CHUNK_CELLS)
   const cy = Math.floor(wy / CHUNK_CELLS)
-  totalQuads = 0
-  promotedCount = 0
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
-      const c = world.terrain.chunks.get((cy + dy) * 512 + (cx + dx))
-      if (c) buildChunkMesh(c)
+      const key = (cy + dy) * 512 + (cx + dx)
+      const c = world.terrain.chunks.get(key)
+      if (!c) continue
+      const wasPromoted = promotedBefore.has(key)
+      const isCenter = dx === 0 && dy === 0
+      if (isCenter || !wasPromoted) buildChunkMesh(c)
     }
   }
   recount()

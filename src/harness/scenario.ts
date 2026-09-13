@@ -13,6 +13,8 @@ import type { Command, LoggedCommand } from '../sim/commands.ts'
 import { applyCommand } from '../sim/commands.ts'
 import { hashWorld } from '../sim/hash.ts'
 import { describe } from '../sim/result.ts'
+import { CHUNK_CELLS, Material } from '../sim/terrain/chunk.ts'
+import { createTerrain, groundLevelM, WORLD_CELLS } from '../sim/terrain/terrain.ts'
 import type { World } from '../sim/state.ts'
 import { advance, createWorld, liveAgentCount, tick } from '../sim/world.ts'
 
@@ -65,9 +67,25 @@ export function runScenario(s: Scenario): RunReport {
   }
 }
 
-/** Un scenariu standard, folosit de teste si de benchmark. Deterministic prin constructie. */
+/**
+ * Un scenariu standard, folosit de teste si de benchmark. Deterministic prin constructie.
+ *
+ * Contine DELIBERAT trei feluri de comenzi, nu unul singur:
+ *  - agenti, ca sa miste `AgentStore` si `nextId`
+ *  - `setFocus`, ca sa miste discul rezident (chunk-uri incarcate si aruncate)
+ *  - sapaturi si zidiri, ca sa PROMOVEZE chunk-uri
+ *
+ * Ultimul punct e cel care conteaza si a lipsit pana acum. `hashWorld` include
+ * numai chunk-urile promovate — decizie corecta, fiindca restul terenului e
+ * DERIVED. Dar un scenariu care nu promoveaza nimic face din asta un oracol ORB:
+ * hash-ul de referinta din CI acoperea zero teren. Dovedit prin mutatie:
+ * cu `HEIGHT_SCALE_DM` mutat de la 1800 la 1900 — adica tot relieful lumii
+ * schimbat cu 5,5% — hash-ul ramanea `5bc3ca4c`. O poarta care nu poate sa pice
+ * nu e o poarta.
+ */
 export function standardScenario(seed: number, ticks: number, agents = 20): Scenario {
   const commands: LoggedCommand[] = []
+
   for (let i = 0; i < agents; i++) {
     const cmd: Command = {
       kind: 'spawnAgent',
@@ -78,7 +96,68 @@ export function standardScenario(seed: number, ticks: number, agents = 20): Scen
     }
     commands.push({ tick: i % 3, cmd })
   }
+
+  // Terenul. Siturile se aleg din seed, nu din constante scrise de mana, ca
+  // scenariul sa ramana valid pe orice seed.
+  const sites = pickSites(seed)
+  let t = 100
+  for (const s of sites) {
+    commands.push({ tick: t, cmd: { kind: 'setFocus', cx: Math.floor(s.wx / CHUNK_CELLS), cy: Math.floor(s.wy / CHUNK_CELLS) } })
+    // Trei voxeli in jos: garantat solizi, deci zero refuzuri.
+    for (let d = 0; d < 3; d++) {
+      commands.push({ tick: t + 1 + d, cmd: { kind: 'dig', wx: s.wx, wy: s.wy, z: s.groundM - d } })
+    }
+    // Si un zid deasupra: garantat gol.
+    commands.push({ tick: t + 4, cmd: { kind: 'fill', wx: s.wx, wy: s.wy, z: s.groundM + 1, material: Material.PIATRA_CONSTRUITA } })
+    t += 20
+  }
+
   return { seed, ticks, commands }
+}
+
+interface Site {
+  readonly wx: number
+  readonly wy: number
+  readonly groundM: number
+}
+
+/** Cate situri de fiecare semn. Ambele semne conteaza: `Math.floor` pe centimetri negativi. */
+const SITES_PER_SIGN = 6
+
+/**
+ * Alege situri de sapat: jumatate sub cota zero, jumatate peste.
+ *
+ * Ambele semne intentionat: cota se calculeaza cu `Math.floor(cm / 100)`, iar
+ * `Math.floor` pe negative nu se comporta ca trunchierea. Un scenariu care sapa
+ * numai pe deal nu ar prinde niciodata o regresie de semn.
+ *
+ * Ruleaza pe un teren TEMPORAR, aruncat imediat: alegerea trebuie sa fie o
+ * functie pura de seed, nu sa depinda de starea lumii in care se ruleaza.
+ */
+function pickSites(seed: number): Site[] {
+  const scratch = createTerrain(seed, 1)
+  const below: Site[] = []
+  const above: Site[] = []
+
+  for (let k = 1; k <= 400; k++) {
+    if (below.length >= SITES_PER_SIGN && above.length >= SITES_PER_SIGN) break
+    // Doua numere prime mari, ca pasii sa nu se alinieze pe grila de chunk-uri.
+    const wx = (k * 1237 + seed) % WORLD_CELLS
+    const wy = (k * 7919 + seed * 31) % WORLD_CELLS
+    const g = groundLevelM(scratch, wx, wy)
+    if (!g.ok) continue
+    const site: Site = { wx, wy, groundM: g.value }
+    if (g.value < 0 && below.length < SITES_PER_SIGN) below.push(site)
+    else if (g.value >= 0 && above.length < SITES_PER_SIGN) above.push(site)
+  }
+
+  // Intercalate, ca ordinea sa nu grupeze toate promovarile de acelasi semn.
+  const out: Site[] = []
+  for (let i = 0; i < Math.max(below.length, above.length); i++) {
+    if (i < below.length) out.push(below[i]!)
+    if (i < above.length) out.push(above[i]!)
+  }
+  return out
 }
 
 export { advance, createWorld, hashWorld }

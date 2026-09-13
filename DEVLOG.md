@@ -252,3 +252,108 @@ npm --prefix games/kinstead run viewer      # http://localhost:5175
 Drag rotește, rotița face zoom, Q/E mișcă nivelul de slice, click stânga sapă, Shift+click construiește.
 
 **Ce NU e:** nu e joc. Nu există pioni, joburi, nevoi, timp. E o unealtă de inspecție și de măsurare.
+
+---
+
+## Protocolul gate-ului de motor, scris înainte de măsurătoare
+
+**Prompt:** „continua" (după panoul de pre-înregistrare a gate-ului, 8 agenți, 1,11 M tokeni)
+**Model:** Opus 5
+
+Panoul a produs șase protocoale și două verdicte de judecător. Ce am făcut cu ele nu e să le
+adopt — le-am verificat în cod, am tăiat ce nu încape, și am reparat trei lucruri pe care le-au
+găsit și care erau defecte reale, nu observații.
+
+### Oracolul de determinism era ORB pe teren — dovedit prin mutație
+
+`hashWorld` include, prin decizie documentată, **numai chunk-urile promovate**: restul terenului e
+DERIVED și se regenerează identic din seed. Corect pentru simulare. Fatal ca poartă, fiindcă
+`standardScenario` emitea **exclusiv** `spawnAgent` — deci zero chunk-uri promovate, deci hash-ul de
+referință din CI acoperea **zero teren**.
+
+Nu am dedus-o, am dovedit-o prin mutație:
+
+| mutație | hash înainte | hash după |
+|---|---|---|
+| `HEIGHT_SCALE_DM` 1800 → 1900 (tot relieful lumii, +5,5%) | `5bc3ca4c` | `5bc3ca4c` ❌ |
+
+Tot relieful lumii se putea schimba fără ca poarta să clipească. **O poartă care nu poate să pice nu
+e o poartă.**
+
+Scenariul standard promovează acum 108 chunk-uri, cu situri alese pe seed, jumătate sub cota zero și
+jumătate peste — semnul contează, fiindcă înălțimea se calculează cu `Math.floor(cm / 100)`, iar pe
+negative `Math.floor` nu e trunchiere. Aceleași mutații, acum:
+
+| mutație | hash |
+|---|---|
+| bază | `3876f59a` |
+| relief +5,5% | `161a75d9` ✓ |
+| `Math.floor` → `Math.trunc` pe cote | `67cb4b5d` ✓ |
+| `LEVELS_BELOW` 24 → 25 | `290d35a8` ✓ |
+
+Hash-ul de referință din CI e acum `3876f59a`. Plus trei teste care păzesc poarta însăși: că
+scenariul chiar promovează, că sapă în ambele semne, și că hash-ul vede un singur voxel schimbat.
+
+### Viewerul plătea de 9× pentru o săpătură
+
+Remesh-uia fix 3×3 chunk-uri la fiecare săpătură, deși apron-ul se promovează **o singură dată** —
+la a doua săpătură în același chunk, vecinii sunt deja promovați și mesh-ul lor e neschimbat.
+**4,14 ms → 0,46 ms.** Exact genul de defect care ar fi intrat în gate ca „limita stivei" și ar fi
+cumpărat două luni de portare inutilă.
+
+La fel, `applySlice()` comuta `renderer.clippingPlanes` între `[]` și `[plane]`. Numărul de clipping
+planes intră în cheia de program a shaderului ⇒ recompilare ⇒ un cadru lung care arată **exact** ca
+un hiccup de streaming. Planul e acum mereu activ, împins la 1e6 când slice-ul e oprit.
+
+### Fixtura M10: gate-ul se rulează pe ce va fi jocul, nu pe ce e azi
+
+Fortăreața din viewer promovează **12 chunk-uri**. Un gate rulat pe ea trece cu orice stivă.
+`src/harness/fixture-m10.ts` construiește determinist o așezare de dimensiunea bugetului din plan:
+
+| | măsurat (`node src/harness/bench-fixture.ts`) |
+|---|---|
+| Camere · săpături · zidiri | 676 · 214.350 · 3.880 |
+| **Chunk-uri promovate** | **225** (PLAN bugeta ~200) |
+| Quaduri / triunghiuri | 114.586 / 229.172 |
+| Meshing complet | 89,6 ms (398 µs/chunk) |
+| `dig` în sim, fără mesh | 2,9 µs |
+| Memorie RLE | 2,64 MB (față de 14,1 MB) |
+
+Validarea fixturii e **structurală**, nu prin raportul de reducere al mesher-ului: criteriul ăla e
+auto-referențial, selectează fixturi ieftine de meshuit, adică exact fixturile pe care un motor slab
+le trece.
+
+**Și aici am greșit o măsurătoare, din nou pe instrument.** Prima variantă raporta „2,73 ms per
+săpătură" — bucla apela `meshChunk` de 200 de ori, dar împărțea la săpăturile **acceptate**, 144 din
+200 (restul loveau aer deja săpat). Factorul de 1,4× venea din numărător. Separate corect: `dig` =
+2,9 µs, remesh = 460 µs.
+
+### Ce spune protocolul, pe scurt
+
+`bench/GATE.md` e comis **înainte de prima cifră**, cu predicție sigilată, listă înghețată de
+optimizări și ambele comunicate scrise dinainte. Trei schimbări față de cum era scris gate-ul în plan:
+
+1. **„60 FPS" nu e o măsurătoare, e o saturație.** Sub vsync, cel mai bun rezultat observabil e
+   16,67 ms și nu afli dacă ai consumat 2 ms sau 16. Metrica e **X_max** — bugetul liber, găsit prin
+   bisecție pe o sarcină artificială, cu criteriul p99(interval de prezentare) ≤ 17,5 ms.
+2. **`CPU_busy` măsurat în rAF nu poate să pice.** În Chromium, submisia GL, rasterul și compunerea
+   rulează în procesul GPU; rAF vede doar JS-ul. Rămâne diagnostic, fără prag. X_max scapă de
+   problemă fiindcă e măsurat pe **prezentare**.
+3. **Mașina asta nu poate semna STAY.** 7950X + RTX 3060 e de ~2× pe CPU și ~5,5× pe GPU peste clasa
+   țintă. Aritmetica: randarea trebuie să încapă în 4,78 ms pe țintă, deci în 2,39 ms aici
+   (CPU-bound) sau 0,87 ms (GPU-bound) — al doilea e sub pragul la care bisecția mai înseamnă ceva.
+   Cel mai bun verdict disponibil e **STAY-PROVIZORIU**, iar ce-l ridică la STAY costă ~200–300 EUR.
+
+`tools/gate-verdict.mjs` e programul care dă verdictul, cu zece fixturi sintetice — câte una pentru
+fiecare ieșire, inclusiv trei care TREBUIE să producă REFUZ. Rulează în `npm run check` și în CI.
+Un program de verdict care nu poate produce roșu n-are dreptul să producă verde.
+
+### Ce rămâne deschis, scris ca să nu poată fi uitat
+
+- **Care e mașina țintă?** PLAN spune în două locuri lucruri diferite („laptopul meu" vs. clase de
+  hardware). Până la răspuns, protocolul presupune clasa GTX 1050 Ti / Ryzen 5 3600 și fiecare
+  verdict poartă eticheta „prag bazat pe presupunere de hardware nevalidată".
+- **D1b — panoul dens** rămâne nemăsurat în ambele stive. E criteriul pe care D1 și-l declară singur.
+- **Electron nu e instalat.** Gate-ul măsoară Chrome curat; livrarea e Electron cu `in-process-gpu`.
+- **CI-ul n-a rulat niciodată** — `git remote -v` e gol. Pre-înregistrarea prin commit-uri locale
+  n-are nicio dată emisă de alt sistem.

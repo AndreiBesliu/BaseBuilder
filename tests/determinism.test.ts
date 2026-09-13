@@ -6,6 +6,7 @@ import { advance, createWorld, liveAgentCount } from '../src/sim/world.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { Faction } from '../src/sim/state.ts'
 import { Reason } from '../src/sim/result.ts'
+import { promotedCount } from '../src/sim/terrain/terrain.ts'
 
 test('acelasi seed, 10.000 de tickuri, acelasi hash', () => {
   const a = runScenario(standardScenario(12345, 10000, 40))
@@ -129,4 +130,38 @@ test('slotul unui agent mort se reutilizeaza, dar id-ul nu', () => {
   assert.ok(b.ok)
   assert.equal(w.agents.count, 1, 'slotul nu a fost reutilizat')
   assert.notEqual(b.value, a.value, 'id-ul a fost reciclat')
+})
+
+test('scenariul standard chiar promoveaza teren — altfel oracolul e orb', () => {
+  // Testul asta pazeste o poarta, nu un comportament. `hashWorld` include NUMAI
+  // chunk-urile promovate; un scenariu care nu promoveaza niciunul face din
+  // hash-ul de referinta din CI un semafor care nu poate deveni rosu.
+  //
+  // A fost exact cazul pana acum: `HEIGHT_SCALE_DM` mutat de la 1800 la 1900 —
+  // tot relieful lumii schimbat cu 5,5% — lasa hash-ul neclintit la `5bc3ca4c`.
+  const r = runScenario(standardScenario(12345, 2000, 10))
+  assert.ok(promotedCount(r.world.terrain) > 50, `doar ${promotedCount(r.world.terrain)} chunk-uri promovate`)
+  assert.deepEqual(r.refusals, [], 'scenariul standard trebuie sa ruleze fara refuzuri')
+})
+
+test('scenariul standard sapa si sub cota zero, si peste', () => {
+  // Cota se calculeaza cu `Math.floor(cm / 100)`, iar pe negative `Math.floor`
+  // nu e acelasi lucru cu trunchierea: -250 cm inseamna -3 m, nu -2 m. Un
+  // scenariu care sapa numai pe deal nu ar prinde niciodata o regresie de semn.
+  const s = standardScenario(12345, 2000, 0)
+  const zs = (s.commands ?? []).filter((c) => c.cmd.kind === 'dig').map((c) => (c.cmd as { z: number }).z)
+  assert.ok(zs.some((z) => z < 0), 'niciun dig sub cota zero')
+  assert.ok(zs.some((z) => z >= 0), 'niciun dig peste cota zero')
+})
+
+test('hash-ul vede un singur voxel schimbat', () => {
+  // Proba negativa pentru oracolul de teren: daca asta trece cand n-ar trebui,
+  // toate garantiile de determinism pe teren sunt decorative.
+  const r = runScenario(standardScenario(12345, 2000, 0))
+  const before = hashWorld(r.world)
+  const key = r.world.terrain.keys.find((k) => r.world.terrain.chunks.get(k)!.voxels !== null)
+  assert.ok(key !== undefined, 'scenariul nu a promovat niciun chunk')
+  const v = r.world.terrain.chunks.get(key!)!.voxels!
+  v.runLength[0] = v.runLength[0]! ^ 1
+  assert.notEqual(hashWorld(r.world), before)
 })
