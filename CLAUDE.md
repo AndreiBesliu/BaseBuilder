@@ -80,7 +80,23 @@ node src/harness/cli.ts --seed 12345 --ticks 100000 --agents 40
 ## Stare
 
 - **S1-2 livrat:** nucleu determinist, harness headless, save versionat, loader de conținut,
-  scaner de disciplină, CI. 48 de teste.
-- **Următorul:** S3-5, terenul. Vezi tabelul de săptămâni din PLAN.md §0.5.
-- **Motorul e deliberat nedecis** până la gate-ul măsurat de la finalul S8. Nucleul e TypeScript pur,
-  fără dependențe de motor, tocmai ca decizia să rămână reversibilă — portabil în C# în săptămâni.
+  scaner de disciplină, CI.
+- **S3-5 livrat:** harta macro (funcție pură de seed), streamer de chunkuri, promovarea la voxeli RLE
+  cu apron, dig/fill, save doar al chunkurilor promovate. **77 de teste**, inclusiv fuzz-ul de 10.000
+  de operații cerut de plan. Numerele măsurate sunt în PLAN.md §0.5.
+- **Următorul:** S6-8, coloana vertebrală de randare — și la finalul ei, **gate-ul de motor (D1)**.
+- **Motorul e deliberat nedecis.** Nucleul e TypeScript pur, fără dependențe de motor, tocmai ca
+  decizia să rămână reversibilă — portabil în C# în săptămâni.
+
+### Invarianți de teren, de nu încălcat
+
+- **Ne-promovat = cache (DERIVED). Promovat = date (PERSISTED).** Un chunk ne-promovat se poate arunca
+  oricând; unul promovat conține munca jucătorului și nu se aruncă niciodată, nici la streaming.
+- **Save-ul conține DOAR chunkurile promovate.** Cele 268 km² se regenerează din seed.
+- **Hash-ul nu conține chunkuri ne-promovate.** Altfel două lumi identice ca *conținut* ar arăta
+  diferit doar pentru că una a încărcat mai mult teren.
+- **Promovarea e ireversibilă și vine cu apron de 1 chunk.** O graniță care se mișcă în ambele sensuri
+  ar trebui să fie corectă în ambele sensuri în șase subsisteme. Cu apron, seam-ul e un inel testabil.
+- **`terrain.keys` e MEREU sortat.** E singura sursă de ordine la iterarea peste teren.
+- Generarea e o **funcție pură de (poziție, seed)**, în aritmetică întreagă — nu consumă din fluxurile
+  de RNG, deci două chunkuri generate în orice ordine dau același rezultat.

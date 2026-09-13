@@ -24,6 +24,8 @@ export interface Rules {
   readonly agentStepMm: number
   /** Tickuri de simulare pe secunda de joc. */
   readonly ticksPerSecond: number
+  /** Raza discului de chunk-uri rezidente, in chunk-uri. 11 ≈ 377 de chunk-uri. */
+  readonly chunkResidentRadius: number
 }
 
 type FieldSpec = { min: number; max: number }
@@ -34,6 +36,7 @@ const RULES_SPEC: Record<keyof Rules, FieldSpec> = {
   agentCapacity: { min: 1, max: 100000 },
   agentStepMm: { min: 1, max: 100000 },
   ticksPerSecond: { min: 1, max: 240 },
+  chunkResidentRadius: { min: 0, max: 64 },
 }
 
 /**
@@ -81,4 +84,5 @@ export const DEFAULT_RULES: Rules = {
   agentCapacity: 64,
   agentStepMm: 250,
   ticksPerSecond: 20,
+  chunkResidentRadius: 11,
 }

@@ -16,11 +16,19 @@ import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import type { World, FactionId } from './state.ts'
 import { slotOf } from './state.ts'
+import type { MaterialId } from './terrain/chunk.ts'
+import { CHUNK_GRID, dig, fill, inWorld, setFocus } from './terrain/terrain.ts'
 
 export type Command =
   | { readonly kind: 'spawnAgent'; readonly x: number; readonly y: number; readonly z: number; readonly faction: FactionId }
   | { readonly kind: 'moveAgent'; readonly id: number; readonly dx: number; readonly dy: number }
   | { readonly kind: 'killAgent'; readonly id: number }
+  /** Muta centrul discului de chunk-uri rezidente. Coordonate in chunk-uri. */
+  | { readonly kind: 'setFocus'; readonly cx: number; readonly cy: number }
+  /** Sapa un voxel. Promoveaza chunk-ul si apron-ul lui daca e nevoie. */
+  | { readonly kind: 'dig'; readonly wx: number; readonly wy: number; readonly z: number }
+  /** Umple un voxel gol. */
+  | { readonly kind: 'fill'; readonly wx: number; readonly wy: number; readonly z: number; readonly material: MaterialId }
 
 /** O comanda, plus tickul la care a fost emisa. Asta e unitatea de replay. */
 export interface LoggedCommand {
@@ -79,6 +87,24 @@ export function applyCommand(w: World, cmd: Command): Outcome<number> {
       if (slot === -1) return refuse(Reason.ENTITATE_INEXISTENTA, { id: cmd.id })
       a.alive[slot] = 0
       return accept(cmd.id)
+    }
+
+    case 'setFocus': {
+      if (!inWorld(cmd.cx, cmd.cy)) {
+        return refuse(Reason.IN_AFARA_LUMII, { cx: cmd.cx, cy: cmd.cy, limita: CHUNK_GRID })
+      }
+      setFocus(w.terrain, cmd.cx, cmd.cy)
+      return accept(0)
+    }
+
+    case 'dig': {
+      const out = dig(w.terrain, cmd.wx, cmd.wy, cmd.z)
+      return out.ok ? accept(0) : out
+    }
+
+    case 'fill': {
+      const out = fill(w.terrain, cmd.wx, cmd.wy, cmd.z, cmd.material)
+      return out.ok ? accept(0) : out
     }
 
     default: {

@@ -12,6 +12,7 @@
 
 import type { World } from './state.ts'
 import { RNG_STREAMS } from './state.ts'
+import { runCount } from './terrain/chunk.ts'
 
 const FNV_OFFSET = 0x811c9dc5
 const FNV_PRIME = 0x01000193
@@ -89,6 +90,27 @@ export function hashWorld(w: World): string {
   h.ints(a.z, a.count)
   h.bytes(a.faction, a.count)
   h.bytes(a.alive, a.count)
+
+  // Terenul: NUMAI chunk-urile promovate. Cele ne-promovate sunt DERIVED — se
+  // regenereaza identic din seed, deci n-au ce cauta in hash. Daca ar intra,
+  // hash-ul ar depinde de unde s-a uitat camera, iar doua lumi identice ca
+  // CONTINUT ar parea diferite.
+  const t = w.terrain
+  h.i32(t.focusCx).i32(t.focusCy)
+  let promoted = 0
+  for (const key of t.keys) if (t.chunks.get(key)!.voxels !== null) promoted++
+  h.u32(promoted)
+
+  // `t.keys` e mentinut sortat tocmai pentru randul asta.
+  for (const key of t.keys) {
+    const chunk = t.chunks.get(key)!
+    const v = chunk.voxels
+    if (!v) continue
+    const runs = runCount(v)
+    h.u32(key).i32(v.zBaseM).u32(runs)
+    h.bytes(v.runMaterial, runs)
+    h.bytes(v.runLength, runs)
+  }
 
   return h.hex()
 }

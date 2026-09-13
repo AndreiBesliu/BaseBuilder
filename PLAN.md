@@ -55,6 +55,24 @@ Teza, într-o propoziție: **grila de 1 m e universală, stiva verticală e rar�
 
 De ce 32 m lățime: ca o coloană să încapă într-un `Uint32Array` de 32 de biți — binary greedy meshing e **bitwise pe coloane**, iar JavaScript n-are typed array pe 64 de biți. A fost singura propunere din patru care a observat asta.
 
+### Măsurat, nu estimat *(S3-5 livrat, `node src/harness/bench-terrain.ts`)*
+
+| | Măsurat | Ce spunea planul |
+|---|---|---|
+| Chunk-uri rezidente la rază 11 | **377**, încărcate la rece în **9,8 ms** | ~400 |
+| Mutarea focusului cu un chunk | **0,8 ms** | — |
+| Promovare + apron (9 chunk-uri) | **5,5 ms** | — |
+| O săpătură | **7,0 µs** | — |
+| Chunk proaspăt promovat | **12,0 KB** | ~4 KB ❌ |
+| Chunk de fortăreață intens săpat | **13,4 KB** | ~16 KB ✓ |
+| 200 de chunk-uri de fortăreață | **2,62 MB** | ~3,2 MB ✓ |
+| Compresie RLE | **4,8×** față de nedecomprimat | — |
+
+**Corecția onestă:** estimarea de 4 KB pentru un chunk proaspăt promovat era greșită de trei ori,
+pentru că ignora indexul de coloane — 1.025 de intrări × 4 B = 4,1 KB, singur cât tot bugetul estimat.
+Bugetul TOTAL ține însă, fiindcă planul supraestima în cealaltă direcție chunk-ul intens săpat.
+Nu optimizez acum: 2,62 MB e sub ținta de 3,2 MB și n-am un motiv măsurat.
+
 Comparația de scară: Going Medieval e 250×250×16 = 1e6 voxeli, hartă **fixă**. Aici, fortăreața de 3,2 MB stă într-o lume de 268 km², iar a doua fortăreață e la 3 km și **rămâne acolo când pleci**.
 
 ### Ce rezolvă, câmp cu câmp

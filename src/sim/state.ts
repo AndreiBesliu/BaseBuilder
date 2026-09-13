@@ -17,6 +17,7 @@
  */
 
 import type { RngState } from './rng.ts'
+import type { Terrain } from './terrain/terrain.ts'
 
 /** Versiunea schemei de stare. Creste la ORICE camp nou. Vezi save.ts. */
 export const SCHEMA_VERSION = 1
@@ -58,7 +59,19 @@ export interface World {
   /** PERSISTED — generatorul de identitati stabile */ nextId: number
   /** PERSISTED */ rng: Record<RngStreamName, RngState>
   /** PERSISTED */ agents: AgentStore
-  /** PERSISTED — marginile lumii, in milimetri */ bounds: { w: number; h: number }
+  /**
+   * PERSISTED — marginile in care se misca agentii-substitut, in milimetri.
+   *
+   * Deliberat SEPARATE de coordonatele terenului, cat timp agentii sunt un
+   * substitut. Se contopesc la S12-15, cand agentii devin reali si incep sa
+   * calce pe celule de teren.
+   */
+  bounds: { w: number; h: number }
+  /**
+   * MIXT: chunk-urile ne-promovate sunt DERIVED (se regenereaza din seed),
+   * cele promovate sunt PERSISTED (contin munca jucatorului).
+   */
+  terrain: Terrain
 }
 
 export function makeAgentStore(capacity: number): AgentStore {

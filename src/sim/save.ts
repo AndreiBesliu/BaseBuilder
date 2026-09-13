@@ -17,6 +17,8 @@ import { accept, refuse, Reason } from './result.ts'
 import type { RngState } from './rng.ts'
 import type { RngStreamName, World } from './state.ts'
 import { makeAgentStore, RNG_STREAMS, SCHEMA_VERSION } from './state.ts'
+import { runCount } from './terrain/chunk.ts'
+import { createTerrain, ensureChunk, inWorld } from './terrain/terrain.ts'
 
 /** Creste cand se schimba FORMATUL de fisier, independent de schema de stare. */
 export const SAVE_BUILD = 1
@@ -44,6 +46,29 @@ export function encode(w: World): string {
       tick: w.tick,
       nextId: w.nextId,
       bounds: w.bounds,
+      // Terenul: se salveaza DOAR chunk-urile promovate. Restul lumii — 268 km² —
+      // se regenereaza din seed. Asta e trucul care face ca un save sa fie de
+      // ordinul megabytelor si nu al gigabytelor.
+      terrain: {
+        radius: w.terrain.radius,
+        focusCx: w.terrain.focusCx,
+        focusCy: w.terrain.focusCy,
+        promoted: w.terrain.keys
+          .map((key) => ({ key, chunk: w.terrain.chunks.get(key)! }))
+          .filter((e) => e.chunk.voxels !== null)
+          .map((e) => {
+            const v = e.chunk.voxels!
+            const runs = runCount(v)
+            return {
+              cx: e.chunk.cx,
+              cy: e.chunk.cy,
+              zBaseM: v.zBaseM,
+              runMaterial: Array.from(v.runMaterial.subarray(0, runs)),
+              runLength: Array.from(v.runLength.subarray(0, runs)),
+              columnStart: Array.from(v.columnStart),
+            }
+          }),
+      },
       rng,
       agents: {
         count: a.count,
@@ -129,13 +154,51 @@ export function decode(text: string): Outcome<World> {
   }
 
   const bounds = data.bounds as { w: number; h: number }
+  const seed = data.seed as number
+
+  const tRaw = data.terrain as SavedTerrain | undefined
+  if (!tRaw) return refuse(Reason.LIPSA_MATERIAL, { camp: 'terrain' })
+
+  const terrain = createTerrain(seed, tRaw.radius)
+  terrain.focusCx = tRaw.focusCx
+  terrain.focusCy = tRaw.focusCy
+
+  for (const saved of tRaw.promoted) {
+    if (!inWorld(saved.cx, saved.cy)) {
+      return refuse(Reason.IN_AFARA_LUMII, { camp: 'terrain.promoted', cx: saved.cx, cy: saved.cy })
+    }
+    // `vertexCm` e DERIVED: se regenereaza din seed, nu se citeste din fisier.
+    const chunk = ensureChunk(terrain, saved.cx, saved.cy)
+    chunk.voxels = {
+      zBaseM: saved.zBaseM,
+      runMaterial: Uint8Array.from(saved.runMaterial),
+      runLength: Uint8Array.from(saved.runLength),
+      columnStart: Uint32Array.from(saved.columnStart),
+    }
+  }
+
   return accept({
     schema: SCHEMA_VERSION,
-    seed: data.seed as number,
+    seed,
     tick: data.tick as number,
     nextId: data.nextId as number,
     rng,
     agents,
     bounds: { w: bounds.w, h: bounds.h },
+    terrain,
   })
+}
+
+interface SavedTerrain {
+  radius: number
+  focusCx: number
+  focusCy: number
+  promoted: {
+    cx: number
+    cy: number
+    zBaseM: number
+    runMaterial: number[]
+    runLength: number[]
+    columnStart: number[]
+  }[]
 }

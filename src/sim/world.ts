@@ -20,7 +20,15 @@ import { nextInt, stream } from './rng.ts'
 import type { RngState } from './rng.ts'
 import type { RngStreamName, World } from './state.ts'
 import { makeAgentStore, MM_PER_CELL, RNG_STREAMS, SCHEMA_VERSION } from './state.ts'
+import { createTerrain } from './terrain/terrain.ts'
 
+/**
+ * Creeaza o lume. NU incarca teren: `createTerrain` aloca doar structura goala,
+ * iar chunk-urile se genereaza la cerere. Streamingul porneste cand cineva cheama
+ * `setFocus` — adica atunci cand exista o camera. Un `createWorld` care ar genera
+ * 377 de chunk-uri ar face fiecare test sa coste cateva sute de milisecunde
+ * degeaba.
+ */
 export function createWorld(seed: number, rules: Rules = DEFAULT_RULES): World {
   const rng = {} as Record<RngStreamName, RngState>
   for (const name of RNG_STREAMS) rng[name] = stream(seed, name)
@@ -36,6 +44,7 @@ export function createWorld(seed: number, rules: Rules = DEFAULT_RULES): World {
       w: rules.worldWidthCells * MM_PER_CELL,
       h: rules.worldHeightCells * MM_PER_CELL,
     },
+    terrain: createTerrain(seed, rules.chunkResidentRadius),
   }
 }
 

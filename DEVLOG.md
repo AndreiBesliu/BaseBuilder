@@ -83,3 +83,66 @@ exercite mecanismele care nu se pot retrofita.
 
 **Următorul pas:** S3-5, terenul — harta macro, streamer-ul de chunkuri, promovarea la voxeli RLE.
 Gate-ul de motor e la finalul S8.
+
+---
+
+## 2026-09-13 — Sesiunea 1 (continuare): S3-5, terenul
+
+**Model:** Claude Opus 5 · **Prompt:** „continua"
+
+### Task Started — S3-5
+
+Prima felie care depinde de arhitectura. D17 fiind închisă (grilă pentru logică), drumul era liber.
+
+### Task Completed
+
+Cele trei straturi din arhitectura Grilă Promovată, plus editarea și persistența:
+
+| | |
+|---|---|
+| `terrain/noise.ts` | zgomot valoric + fBm, **în aritmetică întreagă**. Nu float: `Math` nu e garantat bit-identic între motoare, iar lumea trebuie să fie aceeași funcție oriunde — altfel un save mutat pe alt calculator se aplică peste alt teren. |
+| `terrain/macro.ts` | L0, funcție pură de (seed, poziție). 1024² eșantioane la 16 m = 268 km². Nu se materializează și nu se salvează. |
+| `terrain/chunk.ts` | L1 heightfield + L2 voxeli RLE. Promovare, `setVoxel`, codare/decodare. |
+| `terrain/terrain.ts` | streamer pe disc, promovare cu apron, `dig`/`fill` cu refuzuri tipizate. |
+
+**Verificat:** 77/77 teste (29 noi), typecheck curat, disciplină curată.
+
+**Măsurat** (`node src/harness/bench-terrain.ts`): 377 de chunkuri rezidente încărcate la rece în
+9,8 ms · mutarea focusului cu un chunk 0,8 ms · promovare + apron 5,5 ms · o săpătură 7,0 µs ·
+2,62 MB pentru 200 de chunkuri de fortăreață, sub ținta de 3,2 MB.
+
+**Corecție la plan:** estimarea de „4 KB pentru un chunk proaspăt promovat" era greșită de trei ori —
+ignora indexul de coloane (1.025 × 4 B = 4,1 KB, singur cât tot bugetul estimat). Măsurat: 12,0 KB.
+Bugetul total ține totuși, fiindcă planul supraestima în cealaltă direcție chunkul intens săpat.
+Nu optimizez: n-am un motiv măsurat.
+
+### Două decizii luate în timpul implementării, ambele cu număr în spate
+
+1. **`setVoxel` lucrează pe COLOANĂ, nu pe chunk.** Prima versiune desfăcea și reconstruia tot chunkul
+   la fiecare editare: 130.000 de operații pe săpătură, adică 1,3 miliarde pentru fuzz-ul de 10.000 de
+   operații cerut de plan. Nu e optimizare prematură — e un număr calculat *înainte* de a scrie testul.
+   Rezultat: fuzz-ul rulează în **104 ms**.
+2. **Petec macro precalculat.** Fiecare vârf ar fi cerut patru evaluări de fBm, adică 4.356 pe chunk.
+   Un petec de 4×4 eșantioane acoperă tot chunkul: **16 evaluări, de 272 de ori mai puțin** — și e și
+   implementarea corectă, fiindcă vârfurile vecine împart același eșantion macro.
+
+### Invariantul de seam, testat în miniatură
+
+K16 (granița heightfield↔voxel) e riscul declarat numărul unu al arhitecturii. Testul
+`chunk-urile vecine sunt CONTINUE pe muchia comuna` verifică toate cele 33 de vârfuri de pe fiecare
+muchie comună. Trece prin construcție: interpolarea la granița chunkului cade exact pe un eșantion
+macro, cu pondere zero. Nu închide K16 — seam-ul rămâne de verificat în randare, pathfinding, camere
+și stabilitate — dar închide primul dintre cele șase subsisteme.
+
+### Ce s-a schimbat și nu e un bug
+
+Hash-ul de referință din CI a trecut de la `f23d080c` la `5bc3ca4c`, fiindcă terenul intră acum în
+starea hash-uită (focus + chunkurile promovate). Intenționat, actualizat în workflow.
+
+### Ce NU e livrat
+
+Râurile (planul le cere generate ÎNAINTEA reliefului — nu sunt în lista S3-5). Nicio randare.
+Niciun mesher. Agenții rămân substitutul de la S1-2, cu marginile lor separate de coordonatele
+terenului; se contopesc la S12-15.
+
+**Următorul pas:** S6-8 — coloana vertebrală de randare, la finalul căreia stă **gate-ul de motor**.
