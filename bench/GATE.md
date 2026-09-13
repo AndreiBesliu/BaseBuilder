@@ -126,9 +126,16 @@ Ce cere STAY, tradus pe mașina asta:
 ### Întrebare deschisă, către owner: CARE e mașina țintă?
 
 PLAN spune în două locuri lucruri diferite: criteriul de acceptare P1+P2 zice „≥60 FPS pe **laptopul
-meu**", iar panoul de motor discută clase de hardware. Protocolul folosește, până la un răspuns,
-**clasa GTX 1050 Ti / Ryzen 5 3600** (mediana sondajului Steam) și fiecare verdict poartă, scris cu
-litere, *„prag bazat pe presupunere de hardware nevalidată"*.
+meu**", iar panoul de motor discută clase de hardware.
+
+**Întrebat, 13.09.2026. Răspunsul owner-ului: amânat deliberat.** Deci protocolul rulează cu
+presupunerea **clasa GTX 1050 Ti / Ryzen 5 3600** (mediana sondajului Steam), iar fiecare verdict
+poartă, scris cu litere, *„prag bazat pe presupunere de hardware nevalidată"*.
+
+Ce înseamnă asta operațional, ca să nu fie o surpriză la luna 3: **D1 nu se poate închide** până la
+un răspuns. Verdictul maxim disponibil rămâne STAY-PROVIZORIU, iar decizia se poate lua oricând —
+inclusiv după ce gate-ul a rulat, fiindcă datele brute se arhivează (§8) și pragul se recalculează
+din ele fără re-rulare.
 
 ---
 
