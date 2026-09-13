@@ -1,0 +1,7 @@
+{
+  "worldWidthCells": 256,
+  "worldHeightCells": 256,
+  "agentCapacity": 64,
+  "agentStepMm": 250,
+  "ticksPerSecond": 20
+}

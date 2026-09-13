@@ -1,0 +1,21 @@
+{
+  "name": "kinstead",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Kinstead — colony sim cu constructie verticala si asezari care raman in lume. Nucleu de simulare determinist, fara dependente de motor.",
+  "engines": {
+    "node": ">=23"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "discipline": "node tools/check-sim-discipline.mjs",
+    "test": "node --test tests/",
+    "check": "npm run discipline && npm run typecheck && npm run test",
+    "run:headless": "node src/harness/cli.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.0"
+  }
+}

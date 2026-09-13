@@ -1,0 +1,46 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Node 23+ ruleaza .ts direct prin strip de tipuri. Fara bundler, fara pas de build.
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      # Ordinea conteaza: disciplina intai, fiindca e cea mai ieftina si cea mai
+      # usor de incalcat. Typecheck-ul dupa, fiindca `npm test` NU verifica tipuri.
+      - name: disciplina de determinism in src/sim
+        run: npm run discipline
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: teste
+        run: npm test
+
+      # Regresie de determinism pe un scenariu fix. Daca hash-ul se schimba fara
+      # ca cineva sa fi vrut asta, build-ul pica aici si nu peste trei luni.
+      - name: hash de referinta
+        run: |
+          OUT=$(node src/harness/cli.ts --seed 12345 --ticks 100000 --agents 40)
+          echo "$OUT"
+          HASH=$(echo "$OUT" | awk '/^hash/ {print $2}')
+          EXPECTED=f23d080c
+          if [ "$HASH" != "$EXPECTED" ]; then
+            echo "::error::hash-ul de referinta s-a schimbat: $HASH (asteptat $EXPECTED)"
+            echo "Daca schimbarea e intentionata, actualizeaza EXPECTED in acest workflow"
+            echo "si scrie in DEVLOG ce anume a mutat-o."
+            exit 1
+          fi
