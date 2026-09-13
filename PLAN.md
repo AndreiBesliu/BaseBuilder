@@ -73,6 +73,25 @@ pentru că ignora indexul de coloane — 1.025 de intrări × 4 B = 4,1 KB, sing
 Bugetul TOTAL ține însă, fiindcă planul supraestima în cealaltă direcție chunk-ul intens săpat.
 Nu optimizez acum: 2,62 MB e sub ținta de 3,2 MB și n-am un motiv măsurat.
 
+### Meshing *(prima jumătate din S6-8, `node src/harness/bench-mesh.ts`)*
+
+| | Măsurat |
+|---|---|
+| Chunk proaspăt promovat | **430 µs** · 5.338 fețe → **119 quaduri** (reducere **44,9×**) |
+| Chunk de fortăreață — camere și coridoare | **435 µs** · 6.348 fețe → 326 quaduri (**19,5×**) |
+| Chunk săpat **aleator** (cel mai prost caz) | 1.222 µs · 19.078 fețe → 11.220 quaduri (1,7×) |
+| Față de reperul C++ din panou (74 µs / 64³) | **23× mai lent** per voxel |
+| La 25% din bugetul de cadru | **9 chunk-uri proaspete pe cadru**, 200 de chunkuri promovate ≈ 87 ms într-un worker |
+
+**Cazul aleator nu e cazul real.** Prima măsurătoare arăta 1,7× reducere și părea alarmantă — până
+am construit un chunk cu **camere și coridoare** în loc de zgomot: 19,5× reducere, la același timp ca
+un chunk neatins. Săpătura aleatoare e cel mai prost caz posibil pentru unirea lacomă și nu seamănă
+cu nimic din ce construiește un jucător. *Măsurătoarea greșită era fixtura, nu codul.*
+
+**Verdictul de buget:** un dig murdărește un chunk ⇒ 435 µs de re-mesh, adică 2,6% dintr-un cadru.
+Încărcarea inițială a unei fortărețe de 200 de chunkuri ⇒ ~87 ms într-un worker, întinsă pe câteva
+cadre. **Încape.** Diferența de 23× față de C++ e reală, dar nu e cea care decide gate-ul — bugetul e.
+
 Comparația de scară: Going Medieval e 250×250×16 = 1e6 voxeli, hartă **fixă**. Aici, fortăreața de 3,2 MB stă într-o lume de 268 km², iar a doua fortăreață e la 3 km și **rămâne acolo când pleci**.
 
 ### Ce rezolvă, câmp cu câmp

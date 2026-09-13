@@ -146,3 +146,56 @@ Niciun mesher. Agenții rămân substitutul de la S1-2, cu marginile lor separat
 terenului; se contopesc la S12-15.
 
 **Următorul pas:** S6-8 — coloana vertebrală de randare, la finalul căreia stă **gate-ul de motor**.
+
+---
+
+## 2026-09-13 — Sesiunea 1 (continuare): S6-8, prima jumătate — mesher-ul
+
+**Model:** Claude Opus 5 · **Prompt:** „continua"
+
+### Task Started
+
+Din S6-8 am atacat întâi partea care **poate să pice gate-ul și se poate măsura fără GPU**:
+binary greedy meshing. Reperul citat în panou era 74 µs pe un chunk de 64³ în C++, față de 2,04 ms
+pentru face-cull naiv în JS — o prăpastie de 27× pe care doar arhitectura câștigătoare a proiectat-o.
+
+### Task Completed
+
+`src/render/mesher.ts` + 10 teste. **87/87 teste, typecheck curat, disciplină curată.**
+
+**Invariantul central, testat:** aria totală a quadurilor unite trebuie să fie *exact* egală cu
+numărul de fețe vizibile numărate naiv. Dacă unirea pierde fețe, apar găuri în geometrie; dacă
+inventează, apar suprapuneri. E singurul test care dovedește că unirea e corectă, și se ține și după
+400 de săpături aleatoare.
+
+### Trei lucruri măsurate, toate contrazicând o presupunere
+
+1. **Prima versiune: 786 µs/chunk — per voxel mai lentă decât face-cull-ul naiv în JS.** Semnal roșu.
+2. **Ablația a contrazis ipoteza mea.** Credeam că e în `expand` (decodare + array dens). Măsurat:
+   `expand` = 24%, umplerea grilelor = 15%, iar **61% era în unire și emitere**. Cauza structurală:
+   parcurgeam fiecare celulă din toate cele 128 de felii, inclusiv cele complet goale. Cu ieșire
+   devreme pe felie și pe rând: **786 → 430 µs**, de 1,83×.
+3. **Cazul „săpat intens" era o fixtură greșită, nu un rezultat.** Arăta 1,7× reducere și 1222 µs,
+   ceea ce părea alarmant. Am construit un chunk cu **camere și coridoare** în loc de zgomot:
+   **19,5× reducere, 435 µs** — practic la fel ca un chunk neatins. Săpătura aleatoare e cel mai
+   prost caz posibil pentru unirea lacomă și nu seamănă cu nimic construit de un jucător.
+
+### Un bug pe care l-am introdus chiar eu, prins de invariant
+
+Optimizarea „sari peste rândurile goale" a lăsat grila **negolită** pe acele rânduri, iar extinderea
+pe verticală din unire citește rândurile de dedesubt *fără* să verifice steagul de rând folosit —
+deci ar fi unit date rămase de la felia anterioară ca și cum ar fi fost fețe reale. Prins imediat de
+testul de arie. Reparat cu golire explicită.
+
+### Verdictul de buget
+
+23× mai lent decât C++ per voxel, și asta rămâne adevărat. Dar cifra care decide nu e raportul, e
+bugetul: un dig murdărește un chunk ⇒ **435 µs = 2,6% dintr-un cadru**; o fortăreață de 200 de
+chunkuri ⇒ **~87 ms într-un worker**, întinsă pe câteva cadre. Încape.
+
+### Ce NU e livrat din S6-8
+
+Randarea propriu-zisă: three.js, netezirea suprafeței cu marching-squares, slice view cu fade de
+acoperiș, camera. **Gate-ul de motor nu se poate rula încă** — el cere o măsurătoare de FPS pe GPU,
+nu una de CPU. Plus limita cunoscută a mesher-ului: fețele de la marginea chunkului sunt emise mereu,
+pentru că nu se consultă vecinul.

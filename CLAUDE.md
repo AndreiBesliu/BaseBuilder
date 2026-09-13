@@ -73,7 +73,14 @@ node src/harness/cli.ts --seed 12345 --ticks 100000 --agents 40
 - **Orice număr care ajunge într-o decizie se re-verifică la sursă sau se măsoară.** În panoul de
   arhitectură, o cifră inventată despre performanța PIBT s-a propagat identic în toate cele patru
   propuneri, pentru că nimeni n-a deschis sursa. Vezi K17 în PLAN.md.
-- **Nu se scrie cod de teren** înainte să se închidă gate-ul de motor de la S8.
+- **Nimic din `sim/` nu are voie să depindă de motor.** Nucleul e polița de asigurare care face
+  decizia de motor reversibilă — inclusiv terenul și mesher-ul, care sunt calcul pur.
+  *(Regula de aici spunea inițial „nu se scrie cod de teren înainte de gate-ul de la S8". Era
+  greșită: condiția reală era închiderea lui D17, care s-a întâmplat în panoul de arhitectură.)*
+- **Măsoară înainte să optimizezi, și verifică fixtura înainte să crezi măsurătoarea.** Ambele au
+  prins ceva real în sesiunea 1: ablația mesher-ului a arătat că 61% din timp era exact unde nu
+  credeam, iar un rezultat alarmant s-a dovedit a fi o fixtură nereprezentativă (săpătură aleatoare
+  în loc de camere).
 - DEVLOG.md primește o intrare Task Started / Task Completed per sesiune, cu promptul și modelul.
 - Zero dependențe de runtime în `src/`. Doar `typescript` și `@types/node` ca devDependencies.
 
@@ -84,7 +91,8 @@ node src/harness/cli.ts --seed 12345 --ticks 100000 --agents 40
 - **S3-5 livrat:** harta macro (funcție pură de seed), streamer de chunkuri, promovarea la voxeli RLE
   cu apron, dig/fill, save doar al chunkurilor promovate. **77 de teste**, inclusiv fuzz-ul de 10.000
   de operații cerut de plan. Numerele măsurate sunt în PLAN.md §0.5.
-- **Următorul:** S6-8, coloana vertebrală de randare — și la finalul ei, **gate-ul de motor (D1)**.
+- **S6-8, prima jumătate livrată:** binary greedy meshing, măsurat. Rămâne randarea propriu-zisă
+  (three.js, slice view, cameră) și abia atunci se poate rula **gate-ul de motor (D1)**.
 - **Motorul e deliberat nedecis.** Nucleul e TypeScript pur, fără dependențe de motor, tocmai ca
   decizia să rămână reversibilă — portabil în C# în săptămâni.
 
