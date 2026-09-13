@@ -357,3 +357,32 @@ Un program de verdict care nu poate produce roșu n-are dreptul să producă ver
 - **Electron nu e instalat.** Gate-ul măsoară Chrome curat; livrarea e Electron cu `in-process-gpu`.
 - **CI-ul n-a rulat niciodată** — `git remote -v` e gol. Pre-înregistrarea prin commit-uri locale
   n-are nicio dată emisă de alt sistem.
+
+### Trei defecte găsite privind viewerul, nu citind codul
+
+Am pornit viewerul ca să verific schimbările de randare. N-am verificat schimbările — am găsit trei
+lucruri care nu funcționaseră niciodată.
+
+1. **Săpatul nu funcționa deloc.** Punctul de impact al raycast-ului stă EXACT pe suprafață, deci nu
+   aparține niciunei celule. `Math.round(p.y)` nimerea sistematic celula de deasupra solului: teren
+   la −4,37 m ⇒ sol solid de la −5 în jos, dar ținta calculată era −4, adică aer. Fiecare click se
+   termina în `LIPSA_MATERIAL`. Acum se intră o jumătate de celulă pe direcția normalei feței —
+   înăuntru pentru săpat, în afară pentru zidit — ceea ce merge identic pe heightfield (cotă
+   fracționară) și pe o față de voxel (cotă întreagă, punct fix pe graniță).
+2. **Refuzurile erau înghițite.** `if (!out.ok) return` — contractul de `Outcome` poartă motivul, și
+   era aruncat exact la capătul lanțului. Un buton care „nu face nimic" e cel mai scump fel de bug.
+   Fără `console.warn`-ul adăugat aici, defectul de mai sus rămânea invizibil: **el a spus care e
+   problema, în prima încercare.**
+3. **Un click cu un pixel de tremur nu făcea nimic.** `pointermove` seta un flag `dragged`, deci orice
+   mișcare între apăsare și eliberare anula clickul. Acum e o distanță (4 px), nu un flag.
+
+Și o măsurătoare pe care era să o citesc greșit: după un click, „draw calls" și „triunghiuri" scăzuseră.
+Nu de la click — de la redimensionarea ferestrei între cele două citiri. Cele două câmpuri vin din
+`renderer.info`, adică din **frustum culling**, nu din starea lumii. Câmpurile care spun ceva despre
+lume sunt „din care voxel" și „quaduri voxel".
+
+Verificat live: săpat ⇒ quaduri 5.607 → 5.615; Shift+click pe teren nepromovat ⇒ chunk-uri voxel
+12 → 15, quaduri → 6.603, zero refuzuri în consolă. HUD-ul arată acum GPU-ul REAL
+(`ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 …, D3D11)`) — e condiția de invalidare nr. 2 din
+`bench/GATE.md`, iar mașina asta are și un iGPU AMD lângă 3060.
+

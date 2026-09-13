@@ -14,6 +14,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
 import { createWorld } from '../src/sim/world.ts'
 import { applyCommand } from '../src/sim/commands.ts'
+import { describe } from '../src/sim/result.ts'
 import { CHUNK_CELLS, Material, VOXEL_LEVELS } from '../src/sim/terrain/chunk.ts'
 import type { Chunk } from '../src/sim/terrain/chunk.ts'
 import { groundLevelM } from '../src/sim/terrain/terrain.ts'
@@ -305,23 +306,50 @@ applySlice()
 
 const raycaster = new THREE.Raycaster()
 const pointer = new THREE.Vector2()
-let dragged = false
 
-renderer.domElement.addEventListener('pointerdown', () => { dragged = false })
-renderer.domElement.addEventListener('pointermove', () => { dragged = true })
+// Drag vs. click se decide pe DISTANTA, nu pe „a existat un pointermove".
+// Varianta cu flag ignora orice click in care mouse-ul tremura un pixel intre
+// apasare si eliberare — adica majoritatea clickurilor facute cu mana, si toate
+// cele facute de un harness de automatizare.
+const DRAG_PX = 4
+let downX = 0
+let downY = 0
+let moved = 0
+
+renderer.domElement.addEventListener('pointerdown', (ev) => {
+  downX = ev.clientX
+  downY = ev.clientY
+  moved = 0
+})
+renderer.domElement.addEventListener('pointermove', (ev) => {
+  const dx = ev.clientX - downX
+  const dy = ev.clientY - downY
+  moved = Math.max(moved, Math.hypot(dx, dy))
+})
 
 renderer.domElement.addEventListener('click', (ev) => {
-  if (dragged) return
+  if (moved > DRAG_PX) return
   pointer.x = (ev.clientX / window.innerWidth) * 2 - 1
   pointer.y = -(ev.clientY / window.innerHeight) * 2 + 1
   raycaster.setFromCamera(pointer, camera)
   const hits = raycaster.intersectObjects(group.children, false)
   if (hits.length === 0) return
 
-  const p = hits[0]!.point
-  const wx = Math.floor(p.x)
-  const wy = Math.floor(p.z)
-  const z = Math.round(p.y)
+  // Punctul de impact sta EXACT pe suprafata, deci nu apartine niciunei celule:
+  // rotunjirea lui nimerea sistematic celula de deasupra solului, adica aer, iar
+  // fiecare click se termina in LIPSA_MATERIAL. Corect e sa intri o jumatate de
+  // celula in directia normalei — inauntru pentru sapat, in afara pentru zidit.
+  //
+  // Merge la fel pe suprafata de heightfield (unde cota e fractionara: teren la
+  // -4,37 m inseamna sol solid de la -5 in jos) si pe o fata de voxel (unde cota
+  // e intreaga si punctul cade fix pe granita dintre doua celule).
+  const hit = hits[0]!
+  const normal = hit.face ? hit.face.normal : new THREE.Vector3(0, 1, 0)
+  const target = hit.point.clone().addScaledVector(normal, ev.shiftKey ? 0.5 : -0.5)
+
+  const wx = Math.floor(target.x)
+  const wy = Math.floor(target.z)
+  const z = Math.floor(target.y)
 
   // Cine era deja promovat INAINTE de comanda. Diferenta de dupa spune exact
   // ce mesh trebuie refacut.
@@ -331,10 +359,15 @@ renderer.domElement.addEventListener('click', (ev) => {
   }
 
   const out = ev.shiftKey
-    ? applyCommand(world, { kind: 'fill', wx, wy, z: z + 1, material: Material.PIATRA_CONSTRUITA })
+    ? applyCommand(world, { kind: 'fill', wx, wy, z, material: Material.PIATRA_CONSTRUITA })
     : applyCommand(world, { kind: 'dig', wx, wy, z })
 
-  if (!out.ok) return
+  // Un refuz care nu se vede e un buton care „nu face nimic". Contractul de
+  // Outcome poarta motivul — ar fi absurd sa-l arunc exact la capatul lantului.
+  if (!out.ok) {
+    console.warn(`refuzat la ${wx},${wy},${z}: ${describe(out)}`)
+    return
+  }
 
   // Se reconstruieste chunk-ul atins plus vecinii care CHIAR s-au schimbat.
   //
@@ -421,7 +454,18 @@ window.addEventListener('resize', () => {
 })
 
 recount()
-el('backend').textContent = `WebGL · ${buildMs.toFixed(0)} ms build`
+// GPU-ul REAL, nu „WebGL". Masina asta are si un iGPU AMD langa 3060, iar un
+// fallback tacut pe el (sau pe SwiftShader) explica singur diferente de 3×.
+// E conditia de invalidare nr. 2 din bench/GATE.md — deci trebuie sa se VADA.
+function gpuName(): string {
+  const gl = renderer.getContext()
+  const ext = gl.getExtension('WEBGL_debug_renderer_info')
+  if (!ext) return 'WebGL (GPU necunoscut)'
+  return String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL))
+}
+
+el('backend').textContent = `${gpuName()} · ${buildMs.toFixed(0)} ms build`
+el('spot').textContent = `chunk ${FOCUS_CX}/${FOCUS_CY} · seed ${SEED}`
 busy.remove()
 hud.removeAttribute('hidden')
 tick()
