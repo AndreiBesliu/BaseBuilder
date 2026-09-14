@@ -184,15 +184,27 @@ ce construiește un jucător.
 | Chunk-uri rezidente | 473 |
 | Construcție | ~700 ms |
 | Quaduri / triunghiuri | 90.932 / **181.864** |
-| Meshing complet | **84,5 ms** (375 µs/chunk) |
+| Meshing complet | **99,5 ms** · mediana din 10 · CV 7,6% · detectabil peste 21,4 ms |
+| &nbsp;&nbsp;per chunk | **409 µs** · mediana din 10 · CV 6,9% · detectabil peste **79 µs** |
 | Memorie voxeli (RLE) | 2,64 MB (față de 14,1 MB necomprimat) |
 
-> **Re-etalonare, 14.09.2026, ÎNAINTE de orice rulare de gate.** Cifrele de mai sus au fost
-> 114.586 / 229.172 / 89,6 ms. **Nu s-a schimbat nimic în mesher** — s-a schimbat LUMEA: precizia
-> zgomotului a trecut de la Q10 la Q14, fiindcă rezoluția verticală era plafonată la 17,6 cm și
-> producea terase plate de 16 m. Cele două seturi de cifre descriu două lumi diferite și **nu sunt
-> comparabile între ele**; nu e o mutare de prag, fiindcă niciun prag din §8 nu depinde de ele și
-> niciun gate n-a rulat. Seria de măsurători începe de aici.
+> **Re-etalonare, 14.09.2026, ÎNAINTE de orice rulare de gate.** Două lucruri s-au schimbat, niciunul
+> în mesher, și amândouă se consemnează ca să nu poată trece drept optimizare:
+>
+> 1. **Lumea.** Precizia zgomotului a trecut de la Q10 la Q14, fiindcă rezoluția verticală era
+>    plafonată la 17,6 cm și producea terase plate de 16 m. Cifrele erau 114.586 / 229.172 / 89,6 ms.
+>    Cele două seturi descriu **două lumi diferite** și nu sunt comparabile între ele.
+> 2. **Instrumentul.** Se raportează mediana a 10 rulări, cu CV și cu diferența minimă detectabilă,
+>    nu o singură rulare. Măsurătoarea unică dădea 375 µs/chunk; mediana dă 409. **Rularea unică
+>    raporta cazul cel mai bun** — vezi `src/harness/measure.ts` pentru cifrele de împrăștiere.
+>
+> Nu e o mutare de prag: niciun prag din §8 nu depinde de cifrele astea și niciun gate n-a rulat.
+> Seria de măsurători începe de aici.
+>
+> **Consecință imediată, care a decis deja ceva:** benchmark-ul nu poate detecta o diferență sub
+> **79 µs/chunk**. Cele patru propuneri de netezire a suprafeței pretindeau toate ~50 µs/chunk —
+> adică **sub pragul propriului instrument**. Nu se poate alege între ele pe cost până când
+> instrumentul nu devine mai fin sau efectul mai mare.
 
 **Validarea fixturii NU se face prin raportul de reducere al mesher-ului.** Criteriul ăla e
 auto-referențial: selectează fixturi *ieftine de meshuit*, adică exact fixturile pe care un motor slab
@@ -258,6 +270,34 @@ lung care arată exact ca un hiccup de streaming.
 
 ---
 
+## 5b. Cine apasă pe buton — și de ce nu poate fi Claude
+
+**Într-o fereastră ascunsă sau nefocalizată, `requestAnimationFrame` nu e apelat deloc.** Bucla nu
+încetinește: se **oprește**. Verificat de trei ori în proiectul ăsta, ultima dată chiar în harness-ul
+de măsurare: `document.hidden === true`, contor de cadre 0, iar HUD-ul arăta „p99 = 9.815 ms".
+
+Deci rularea de gate e o acțiune de OM, într-o fereastră reală:
+
+```
+benchuleaza-gate.cmd            # bisecția pentru X_max
+benchuleaza-gate.cmd fortress   # un scenariu anume
+```
+
+Scriptul construiește build-ul de producție, pornește serverul de preview, deschide Chrome pe un
+profil curat cu flagurile din protocol, și la final pagina **descarcă singură** un `.json` cu
+rezultatul și metadatele. Fișierul e singurul lucru care supraviețuiește momentului.
+
+Sonda se **autodeclară invalidă** dacă ceva din §7 nu e în regulă — inclusiv „fereastra era ascunsă
+la pornire", cazul pe care prima versiune a gărzii l-a ratat, fiindcă asculta doar `visibilitychange`
+și nu verifica starea inițială. O gardă scrisă pe jumătate e mai rea decât niciuna: arată ca o gardă.
+
+**Notă de implementare:** sonda stă în `viewer/probe.ts`, nu în `src/harness/frame-probe.ts` cum
+spunea prima versiune a protocolului. Motivul e mecanic: are nevoie de DOM și de WebGL, iar
+`tsconfig.json` (nucleul) nu are `lib: DOM` — exact regula care ține `src/` portabil. Statistica și
+verdictul rămân în afara browserului (`src/harness/measure.ts`, `tools/gate-verdict.mjs`).
+
+---
+
 ## 6. Dovada că instrumentul nu minte
 
 **Se rulează ÎNAINTE de orice rulare de gate. Un harness care nu poate produce roșu n-are dreptul să
@@ -268,6 +308,14 @@ producă verde.**
 | 1 | **Scena nulă** — rAF gol, fără randare, 1.800 de cadre | mediana delta rAF = **16,67 ± 0,3 ms**. Dacă iese 33,3, sunt deja throttled și nimic de după nu contează |
 | 2 | **Cost cunoscut** — busy-loop calibrat la 8,0 ms, 600 de cadre | sonda raportează **8,0 ± 0,5 ms** |
 | 3 | **Granularitatea ceasului** — 1.000 de `performance.now()` consecutive | cel mai mic delta nenul < 0,1 ms, altfel nu raportez nicio cifră sub 1 ms |
+
+> **MĂSURAT, 14.09.2026: exact 0,100 ms.** Fără izolare cross-origin, ceasul e tocit ca apărare
+> împotriva Spectre. Consecințe, scrise acum ca să nu fie descoperite în raport:
+> - nicio cifră sub **1 ms** din raport nu e credibilă — inclusiv orice descompunere fină a cadrului;
+> - balastul arde cu o eroare de ~7% la 1,5 ms și ~1% la 8 ms, deci forma temporală ține, dar
+>   constanta de UI e la limită;
+> - rezoluția bisecției (0,25 ms) e de doar 2,5× granularitatea — se compensează prin p99 peste
+>   540 de eșantioane, dar **nu se raportează X_max cu două zecimale**.
 | 4 | **Probă negativă A** — 5.000 de mesh-uri goale | TREBUIE să iasă roșu pe draw calls |
 | 5 | **Probă negativă B** — `geometry.dispose()` dezactivat | contorul de geometrii TREBUIE să crească monoton |
 | 6 | **Probă negativă C** — busy-loop de 120 ms la fiecare 5 s | TREBUIE raportat ca stall **și atribuit** prin `PerformanceObserver('long-animation-frame')` |

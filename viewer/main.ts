@@ -21,6 +21,7 @@ import { groundLevelM, inWorld } from '../src/sim/terrain/terrain.ts'
 import { Biome, MACRO_METERS, sampleMacro } from '../src/sim/terrain/macro.ts'
 import { Face, meshChunk } from '../src/render/mesher.ts'
 import { quadColor } from '../src/render/palette.ts'
+import { Ballast, Bisector, checkGuards, clockGranularityMs, FrameProbe, heapMB } from './probe.ts'
 import { meshHeightfield } from '../src/render/heightfield.ts'
 
 const SEED = 20260913
@@ -554,7 +555,99 @@ const frames: number[] = []
 let last = performance.now()
 let hudTimer = 0
 
-function tick(): void {
+// --- modul de gate, comandat din URL ca rularea sa fie reproductibila ---------
+//
+// Tastele sunt bune pentru explorat, dar o rulare de gate trebuie sa poata fi
+// repornita identic si sa-si scrie propriile metadate. De aia scenariul, balastul
+// si bisectia se cer prin `?scenario=...&ballast=1&bisect=1`, nu din degete.
+// GPU-ul REAL, nu „WebGL". Masina asta are si un iGPU AMD langa 3060, iar un
+// fallback tacut pe el (sau pe SwiftShader) explica singur diferente de 3×.
+// E conditia de invalidare nr. 2 din bench/GATE.md — deci trebuie sa se VADA.
+function gpuName(): string {
+  const gl = renderer.getContext()
+  const ext = gl.getExtension('WEBGL_debug_renderer_info')
+  if (!ext) return 'WebGL (GPU necunoscut)'
+  return String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL))
+}
+
+const params = new URLSearchParams(location.search)
+const probe = new FrameProbe()
+const ballast = new Ballast()
+ballast.enabled = params.get('ballast') === '1'
+const bisector = params.get('bisect') === '1' ? new Bisector() : null
+/** Cadre aruncate la inceput: compilare de shadere, JIT, incalzire de driver. */
+const WARMUP_FRAMES = Number(params.get('warmup') ?? 300)
+/** Cadre utile. NUMAR FIX, nu durata: la durata fixa o configuratie lenta parcurge alt traseu. */
+const MEASURED_FRAMES = Number(params.get('frames') ?? 3600)
+const gateRun = params.has('scenario') || bisector !== null
+let frameIndex = 0
+let gateDone = false
+
+// Garda cea mai importanta, si cea mai usor de scris pe jumatate.
+//
+// Cand fereastra e ascunsa, `requestAnimationFrame` nu mai e apelat deloc: bucla
+// nu incetineste, se OPRESTE. Prima versiune de aici asculta doar
+// `visibilitychange` — si a ratat exact cazul care conteaza, adica fereastra
+// ascunsa DE LA INCEPUT, cand nu se emite niciun eveniment. Rularea parea ca
+// merge, dar contorul de cadre era zero.
+//
+// Deci: ambele. O verificare la pornire SI ascultatorul pentru tranzitii.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') probe.invalidate('fereastra a devenit invizibila in timpul rularii')
+})
+
+const guardFails = checkGuards({
+  rendererName: gpuName(),
+  expectGpu: 'RTX 3060',
+  isDevServer: 'hot' in import.meta,
+})
+for (const f of guardFails) probe.invalidate(f)
+
+function finishGateRun(): void {
+  gateDone = true
+  const s = probe.summary()
+  const result = {
+    meta: {
+      scenario: params.get('scenario') ?? 'liber',
+      seed: SEED,
+      spot: `${FOCUS_CX}/${FOCUS_CY}`,
+      renderer: gpuName(),
+      ballast: ballast.enabled ? ballast.fingerprint() : 'OPRIT',
+      ballastChecksum: ballast.checksum(),
+      devicePixelRatio: window.devicePixelRatio,
+      canvasPx: `${renderer.domElement.width}×${renderer.domElement.height}`,
+      clockGranularityMs: clockGranularityMs(),
+      warmupFrames: WARMUP_FRAMES,
+      // Vite injecteaza `hot` doar pe dev server. Daca e prezent, rularea e
+      // invalida prin protocol: module netranspilate, HMR, sourcemaps.
+      isDevServer: 'hot' in import.meta,
+    },
+    invalid: probe.invalid,
+    xMaxMs: bisector ? bisector.result : null,
+    bisectionResolutionMs: bisector ? bisector.resolutionMs : null,
+    summary: s,
+  }
+  Object.assign(globalThis, { __kinsteadResult: result })
+  console.log('REZULTAT DE GATE')
+  console.log(JSON.stringify(result, null, 2))
+
+  // Rezultatul se scrie pe disc, nu doar in consola. Motivul e practic: rularea
+  // are nevoie de o fereastra REALA, vizibila si focalizata — intr-un panou ascuns
+  // `requestAnimationFrame` nu e apelat deloc — deci o face un om, iar fisierul e
+  // singurul lucru care supravietuieste momentului ala.
+  const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `gate-${result.meta.scenario}-${probe.count}cadre.json`
+  a.click()
+  URL.revokeObjectURL(a.href)
+
+  const verdict = result.invalid ? `INVALID · ${result.invalid}` : 'rulare valida'
+  el('spot').textContent = `GATA · ${verdict} · fisier descarcat`
+  el('spot').className = result.invalid ? 'warn' : ''
+}
+
+function tick(ts: number): void {
   requestAnimationFrame(tick)
   const now = performance.now()
   const dt = now - last
@@ -563,11 +656,29 @@ function tick(): void {
   frames.push(dt)
   if (frames.length > 240) frames.shift()
 
+  const cpuStart = performance.now()
   stepTraverse(dt)
   controls.update()
   updateFocus()
   pumpBuildQueue()
+  // Balastul si sarcina de bisectie se ard INAINTE de randare, ca sa concureze
+  // cu ea pe acelasi cadru — exact ca simularea reala de la luna 10.
+  ballast.burnFrame(frameIndex)
+  if (bisector && !bisector.done) ballast.burnMs(bisector.currentX())
   renderer.render(scene, camera)
+  const cpuEnd = performance.now()
+
+  frameIndex++
+  if (frameIndex > WARMUP_FRAMES) {
+    const present = probe.record(ts, cpuStart, cpuEnd, renderer.info.render.calls, renderer.info.render.triangles, heapMB())
+    // Bisectia primeste intervalul de PREZENTARE, nu delta de performance.now().
+    // Primul cadru are present = 0 si n-are ce cauta in esantion.
+    if (bisector && !bisector.done && present > 0) bisector.sample(present)
+  }
+  if (gateRun && !gateDone) {
+    const enough = bisector ? bisector.done : probe.count >= MEASURED_FRAMES
+    if (enough) finishGateRun()
+  }
 
   hudTimer += dt
   if (hudTimer > 400) {
@@ -582,6 +693,11 @@ function tick(): void {
     el('queue').textContent = traversing ? `${q} · T ${dir} ${traverseFixedClock ? 'pas fix' : 'timp real'}` : q
     el('calls').textContent = String(renderer.info.render.calls)
     el('tris').textContent = renderer.info.render.triangles.toLocaleString('ro-RO')
+    if (bisector) el('slice').textContent = bisector.progress
+    if (probe.invalid) {
+      el('spot').textContent = `INVALID · ${probe.invalid}`
+      el('spot').className = 'warn'
+    }
   }
 }
 
@@ -592,21 +708,11 @@ window.addEventListener('resize', () => {
 })
 
 recount()
-// GPU-ul REAL, nu „WebGL". Masina asta are si un iGPU AMD langa 3060, iar un
-// fallback tacut pe el (sau pe SwiftShader) explica singur diferente de 3×.
-// E conditia de invalidare nr. 2 din bench/GATE.md — deci trebuie sa se VADA.
-function gpuName(): string {
-  const gl = renderer.getContext()
-  const ext = gl.getExtension('WEBGL_debug_renderer_info')
-  if (!ext) return 'WebGL (GPU necunoscut)'
-  return String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL))
-}
-
 el('backend').textContent = `${gpuName()} · ${buildMs.toFixed(0)} ms build`
 el('spot').textContent = `chunk ${FOCUS_CX}/${FOCUS_CY} · seed ${SEED}`
 busy.remove()
 hud.removeAttribute('hidden')
-tick()
+requestAnimationFrame(tick)
 
 // Expus pentru masuratori din consola, nu pentru joc.
-Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames } })
+Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast } })

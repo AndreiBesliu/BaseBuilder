@@ -14,6 +14,7 @@ import { CHUNK_CELLS, VOXEL_LEVELS, runCount } from '../sim/terrain/chunk.ts'
 import type { Terrain } from '../sim/terrain/terrain.ts'
 import { dig, groundLevelM } from '../sim/terrain/terrain.ts'
 import { makeM10, SETTLEMENT_CHUNKS } from './fixture-m10.ts'
+import { format, repeat } from './measure.ts'
 
 const SEED = 20260913
 const CX = 300
@@ -50,13 +51,16 @@ function meshAll(terr: Terrain): { quads: number; ms: number; chunks: number } {
 
 console.log('')
 console.log('--- meshing complet ---')
-meshAll(terrain) // incalzire
+// Se raporteaza MEDIANA, cu CV si cu diferenta minima detectabila. O singura
+// rulare a aceluiasi cod variaza cu 8,3% pe masina asta — vezi measure.ts.
 const full = meshAll(terrain)
+const totalMs = repeat(() => meshAll(terrain).ms)
+const perChunk = repeat(() => (meshAll(terrain).ms * 1000) / full.chunks)
 pad('chunk-uri meshuite', String(full.chunks))
 pad('quaduri', full.quads.toLocaleString('ro-RO'))
 pad('triunghiuri', (full.quads * 2).toLocaleString('ro-RO'))
-pad('timp total', `${full.ms.toFixed(1)} ms`)
-pad('  per chunk', `${((full.ms * 1000) / full.chunks).toFixed(0)} µs`)
+console.log(`${'timp total'.padEnd(46)} ${format(totalMs, 'ms')}`)
+console.log(`${'  per chunk'.padEnd(46)} ${format(perChunk, 'µs', 0)}`)
 
 console.log('')
 console.log('--- costul unei sapaturi ---')
@@ -70,11 +74,13 @@ const mid = terrain.chunks.get(midCy * 512 + midCx)!
 const baseX = midCx * CHUNK_CELLS
 const baseY = midCy * CHUNK_CELLS
 
-meshChunk(mid) // incalzire
 const MESH_ITERS = 200
-const tMesh = performance.now()
-for (let i = 0; i < MESH_ITERS; i++) meshChunk(mid)
-const meshUs = ((performance.now() - tMesh) / MESH_ITERS) * 1000
+const meshM = repeat(() => {
+  const t = performance.now()
+  for (let i = 0; i < MESH_ITERS; i++) meshChunk(mid)
+  return ((performance.now() - t) / MESH_ITERS) * 1000
+})
+const meshUs = meshM.median
 
 let attempted = 0
 let accepted = 0
@@ -91,9 +97,9 @@ const digUs = ((performance.now() - tDig) / Math.max(1, accepted)) * 1000
 
 pad('dig in sim, fara mesh', `${digUs.toFixed(1)} µs`)
 pad('  acceptate / incercate', `${accepted} / ${attempted}`)
-pad('remesh, 1 chunk de asezare', `${meshUs.toFixed(0)} µs`)
+console.log(`${'remesh, 1 chunk de asezare'.padEnd(46)} ${format(meshM, 'µs', 0)}`)
 pad('  remesh 3×3, cat platea viewerul', `${((meshUs * 9) / 1000).toFixed(2)} ms`)
-pad('  remesh complet, toata asezarea', `${full.ms.toFixed(0)} ms`)
+pad('  remesh complet, toata asezarea', `${totalMs.median.toFixed(0)} ms`)
 
 console.log('')
 console.log('--- memorie ---')

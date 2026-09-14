@@ -15,7 +15,8 @@
     "gate:selftest": "node tools/gate-verdict.mjs --self-test",
     "run:headless": "node src/harness/cli.ts",
     "viewer": "vite",
-    "viewer:build": "vite build"
+    "viewer:build": "vite build",
+    "viewer:preview": "vite preview --port 4173 --strictPort"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

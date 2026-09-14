@@ -515,3 +515,79 @@ de quaduri **nu** înseamnă o optimizare, înseamnă altă lume. `bench/GATE.md
 Hash de referință: `3876f59a` → `c3641ad5`. Oracolul reparat alaltăieri a prins schimbarea imediat;
 acum trei zile n-ar fi clipit.
 
+---
+
+## Instrumentul de măsurare, și trei lucruri pe care le-a spus despre el însuși
+
+**Prompt:** „Continua"
+**Model:** Opus 5
+
+Protocolul cere, înainte de orice cifră de gate, ca instrumentul să-și demonstreze că poate produce
+roșu. Construindu-l, a produs roșu de trei ori — despre sine.
+
+### 1. Benchmark-urile proiectului nu puteau detecta ce li se cerea
+
+Judecătorul de cost al panoului de netezire a susținut că aceeași bucată de cod dă „+46, −153 și
++28 µs/chunk" pe mașina asta. Am verificat:
+
+```
+10 rulări, același cod, același proces:
+444 389 414 493 434 430 366 416 395 405 µs/chunk   ⇒ CV 8,3%
+```
+
+Avea dreptate. Dar diagnosticul complet e altul: **mediana a 10 rulări, comparată între procese
+separate**, dă 419,4 · 419,6 · 420,4 · 429,5 · 441,0 · 412,1 ⇒ **CV 2,5%**. Nu măsurătoarea era
+imposibilă, ci protocolul de raportare era greșit.
+
+`src/harness/measure.ts` raportează acum mediana, CV-ul și **diferența minimă detectabilă**, cu cinci
+probe negative care verifică tocmai că poate spune „nedecis". Consecința imediată, pe care o scriu
+pentru că a decis ceva: benchmark-ul **nu poate detecta sub 79 µs/chunk**, iar toate cele patru
+propuneri de netezire pretindeau ~50 µs. Nu se putea alege între ele pe cost — nu din lipsă de date,
+ci pentru că instrumentul nu ajungea acolo.
+
+Și un detaliu care spune ce fel de greșeală e asta: măsurătoarea unică de ieri dădea 375 µs/chunk,
+mediana dă 409. **Rularea unică raporta cazul cel mai bun.**
+
+### 2. Ceasul browserului e tocit la exact 0,1 ms
+
+Măsurat, nu presupus: cel mai mic delta nenul între două `performance.now()` consecutive e
+`0,09999996 ms`. Fără izolare cross-origin, ceasul e tocit ca apărare împotriva Spectre. Deci nicio
+cifră sub 1 ms din raport nu e credibilă, iar rezoluția bisecției (0,25 ms) e de doar 2,5× ceasul.
+Scris în `bench/GATE.md` §6 ca limită declarată, nu descoperită la interpretare.
+
+### 3. Garda mea cea mai importantă era scrisă pe jumătate
+
+Am scris `checkGuards()` — și nu am chemat-o niciodată. Ascultam doar `visibilitychange`, ceea ce
+ratează exact cazul care contează: fereastra **ascunsă de la început**, când nu se emite niciun
+eveniment. Rularea părea că merge; contorul de cadre era zero, iar HUD-ul afișa „p99 = 9.815 ms".
+
+**O gardă scrisă pe jumătate e mai rea decât niciuna, fiindcă arată ca o gardă.**
+
+### Cine apasă pe buton
+
+Consecința operațională, și nu e una plăcută: **nu pot executa eu măsurătoarea.** Într-un panou
+ascuns sau nefocalizat `requestAnimationFrame` nu e apelat deloc — bucla nu încetinește, se oprește
+— iar panoul de preview pornește ascuns și rulează în reluare lentă. Verificat: `document.hidden`
+era `true` chiar în momentul în care credeam că măsor.
+
+Deci rularea e o acțiune de om, de o comandă:
+
+```
+benchuleaza-gate.cmd
+```
+
+Build de producție, server de preview, Chrome pe profil curat cu flagurile din protocol, iar la final
+pagina **descarcă singură** un `.json` cu rezultatul și metadatele — inclusiv verdictul de validitate.
+Fișierul e singurul lucru care supraviețuiește momentului.
+
+### Ce e construit acum
+
+`viewer/probe.ts`: două ceasuri distincte (interval de prezentare vs. muncă proprie, primul gatează,
+al doilea e diagnostic), buffer prealocat fără alocări în bucla fierbinte, balast cu forma temporală
+corectă (8 ms pe **un cadru din trei**, nu întins uniform), bisecția care dă X_max, gărzile de
+invalidare și amprenta constantelor tipărită în raport ca să nu poată fi micșorate tăcut.
+
+Sonda stă lângă viewer, nu în `src/harness/`, fiindcă are nevoie de DOM — iar `tsconfig.json` al
+nucleului nu are `lib: DOM`, exact regula care ține `src/` portabil. Statistica și verdictul rămân în
+afara browserului.
+
