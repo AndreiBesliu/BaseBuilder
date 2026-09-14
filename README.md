@@ -22,6 +22,19 @@ sau luptă. Se înlocuiesc la S12-15.
 - [CLAUDE.md](CLAUDE.md) — regulile dure ale nucleului
 - [research/](research/) — 23 de lentile de research, 549 de constatări cu surse
 
+## Cum îl pornești
+
+Dublu-click pe **`Kinstead.cmd`**. Instalează dependențele la prima pornire, pornește serverul și
+deschide browserul. Închizi fereastra neagră ca să oprești.
+
+Dublu-click pe **`Verifica.cmd`** rulează poarta proiectului — aceleași verificări ca CI-ul.
+
+Dublu-click pe **`benchuleaza-gate.cmd`** rulează măsurătoarea gate-ului de motor. Durează un
+minut, nu minimiza fereastra, și descarcă singur un `.json` cu rezultatul.
+
+Din linia de comandă, echivalentele sunt `npm run viewer`, `npm run check` și protocolul din
+[`bench/GATE.md`](bench/GATE.md).
+
 ## Rulează
 
 Nu are nevoie de nimic instalat în afară de Node 23+ — nucleul are **zero dependențe de runtime**,
