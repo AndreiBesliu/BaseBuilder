@@ -40,7 +40,7 @@
 import type { Rules } from './content.ts'
 import { CHUNK_CELLS, isSolid, Material } from './terrain/chunk.ts'
 import type { Terrain } from './terrain/terrain.ts'
-import { materialAt, WORLD_CELLS } from './terrain/terrain.ts'
+import { groundLevelM, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
 
 /** Latura unui bloc de regiune, in celule. 32 / 16 = 2×2 blocuri per chunk. */
 export const REGION_SIZE = 16
@@ -308,10 +308,49 @@ function clampStep(rules: Rules): number {
 }
 
 /**
+ * Intervalul de niveluri in care poate exista teren pe care se merge, intr-un bloc.
+ *
+ * Se citeste din relief, nu se presupune. Un bloc de pe o coasta poate avea 12 m
+ * diferenta intre colturi, si toate nivelurile alea au celule pe care se sta.
+ */
+function groundSpan(t: Terrain, bx: number, by: number): { lo: number; hi: number } {
+  let lo = Infinity
+  let hi = -Infinity
+  const originX = bx * REGION_SIZE
+  const originY = by * REGION_SIZE
+  // Patru colturi si centrul: relieful e neted la rezolutia asta, iar o sondare
+  // completa de 256 de celule per bloc ar costa de 50 de ori mai mult degeaba.
+  const probes = [
+    [0, 0],
+    [REGION_SIZE - 1, 0],
+    [0, REGION_SIZE - 1],
+    [REGION_SIZE - 1, REGION_SIZE - 1],
+    [REGION_SIZE >> 1, REGION_SIZE >> 1],
+  ] as const
+  for (const [dx, dy] of probes) {
+    const g = groundLevelM(t, originX + dx, originY + dy)
+    if (!g.ok) continue
+    if (g.value < lo) lo = g.value
+    if (g.value > hi) hi = g.value
+  }
+  if (lo === Infinity) return { lo: 0, hi: 0 }
+  return { lo, hi }
+}
+
+/**
  * Pregateste o zona: calculeaza si leaga blocurile dintr-o raza in jurul unei celule.
  *
  * `radiusBlocks` e in BLOCURI, nu in celule — cine intreaba despre reachability
  * intreaba despre o vecinatate, iar unitatea naturala a sistemului e blocul.
+ *
+ * Pe verticala NU se acopera o banda fixa in jurul lui `z`, ci **suprafata**:
+ * pentru fiecare bloc se citeste intervalul lui de cote si se acopera de acolo.
+ * Prima versiune acoperea `z ± maxStepM`, si pe o coasta prindea doar celulele al
+ * caror sol nimerea exact acele trei niveluri — adica o banda subtire de contur.
+ * S-a vazut instantaneu in overlay si nu s-ar fi vazut deloc intr-un test.
+ *
+ * `depthBelow` coboara sub sol pentru camerele sapate. Zero inseamna „doar
+ * suprafata", si e alegerea corecta cand nu te intereseaza interioarele.
  */
 export function ensureArea(
   t: Terrain,
@@ -321,17 +360,21 @@ export function ensureArea(
   z: number,
   radiusBlocks: number,
   rules: Rules,
+  depthBelow = 0,
 ): void {
   const { bx, by } = blockOfCell(wx, wy)
   const step = clampStep(rules)
-  for (let dz = -step; dz <= step; dz++) {
-    for (let dy = -radiusBlocks; dy <= radiusBlocks; dy++) {
-      for (let dx = -radiusBlocks; dx <= radiusBlocks; dx++) {
-        const nbx = bx + dx
-        const nby = by + dy
-        if (nbx < 0 || nby < 0 || nbx >= WORLD_BLOCKS || nby >= WORLD_BLOCKS) continue
-        linkBlock(t, s, nbx, nby, z + dz, rules)
-      }
+  for (let dy = -radiusBlocks; dy <= radiusBlocks; dy++) {
+    for (let dx = -radiusBlocks; dx <= radiusBlocks; dx++) {
+      const nbx = bx + dx
+      const nby = by + dy
+      if (nbx < 0 || nby < 0 || nbx >= WORLD_BLOCKS || nby >= WORLD_BLOCKS) continue
+      const span = groundSpan(t, nbx, nby)
+      // Solul e la `g`, deci se sta la `g + 1`. Marginea de sus adauga un pas, cea
+      // de jos coboara cat s-a cerut plus un pas, ca sa prinda si legaturile.
+      const lo = Math.min(span.lo, z) - depthBelow - step
+      const hi = Math.max(span.hi, z) + 1 + step
+      for (let zz = lo; zz <= hi; zz++) linkBlock(t, s, nbx, nby, zz, rules)
     }
   }
 }

@@ -776,3 +776,37 @@ sincron în cadrul în care jucătorul a dat click. Merge acum fiindcă nu exist
 întrebe — și e scris în cod, cu cifra, tocmai ca să nu treacă drept „destul de rapid" la S12-15.
 Pragul la care devine obligatorie etichetarea incrementală: **primul agent care cere un drum.**
 
+---
+
+## Overlay-ul de regiuni, și ce a găsit în prima privire
+
+**Prompt:** „ok continua"
+**Model:** Opus 5
+
+Research-ul e explicit: *„sistemele astea — regiuni, rezervări, job selection — sunt INVIZIBILE:
+typecheck verde, teste verzi, joc rupt. Semnalul: nu ai un debug overlay. Construiește overlay-urile
+în aceeași zi cu sistemele, nu după."* Tocmai demonstrasem prima jumătate — regiunile au găsit un
+defect de arhitectură pe care nicio suită nu-l putea prinde. Asta e a doua jumătate.
+
+**G** desenează fiecare celulă pe care se poate sta, colorată după componenta ei conexă. Aceeași
+culoare = se poate ajunge dintr-una în alta. Culori diferite = nu există drum. Un zid care închide o
+cameră se vede instantaneu, fără să ai încredere în nimic.
+
+### Prima privire a arătat o bandă subțire de contur
+
+Nu o suprafață. Și nu era un defect de desen: `ensureArea` acoperea `z ± maxStepM`, adică **trei
+niveluri fixe**. Pe o coastă, asta prinde doar celulele al căror sol nimerește exact acele niveluri —
+un contur.
+
+Consecința reală e mult mai mare decât overlay-ul: **un agent care urcă un deal traversează multe
+niveluri.** Cu modelul vechi, reachability-ul ar fi răspuns „nu există drum" pe orice pantă, iar
+cauza s-ar fi căutat în pathfinding, unde nu era.
+
+Corectat: regiunile **urmează suprafața**. Pentru fiecare bloc se citește intervalul lui de cote din
+relief și se acoperă de acolo, plus o adâncime pentru camerele săpate. După corecție: **17.404 celule
+· 10 componente · 73 ms**, o culoare dominantă pe toată suprafața traversabilă și o componentă
+separată dincolo de apă — adică exact ce trebuie să arate.
+
+Niciun test nu l-ar fi prins, fiindcă toate testele mele interogau puncte pe care le alesesem eu, pe
+teren pe care îl alesesem eu. Overlay-ul nu alege.
+

@@ -23,6 +23,9 @@ import { Face, meshChunk } from '../src/render/mesher.ts'
 import type { ChunkNeighbours } from '../src/render/mesher.ts'
 import { quadColor } from '../src/render/palette.ts'
 import { Ballast, Bisector, checkGuards, clockGranularityMs, FrameProbe, heapMB } from './probe.ts'
+import { createRegionOverlay, rebuildRegionOverlay } from './overlay-regions.ts'
+import { createRegions, markDirty, rebuildDirty } from '../src/sim/regions.ts'
+import { DEFAULT_RULES } from '../src/sim/content.ts'
 import { meshHeightfield } from '../src/render/heightfield.ts'
 import { buildM10 } from '../src/harness/fixture-m10.ts'
 
@@ -499,6 +502,35 @@ renderer.clippingPlanes = [clipPlane]
 applySlice()
 
 // --------------------------------------------------------------------------
+// 3b. overlay de regiuni — sistemele invizibile, facute vizibile
+// --------------------------------------------------------------------------
+//
+// Research-ul numeste lipsa asta drept capcana: „regiuni, rezervari, job selection
+// sunt INVIZIBILE — typecheck verde, teste verzi, joc rupt". Sistemul de regiuni a
+// scos la iveala un defect de arhitectura in ziua in care a fost scris, fiindca a
+// pus o intrebare noua. Overlay-ul e ca sa se poata si UITA cineva la urmatorul.
+//
+// Doua zone cu aceeasi culoare sunt, dupa graf, mutual accesibile. Culori diferite
+// inseamna ca NU exista drum. Un zid care inchide o camera se vede instantaneu.
+
+const regions = createRegions()
+const regionOverlay = createRegionOverlay()
+scene.add(regionOverlay.group)
+
+function refreshOverlay(): void {
+  if (!regionOverlay.visible) return
+  const wx = Math.floor(controls.target.x)
+  const wy = Math.floor(controls.target.z)
+  const g = groundLevelM(world.terrain, wx, wy)
+  const z = (g.ok ? g.value : 0) + 1
+  const t0 = performance.now()
+  rebuildRegionOverlay(regionOverlay, world.terrain, regions, wx, wy, z, DEFAULT_RULES)
+  lastOverlayMs = performance.now() - t0
+}
+
+let lastOverlayMs = 0
+
+// --------------------------------------------------------------------------
 // 4. interactiune: sapa si construieste
 // --------------------------------------------------------------------------
 
@@ -574,10 +606,20 @@ renderer.domElement.addEventListener('click', (ev) => {
   // Varianta care remesh-uia mereu 3×3 platea 9× pretul pentru un singur chunk
   // murdar — 5,4 ms in loc de ~0,6 — si ar fi intrat in gate ca „limita stivei".
   remeshAfterEdit(wx, wy, promotedBefore)
+  // Editarea murdareste regiunile la fel de sigur cum murdareste mesh-ul.
+  markDirty(regions, wx, wy, z, DEFAULT_RULES)
+  rebuildDirty(world.terrain, regions, DEFAULT_RULES)
+  refreshOverlay()
   recount()
 })
 
 window.addEventListener('keydown', (ev) => {
+  if (ev.key === 'g' || ev.key === 'G') {
+    regionOverlay.visible = !regionOverlay.visible
+    regionOverlay.group.visible = regionOverlay.visible
+    refreshOverlay()
+    return
+  }
   if (ev.key === 't' || ev.key === 'T') {
     if (ev.shiftKey) traverseDir = -traverseDir
     else traversing = !traversing
@@ -890,6 +932,9 @@ function stepFrame(ts: number): void {
     el('calls').textContent = String(renderer.info.render.calls)
     el('tris').textContent = renderer.info.render.triangles.toLocaleString('ro-RO')
     if (bisector) el('slice').textContent = bisector.progress
+    el('regions').textContent = regionOverlay.visible
+      ? `${regionOverlay.cells.toLocaleString('ro-RO')} celule · ${regionOverlay.components} componente · ${lastOverlayMs.toFixed(0)} ms`
+      : 'G'
     if (probe.invalid) {
       el('spot').textContent = `INVALID · ${probe.invalid}`
       el('spot').className = 'warn'
