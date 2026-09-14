@@ -17,7 +17,7 @@ import { applyCommand } from '../src/sim/commands.ts'
 import { describe } from '../src/sim/result.ts'
 import { CHUNK_CELLS, Material, VOXEL_LEVELS } from '../src/sim/terrain/chunk.ts'
 import type { Chunk } from '../src/sim/terrain/chunk.ts'
-import { groundLevelM } from '../src/sim/terrain/terrain.ts'
+import { groundLevelM, inWorld } from '../src/sim/terrain/terrain.ts'
 import { Biome, MACRO_METERS, sampleMacro } from '../src/sim/terrain/macro.ts'
 import { meshChunk } from '../src/render/mesher.ts'
 import { meshHeightfield } from '../src/render/heightfield.ts'
@@ -274,6 +274,123 @@ camera.position.set(centerX - 46, centerY + 34, centerZ + 46)
 controls.update()
 
 // --------------------------------------------------------------------------
+// 2b. streaming — discul rezident urmareste camera
+// --------------------------------------------------------------------------
+//
+// Pana acum viewerul construia o data discul de 377 de chunk-uri si nu mai
+// streama niciodata. Adica S-TRAVERSE — exact scenariul scris in PLAN.md ca
+// gate de motor — nu se putea rula deloc.
+//
+// Doua lucruri DIFERITE, care se confunda usor si nu trebuie:
+//   REZIDENTA  (date)  — `setFocus` in sim: ce chunk-uri exista in memorie.
+//                        Nu arunca NICIODATA un chunk promovat: acolo e munca
+//                        jucatorului.
+//   VIZIBILITATE (mesh) — ce are geometrie pe GPU. Un chunk promovat de acum
+//                        trei vai ramane in date, dar nu merita un draw call.
+// De asta evacuarea de mesh-uri se face pe VIEW_RADIUS, nu pe promovare.
+
+/** Cate chunk-uri se construiesc cel mult intr-un cadru. Bugetul, nu graba. */
+const BUILD_BUDGET_PER_FRAME = 2
+
+let focusCx = FOCUS_CX
+let focusCy = FOCUS_CY
+/** Chei de chunk asteptand geometrie, sortate DESCRESCATOR dupa distanta: `pop()` ia cel mai apropiat. */
+const buildQueue: number[] = []
+let lastFocusMs = 0
+
+function dropMesh(key: number): void {
+  const mesh = meshes.get(key)
+  if (!mesh) return
+  group.remove(mesh)
+  mesh.geometry.dispose()
+  meshes.delete(key)
+}
+
+/** Pune in coada tot ce e in raza de desen si n-are inca geometrie. */
+function enqueueVisible(): void {
+  buildQueue.length = 0
+  const r2 = VIEW_RADIUS * VIEW_RADIUS
+  for (const key of world.terrain.keys) {
+    if (meshes.has(key)) continue
+    const c = world.terrain.chunks.get(key)!
+    const d2 = (c.cx - focusCx) ** 2 + (c.cy - focusCy) ** 2
+    if (d2 > r2) continue
+    buildQueue.push(key)
+  }
+  // Cele mai departate primele, ca `pop()` sa scoata mereu cel mai apropiat chunk.
+  buildQueue.sort((a, b) => {
+    const ca = world.terrain.chunks.get(a)!
+    const cb = world.terrain.chunks.get(b)!
+    const da = (ca.cx - focusCx) ** 2 + (ca.cy - focusCy) ** 2
+    const db = (cb.cx - focusCx) ** 2 + (cb.cy - focusCy) ** 2
+    return db - da
+  })
+}
+
+/** Muta centrul discului daca privirea a trecut granita unui chunk. */
+function updateFocus(): void {
+  const cx = Math.floor(controls.target.x / CHUNK_CELLS)
+  const cy = Math.floor(controls.target.z / CHUNK_CELLS)
+  if (cx === focusCx && cy === focusCy) return
+  if (!inWorld(cx, cy)) return
+
+  const t0 = performance.now()
+  focusCx = cx
+  focusCy = cy
+  applyCommand(world, { kind: 'setFocus', cx, cy })
+
+  const r2 = VIEW_RADIUS * VIEW_RADIUS
+  for (const key of [...meshes.keys()]) {
+    const c = world.terrain.chunks.get(key)
+    // Iesit din rezidenta (aruncat de sim) SAU iesit din raza de desen.
+    if (!c || (c.cx - focusCx) ** 2 + (c.cy - focusCy) ** 2 > r2) dropMesh(key)
+  }
+  enqueueVisible()
+  lastFocusMs = performance.now() - t0
+}
+
+// Traversare pe sine — scheletul scenariului S-TRAVERSE din bench/GATE.md §5.
+//
+// Doua ceasuri, deliberat, fiindca masoara lucruri diferite:
+//   TIMP REAL      — stresul real de streaming. Pe asta se da verdictul.
+//   PAS FIX 1/60 s — acelasi traseu si acelasi numar de cadre in orice rulare,
+//                    deci comparabilitate intre configuratii.
+// Cu pas fix, o configuratie lenta primeste MAI MULT timp de perete pe metru,
+// deci un streamer asincron arata mai bine decat va fi in joc: fals PASS structural.
+/** Viteza de traversare, in metri pe secunda. */
+const TRAVERSE_MPS = 40
+/** Pasul de timp simulat, cand traversarea ruleaza pe ceas fix. */
+const FIXED_STEP_S = 1 / 60
+
+let traversing = false
+let traverseFixedClock = false
+/** +1 sau -1. Intoarcerea nu e un moft: e S4b din protocol — daca a doua trecere
+ *  peste acelasi teren e mai slaba decat prima, ai acumulare (leak, fragmentare,
+ *  cache invalidat), indiferent ce arata media. */
+let traverseDir = 1
+
+function stepTraverse(dtMs: number): void {
+  if (!traversing) return
+  const dt = traverseFixedClock ? FIXED_STEP_S : dtMs / 1000
+  const d = TRAVERSE_MPS * dt * traverseDir
+  controls.target.x += d
+  camera.position.x += d
+}
+
+/** Construieste cel mult BUILD_BUDGET_PER_FRAME chunk-uri. Restul asteapta. */
+function pumpBuildQueue(): void {
+  let built = 0
+  while (buildQueue.length > 0 && built < BUILD_BUDGET_PER_FRAME) {
+    const key = buildQueue.pop()!
+    const c = world.terrain.chunks.get(key)
+    if (!c || meshes.has(key)) continue
+    buildChunkMesh(c)
+    built++
+  }
+  if (built > 0) recount()
+}
+
+// --------------------------------------------------------------------------
 // 3. slice view — ascunde tot ce e peste nivelul activ
 // --------------------------------------------------------------------------
 
@@ -391,6 +508,15 @@ renderer.domElement.addEventListener('click', (ev) => {
 })
 
 window.addEventListener('keydown', (ev) => {
+  if (ev.key === 't' || ev.key === 'T') {
+    if (ev.shiftKey) traverseDir = -traverseDir
+    else traversing = !traversing
+    return
+  }
+  if (ev.key === 'f' || ev.key === 'F') {
+    traverseFixedClock = !traverseFixedClock
+    return
+  }
   if (ev.key === 'q' || ev.key === 'Q') sliceLevel = Math.max(0, sliceLevel - 1)
   else if (ev.key === 'e' || ev.key === 'E') sliceLevel = Math.min(VOXEL_LEVELS, sliceLevel + 1)
   else if (ev.key === 'r' || ev.key === 'R') sliceLevel = VOXEL_LEVELS
@@ -431,7 +557,10 @@ function tick(): void {
   frames.push(dt)
   if (frames.length > 240) frames.shift()
 
+  stepTraverse(dt)
   controls.update()
+  updateFocus()
+  pumpBuildQueue()
   renderer.render(scene, camera)
 
   hudTimer += dt
@@ -442,6 +571,9 @@ function tick(): void {
     const p99 = sorted[Math.floor(sorted.length * 0.99)] ?? 0
     el('fps').textContent = mid > 0 ? (1000 / mid).toFixed(0) : '—'
     el('p99').textContent = `${p99.toFixed(1)} ms`
+    const q = buildQueue.length > 0 ? `${buildQueue.length} · ${lastFocusMs.toFixed(1)} ms` : '—'
+    const dir = traverseDir > 0 ? '→' : '←'
+    el('queue').textContent = traversing ? `${q} · T ${dir} ${traverseFixedClock ? 'pas fix' : 'timp real'}` : q
     el('calls').textContent = String(renderer.info.render.calls)
     el('tris').textContent = renderer.info.render.triangles.toLocaleString('ro-RO')
   }

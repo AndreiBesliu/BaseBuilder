@@ -386,3 +386,51 @@ Verificat live: săpat ⇒ quaduri 5.607 → 5.615; Shift+click pe teren nepromo
 (`ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 …, D3D11)`) — e condiția de invalidare nr. 2 din
 `bench/GATE.md`, iar mașina asta are și un iGPU AMD lângă 3060.
 
+---
+
+## Streaming în viewer — piesa fără de care gate-ul nu se poate rula
+
+**Prompt:** „continua"
+**Model:** Opus 5
+
+Viewerul construia o dată discul de 377 de chunk-uri și nu mai streama niciodată. Adică **S-TRAVERSE
+— exact scenariul scris în PLAN.md ca gate de motor — nu se putea rula deloc.** E prima piesă,
+fiindcă nu depinde de decizia despre netezire (care rulează în panou acum).
+
+### Rezidență ≠ vizibilitate
+
+Distincția asta e ușor de ratat și ar fi produs un bug tăcut:
+
+| | ce e | regula |
+|---|---|---|
+| **Rezidență** (date) | `setFocus` în sim: ce chunk-uri există în memorie | nu aruncă **niciodată** un chunk promovat — acolo e munca jucătorului |
+| **Vizibilitate** (mesh) | ce are geometrie pe GPU | se evacuează pe `VIEW_RADIUS`, indiferent de promovare |
+
+O fortăreață de acum trei văi rămâne în date, dar nu merită un draw call. Verificat live: după
+traversare, „din care voxel" rămâne **12** iar „quaduri voxel" cade la **0** — apoi, la întoarcere,
+revine la **5.607**, exact valoarea inițială.
+
+### Ce s-a adăugat
+
+- coadă de build cu **buget de 2 chunk-uri/cadru**, sortată după distanță (`pop()` ia cel mai apropiat)
+- evacuare de mesh-uri la trecerea de graniță, pe rază de desen
+- **traversare pe șine, 40 m/s** (`T`), cu **două ceasuri** (`F`): timp real — pe ăsta se dă verdictul;
+  pas fix 1/60 s — pentru comparabilitate între rulări. Cu pas fix, o configurație lentă primește mai
+  mult timp de perete pe metru, deci streamerul asincron arată mai bine decât va fi în joc.
+- **sens reversibil** (`Shift+T`) — nu e un moft: e S4b din protocol, a doua trecere peste același
+  teren detectează acumularea (leak, fragmentare, cache invalidat) pe care media o ascunde.
+- HUD: adâncimea cozii + costul lui `setFocus` (măsurat: **0,5–0,6 ms** per graniță)
+
+### Și o măsurătoare pe care era să o iau drept constatare
+
+Pe drumul de întoarcere HUD-ul arăta **30 fps, p99 33,5 ms** — arăta exact ca semnalul S4b pe care
+tocmai îl construisem ca să-l caut. Apoi am oprit traversarea: scena a rămas cu **37 de draw calls și
+77.000 de triunghiuri** — și tot 30 fps.
+
+O scenă aproape goală la 30 fps nu e o afirmație despre cost. E **vsync-ul căzut la jumătate de rată**
+și rămas acolo. Adică fix teza din `bench/GATE.md` §1, observată live pe propriul cod: sub vsync,
+framerate-ul nu măsoară cât ai consumat. Dacă protocolul nu era deja scris, aș fi raportat 30 fps ca
+pe o constatare despre streaming.
+
+Al treilea instrument care minte în două sesiuni, după `AdapterRAM` = 4 GB și „2,73 ms per săpătură".
+

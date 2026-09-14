@@ -228,8 +228,11 @@ compilare la cadrul 900.
 | **S-DIG** | 20 de săpături/s timp de 60 s peste fixtura M10 | bucla de construcție |
 | **S-TRAVERSE** | 40 m/s, `setFocus` la fiecare graniță de chunk, build/dispose cu buget de 2 chunk-uri/cadru | **criteriul scris în PLAN** |
 
-**S-TRAVERSE cere cod care nu există.** Viewerul construiește o dată discul de 377 de chunk-uri și nu
-mai streamează niciodată. Sunt ~60 de linii noi, și e singura piesă de construit de la zero.
+**S-TRAVERSE cerea cod care nu exista. Acum există** (commit `streaming`): coadă de build cu buget de
+2 chunk-uri/cadru, evacuare de mesh pe rază de desen, traversare pe șine la 40 m/s cu ambele ceasuri
+(`T`, `F`) și sens reversibil (`Shift+T`, adică S4b — întoarcerea). Măsurat la implementare:
+`setFocus` costă **0,5–0,6 ms** per graniță de chunk, iar coada se golește în regim staționar.
+Cifrele de gate se iau tot din protocolul de mai jos, nu din citirile astea de la tastatură.
 
 S-TRAVERSE se rulează **de două ori, cu două ceasuri**: (a) pas fix pe timp simulat — pentru
 comparații între rulări; (b) **timp real** la 40 m/s — ăsta e cel pe care se dă verdictul. Cu pas fix,
