@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kinstead — spike de aspect</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a8c4d4; }
+  canvas { display: block; }
+  #hud {
+    position: fixed; bottom: 12px; left: 12px;
+    font: 11px/1.5 "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    color: #2e3a42; background: rgba(255,255,255,.72);
+    border: 1px solid rgba(46,58,66,.25); padding: 8px 12px;
+  }
+  #nota {
+    position: fixed; top: 12px; left: 12px; max-width: 460px;
+    font: 12px/1.55 "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    color: #2e3a42; background: rgba(255,255,255,.82);
+    border: 1px solid rgba(46,58,66,.25); padding: 12px 14px;
+  }
+  #nota b { color: #1d262c; }
+  #nota hr { border: 0; border-top: 1px solid rgba(46,58,66,.2); margin: 8px 0; }
+</style>
+</head>
+<body>
+  <div id="nota">
+    <b>SPIKE DE ASPECT — nu e jocul.</b>
+    <hr>
+    Machetă de aspect, ca să se vadă direcția înainte de a fi plătită. Zero fișiere
+    de model, zero texturi: tot ce vezi e geometrie procedurală.
+    <hr>
+    <b>1.</b> Clădirile nu stau pe axe — fiecare are unghiul ei.<br>
+    <b>2.</b> Zidurile sunt pietre individuale, nu cuburi.<br>
+    <b>3.</b> Terenul e o suprafață, nu o scară.<br>
+    <b>4.</b> Lumina face jumătate din treabă.
+    <hr>
+    drag rotește · rotița zoom · click dreapta+drag panoramare
+  </div>
+  <div id="hud">—</div>
+  <script type="module" src="./spike.ts"></script>
+</body>
+</html>
