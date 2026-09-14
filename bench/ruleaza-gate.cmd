@@ -23,10 +23,13 @@ setlocal
 set SCENARIU=%1
 if "%SCENARIU%"=="" set SCENARIU=bisect
 
+set D1B=
+if "%2"=="d1b" set D1B=^&d1b=1
+
 if "%SCENARIU%"=="bisect" (
-  set QUERY=?bisect=1^&ballast=1^&warmup=300
+  set QUERY=?bisect=1^&ballast=1^&warmup=300%D1B%
 ) else (
-  set QUERY=?scenario=%SCENARIU%^&ballast=1^&warmup=300^&frames=3600
+  set QUERY=?scenario=%SCENARIU%^&ballast=1^&warmup=300^&frames=3600%D1B%
 )
 
 echo.

@@ -24,6 +24,7 @@ import type { ChunkNeighbours } from '../src/render/mesher.ts'
 import { quadColor } from '../src/render/palette.ts'
 import { Ballast, Bisector, checkGuards, clockGranularityMs, FrameProbe, heapMB } from './probe.ts'
 import { createRegionOverlay, rebuildRegionOverlay } from './overlay-regions.ts'
+import { createDensePanel, densePanelReport, PANEL_HZ, tickDensePanel } from './panel-dens.ts'
 import { createRegions, markDirty, rebuildDirty } from '../src/sim/regions.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
 import { meshHeightfield } from '../src/render/heightfield.ts'
@@ -709,6 +710,24 @@ const guardFails = checkGuards({
 })
 for (const f of guardFails) probe.invalidate(f)
 
+// D1b — panoul dens. `?d1b=1` il porneste si il masoara.
+//
+// E criteriul pe care D1 si-l declara singur si golul nr. 2 din bench/GATE.md §12:
+// fara el, un PASS de randare inchide D1a, nu D1. Ruleaza in ACELASI cadru cu
+// randarea, fiindca asa va rula si in joc — masurat separat, ar fi alt numar.
+const densePanel = params.get('d1b') === '1' ? createDensePanel() : null
+let panelTick = 0
+let panelAccMs = 0
+
+function stepDensePanel(dtMs: number): void {
+  if (!densePanel) return
+  panelAccMs += dtMs
+  const interval = 1000 / PANEL_HZ
+  if (panelAccMs < interval) return
+  panelAccMs -= interval
+  tickDensePanel(densePanel, panelTick++)
+}
+
 function finishGateRun(): void {
   gateDone = true
   const s = probe.summary()
@@ -731,6 +750,7 @@ function finishGateRun(): void {
     // Contorul de geometrii: proba negativa B nu se poate verifica fara el.
     geometrii: renderer.info.memory.geometries,
     probaNegativa: NEGATIVE_PROBE ?? 'niciuna',
+    d1b: densePanel ? densePanelReport(densePanel) : null,
     invalid: probe.invalid,
     xMaxMs: bisector ? bisector.result : null,
     bisectionResolutionMs: bisector ? bisector.resolutionMs : null,
@@ -893,6 +913,7 @@ function stepFrame(ts: number): void {
   if (frames.length > 240) frames.shift()
 
   const cpuStart = performance.now()
+  stepDensePanel(dt)
   driveScenario(frameIndex)
   stepNegativeProbe()
   stepTraverse(dt)
@@ -956,4 +977,4 @@ hud.removeAttribute('hidden')
 requestAnimationFrame(tick)
 
 // Expus pentru masuratori din consola, nu pentru joc.
-Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes } })
+Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport } })

@@ -810,3 +810,39 @@ separată dincolo de apă — adică exact ce trebuie să arate.
 Niciun test nu l-ar fi prins, fiindcă toate testele mele interogau puncte pe care le alesesem eu, pe
 teren pe care îl alesesem eu. Overlay-ul nu alege.
 
+---
+
+## D1b: criteriul pe care D1 și-l declară singur, măsurat pe jumătate
+
+**Prompt:** „continua"
+**Model:** Opus 5
+
+Cât rulează panoul despre mesher-în-worker, am atacat golul nr. 2 din `bench/GATE.md` §12 — și e
+golul care contează cel mai mult, fiindcă **D1 nu se poate închide fără el**: PLAN.md declară
+ergonomia UI-ului dens drept ~70% din UX-ul genului și criteriul rămas al deciziei de motor. Era
+nemăsurat în *toate* cele trei motoare — avocatul Unity a dat o anecdotă de forum, ceilalți doi au
+spus onest „n-am găsit o cifră publicată".
+
+`viewer/panel-dens.ts`, pornit cu `?d1b=1`: 40 de pioni × 25 de coloane + 300 de stocuri = **1.300 de
+celule live la 20 Hz**, în același cadru cu randarea.
+
+**Măsurat: 0,336 ms medie, 1,70 ms maxim**, față de bugetul de 1,5 ms din §2.
+
+### Și de ce nu scriu asta ca victorie
+
+Sunt **două limite inferioare suprapuse**, și amândouă trebuie spuse înainte de cifră, nu după:
+
+1. **E DOM țintit, nu React.** Am scris ce ar scrie cineva care vrea să treacă: structură fixă, zero
+   noduri create sau distruse, scriere doar unde s-a schimbat ceva. Un panou React cu 1.000 de
+   componente la 20 Hz e alt număr, aproape sigur mai mare. Asta măsoară **podeaua** stivei de UI din
+   browser — dacă podeaua nu încape, niciun framework n-o repară, toate construiesc peste ea.
+2. **Cronometrul acoperă doar scrierea în DOM.** Recalcularea de stiluri, layout-ul și desenarea se
+   întâmplă mai târziu, în faza de randare a browserului, în afara ferestrei măsurate. **E exact
+   aceeași clasă de eroare ca `CPU_busy` măsurat în rAF, care nu vede procesul GPU** — greșeala pe
+   care protocolul o interzice explicit la §1, făcută de mine două zile mai târziu în alt loc.
+
+Costul întreg se vede o singură dată: în intervalul de **prezentare** al unei rulări reale, cu și
+fără `?d1b=1`. De aceea `benchuleaza-gate.cmd` primește acum un al doilea argument, `d1b`, care
+pornește ablația. Unity rămâne complet nemăsurat și blochează mai departe închiderea lui D1 — asta nu
+se schimbă fiindcă am măsurat jumătate din partea mea.
+
