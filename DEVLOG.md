@@ -902,3 +902,40 @@ chunk** și se poate elimina fără worker, iar indicii de heightfield sunt iden
 pot fi o constantă. Amândouă intră în lista de optimizări necheltuite din §10, ca **itemi noi** — nu
 ca reciclare a unuia deja cheltuit.
 
+---
+
+## Două optimizări fără worker, și o măsurătoare pe care n-o pot revendica
+
+**Prompt:** „Continua"
+**Model:** Opus 5
+
+Panelul spusese: până la worker există lucruri mai ieftine și fără concurență. Le-am făcut pe
+amândouă, în `src/render/heightfield.ts`.
+
+**Normalele, analitic.** Pe o grilă regulată, `computeVertexNormals()` face muncă inutilă: parcurge
+toate triunghiurile, calculează produsul vectorial, adună în vârfuri, normalizează. Panta se citește
+direct din diferențele de înălțime ale vecinilor — și iese și mai netedă. La margine se folosește
+diferența unilaterală, fiindcă vârful de dincolo aparține chunk-ului vecin.
+
+Riscul era o **cusătură de lumină** la granițe, care ar fi arătat exact ca bug-ul de winding din
+sesiunea 2. M-am uitat: nu există. Dacă apare vreodată, leacul e un inel de apron în `vertexCm`, nu
+o întoarcere la `computeVertexNormals` — scris lângă cod, ca să nu se redescopere.
+
+**Indicii, un singur buffer.** Topologia unei grile regulate nu depinde de conținut, deci toate
+chunk-urile produceau exact aceiași indici. Verificat, nu presupus: **24 KB × 377 de chunk-uri
+rezidente = 8,8 MB** de indici identici, alocați și ținuți degeaba. Cifra asta e exactă.
+
+### Ce nu pot revendica
+
+Am încercat să măsor câștigul de timp per chunk și **instrumentul a refuzat**: CV între 47% și 56%,
+adică „NU COMPARA". Zgomotul depășește efectul. Așa că nu scriu o cifră per chunk.
+
+Ce pot spune, și e altceva: **construcția inițială a celor 377 de chunk-uri** a dat 82, 97, 110 și
+82 ms, față de 127, 130, 139, 150, 157, 176, 180 și 185 ms în toate citirile anterioare din sesiune.
+Intervalele **nu se suprapun**. Nu e un A/B controlat — s-a schimbat și alt cod între timp, inclusiv
+lumea — dar e consistent cu eliminarea unei treceri per chunk și a 8,8 MB de alocări.
+
+Amândouă intră în §10 ca itemi **deja cheltuiți**, nu ca economii disponibile. Și, ca să nu se
+întâmple iar ce s-a întâmplat cu bugetul de streaming, `tools/check-gate-numbers.mjs` le cunoaște
+acum pe nume: dacă vreuna reapare vreodată în lista de optimizări disponibile, CI-ul pică.
+

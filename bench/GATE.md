@@ -540,6 +540,12 @@ prezisă și bază de dovadă.
 - **tăierea fețelor de la granița de chunk: −5,3% quaduri**, la un cost nedecis. Vine cu un invariant
   nou, care e adevăratul preț: o săpătură pe marginea unui chunk trebuie să re-meshuiască și vecinul,
   altfel rămâne o gaură prin care se vede fundalul
+- **normalele de heightfield, calculate analitic** în loc de `computeVertexNormals()`: pe o grilă
+  regulată panta se citește direct din diferențele de înălțime ale vecinilor. O trecere mai puțin
+  peste geometrie, per chunk ne-promovat
+- **indicii de heightfield, un singur buffer partajat**: topologia unei grile regulate nu depinde de
+  conținut. **24 KB × 377 de chunk-uri rezidente = 8,8 MB** de indici identici, alocați și ținuți
+  degeaba. Cifra e exactă, nu măsurată
 - **bugetul de streaming pe cadru** (`BUILD_BUDGET_PER_FRAME`, coadă sortată după distanță) — era
   listat ca item (a) DISPONIBIL în tabelul de mai sus, deși fusese implementat. §8.4 acordă fereastra
   GREY tocmai dacă lista de sus acoperă golul, deci documentul putea cumpăra **o amânare nemeritată

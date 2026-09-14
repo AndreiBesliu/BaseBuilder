@@ -287,8 +287,11 @@ function buildChunkMesh(chunk: Chunk): void {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(hf.positions, 3))
     geo.setAttribute('color', new THREE.BufferAttribute(hf.colors, 3))
+    // Normalele vin gata calculate, iar indicii sunt ACELASI buffer pentru toate
+    // chunk-urile — deci `dispose()` nu are voie sa-i elibereze ca pe ceva propriu.
+    // three.js nu elibereaza bufferele JS oricum, doar cele de pe GPU.
+    geo.setAttribute('normal', new THREE.BufferAttribute(hf.normals, 3))
     geo.setIndex(new THREE.BufferAttribute(hf.indices, 1))
-    geo.computeVertexNormals()
     mesh = new THREE.Mesh(geo, terrainMaterial)
   }
 

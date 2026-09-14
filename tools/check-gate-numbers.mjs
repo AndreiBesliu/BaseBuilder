@@ -103,6 +103,8 @@ const sectiunea = doc.slice(doc.indexOf('## 10.'))
 const disponibile = sectiunea.slice(0, sectiunea.indexOf('**Deja cheltuite'))
 const CHELTUITE = [
   { nume: 'buget de streaming pe cadru', tipar: /Buget de streaming/i, dovada: 'BUILD_BUDGET_PER_FRAME in viewer/main.ts' },
+  { nume: 'normale analitice de heightfield', tipar: /computeVertexNormals/i, dovada: 'src/render/heightfield.ts' },
+  { nume: 'indici de heightfield partajati', tipar: /indici.*partajat|buffer partajat.*indici/i, dovada: 'SHARED_INDICES in src/render/heightfield.ts' },
 ]
 for (const c of CHELTUITE) {
   if (c.tipar.test(disponibile)) {
