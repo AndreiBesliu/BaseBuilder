@@ -10,7 +10,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.viewer.json",
     "discipline": "node tools/check-sim-discipline.mjs",
-    "test": "node --test tests/",
+    "test": "node --test \"tests/**/*.test.ts\"",
     "check": "npm run discipline && npm run typecheck && npm run test && npm run gate:selftest",
     "gate:selftest": "node tools/gate-verdict.mjs --self-test",
     "run:headless": "node src/harness/cli.ts",

@@ -14,6 +14,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           # Node 23+ ruleaza .ts direct prin strip de tipuri. Fara bundler, fara pas de build.
+          # 24 e MINIMUL pe care il sustinem; local se dezvolta pe 26. Prima rulare
+          # de CI din viata proiectului a picat exact pe diferenta dintre ele:
+          # `node --test tests/` merge pe 26 si incearca sa rezolve `tests` ca MODUL
+          # pe 24. Un workflow care n-a rulat niciodata e un fisier, nu o verificare.
           node-version: '24'
           cache: npm
 
