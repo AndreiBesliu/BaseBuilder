@@ -20,6 +20,7 @@ import type { Chunk } from '../src/sim/terrain/chunk.ts'
 import { groundLevelM, inWorld } from '../src/sim/terrain/terrain.ts'
 import { Biome, MACRO_METERS, sampleMacro } from '../src/sim/terrain/macro.ts'
 import { Face, meshChunk } from '../src/render/mesher.ts'
+import type { ChunkNeighbours } from '../src/render/mesher.ts'
 import { quadColor } from '../src/render/palette.ts'
 import { Ballast, Bisector, checkGuards, clockGranularityMs, FrameProbe, heapMB } from './probe.ts'
 import { meshHeightfield } from '../src/render/heightfield.ts'
@@ -186,8 +187,19 @@ scene.add(group)
 let totalQuads = 0
 let promotedCount = 0
 
+/** Vecinii ortogonali ai unui chunk, pentru taierea fetelor de granita. */
+function neighboursOf(chunk: Chunk): ChunkNeighbours {
+  const at = (cx: number, cy: number) => world.terrain.chunks.get(cy * 512 + cx) ?? null
+  return {
+    xNeg: at(chunk.cx - 1, chunk.cy),
+    xPos: at(chunk.cx + 1, chunk.cy),
+    yNeg: at(chunk.cx, chunk.cy - 1),
+    yPos: at(chunk.cx, chunk.cy + 1),
+  }
+}
+
 function buildVoxelGeometry(chunk: Chunk): THREE.BufferGeometry | null {
-  const mesh = meshChunk(chunk)
+  const mesh = meshChunk(chunk, neighboursOf(chunk))
   if (mesh.quadCount === 0) return null
   totalQuads += mesh.quadCount
 
@@ -323,6 +335,46 @@ let focusCy = FOCUS_CY
 /** Chei de chunk asteptand geometrie, sortate DESCRESCATOR dupa distanta: `pop()` ia cel mai apropiat. */
 const buildQueue: number[] = []
 let lastFocusMs = 0
+
+/**
+ * Ce mesh-uri trebuie refacute dupa o editare la (wx, wy).
+ *
+ * Trei cazuri, si al treilea e NOU de cand mesher-ul taie fetele de granita:
+ *  1. chunk-ul atins — evident;
+ *  2. vecinii care tocmai au fost PROMOVATI de comanda (apron-ul de 3×3), fiindca
+ *     au trecut de la heightfield la voxeli;
+ *  3. vecinul de dincolo de granita, daca celula editata sta pe marginea
+ *     chunk-ului. Fata lui catre noi era taiata pentru ca eram solizi acolo; daca
+ *     tocmai am sapat, fata aia trebuie sa reapara — altfel ramane o GAURA prin
+ *     care se vede fundalul.
+ */
+function remeshAfterEdit(wx: number, wy: number, promotedBefore: Set<number>): void {
+  const cx = Math.floor(wx / CHUNK_CELLS)
+  const cy = Math.floor(wy / CHUNK_CELLS)
+  const lx = wx - cx * CHUNK_CELLS
+  const ly = wy - cy * CHUNK_CELLS
+
+  const deRefacut = new Set<number>()
+  deRefacut.add(cy * 512 + cx)
+
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const key = (cy + dy) * 512 + (cx + dx)
+      if (world.terrain.chunks.has(key) && !promotedBefore.has(key)) deRefacut.add(key)
+    }
+  }
+
+  // Cazul 3: numai laturile chiar atinse, nu toate patru.
+  if (lx === 0) deRefacut.add(cy * 512 + (cx - 1))
+  if (lx === CHUNK_CELLS - 1) deRefacut.add(cy * 512 + (cx + 1))
+  if (ly === 0) deRefacut.add((cy - 1) * 512 + cx)
+  if (ly === CHUNK_CELLS - 1) deRefacut.add((cy + 1) * 512 + cx)
+
+  for (const key of deRefacut) {
+    const c = world.terrain.chunks.get(key)
+    if (c) buildChunkMesh(c)
+  }
+}
 
 function dropMesh(key: number): void {
   const mesh = meshes.get(key)
@@ -521,18 +573,7 @@ renderer.domElement.addEventListener('click', (ev) => {
   // in acelasi chunk, vecinii sunt deja promovati si mesh-ul lor e neschimbat.
   // Varianta care remesh-uia mereu 3×3 platea 9× pretul pentru un singur chunk
   // murdar — 5,4 ms in loc de ~0,6 — si ar fi intrat in gate ca „limita stivei".
-  const cx = Math.floor(wx / CHUNK_CELLS)
-  const cy = Math.floor(wy / CHUNK_CELLS)
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
-      const key = (cy + dy) * 512 + (cx + dx)
-      const c = world.terrain.chunks.get(key)
-      if (!c) continue
-      const wasPromoted = promotedBefore.has(key)
-      const isCenter = dx === 0 && dy === 0
-      if (isCenter || !wasPromoted) buildChunkMesh(c)
-    }
-  }
+  remeshAfterEdit(wx, wy, promotedBefore)
   recount()
 })
 
@@ -725,8 +766,7 @@ function driveScenario(frame: number): void {
     if (!g.ok) return
     const out = applyCommand(world, { kind: 'dig', wx, wy, z: g.value - (digCursor % 5) })
     if (!out.ok) return
-    const c = world.terrain.chunks.get(Math.floor(wy / CHUNK_CELLS) * 512 + Math.floor(wx / CHUNK_CELLS))
-    if (c) buildChunkMesh(c)
+    remeshAfterEdit(wx, wy, new Set(world.terrain.keys.filter((k) => world.terrain.chunks.get(k)!.voxels !== null)))
     return
   }
 

@@ -15,10 +15,14 @@
  * Modulul e pur: citeste starea de simulare, nu o atinge. Nu importa nimic de
  * motor, ca sa poata fi masurat headless si portat odata cu nucleul.
  *
- * LIMITA CUNOSCUTA: fetele de la marginea chunk-ului sunt emise mereu, fiindca
- * nu se consulta chunk-ul vecin. Costul e un inel de fete ascunse pe fiecare
- * granita — masurat mai jos ca procent din total. Se inchide cand mesher-ul
- * primeste acces la vecini, la S6-8 tarziu.
+ * Limita cunoscuta de la S6-8 — fetele de granita emise mereu — e INCHISA:
+ * `meshChunk(chunk, neighbours)` taie fetele acoperite de chunk-ul vecin.
+ * Masurat pe fixtura M10: 674.582 din 779.888 de fete de granita erau ascunse
+ * (86,5%), iar dupa unirea lacoma raman **−5,3% quaduri**. Fara `neighbours`,
+ * comportamentul e IDENTIC cu cel dinainte, si asta e testat.
+ *
+ * Pretul nu e in cod, e in invalidare: o sapatura pe marginea unui chunk trebuie
+ * sa re-meshuiasca si vecinul, altfel ramane o gaura prin care se vede fundalul.
  */
 
 import type { Chunk } from '../sim/terrain/chunk.ts'
@@ -194,9 +198,95 @@ function greedy(w: number, h: number, emit: (u: number, v: number, du: number, d
 }
 
 /** Construieste mesh-ul unui chunk promovat. */
-export function meshChunk(chunk: Chunk): ChunkMesh {
+
+// ---------------------------------------------------------------------------
+// taierea fetelor de la granita de chunk
+// ---------------------------------------------------------------------------
+
+/**
+ * Vecinii unui chunk, pe cele patru laturi. `null` inseamna „nu stiu ce e acolo",
+ * si atunci se pastreaza comportamentul vechi: fata se emite.
+ *
+ * Presupunerea sigura la granita e „dincolo e aer", fiindca o fata emisa in plus
+ * e risipa, iar una taiata gresit e o gaura prin care se vede fundalul.
+ */
+export interface ChunkNeighbours {
+  readonly xNeg?: Chunk | null
+  readonly xPos?: Chunk | null
+  readonly yNeg?: Chunk | null
+  readonly yPos?: Chunk | null
+}
+
+/** Masca de solid a unei linii de granita din vecin, per nivel. */
+const borderMask = new Uint32Array(SZ)
+
+/**
+ * Nivelurile NU se aliniaza intre chunk-uri: fiecare stiva incepe la propriul
+ * `zBaseM`. Decalajul se aplica la citire, iar ce cade in afara stivei vecinului
+ * se considera AER — adica fata ramane emisa.
+ */
+function neighbourSolidAt(column_: Uint8Array, level: number, dz: number): boolean {
+  const nl = level + dz
+  if (nl < 0 || nl >= SZ) return false
+  return isSolid(column_[nl]!)
+}
+
+/** Taie fetele de pe axa X care sunt acoperite de chunk-ul vecin. */
+function cullX(own: Chunk, neighbour: Chunk, face: number, ownBit: number, neighbourLx: number): void {
+  const nv = neighbour.voxels
+  if (!nv) return
+  const dz = own.voxels!.zBaseM - nv.zBaseM
+  const mask = vis[face]!
+  for (let ly = 0; ly < SY; ly++) {
+    decodeColumn(nv, ly * SX + neighbourLx, column)
+    for (let level = 0; level < SZ; level++) {
+      if (neighbourSolidAt(column, level, dz)) mask[level * SY + ly]! &= ~ownBit
+    }
+  }
+}
+
+/** Taie fetele de pe axa Y care sunt acoperite de chunk-ul vecin. */
+function cullY(own: Chunk, neighbour: Chunk, face: number, ownLy: number, neighbourLy: number): void {
+  const nv = neighbour.voxels
+  if (!nv) return
+  const dz = own.voxels!.zBaseM - nv.zBaseM
+
+  borderMask.fill(0)
+  for (let lx = 0; lx < SX; lx++) {
+    decodeColumn(nv, neighbourLy * SX + lx, column)
+    const bit = 1 << lx
+    for (let level = 0; level < SZ; level++) {
+      if (neighbourSolidAt(column, level, dz)) borderMask[level]! |= bit
+    }
+  }
+
+  const mask = vis[face]!
+  for (let level = 0; level < SZ; level++) mask[level * SY + ownLy]! &= ~borderMask[level]!
+}
+
+/**
+ * Limita cunoscuta a mesher-ului, inchisa.
+ *
+ * Pana acum fetele de la marginea chunk-ului se emiteau MEREU, fiindca nu se
+ * consulta vecinul. Masurat pe fixtura M10 (`node tools/border-faces.mjs`):
+ * 779.888 de fete de granita, din care **674.582 (86,5%) ascunse** de un vecin
+ * promovat.
+ *
+ * Se face DUPA `computeVisibility`, pe mastile deja calculate, si numai pe cele
+ * patru linii de granita. Nu atinge trucul bitwise pe care sta tot modulul:
+ * o linie de 32 de voxeli ramane un `Uint32`.
+ */
+function cullChunkBorders(chunk: Chunk, n: ChunkNeighbours): void {
+  if (n.xNeg) cullX(chunk, n.xNeg, Face.X_NEG, 1, SX - 1)
+  if (n.xPos) cullX(chunk, n.xPos, Face.X_POS, 1 << (SX - 1), 0)
+  if (n.yNeg) cullY(chunk, n.yNeg, Face.Y_NEG, 0, SY - 1)
+  if (n.yPos) cullY(chunk, n.yPos, Face.Y_POS, SY - 1, 0)
+}
+
+export function meshChunk(chunk: Chunk, neighbours?: ChunkNeighbours): ChunkMesh {
   expand(chunk)
   computeVisibility()
+  if (neighbours) cullChunkBorders(chunk, neighbours)
   quadCount = 0
 
   // --- fetele de pe axa X: felii la x = const, grila (ly, level) ---

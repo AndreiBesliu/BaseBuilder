@@ -37,13 +37,21 @@ pad('chunk-uri promovate', String(stats.promotedChunks))
 pad('constructie', `${buildMs.toFixed(0)} ms`)
 
 function meshAll(terr: Terrain): { quads: number; ms: number; chunks: number } {
+  // Vecinii se dau MEREU: altfel benchmark-ul masoara alt cod decat cel care
+  // randeaza, iar cifra de gate ar descrie o geometrie care nu se vede nicaieri.
+  const at = (cx: number, cy: number) => terr.chunks.get(cy * 512 + cx) ?? null
   const t1 = performance.now()
   let quads = 0
   let chunks = 0
   for (const key of terr.keys) {
     const c = terr.chunks.get(key)!
     if (!c.voxels) continue
-    quads += meshChunk(c).quadCount
+    quads += meshChunk(c, {
+      xNeg: at(c.cx - 1, c.cy),
+      xPos: at(c.cx + 1, c.cy),
+      yNeg: at(c.cx, c.cy - 1),
+      yPos: at(c.cx, c.cy + 1),
+    }).quadCount
     chunks++
   }
   return { quads, ms: performance.now() - t1, chunks }
@@ -75,9 +83,15 @@ const baseX = midCx * CHUNK_CELLS
 const baseY = midCy * CHUNK_CELLS
 
 const MESH_ITERS = 200
+const midNeighbours = {
+  xNeg: terrain.chunks.get(midCy * 512 + midCx - 1) ?? null,
+  xPos: terrain.chunks.get(midCy * 512 + midCx + 1) ?? null,
+  yNeg: terrain.chunks.get((midCy - 1) * 512 + midCx) ?? null,
+  yPos: terrain.chunks.get((midCy + 1) * 512 + midCx) ?? null,
+}
 const meshM = repeat(() => {
   const t = performance.now()
-  for (let i = 0; i < MESH_ITERS; i++) meshChunk(mid)
+  for (let i = 0; i < MESH_ITERS; i++) meshChunk(mid, midNeighbours)
   return ((performance.now() - t) / MESH_ITERS) * 1000
 })
 const meshUs = meshM.median

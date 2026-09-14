@@ -183,9 +183,9 @@ ce construiește un jucător.
 | **Chunk-uri promovate** | **225** (PLAN bugeta ~200) |
 | Chunk-uri rezidente | 473 |
 | Construcție | ~700 ms |
-| Quaduri / triunghiuri | 90.932 / **181.864** |
-| Meshing complet | **99,5 ms** · mediana din 10 · CV 7,6% · detectabil peste 21,4 ms |
-| &nbsp;&nbsp;per chunk | **409 µs** · mediana din 10 · CV 6,9% · detectabil peste **79 µs** |
+| Quaduri / triunghiuri | 86.071 / **172.142** |
+| Meshing complet | **105 ms** · mediana din 10 · CV 7,5% · detectabil peste 22,3 ms |
+| &nbsp;&nbsp;per chunk | **490 µs** · mediana din 10 · CV 16,4% ⚠ |
 | Memorie voxeli (RLE) | 2,64 MB (față de 14,1 MB necomprimat) |
 
 > **Re-etalonare, 14.09.2026, ÎNAINTE de orice rulare de gate.** Două lucruri s-au schimbat, niciunul
@@ -202,9 +202,16 @@ ce construiește un jucător.
 > Seria de măsurători începe de aici.
 >
 > **Consecință imediată, care a decis deja ceva:** benchmark-ul nu poate detecta o diferență sub
-> **79 µs/chunk**. Cele patru propuneri de netezire a suprafeței pretindeau toate ~50 µs/chunk —
+> ~80 µs/chunk. Cele patru propuneri de netezire a suprafeței pretindeau toate ~50 µs/chunk —
 > adică **sub pragul propriului instrument**. Nu se poate alege între ele pe cost până când
 > instrumentul nu devine mai fin sau efectul mai mare.
+>
+> **A treia schimbare, 14.09.2026 seara: fețele de la granița de chunk se taie acum.** Era limita
+> cunoscută a mesher-ului, declarată în cod de la S6-8. Măsurat: **779.888** de fețe de graniță, din
+> care **674.582 (86,5%)** ascunse de un vecin promovat. După unirea lacomă rămâne un câștig de
+> **−5,3% quaduri** (90.932 → 86.071), exact și determinist. Costul, măsurat corect prin mediane în
+> **procese separate** (398 → 409 µs/chunk, DMD 42 µs): **nedecis** — sub pragul de detecție.
+> Rulările de gate se fac pe geometria cu tăiere, adică pe cea care chiar se randează.
 
 **Validarea fixturii NU se face prin raportul de reducere al mesher-ului.** Criteriul ăla e
 auto-referențial: selectează fixturi *ieftine de meshuit*, adică exact fixturile pe care un motor slab
@@ -399,7 +406,7 @@ sarcina următoare.
 ### 2 · SCOPE — ambiția de geometrie, nu motorul
 Sweep-ul de rezoluție arată **GPU-bound** după benzile calibrate (frametime scade proporțional cu
 pixelii).
-Același GPU, aceleași 181.864 de triunghiuri, aceleași shadere: **Unity nu-mi dă hardware nou.**
+Același GPU, aceleași 172.142 de triunghiuri, aceleași shadere: **Unity nu-mi dă hardware nou.**
 Remediile sunt LOD, instancing, reducere de fill, buget de draw calls — adică **PUNCT DE DECIZIE #1**
 din plan, nu portarea. Portarea aici pierde 2–4 luni și păstrează problema.
 
@@ -493,7 +500,7 @@ Baza: măsurători făcute azi în Node, pe fixtura M10 și pe teren proaspăt.
 
 **Prezic:**
 
-1. **NU pică pe GPU.** 181.864 de triunghiuri, un singur material, ~225 de draw calls pentru partea
+1. **NU pică pe GPU.** 172.142 de triunghiuri, un singur material, ~225 de draw calls pentru partea
    de voxeli — sub orice prag al unui 3060 și, scalat, sub al unui 1050 Ti. Sweep-ul de rezoluție va
    arăta **CPU-bound**: la 25% din pixeli, frametime-ul scade cu **sub 15%**.
    *(Predicția a fost scrisă pe 229.172 de triunghiuri, în lumea dinainte de re-etalonare.
@@ -531,6 +538,9 @@ prezisă și bază de dovadă.
 **Deja cheltuite, deci NU mai pot fi invocate ca apărare:**
 - ablația mesher-ului: 786 → 430 µs (**1,83×**)
 - remesh doar pe chunk-urile chiar murdare, în loc de 3×3 fix: **4,35 ms → 0,48 ms** pe săpătură
+- **tăierea fețelor de la granița de chunk: −5,3% quaduri**, la un cost nedecis. Vine cu un invariant
+  nou, care e adevăratul preț: o săpătură pe marginea unui chunk trebuie să re-meshuiască și vecinul,
+  altfel rămâne o gaură prin care se vede fundalul
 
 ---
 
