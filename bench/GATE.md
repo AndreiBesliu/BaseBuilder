@@ -571,7 +571,7 @@ Amândouă scrise acum, ca să nu pot descoperi după rezultat că unul e mai gr
 | 2 | **D1b — panoul dens.** 40 de pioni × 25 de tipuri (1.000 de celule) + listă de 300 de stocuri + tooltip live, la 20 Hz, cu scroll. Criteriul pe care D1 și-l declară singur, ~70% din UX | 1 zi TS + 1 zi Unity, ore cronometrate |
 | 3 | **Electron nu e instalat.** Gate-ul măsoară Chrome curat; livrarea e Electron cu `in-process-gpu` (cerut de overlay-ul Steam), care schimbă calea de randare | gate D1-B separat, 4–5 zile. Dacă flagurile costă peste 5% din mediană, toate cifrele se re-măsoară |
 | 4 | **Asimetria 10:2 e nemăsurată** și dă forma întregii reguli | spike-ul de portare de 2 zile |
-| 5 | **CI-ul n-a rulat niciodată** — `git remote -v` e gol. Pre-înregistrarea prin commit-uri locale n-are nicio dată emisă de alt sistem | un remote + un push |
+| ~~5~~ | ~~**CI-ul n-a rulat niciodată**~~ — **ÎNCHIS 14.09.2026.** Remote: `AndreiBesliu/BaseBuilder`. Prima rulare a **picat în 21 de secunde**, pe cea mai simplă comandă din workflow (`node --test tests/` merge pe Node 26 local, nu și pe 24). Fișierul exista de la S1-2 și arăta a verificare. De acum commit-urile de protocol au o dată emisă de alt sistem — `GIT_COMMITTER_DATE` se falsifică într-o secundă, un timestamp de GitHub Actions nu | ✅ |
 | 6 | **Atribuirea CPU/GPU poate rămâne grosieră.** `EXT_disjoint_timer_query_webgl2` e dezactivată implicit în Chrome (Spectre/rowhammer) și cere `--enable-webgl-developer-extensions` | dacă flagul nu prinde, rămâne sweep-ul de rezoluție: spune „CPU sau GPU", nu „câte ms fiecare" |
 | 7 | **Nu există agenți randați și nici UI.** Balastul e un proxy onest, dar rămâne proxy | se închide singur, la S15 și S23 |
 

@@ -639,9 +639,63 @@ un instrument absent ca blocant pentru STAY, fără să producă singur FAIL.
 ### Ce rămâne de apăsat
 
 ```
-benchuleaza-gate.cmd fortress
+bench
+uleaza-gate.cmd fortress
 ```
 
 Fereastră reală, nemimimizată. Fișierul `.json` se descarcă singur și spune, în el, dacă rularea a
 fost validă.
+
+---
+
+## Limita mesher-ului, închisă — și CI-ul care n-a rulat niciodată
+
+**Prompt:** „continua" · „am creat un repo pentru proiect"
+**Model:** Opus 5
+
+### Fețele de la granița de chunk
+
+Erau declarate în cod ca limită cunoscută de la S6-8. Măsurat pe fixtura M10:
+**779.888** de fețe de graniță, din care **674.582 (86,5%)** ascunse de un vecin promovat.
+
+**Prima măsurătoare a fost greșită și o scriu ca să nu se repete.** Numărasem pe *quaduri* și ieșea
+0,2% — un quad unit lacom e „complet ascuns" doar dacă **toate** celulele din spate sunt solide,
+măsură mult prea optimistă. Consultarea vecinului taie fețele **înainte** de unire, deci unitatea
+corectă e fața de celulă.
+
+| | |
+|---|---|
+| câștig | **−5,3% quaduri** (90.932 → 86.071), exact și determinist |
+| cost | 398 → 409 µs/chunk, DMD 42 µs ⇒ **nedecis** |
+
+Costul a ieșit „nedecis" pentru că l-am măsurat cum trebuie: mediane în **procese separate**. În
+același proces ieșea CV 12,4% și instrumentul a refuzat comparația — exact pentru asta fusese scris
+ieri.
+
+### Testul era vid, și am aflat prin mutație
+
+Prima variantă a testului „nu șterge fețe care chiar se văd" avea un `if` care îl oprea înainte de
+`assert`. **Tăierea necondiționată — adică găuri peste tot — trecea prin el.**
+
+Rescris ca invariant complet pe tot planul de graniță, în ambele sensuri: vecin solid ⇒ fața **nu are
+voie** desenată; vecin aer ⇒ fața **trebuie** desenată. Acum pică la toate trei mutațiile:
+taie-mereu, nu-tăia, ignoră-decalajul-de-`zBase`. Plus un test pe **toată** fixtura — 225 de
+chunk-uri, peste 50.000 de celule de graniță. O gaură într-un singur chunk din 225 arată pe ecran
+exact ca bug-ul de winding din sesiunea 2, și s-ar găsi greu privind.
+
+Prețul real nu e în cod, e în **invalidare**: o săpătură pe marginea unui chunk trebuie să
+re-meshuiască și vecinul.
+
+### CI-ul a rulat prima dată, și a picat în 21 de secunde
+
+Andrei a creat repo-ul. `.github/workflows/ci.yml` exista de la commit-ul S1-2 și **nu rulase
+niciodată**, fiindcă nu exista remote. Primul push l-a pornit și a căzut pe cea mai simplă comandă
+din el: `node --test tests/` merge pe Node 26 (local) și încearcă să rezolve `tests` ca **modul** pe
+Node 24 (CI).
+
+Nu defectul contează, ci ce dovedește: **era un fișier care arăta a verificare.** Exact tiparul pe
+care îl combate tot protocolul de gate, găsit în propria infrastructură.
+
+Golul nr. 5 din `bench/GATE.md` §12 e închis: commit-urile de pre-înregistrare au acum o dată emisă
+de alt sistem. `GIT_COMMITTER_DATE` se falsifică într-o secundă; un timestamp de GitHub Actions nu.
 
