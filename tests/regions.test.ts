@@ -281,15 +281,51 @@ test('fuzz: 10.000 de edituri aleatorii, invariantii rezista', () => {
       }
     }
 
-    // Union-find-ul nu are voie sa aiba cicluri sau parinti in afara intervalului.
+    // Etichetarea de componente se verifica printr-un ORACOL INDEPENDENT: se
+    // reface partitia cu propriul flood peste graful de adiacenta si se compara.
+    // Varianta dinainte verifica semantica de union-find (`find(find(x)) === x`),
+    // care dupa schimbarea de model nu mai insemna nimic — si un test care nu mai
+    // inseamna nimic trece exact la fel de bine ca unul care inseamna.
+    const vii: number[] = []
     for (const key of s.keys) {
       const cells = s.cells.get(key)!
       for (let c = 0; c < BLOCK_CELLS; c++) {
         const r = cells[c]!
-        if (r === NO_REGION) continue
-        const root = find(s, r)
-        assert.ok(root >= 0 && root < s.nextId, `lot ${lot}: radacina ${root} in afara intervalului`)
-        assert.equal(find(s, root), root, `lot ${lot}: radacina ${root} nu e propriul parinte`)
+        if (r !== NO_REGION && !vii.includes(r)) vii.push(r)
+      }
+    }
+    for (const r of vii) {
+      assert.ok(find(s, r) >= 0, `lot ${lot}: regiunea vie ${r} n-are eticheta`)
+    }
+
+    // Flood propriu peste adiacenta, pornit din fiecare regiune ne-vizitata.
+    const aMea = new Map<number, number>()
+    let eticheta = 0
+    for (const start of [...vii].sort((a, b) => a - b)) {
+      if (aMea.has(start)) continue
+      const e = eticheta++
+      const coada = [start]
+      aMea.set(start, e)
+      while (coada.length > 0) {
+        const cur = coada.pop()!
+        for (const v of s.adj.get(cur) ?? []) {
+          if (aMea.has(v)) continue
+          aMea.set(v, e)
+          coada.push(v)
+        }
+      }
+    }
+
+    // Partitiile trebuie sa coincida: aceeasi eticheta la mine <=> aceeasi la el.
+    for (let i = 0; i < vii.length; i += 7) {
+      for (let j = i; j < vii.length; j += 11) {
+        const a = vii[i]!
+        const b = vii[j]!
+        assert.equal(
+          find(s, a) === find(s, b),
+          aMea.get(a) === aMea.get(b),
+          `lot ${lot}: regiunile ${a} si ${b} sunt in dezacord intre etichetare si oracol`,
+        )
       }
     }
   }

@@ -939,3 +939,61 @@ Amândouă intră în §10 ca itemi **deja cheltuiți**, nu ca economii disponib
 întâmple iar ce s-a întâmplat cu bugetul de streaming, `tools/check-gate-numbers.mjs` le cunoaște
 acum pe nume: dacă vreuna reapare vreodată în lista de optimizări disponibile, CI-ul pică.
 
+---
+
+## Regiuni incrementale — pragul pe care mi-l scrisesem singur
+
+**Prompt:** „continua"
+**Model:** Opus 5
+
+Scrisesem în cod, cu cifră: *„pragul la care etichetarea incrementală devine obligatorie: primul
+agent care cere un drum."* Agenții sunt următoarea felie. Deci acum, nu după.
+
+### De ce costa 30 ms
+
+`rebuildDirty` arunca **toate** celulele rezidente și le recalcula. Nu din neglijență — din
+constrângere: **un union-find nu poate desface o unire**, deci după o săpătură care rupe o legătură,
+singurul rezultat corect era reconstrucția totală.
+
+Înlocuit cu un **graf de adiacență explicit** plus re-etichetare prin parcurgere. Partea scumpă sunt
+celulele (`isWalkable` peste 256 de celule × niveluri); partea ieftină e eticheta de componentă, care
+e o plimbare peste întregi. Deci celulele rămân pe loc și se re-etichetează tot.
+
+Două detalii care nu erau evidente:
+
+- **Id-urile de regiune devin monotone, nu se reciclează niciodată.** Cu reciclare, un bloc
+  nemodificat ar putea arăta spre un id care între timp înseamnă altceva — și asta ar arăta ca un bug
+  de reachability, nu ca unul de contabilitate.
+- **Se ating și vecinii blocurilor murdare.** O muchie există doar între blocuri orizontal vecine,
+  deci orice regiune cu o muchie către un bloc murdar trăiește într-un vecin al lui. Fără asta rămân
+  cioturi către id-uri dispărute, iar `areConnected` ar răspunde „da" pe o legătură care nu mai
+  există — exact falsul pozitiv pe care antetul modulului îl declară inacceptabil în direcția aia.
+
+### Rezultatul, și de ce forma contează mai mult decât cifra
+
+| blocuri rezidente | înainte | acum |
+|---|---|---|
+| 85 | — | **3,3 ms** |
+| 264 | — | **2,9 ms** |
+| 600 | — | **2,8 ms** |
+
+Vechea implementare creștea cu rezidența: 25 → 30 → 34 ms la 44 → 94 → 171 de blocuri. Asta nu mai
+crește deloc. **Aia e definiția lui „incremental"** — costă cât s-a schimbat, nu cât există. Fuzz-ul
+de 10.000 de editări a scăzut de la 22,6 s la 2,57 s.
+
+Nu e „gata", și scriu asta lângă rezultat: 2,8 ms e tot peste bugetul de sub 1 ms al unei săpături.
+Și mai e o limită pe care o las scrisă ca să nu fie descoperită la luna 12: `relabel` parcurge toate
+celulele rezidente ca să afle ce regiuni trăiesc, deci **partea aia încă scalează cu rezidența**. La
+600 de blocuri nu se vede; la discul complet ar fi milioane de celule. Leacul, când va fi nevoie, e
+un index de regiuni vii întreținut la scriere, nu o parcurgere la citire.
+
+### Și un test care încetase să însemne ceva
+
+Fuzz-ul verifica `find(find(x)) === x` — semantica de union-find. După schimbarea de model, `find`
+întoarce o etichetă de componentă, iar aserțiunea aia nu mai însemna nimic. **Un test care nu mai
+înseamnă nimic trece exact la fel de bine ca unul care înseamnă.**
+
+Rescris ca **oracol independent**: se reface partiția cu un flood propriu peste graful de adiacență
+și se compară cu etichetarea. Nu o adaptare a vechii aserțiuni la noul model — o verificare care nu
+folosește codul testat.
+

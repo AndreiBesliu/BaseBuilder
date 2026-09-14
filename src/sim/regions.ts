@@ -131,16 +131,33 @@ export interface RegionStore {
   readonly cells: Map<number, Int32Array>
   /** Cheile calculate, MEREU sortate. Singura sursa de ordine la iterare. */
   readonly keys: number[]
-  /** Union-find peste id-urile de regiune. */
-  parent: Int32Array
-  /** Urmatorul id de regiune liber. */
+  /**
+   * Graful de regiuni: cine e la un pas de cine. Muchiile sunt SIMETRICE si se
+   * adauga din ambele capete, ca stergerea unui bloc sa nu lase cioturi.
+   *
+   * A inlocuit un union-find, si nu din eleganta: o unire NU se poate desface,
+   * deci o sapatura care RUPE o legatura obliga la reconstructie totala. Cu graf
+   * explicit, componentele se re-eticheteaza printr-o parcurgere peste intregi —
+   * ieftina — in timp ce celulele, care sunt partea scumpa, raman pe loc.
+   */
+  readonly adj: Map<number, Set<number>>
+  /** Componenta conexa a fiecarei regiuni. Indexat cu id-ul de regiune. */
+  component: Int32Array
+  /**
+   * Urmatorul id de regiune liber. MONOTON: id-urile nu se recicleaza niciodata.
+   *
+   * Cu reciclare, un bloc nemodificat ar putea ajunge sa arate spre un id care
+   * intre timp inseamna altceva — si ar arata ca un bug de reachability, nu ca
+   * unul de contabilitate. Id-urile eliberate se pierd; la cateva zeci de mii de
+   * sapaturi pe sesiune, e o risipa de cativa kilobytes.
+   */
   nextId: number
   /** Blocuri care trebuie recalculate inainte de urmatoarea interogare. */
   readonly dirty: Set<number>
 }
 
 export function createRegions(): RegionStore {
-  return { cells: new Map(), keys: [], parent: new Int32Array(0), nextId: 0, dirty: new Set() }
+  return { cells: new Map(), keys: [], adj: new Map(), component: new Int32Array(0), nextId: 0, dirty: new Set() }
 }
 
 function insertKey(s: RegionStore, key: number): void {
@@ -155,35 +172,84 @@ function insertKey(s: RegionStore, key: number): void {
   s.keys.splice(lo, 0, key)
 }
 
-function ensureParentCapacity(s: RegionStore, needed: number): void {
-  if (needed <= s.parent.length) return
-  const grown = new Int32Array(Math.max(needed, s.parent.length * 2, 64))
-  grown.set(s.parent)
-  for (let i = s.parent.length; i < grown.length; i++) grown[i] = i
-  s.parent = grown
+function ensureComponentCapacity(s: RegionStore, needed: number): void {
+  if (needed <= s.component.length) return
+  const grown = new Int32Array(Math.max(needed, s.component.length * 2, 64)).fill(NO_REGION)
+  grown.set(s.component)
+  s.component = grown
 }
 
+/** Componenta conexa a unei regiuni. O citire, fara parcurgere. */
 export function find(s: RegionStore, a: number): number {
-  let r = a
-  while (s.parent[r]! !== r) r = s.parent[r]!
-  // Compresie de cale: iterativa, ca sa nu existe recursie in nucleu.
-  let cur = a
-  while (s.parent[cur]! !== cur) {
-    const next = s.parent[cur]!
-    s.parent[cur] = r
-    cur = next
-  }
-  return r
+  return a >= 0 && a < s.component.length ? s.component[a]! : NO_REGION
 }
 
-function union(s: RegionStore, a: number, b: number): void {
-  const ra = find(s, a)
-  const rb = find(s, b)
-  if (ra === rb) return
-  // Legatura mereu spre id-ul mai MIC: face rezultatul independent de ordinea
-  // in care au venit unirile, deci reproductibil.
-  if (ra < rb) s.parent[rb] = ra
-  else s.parent[ra] = rb
+/** Adauga muchia in AMBELE sensuri. Idempotent — `Set`, nu lista. */
+function connect(s: RegionStore, a: number, b: number): void {
+  if (a === b) return
+  let sa = s.adj.get(a)
+  if (!sa) {
+    sa = new Set()
+    s.adj.set(a, sa)
+  }
+  sa.add(b)
+  let sb = s.adj.get(b)
+  if (!sb) {
+    sb = new Set()
+    s.adj.set(b, sb)
+  }
+  sb.add(a)
+}
+
+/**
+ * Re-eticheteaza componentele, prin parcurgere in latime peste graf.
+ *
+ * Ordinea e data de id-ul de regiune crescator, si vecinii se parcurg sortati:
+ * doua lumi identice ca CONTINUT primesc aceleasi etichete, indiferent de ordinea
+ * in care au fost sapate. Fara asta, un save reincarcat ar putea da alte numere
+ * de componenta pentru aceeasi harta.
+ *
+ * Costa O(regiuni + muchii) si lucreaza numai cu intregi — adica e ieftina.
+ * Partea scumpa a fost mereu recalcularea CELULELOR, si aia nu se mai face decat
+ * pentru blocurile murdare.
+ */
+function relabel(s: RegionStore): void {
+  ensureComponentCapacity(s, s.nextId)
+  s.component.fill(NO_REGION, 0, s.nextId)
+
+  const vii: number[] = []
+  for (const key of s.keys) {
+    const cells = s.cells.get(key)!
+    for (let i = 0; i < BLOCK_CELLS; i++) {
+      const r = cells[i]!
+      if (r !== NO_REGION && s.component[r] === NO_REGION) {
+        s.component[r] = -2 // marcat ca existent, inca ne-etichetat
+        vii.push(r)
+      }
+    }
+  }
+  vii.sort((a, b) => a - b)
+
+  const coada: number[] = []
+  let urmatoarea = 0
+  for (const start of vii) {
+    if (s.component[start] !== -2) continue
+    const eticheta = urmatoarea++
+    s.component[start] = eticheta
+    coada.length = 0
+    coada.push(start)
+    while (coada.length > 0) {
+      const cur = coada.pop()!
+      const vecini = s.adj.get(cur)
+      if (!vecini) continue
+      for (const v of [...vecini].sort((a, b) => a - b)) {
+        if (s.component[v] === -2) {
+          s.component[v] = eticheta
+          coada.push(v)
+        }
+      }
+    }
+  }
 }
 
 // --- calculul unui bloc -----------------------------------------------------
@@ -212,8 +278,6 @@ function computeBlock(t: Terrain, s: RegionStore, key: number, bx: number, by: n
   for (let i = 0; i < BLOCK_CELLS; i++) {
     if (walk[i] === 0 || cells[i] !== NO_REGION) continue
     const id = s.nextId++
-    ensureParentCapacity(s, s.nextId)
-    s.parent[id] = id
 
     let head = 0
     let tail = 0
@@ -296,7 +360,7 @@ export function linkBlock(t: Terrain, s: RegionStore, bx: number, by: number, z:
           const nb = blockOfCell(nx, ny)
           ensureBlock(t, s, nb.bx, nb.by, nz, rules)
           const other = regionAt(s, nx, ny, nz)
-          if (other !== NO_REGION) union(s, mine, other)
+          if (other !== NO_REGION) connect(s, mine, other)
         }
       }
     }
@@ -377,6 +441,7 @@ export function ensureArea(
       for (let zz = lo; zz <= hi; zz++) linkBlock(t, s, nbx, nby, zz, rules)
     }
   }
+  relabel(s)
 }
 
 // --- interogarea ------------------------------------------------------------
@@ -405,7 +470,8 @@ export function areConnected(
   if (ra === NO_REGION) return false
   const rb = regionAt(s, bx, by, bz)
   if (rb === NO_REGION) return false
-  return find(s, ra) === find(s, rb)
+  const ca = find(s, ra)
+  return ca !== NO_REGION && ca === find(s, rb)
 }
 
 /** Cate regiuni distincte sunt calculate. Pentru overlay-ul de debug si pentru teste. */
@@ -485,49 +551,93 @@ function decodeKey(key: number): { bx: number; by: number; z: number } {
 }
 
 /**
- * Recalculeaza ce s-a murdarit si reface legaturile.
+ * Recalculeaza ce s-a murdarit. INCREMENTAL.
  *
- * Union-find-ul se reconstruieste de la ZERO peste toate blocurile rezidente, si
- * asta e o limita cunoscuta, nu o scapare: o unire nu se poate desface, deci dupa
- * o sapatura care RUPE o legatura, singurul rezultat corect e reconstructia.
+ * Varianta dinainte arunca TOATE celulele rezidente si le recalcula, fiindca
+ * union-find-ul nu poate desface o unire. Masurat atunci: ~25/30/34 ms la
+ * 44/94/171 de blocuri, fata de un buget de sub 1 ms pe sapatura.
  *
- * **Si costa prea mult. Masurat** (`node tools/bench-regions.mjs`, 14.09.2026):
+ * Acum se recalculeaza numai blocurile murdare. Trucul e ca partea SCUMPA sunt
+ * celulele — `isWalkable` peste 256 de celule × niveluri — iar partea ieftina e
+ * eticheta de componenta, care e o parcurgere peste intregi. Deci celulele stau,
+ * si se re-eticheteaza totul.
  *
- *   44 blocuri rezidente  → ~25 ms
- *   94 blocuri            → ~30 ms
- *   171 blocuri           → ~34 ms
+ * **Masurat dupa** (`node tools/bench-regions.mjs`): 3,3 / 2,9 / **2,8 ms** la
+ * 85 / 264 / 600 de blocuri rezidente. Ce conteaza nu e cifra, e FORMA: inainte
+ * costul crestea cu rezidenta, acum nu mai creste deloc. Aia e definitia lui
+ * „incremental" — costa cat s-a schimbat, nu cat exista.
  *
- * Bugetul unei sapaturi e sub 1 ms — deci reconstructia e cu **peste 30× peste**
- * si nu are ce cauta sincron in cadrul in care jucatorul a dat click. Merge acum
- * fiindca nu exista inca agenti care sa intrebe, si e scris aici cu cifra tocmai
- * ca sa nu treaca drept „destul de rapid" la S12-15.
+ * Nu e insa „gata": 2,8 ms e tot peste bugetul de sub 1 ms al unei sapaturi, deci
+ * ramane in afara caii interactive pana cand exista un motiv masurat sa fie in ea.
+ * Si mai e o limita, scrisa aici ca sa nu fie descoperita la luna 12: `relabel`
+ * parcurge TOATE celulele rezidente ca sa afle ce regiuni traiesc, deci partea
+ * aia inca scaleaza cu rezidenta. La 600 de blocuri nu se vede; la discul complet
+ * ar fi milioane de celule. Leacul, cand va fi nevoie, e un index de regiuni vii
+ * intretinut la scriere, nu o parcurgere la citire.
  *
- * Inlocuitorul, cand va fi nevoie: etichetare incrementala — se recalculeaza doar
- * componentele atinse, prin re-flood din regiunile murdare, in loc de tot.
- * Pragul la care devine obligatoriu: primul agent care cere un drum.
+ * ## De ce se ating si vecinii
+ *
+ * O muchie exista numai intre blocuri ORIZONTAL vecine, in limita `maxStepM` pe
+ * verticala. Deci orice regiune care are o muchie catre un bloc murdar traieste
+ * intr-un bloc vecin cu el — nicaieri altundeva. Se sterg muchiile regiunilor din
+ * blocurile murdare SI din vecinii lor, apoi se releaga amandoua categoriile:
+ * asa nu ramane niciun ciot catre un id care intre timp a disparut.
+ *
+ * Un ciot ar fi cel mai prost fel de defect posibil: `areConnected` ar raspunde
+ * „da" pe o legatura care nu mai exista, adica exact falsul pozitiv pe care
+ * antetul modulului il declara inacceptabil in directia aia.
  */
 export function rebuildDirty(t: Terrain, s: RegionStore, rules: Rules): number {
   if (s.dirty.size === 0) return 0
 
   // determinism-ok: se sorteaza explicit inainte de iterare, tocmai fiindca
   // `Set` pastreaza ordinea de inserare, iar aia depinde de ordinea comenzilor.
-  const murdare = [...s.dirty].sort((a, b) => a - b)
+  const murdare = [...s.dirty].sort((a, b) => a - b).filter((k) => s.cells.has(k))
   s.dirty.clear()
+  if (murdare.length === 0) return 0
 
-  const deRefacut = new Set<number>()
-  for (const key of s.keys) deRefacut.add(key)
-  let reciclate = 0
+  const step = clampStep(rules)
+
+  // Blocurile ale caror muchii pot atinge un bloc murdar: ele insele plus vecinii
+  // orizontali, pe fiecare nivel din raza pasului.
+  const atinse = new Set<number>()
   for (const key of murdare) {
-    if (deRefacut.has(key)) reciclate++
-    deRefacut.add(key)
+    atinse.add(key)
+    const { bx, by, z } = decodeKey(key)
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      const nbx = bx + dx
+      const nby = by + dy
+      if (nbx < 0 || nby < 0 || nbx >= WORLD_BLOCKS || nby >= WORLD_BLOCKS) continue
+      for (let dz = -step; dz <= step; dz++) {
+        const k = blockKey(nbx, nby, z + dz)
+        if (s.cells.has(k)) atinse.add(k)
+      }
+    }
   }
 
-  s.cells.clear()
-  s.keys.length = 0
-  s.nextId = 0
-  s.parent = new Int32Array(0)
+  // Muchiile regiunilor atinse dispar. Cele din capatul celalalt dispar si ele,
+  // fiindca `connect` le-a scris simetric.
+  for (const key of atinse) {
+    const cells = s.cells.get(key)!
+    for (let i = 0; i < BLOCK_CELLS; i++) {
+      const r = cells[i]!
+      if (r === NO_REGION) continue
+      const vecini = s.adj.get(r)
+      if (!vecini) continue
+      for (const v of vecini) s.adj.get(v)?.delete(r)
+      s.adj.delete(r)
+    }
+  }
 
-  const ordonate = [...deRefacut].sort((a, b) => a - b)
+  // Numai blocurile MURDARE isi pierd celulele. Vecinii si le pastreaza — asta e
+  // toata diferenta fata de varianta dinainte.
+  for (const key of murdare) {
+    s.cells.delete(key)
+    const pos = s.keys.indexOf(key)
+    if (pos >= 0) s.keys.splice(pos, 1)
+  }
+
+  const ordonate = [...atinse].sort((a, b) => a - b)
   for (const key of ordonate) {
     const { bx, by, z } = decodeKey(key)
     ensureBlock(t, s, bx, by, z, rules)
@@ -536,5 +646,7 @@ export function rebuildDirty(t: Terrain, s: RegionStore, rules: Rules): number {
     const { bx, by, z } = decodeKey(key)
     linkBlock(t, s, bx, by, z, rules)
   }
-  return reciclate
+
+  relabel(s)
+  return murdare.length
 }
