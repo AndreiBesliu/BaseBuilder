@@ -434,3 +434,84 @@ pe o constatare despre streaming.
 
 Al treilea instrument care minte în două sesiuni, după `AdapterRAM` = 4 GB și „2,73 ms per săpătură".
 
+---
+
+## Două defecte care se anulau reciproc
+
+**Prompt:** „continua" (după panoul de netezire a suprafeței, 7 agenți, 1,41 M tokeni)
+**Model:** Opus 5
+
+Panoul a fost întrebat cum se netezește suprafața. Cei trei judecători au dat trei clasamente
+**diferite** — dar au convers pe altceva decât întrebarea: *nu porni cu niciuna dintre cele patru
+propuneri; repară întâi fundația pe care toate patru au găsit-o stricată.* Am verificat fiecare
+afirmație în cod înainte să o cred.
+
+### Lanțul, în ordinea în care s-a desfăcut
+
+**1. `heightfield.ts` punea cota CELULEI în COLȚUL rețelei.** Cotele reale ale colțurilor erau deja
+în `chunk.vertexCm`; codul folosea în loc media celor patru vecini, adică toată suprafața deplasată
+cu o jumătate de celulă. Măsurat pe 123.057 de vârfuri: eroare medie 0,119 m, maximă 0,370 m.
+
+**2. Reparat, terenul a ieșit în benzi de contur — mai urât decât înainte.** Aici era tentația să dau
+înapoi. În loc de asta am izolat cauza prin eliminare, nu prin ipoteze: culoare complet plată →
+benzile rămân; teren fără lumină deloc → benzile rămân. Deci nici culoare, nici iluminare.
+
+**3. Am citit bufferul real din pagină.** Primele 17 vârfuri din fiecare rând erau **identice**:
+`111.6 111.6 111.6 …`. Terase perfect plate de 16 m.
+
+**4. Cauza era în zgomot, cu două niveluri mai jos.** `fbm` întorcea virgulă fixă Q10, deci
+amplitudinea de 1800 dm se împărțea în 1024 de trepte: **rezoluția verticală a lumii era 17,6 cm**.
+Cu eșantioane macro din 16 în 16 m, două vecine cădeau des pe aceeași treaptă — de aici terasele.
+Q10 → Q14 face treapta **1,1 cm**, de 16 ori mai fină. Marginile de overflow verificate pe rând
+(`smooth`: 2,7e8; `lerp`: 5,4e8; `fbm`: 5,4e8 — toate sub 2³¹). Aritmetica rămâne întreagă.
+
+**Și aici e partea care merită reținută:** defectul (1) ascundea defectul (4). Media pe celulă era un
+blur 2×2 care netezea exact terasele. **Două bug-uri care se anulau reciproc**, deci niciunul nu se
+vedea. Reparat unul singur, ar fi arătat ca o regresie — și exact așa a arătat, timp de trei
+măsurători.
+
+### K16 a căpătat în sfârșit o cifră
+
+Riscul numărul unu al arhitecturii era descris, nu măsurat. Acum e măsurat
+(`node tools/seam-distribution.mjs`):
+
+| convenția cotei | medie | \|medie\| | interval |
+|---|---|---|---|
+| veche: `floor(h)` | **+0,508 m** | 0,508 m | [0,01 · 1,00] |
+| acum: `round(h) − 1` | **+0,005 m** | 0,249 m | [−0,49 · 0,50] |
+
+Fața de sus a voxelului stătea cu **o jumătate de metru deasupra** suprafeței de heightfield, mereu
+în același sens. Nepotrivirea pe celulă nu dispare — se înjumătățește — dar **își pierde semnul**: o
+treaptă constantă se citește ca zid, un zgomot simetric se citește ca teren. Convenția trăia în patru
+locuri, scrisă de fiecare dată ca `Math.floor(cm / 100)`, inclusiv într-un test care astfel verifica
+doar că două copii ale aceleiași formule sunt de acord. Acum e o funcție, `groundLevelFromCm`.
+
+### O paletă, o lege de lumină
+
+Măsurat pe fixtură înainte de a schimba ceva (`node tools/mesh-composition.mjs`): **56,3% din
+quaduri sunt pereți de treaptă de exact 1 m**, iar peretele avea aceeași culoare ca platoul de
+deasupra, sub un `MeshBasicMaterial` care **nu primea deloc lumină**. La cusătura K16 săreau trei
+lucruri unde e nevoie de unul: culoarea, modelul de iluminare și geometria.
+
+Acum: o singură paletă în `src/render/palette.ts` pentru teren și voxeli; lateral, un bloc de iarbă
+arată a pământ (iarba e un strat subțire deasupra); voxelii primesc aceeași lumină ca terenul, cu
+normale axiale derivate din `faces` — gratis, fără `computeVertexNormals`, care pe cuburi ar media
+colțurile și ar rotunji exact ce nu trebuie.
+
+### Ce NU am făcut, și de ce
+
+**N-am ales încă o metodă de netezire geometrică.** Judecătorul de cost a găsit că măsurătorile de
+performanță ale propunerilor nu se susțin pe mașina asta: aceeași bucată de cod a dat **+46, −153 și
++28 µs/chunk** la trei rulări. Asta e sub pragul meu de reproductibilitate din `bench/GATE.md` §7
+(CV > 10% ⇒ nu ai voie să compari). Deci întâi fundația și pasa de culoare, apoi o privire — și abia
+după aia decizia despre geometrie, dacă mai e nevoie de ea.
+
+### Re-etalonare, consemnată
+
+Lumea s-a schimbat, deci cifrele fixturii nu mai sunt comparabile cu cele de ieri: 114.586 → 90.932
+de quaduri **nu** înseamnă o optimizare, înseamnă altă lume. `bench/GATE.md` §3 poartă nota, cu data
+și motivul. Nu e mutare de prag — niciun prag din §8 nu depinde de ele și niciun gate n-a rulat.
+
+Hash de referință: `3876f59a` → `c3641ad5`. Oracolul reparat alaltăieri a prins schimbarea imediat;
+acum trei zile n-ar fi clipit.
+

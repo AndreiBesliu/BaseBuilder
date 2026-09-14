@@ -19,24 +19,18 @@ import { CHUNK_CELLS, Material, VOXEL_LEVELS } from '../src/sim/terrain/chunk.ts
 import type { Chunk } from '../src/sim/terrain/chunk.ts'
 import { groundLevelM, inWorld } from '../src/sim/terrain/terrain.ts'
 import { Biome, MACRO_METERS, sampleMacro } from '../src/sim/terrain/macro.ts'
-import { meshChunk } from '../src/render/mesher.ts'
+import { Face, meshChunk } from '../src/render/mesher.ts'
+import { quadColor } from '../src/render/palette.ts'
 import { meshHeightfield } from '../src/render/heightfield.ts'
 
 const SEED = 20260913
 /** Cate chunk-uri in jurul focusului se deseneaza. 11 = discul rezident intreg. */
 const VIEW_RADIUS = 11
 
-// --- paleta de materiale, aceeasi logica de culoare ca la teren ---
-const MATERIAL_COLOR: Record<number, number> = {
-  [Material.ROCA]: 0x6b6a66,
-  [Material.PAMANT]: 0x6a5a45,
-  [Material.IARBA]: 0x5c7040,
-  [Material.APA]: 0x35566f,
-  [Material.LEMN_CONSTRUIT]: 0x8a6a42,
-  [Material.PIATRA_CONSTRUITA]: 0x8d8b84,
-}
-/** Umbrire per directie de fata, ca volumele sa se citeasca fara lumini scumpe. */
-const FACE_SHADE = [0.82, 0.72, 0.9, 0.66, 1.0, 0.55]
+// Paleta si regula de culoare stau in src/render/palette.ts, una singura pentru
+// teren si pentru voxeli. `FACE_SHADE` a disparut: umbrirea per directie era un
+// inlocuitor de lumina, iar acum voxelii primesc ACEEASI lumina ca heightfield-ul,
+// deci ar fi fost numarata de doua ori.
 
 const busy = document.getElementById('busy')!
 const hud = document.getElementById('hud')!
@@ -159,7 +153,10 @@ controls.dampingFactor = 0.08
 controls.maxPolarAngle = Math.PI * 0.49
 
 const terrainMaterial = new THREE.MeshLambertMaterial({ vertexColors: true })
-const voxelMaterial = new THREE.MeshBasicMaterial({ vertexColors: true })
+// Aceeasi lege de lumina ca terenul. Inainte era MeshBasicMaterial — adica zona
+// sapata NU primea deloc lumina si nu putea raspunde la soare, iar la cusatura
+// K16 sarea si modelul de iluminare, nu doar geometria.
+const voxelMaterial = new THREE.MeshLambertMaterial({ vertexColors: true })
 
 /** Un mesh per chunk, ca sa se poata reconstrui doar cel murdarit. */
 const meshes = new Map<number, THREE.Mesh>()
@@ -176,6 +173,7 @@ function buildVoxelGeometry(chunk: Chunk): THREE.BufferGeometry | null {
 
   const positions = new Float32Array(mesh.quadCount * 4 * 3)
   const colors = new Float32Array(mesh.quadCount * 4 * 3)
+  const normals = new Float32Array(mesh.quadCount * 4 * 3)
   const indices = new Uint32Array(mesh.quadCount * 6)
   const zBase = chunk.voxels!.zBaseM
 
@@ -188,15 +186,22 @@ function buildVoxelGeometry(chunk: Chunk): THREE.BufferGeometry | null {
       positions[dst + v * 3 + 1] = mesh.positions[src + v * 3 + 2]! + zBase
       positions[dst + v * 3 + 2] = mesh.positions[src + v * 3 + 1]!
     }
-    const base = MATERIAL_COLOR[mesh.materials[q]!] ?? 0x999999
-    const shade = FACE_SHADE[mesh.faces[q]!] ?? 1
-    const r = (((base >> 16) & 255) / 255) * shade
-    const g = (((base >> 8) & 255) / 255) * shade
-    const b = ((base & 255) / 255) * shade
+    const face = mesh.faces[q]!
+    const [r, g, b] = quadColor(mesh.materials[q]!, face)
+    // Normala e AXIALA si se stie din directia fetei — gratis, fara atribut in
+    // mesher si fara computeVertexNormals, care pe cuburi ar media colturile si
+    // ar rotunji exact ce nu trebuie. Indicii 0-5 sunt in spatiul MESHER-ului
+    // (X, Y, Z-in-sus); aici Y si Z sunt deja schimbate, ca la pozitii.
+    const nx = face === Face.X_POS ? 1 : face === Face.X_NEG ? -1 : 0
+    const ny = face === Face.Z_POS ? 1 : face === Face.Z_NEG ? -1 : 0
+    const nz = face === Face.Y_POS ? 1 : face === Face.Y_NEG ? -1 : 0
     for (let v = 0; v < 4; v++) {
       colors[dst + v * 3] = r
       colors[dst + v * 3 + 1] = g
       colors[dst + v * 3 + 2] = b
+      normals[dst + v * 3] = nx
+      normals[dst + v * 3 + 1] = ny
+      normals[dst + v * 3 + 2] = nz
     }
     // Winding-ul.
     //
@@ -221,6 +226,7 @@ function buildVoxelGeometry(chunk: Chunk): THREE.BufferGeometry | null {
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+  geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
   geo.setIndex(new THREE.BufferAttribute(indices, 1))
   return geo
 }

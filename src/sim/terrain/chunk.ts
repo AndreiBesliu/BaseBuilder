@@ -92,15 +92,25 @@ function vertexHeightCm(patch: Int32Array, localVx: number, localVy: number): nu
   const tx = ((localVx - i * MACRO_METERS) << 10) / MACRO_METERS
   const ty = ((localVy - j * MACRO_METERS) << 10) / MACRO_METERS
 
-  const h00 = patch[j * PATCH + i]!
-  const h10 = patch[j * PATCH + i + 1]!
-  const h01 = patch[(j + 1) * PATCH + i]!
-  const h11 = patch[(j + 1) * PATCH + i + 1]!
+  // Se trece in CENTIMETRI INAINTE de interpolare, nu dupa.
+  //
+  // Varianta veche interpola in decimetri intregi si inmultea la final, deci
+  // toate cotele de varf ieseau multipli de 10 cm: masurat, 111 cote distincte
+  // intr-un chunk de 1.089 de varfuri, cu salturi de 20-50 cm intre vecini.
+  // Nu se vedea, fiindca heightfield-ul folosea media celor patru varfuri ca
+  // inaltime de varf — adica un blur 2×2 care netezea din intamplare exact
+  // artefactul asta. Cand media a fost corectata, terenul a iesit in benzi de
+  // contur. Instrumentul care ascundea defectul era chiar bug-ul vecin.
+  //
+  // Ramane aritmetica INTREAGA: doar scara se schimba, de la dm la cm.
+  const h00 = patch[j * PATCH + i]! * 10
+  const h10 = patch[j * PATCH + i + 1]! * 10
+  const h01 = patch[(j + 1) * PATCH + i]! * 10
+  const h11 = patch[(j + 1) * PATCH + i + 1]! * 10
 
   const top = h00 + (((h10 - h00) * tx) >> 10)
   const bottom = h01 + (((h11 - h01) * tx) >> 10)
-  const dm = top + (((bottom - top) * ty) >> 10)
-  return dm * 10 // decimetri -> centimetri
+  return top + (((bottom - top) * ty) >> 10)
 }
 
 /** Genereaza heightfield-ul unui chunk. Functie pura de (seed, cx, cy). */
@@ -113,6 +123,26 @@ export function generateChunk(seed: number, cx: number, cy: number): Chunk {
     }
   }
   return { cx, cy, vertexCm, voxels: null }
+}
+
+/**
+ * Cota celui mai de sus voxel SOLID, din inaltimea in centimetri.
+ *
+ * Conventia traia in trei locuri diferite, scrisa de fiecare data ca
+ * `Math.floor(cm / 100)`. Asta punea fata de sus a voxelului — care se randeaza
+ * la `groundM + 1` — cu **0,523 m MEDIE deasupra** suprafetei de heightfield,
+ * mereu in acelasi sens (`node tools/seam-distribution.mjs`). Adica exact K16:
+ * o buza sistematica la granita dintre teren promovat si nepromovat.
+ *
+ * `round(h) - 1` aduce media la 0,005 m. Nepotrivirea pe celula NU dispare — ramane
+ * 0,250 m in medie absoluta, jumatate din cat era — dar isi pierde semnul: o
+ * treapta constanta se citeste ca zid, un zgomot simetric se citeste ca teren.
+ *
+ * Aritmetica ramane intreaga: `floor((cm + 50) / 100)` e rotunjire la jumatate in
+ * sus si pe negative, fara sa depinda de modul de rotunjire al lui `Math.round`.
+ */
+export function groundLevelFromCm(heightCm: number): number {
+  return Math.floor((heightCm + 50) / 100) - 1
 }
 
 /** Inaltimea solului intr-o celula, in centimetri: media celor patru varfuri. */
@@ -263,7 +293,7 @@ export function promote(seed: number, chunk: Chunk): void {
 
   for (let ly = 0; ly < CHUNK_CELLS; ly++) {
     for (let lx = 0; lx < CHUNK_CELLS; lx++) {
-      const groundM = Math.floor(cellHeightCm(chunk, lx, ly) / 100)
+      const groundM = groundLevelFromCm(cellHeightCm(chunk, lx, ly))
       const surface = patch[Math.floor(ly / MACRO_METERS) * patchN + Math.floor(lx / MACRO_METERS)]! as MaterialId
       const base = (ly * CHUNK_CELLS + lx) * VOXEL_LEVELS
       for (let level = 0; level < VOXEL_LEVELS; level++) {

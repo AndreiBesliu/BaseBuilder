@@ -10,8 +10,9 @@
  */
 
 import type { Chunk } from '../sim/terrain/chunk.ts'
-import { CHUNK_CELLS, cellHeightCm } from '../sim/terrain/chunk.ts'
-import { Biome, MACRO_METERS, sampleMacro, WATER_LEVEL_DM } from '../sim/terrain/macro.ts'
+import { CHUNK_CELLS } from '../sim/terrain/chunk.ts'
+import { MACRO_METERS, sampleMacro, WATER_LEVEL_DM } from '../sim/terrain/macro.ts'
+import { biomeColor } from './palette.ts'
 
 export interface HeightfieldMesh {
   /** 3 componente per varf, in metri, relativ la coltul chunk-ului. */
@@ -19,15 +20,6 @@ export interface HeightfieldMesh {
   /** RGB per varf, 0-1. */
   colors: Float32Array
   indices: Uint32Array
-}
-
-/** Paleta de teren. Culorile sunt date, nu magie imprastiata prin cod. */
-const BIOME_COLOR: Record<number, [number, number, number]> = {
-  [Biome.APA]: [0.20, 0.34, 0.45],
-  [Biome.CAMPIE]: [0.45, 0.52, 0.30],
-  [Biome.PADURE]: [0.27, 0.38, 0.24],
-  [Biome.DEAL]: [0.44, 0.42, 0.33],
-  [Biome.MUNTE]: [0.52, 0.52, 0.52],
 }
 
 export function meshHeightfield(seed: number, chunk: Chunk): HeightfieldMesh {
@@ -42,17 +34,21 @@ export function meshHeightfield(seed: number, chunk: Chunk): HeightfieldMesh {
   for (let vy = 0; vy <= n; vy++) {
     for (let vx = 0; vx <= n; vx++) {
       const i = vy * (n + 1) + vx
-      // Inaltimea unui varf: media celulelor din jurul lui, cu marginile prinse in interval.
+      // Cota VARFULUI, direct din `vertexCm`. Varianta veche punea aici cota
+      // CELULEI — adica media celor patru varfuri din jur — deci deplasa toata
+      // suprafata cu o jumatate de celula pe X si pe Y. Masurat pe 123.057 de
+      // varfuri (`node tools/seam-distribution.mjs`): eroare medie 0,119 m,
+      // maxima 0,370 m. Cotele corecte erau deja in chunk, doar nu se citeau.
+      const heightM = chunk.vertexCm[i]! / 100
       const lx = Math.min(vx, n - 1)
       const ly = Math.min(vy, n - 1)
-      const heightM = cellHeightCm(chunk, lx, ly) / 100
 
       positions[i * 3] = vx
       positions[i * 3 + 1] = heightM
       positions[i * 3 + 2] = vy
 
       const s = sampleMacro(seed, Math.floor((originX + lx) / MACRO_METERS), Math.floor((originY + ly) / MACRO_METERS))
-      const c = BIOME_COLOR[s.biome] ?? BIOME_COLOR[Biome.CAMPIE]!
+      const c = biomeColor(s.biome)
       // Variatie mica dupa altitudine, ca peisajul sa nu fie plat ca o harta politica.
       const shade = 0.88 + Math.min(0.24, Math.max(-0.12, (s.heightDm - WATER_LEVEL_DM) / 6000))
       colors[i * 3] = c[0] * shade

@@ -16,6 +16,7 @@ import {
   setVoxel,
   voxelAt,
   VOXEL_LEVELS,
+  groundLevelFromCm,
 } from '../src/sim/terrain/chunk.ts'
 import {
   CHUNK_GRID,
@@ -179,7 +180,11 @@ test('promovarea pastreaza suprafata: primul solid de sus e chiar nivelul solulu
 
   for (let ly = 0; ly < CHUNK_CELLS; ly += 7) {
     for (let lx = 0; lx < CHUNK_CELLS; lx += 7) {
-      const groundM = Math.floor(cellHeightCm(chunk, lx, ly) / 100)
+      // Conventia se INTEROGHEAZA, nu se re-implementeaza aici. Varianta veche
+      // scria `Math.floor(cm / 100)` a patra oara in proiect, deci testul nu
+      // verifica acordul dintre promote() si restul jocului, ci doar ca doua
+      // copii ale aceleiasi formule sunt de acord intre ele.
+      const groundM = groundLevelFromCm(cellHeightCm(chunk, lx, ly))
       decodeColumn(v, ly * CHUNK_CELLS + lx, scratch)
       let topSolid = -1
       for (let level = VOXEL_LEVELS - 1; level >= 0; level--) {

@@ -13,9 +13,27 @@
  * sa fie corect.
  */
 
-/** Unitatea de virgula fixa. 1024 = 1,0. */
-export const FP_ONE = 1024
-export const FP_SHIFT = 10
+/**
+ * Unitatea de virgula fixa. 16384 = 1,0.
+ *
+ * A fost 1024 (Q10) si asta punea un PLAFON pe rezolutia verticala a lumii:
+ * amplitudinea de 1800 dm impartita la 1024 de trepte = **17,6 cm** pe treapta.
+ * Cu esantioane macro din 16 in 16 m, doua vecine ieseau des pe aceeasi treapta,
+ * deci terenul era o scara de terase plate de 16 m — vizibil ca benzi de contur.
+ *
+ * Nu se vedea, fiindca `meshHeightfield` punea in coltul retelei media celor
+ * patru varfuri din jur, adica un blur 2×2 care netezea exact artefactul asta.
+ * Doua defecte care se anulau reciproc: reparat unul, a iesit celalalt la iveala.
+ *
+ * La Q14 treapta devine 1800/16384 = **1,1 cm**, de 16 ori mai fina.
+ *
+ * Marginile de overflow, verificate pe rand, fiindca aici nu e loc de aproximari:
+ *   smooth: t ≤ 2^14 ⇒ t*t ≤ 2,7e8 < 2^31 ✓
+ *   lerp:   |b-a| ≤ 2^15, × t ≤ 2^14 ⇒ 5,4e8 < 2^31 ✓
+ *   fbm:    sum ≤ ~2^15, × FP_ONE ⇒ 5,4e8 < 2^31 ✓
+ */
+export const FP_ONE = 16384
+export const FP_SHIFT = 14
 
 /** Hash pe doua coordonate + seed. Imprastie bine si e stabil intre runtime-uri. */
 export function hash2(x: number, y: number, seed: number): number {
@@ -28,9 +46,9 @@ export function hash2(x: number, y: number, seed: number): number {
   return (h ^ (h >>> 16)) >>> 0
 }
 
-/** Valoarea din nodul de grila, in [-FP_ONE, FP_ONE). */
+/** Valoarea din nodul de grila, in [-FP_ONE, FP_ONE). Masca are 2×FP_ONE valori. */
 function nodeValue(x: number, y: number, seed: number): number {
-  return (hash2(x, y, seed) & 0x7ff) - FP_ONE
+  return (hash2(x, y, seed) & (2 * FP_ONE - 1)) - FP_ONE
 }
 
 /**
@@ -38,8 +56,8 @@ function nodeValue(x: number, y: number, seed: number): number {
  * Fara ea, zgomotul valoric arata a romburi.
  */
 function smooth(t: number): number {
-  // t*t incape in 2^20; inmultit cu (3*FP - 2*t) <= 3*FP incape in ~2^31. Marginea e stransa,
-  // deci pastram ordinea operatiilor exact asa.
+  // Marginile sunt verificate in comentariul lui FP_ONE. Ordinea operatiilor
+  // conteaza: `(t*t) >> FP_SHIFT` inainte de a inmulti din nou.
   const tt = (t * t) >> FP_SHIFT
   const ttt = (tt * t) >> FP_SHIFT
   return 3 * tt - 2 * ttt

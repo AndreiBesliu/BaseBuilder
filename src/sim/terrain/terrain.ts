@@ -16,7 +16,7 @@
 import type { Outcome } from '../result.ts'
 import { accept, refuse, Reason } from '../result.ts'
 import type { Chunk, MaterialId } from './chunk.ts'
-import { CHUNK_CELLS, cellHeightCm, generateChunk, isSolid, Material, promote, setVoxel, voxelAt, VOXEL_LEVELS } from './chunk.ts'
+import { CHUNK_CELLS, cellHeightCm, groundLevelFromCm, generateChunk, isSolid, Material, promote, setVoxel, voxelAt, VOXEL_LEVELS } from './chunk.ts'
 import { MACRO_METERS, MACRO_SIZE } from './macro.ts'
 
 /** Latimea lumii in chunk-uri: 1024 esantioane × 16 m / 32 m = 512. */
@@ -144,7 +144,7 @@ function locate(t: Terrain, wx: number, wy: number): CellRef | null {
 export function groundLevelM(t: Terrain, wx: number, wy: number): Outcome<number> {
   const ref = locate(t, wx, wy)
   if (!ref) return refuse(Reason.IN_AFARA_LUMII, { x: wx, y: wy, limita: WORLD_CELLS })
-  return accept(Math.floor(cellHeightCm(ref.chunk, ref.lx, ref.ly) / 100))
+  return accept(groundLevelFromCm(cellHeightCm(ref.chunk, ref.lx, ref.ly)))
 }
 
 /** Materialul dintr-un voxel. Pe un chunk ne-promovat, derivat din heightfield. */
@@ -153,7 +153,7 @@ export function materialAt(t: Terrain, wx: number, wy: number, z: number): Outco
   if (!ref) return refuse(Reason.IN_AFARA_LUMII, { x: wx, y: wy, limita: WORLD_CELLS })
   if (ref.chunk.voxels) return accept(voxelAt(ref.chunk, ref.lx, ref.ly, z))
 
-  const groundM = Math.floor(cellHeightCm(ref.chunk, ref.lx, ref.ly) / 100)
+  const groundM = groundLevelFromCm(cellHeightCm(ref.chunk, ref.lx, ref.ly))
   if (z > groundM) return accept(Material.AER)
   if (z > groundM - 3) return accept(Material.PAMANT)
   return accept(Material.ROCA)

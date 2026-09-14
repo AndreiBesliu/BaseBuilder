@@ -183,9 +183,16 @@ ce construiește un jucător.
 | **Chunk-uri promovate** | **225** (PLAN bugeta ~200) |
 | Chunk-uri rezidente | 473 |
 | Construcție | ~700 ms |
-| Quaduri / triunghiuri | 114.586 / **229.172** |
-| Meshing complet | **89,6 ms** (398 µs/chunk) |
+| Quaduri / triunghiuri | 90.932 / **181.864** |
+| Meshing complet | **84,5 ms** (375 µs/chunk) |
 | Memorie voxeli (RLE) | 2,64 MB (față de 14,1 MB necomprimat) |
+
+> **Re-etalonare, 14.09.2026, ÎNAINTE de orice rulare de gate.** Cifrele de mai sus au fost
+> 114.586 / 229.172 / 89,6 ms. **Nu s-a schimbat nimic în mesher** — s-a schimbat LUMEA: precizia
+> zgomotului a trecut de la Q10 la Q14, fiindcă rezoluția verticală era plafonată la 17,6 cm și
+> producea terase plate de 16 m. Cele două seturi de cifre descriu două lumi diferite și **nu sunt
+> comparabile între ele**; nu e o mutare de prag, fiindcă niciun prag din §8 nu depinde de ele și
+> niciun gate n-a rulat. Seria de măsurători începe de aici.
 
 **Validarea fixturii NU se face prin raportul de reducere al mesher-ului.** Criteriul ăla e
 auto-referențial: selectează fixturi *ieftine de meshuit*, adică exact fixturile pe care un motor slab
@@ -241,7 +248,7 @@ bine decât va fi în joc.
 
 **Slice-ul, declarat în scris înainte de rulare:** azi e implementat prin `renderer.clippingPlanes`,
 adică discard în shader — **NU** re-mesh. PLAN prognozează ~87 ms pentru re-mesh pe 200 de chunk-uri;
-măsurat azi, remesh-ul complet al fixturii e **89,6 ms**, adică 5 cadre pierdute la fiecare schimbare
+măsurat azi, remesh-ul complet al fixturii e **84,5 ms**, adică 5 cadre pierdute la fiecare schimbare
 de nivel. Sunt două jocuri diferite, cu 20× între ele. Dacă implementarea livrată se schimbă vreodată
 în re-mesh, toate cifrele de gate se re-rulează.
 
@@ -322,7 +329,7 @@ sarcina următoare.
 ### 2 · SCOPE — ambiția de geometrie, nu motorul
 Sweep-ul de rezoluție arată **GPU-bound** după benzile calibrate (frametime scade proporțional cu
 pixelii).
-Același GPU, aceleași 229.172 de triunghiuri, aceleași shadere: **Unity nu-mi dă hardware nou.**
+Același GPU, aceleași 181.864 de triunghiuri, aceleași shadere: **Unity nu-mi dă hardware nou.**
 Remediile sunt LOD, instancing, reducere de fill, buget de draw calls — adică **PUNCT DE DECIZIE #1**
 din plan, nu portarea. Portarea aici pierde 2–4 luni și păstrează problema.
 
@@ -408,23 +415,26 @@ Baza: măsurători făcute azi în Node, pe fixtura M10 și pe teren proaspăt.
 |---|---|
 | `generateChunk` | 22 µs |
 | `meshHeightfield` (chunk ne-promovat) | 209 µs |
-| `meshChunk` (chunk de așezare) | 460 µs |
-| `dig` în sim, fără mesh | 2,9 µs |
+| `meshChunk` (chunk de așezare) | 484 µs |
+| `dig` în sim, fără mesh | 4,8 µs |
 | `setFocus` o graniță de chunk | 0,62 ms · **23 de chunk-uri noi** |
 | Chunk-uri rezidente la rază 11 | 377 |
-| Fixtura completă, meshing | 89,6 ms |
+| Fixtura completă, meshing | 84,5 ms |
 
 **Prezic:**
 
-1. **NU pică pe GPU.** 229.172 de triunghiuri, un singur material, ~225 de draw calls pentru partea
+1. **NU pică pe GPU.** 181.864 de triunghiuri, un singur material, ~225 de draw calls pentru partea
    de voxeli — sub orice prag al unui 3060 și, scalat, sub al unui 1050 Ti. Sweep-ul de rezoluție va
    arăta **CPU-bound**: la 25% din pixeli, frametime-ul scade cu **sub 15%**.
+   *(Predicția a fost scrisă pe 229.172 de triunghiuri, în lumea dinainte de re-etalonare.
+   Raționamentul nu se schimbă — cifra a scăzut, deci predicția devine mai ușor de îndeplinit,
+   nu mai grea. Se consemnează, nu se rescrie în tăcere.)*
 2. **S-TRAVERSE pică primul.** O graniță de chunk la 40 m/s = 1,25 treceri/s, fiecare aducând 23 de
    chunk-uri noi × (209 µs mesh + BufferGeometry + upload) ≈ **5–7 ms de lucru, în rafală**. Prezic
    **X_max între 6 și 10 ms** pe S-TRAVERSE cu ceas real, și **cel puțin un cadru peste 33 ms** la
    fiecare a doua trecere de graniță, dacă bugetul de 2 chunk-uri/cadru nu e respectat.
 3. **S-FORTRESS trece confortabil:** X_max **între 12 și 15 ms**.
-4. **S-DIG trece:** 20 de săpături/s × 460 µs = 9,2 ms/s ≈ 0,15 ms/cadru amortizat. X_max **între 11
+4. **S-DIG trece:** 20 de săpături/s × 484 µs = 9,2 ms/s ≈ 0,15 ms/cadru amortizat. X_max **între 11
    și 14 ms**. Riscul e rafala, nu media.
 5. **Zero cadre peste 100 ms** pe toate trei scenariile.
 6. **Verdictul cel mai probabil al zilei: GREY sau FAIL-CANDIDAT pe S-TRAVERSE**, cu cauza atribuită
@@ -450,7 +460,7 @@ prezisă și bază de dovadă.
 
 **Deja cheltuite, deci NU mai pot fi invocate ca apărare:**
 - ablația mesher-ului: 786 → 430 µs (**1,83×**)
-- remesh doar pe chunk-urile chiar murdare, în loc de 3×3 fix: **4,14 ms → 0,46 ms** pe săpătură
+- remesh doar pe chunk-urile chiar murdare, în loc de 3×3 fix: **4,35 ms → 0,48 ms** pe săpătură
 
 ---
 
