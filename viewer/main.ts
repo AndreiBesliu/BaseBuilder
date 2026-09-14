@@ -352,6 +352,15 @@ let lastFocusMs = 0
  *     tocmai am sapat, fata aia trebuie sa reapara — altfel ramane o GAURA prin
  *     care se vede fundalul.
  */
+/** Cine e promovat ACUM. Se cheama INAINTE de o comanda, ca sa se vada diferenta. */
+function promotedKeys(): Set<number> {
+  const out = new Set<number>()
+  for (const k of world.terrain.keys) {
+    if (world.terrain.chunks.get(k)!.voxels !== null) out.add(k)
+  }
+  return out
+}
+
 function remeshAfterEdit(wx: number, wy: number, promotedBefore: Set<number>): void {
   const cx = Math.floor(wx / CHUNK_CELLS)
   const cy = Math.floor(wy / CHUNK_CELLS)
@@ -582,12 +591,7 @@ renderer.domElement.addEventListener('click', (ev) => {
   const wy = Math.floor(target.z)
   const z = Math.floor(target.y)
 
-  // Cine era deja promovat INAINTE de comanda. Diferenta de dupa spune exact
-  // ce mesh trebuie refacut.
-  const promotedBefore = new Set<number>()
-  for (const k of world.terrain.keys) {
-    if (world.terrain.chunks.get(k)!.voxels !== null) promotedBefore.add(k)
-  }
+  const promotedBefore = promotedKeys()
 
   const out = ev.shiftKey
     ? applyCommand(world, { kind: 'fill', wx, wy, z, material: Material.PIATRA_CONSTRUITA })
@@ -607,10 +611,21 @@ renderer.domElement.addEventListener('click', (ev) => {
   // Varianta care remesh-uia mereu 3×3 platea 9× pretul pentru un singur chunk
   // murdar — 5,4 ms in loc de ~0,6 — si ar fi intrat in gate ca „limita stivei".
   remeshAfterEdit(wx, wy, promotedBefore)
-  // Editarea murdareste regiunile la fel de sigur cum murdareste mesh-ul.
-  markDirty(regions, wx, wy, z, DEFAULT_RULES)
-  rebuildDirty(world.terrain, regions, DEFAULT_RULES)
-  refreshOverlay()
+  // Regiunile se intretin DOAR cat timp overlay-ul e deschis.
+  //
+  // Motivul e o cifra: `rebuildDirty` reconstruieste toate blocurile rezidente, iar
+  // cu overlay-ul pornit alea sunt ~735, deci un click costa peste 150 ms. Adica
+  // ~10 cadre pierdute la fiecare sapatura — introdus chiar de mine, in commit-ul
+  // de overlay, si gasit de un panou care citea codul.
+  //
+  // Deocamdata regiunile sunt o unealta de inspectie, deci asta e corect. Cand vor
+  // veni agentii vor cere intretinere permanenta, si ATUNCI reconstructia
+  // incrementala devine obligatorie — nu inainte, si nu mai tarziu.
+  if (regionOverlay.visible) {
+    markDirty(regions, wx, wy, z, DEFAULT_RULES)
+    rebuildDirty(world.terrain, regions, DEFAULT_RULES)
+    refreshOverlay()
+  }
   recount()
 })
 
@@ -826,9 +841,14 @@ function driveScenario(frame: number): void {
     digCursor++
     const g = groundLevelM(world.terrain, wx, wy)
     if (!g.ok) return
+    // INAINTE de comanda, nu dupa. Varianta care citea multimea DUPA `dig` punea
+    // in ea si chunk-urile tocmai promovate, deci `!promotedBefore.has(key)` nu se
+    // declansa niciodata si apron-ul nou nu-si primea primul mesh. Adica S-DIG —
+    // un scenariu de GATE — masura mai putina munca decat face jocul.
+    const promotedBefore = promotedKeys()
     const out = applyCommand(world, { kind: 'dig', wx, wy, z: g.value - (digCursor % 5) })
     if (!out.ok) return
-    remeshAfterEdit(wx, wy, new Set(world.terrain.keys.filter((k) => world.terrain.chunks.get(k)!.voxels !== null)))
+    remeshAfterEdit(wx, wy, promotedBefore)
     return
   }
 
