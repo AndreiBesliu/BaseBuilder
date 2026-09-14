@@ -46,6 +46,13 @@ jobs:
       - name: programul de verdict al gate-ului
         run: node tools/gate-verdict.mjs --self-test
 
+      # Documentul de protocol contine cifre, si cifrele se invechesc exact ca un
+      # cache fara invalidare. Verificarea asta a fost adaugata DUPA ce un panou a
+      # gasit trei derapaje intr-o zi, dintre care unul putea cumpara o amanare
+      # nemeritata pe o economie deja cheltuita.
+      - name: cifrele din bench/GATE.md corespund codului
+        run: node tools/check-gate-numbers.mjs
+
       # Regresie de determinism pe un scenariu fix. Daca hash-ul se schimba fara
       # ca cineva sa fi vrut asta, build-ul pica aici si nu peste trei luni.
       - name: hash de referinta

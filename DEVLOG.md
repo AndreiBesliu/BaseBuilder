@@ -842,7 +842,63 @@ Sunt **două limite inferioare suprapuse**, și amândouă trebuie spuse înaint
    care protocolul o interzice explicit la §1, făcută de mine două zile mai târziu în alt loc.
 
 Costul întreg se vede o singură dată: în intervalul de **prezentare** al unei rulări reale, cu și
-fără `?d1b=1`. De aceea `benchuleaza-gate.cmd` primește acum un al doilea argument, `d1b`, care
+fără `?d1b=1`. De aceea `bench
+uleaza-gate.cmd` primește acum un al doilea argument, `d1b`, care
 pornește ablația. Unity rămâne complet nemăsurat și blochează mai departe închiderea lui D1 — asta nu
 se schimbă fiindcă am măsurat jumătate din partea mea.
+
+---
+
+## Panoul despre worker a răspuns „nu construi workerul" — și a găsit trei lucruri în fișierele mele
+
+**Prompt:** „continua"
+**Model:** Opus 5
+
+Am întrebat *cum* se mută mesher-ul într-un worker. Ambii judecători au răspuns **nu acum**, cu
+argumente pe care le-am verificat unul câte unul. Dar valoarea panoului n-a fost răspunsul la
+întrebare — a fost ce a găsit citind.
+
+### Protocolul meu derapase, exact în felul împotriva căruia fusese scris
+
+| ce | ce spunea | ce e |
+|---|---|---|
+| §3 vs. §5/§9, meshing complet | **105 ms** și **84,5 ms** pentru aceeași măsurătoare | diferență de 20,5 ms, **peste DMD** |
+| §3, memorie RLE | 2,64 MB | 2,34 MB |
+| §10(a), bugetul de streaming | listat ca **optimizare disponibilă** | **implementat de mine acum două zile** |
+
+Primele două sunt cifre învechite. **A treia e altceva.** §8.4 acordă fereastra GREY tocmai dacă
+lista de optimizări necheltuite acoperă golul — deci documentul putea cumpăra **o amânare nemeritată
+pe o economie deja cheltuită.** Nu o scăpare de întreținere: un mecanism de auto-indulgență, în
+documentul scris anume ca să prevină auto-indulgența.
+
+N-am găsit-o eu. A găsit-o un panou căruia i-am dat documentul să-l citească.
+
+Corectat în commit separat, cum cere antetul. Și, fiindcă frecvența spune mai mult decât fiecare
+derapaj în parte — **un document care conține cifre se învechește exact ca un cache fără
+invalidare** — verificarea e acum mecanică: `tools/check-gate-numbers.mjs` rulează fixtura, compară
+cifrele din §3 cu măsurătoarea, refuză ca aceeași măsurătoare să apară cu două valori, și refuză o
+optimizare listată ca disponibilă dacă e implementată. În `npm run check` și în CI.
+
+### Două bug-uri de cod, tot din citit
+
+1. **S-DIG măsura mai puțină muncă decât face jocul.** `promotedBefore` se calcula *după*
+   `applyCommand`, deci conținea și chunk-urile tocmai promovate — apron-ul nou nu-și primea
+   niciodată primul mesh. Un scenariu de **gate** care măsoară altceva decât crede.
+2. **Un click costa peste 150 ms.** Commit-ul de overlay chema `rebuildDirty` pe fiecare editare, iar
+   ăla reconstruiește toate blocurile rezidente — cu overlay-ul pornit, ~735. Zece cadre pierdute la
+   fiecare săpătură, introduse de mine cu două ore înainte.
+
+### Și verdictul despre worker
+
+Nu se construiește acum. Motivul, pe scurt: câștigul lui e pe streaming, unde e **sub rezoluția de
+0,25 ms a propriei bisecții**, iar riscul lui e pe editare, unde soluția corectă e să nu intre deloc.
+Judecătorii au numit și cifra care ar schimba decizia, și e măsurabilă **azi, în browser**, nu pe
+hardware inexistent: p99 al costului de teren pe cadrele care *construiesc*, în S-TRAVERSE la
+întoarcere. Dacă depășește ~1,5 ms — peste 20% din bugetul de 7,17 ms — workerul devine itemul care
+închide golul.
+
+Până atunci există lucruri mai ieftine și mai sigure: `computeVertexNormals` costă **115,9 µs pe
+chunk** și se poate elimina fără worker, iar indicii de heightfield sunt identici între chunk-uri și
+pot fi o constantă. Amândouă intră în lista de optimizări necheltuite din §10, ca **itemi noi** — nu
+ca reciclare a unuia deja cheltuit.
 

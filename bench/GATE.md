@@ -184,9 +184,9 @@ ce construiește un jucător.
 | Chunk-uri rezidente | 473 |
 | Construcție | ~700 ms |
 | Quaduri / triunghiuri | 86.071 / **172.142** |
-| Meshing complet | **105 ms** · mediana din 10 · CV 7,5% · detectabil peste 22,3 ms |
+| Meshing complet | **88 ms** · mediana din 10 · verificat mecanic de `tools/check-gate-numbers.mjs` |
 | &nbsp;&nbsp;per chunk | **490 µs** · mediana din 10 · CV 16,4% ⚠ |
-| Memorie voxeli (RLE) | 2,64 MB (față de 14,1 MB necomprimat) |
+| Memorie voxeli (RLE) | 2,34 MB (față de 14,1 MB necomprimat) |
 
 > **Re-etalonare, 14.09.2026, ÎNAINTE de orice rulare de gate.** Două lucruri s-au schimbat, niciunul
 > în mesher, și amândouă se consemnează ca să nu poată trece drept optimizare:
@@ -271,7 +271,7 @@ bine decât va fi în joc.
 
 **Slice-ul, declarat în scris înainte de rulare:** azi e implementat prin `renderer.clippingPlanes`,
 adică discard în shader — **NU** re-mesh. PLAN prognozează ~87 ms pentru re-mesh pe 200 de chunk-uri;
-măsurat azi, remesh-ul complet al fixturii e **84,5 ms**, adică 5 cadre pierdute la fiecare schimbare
+măsurat azi, remesh-ul complet al fixturii e **88 ms**, adică 5 cadre pierdute la fiecare schimbare
 de nivel. Sunt două jocuri diferite, cu 20× între ele. Dacă implementarea livrată se schimbă vreodată
 în re-mesh, toate cifrele de gate se re-rulează.
 
@@ -496,7 +496,7 @@ Baza: măsurători făcute azi în Node, pe fixtura M10 și pe teren proaspăt.
 | `dig` în sim, fără mesh | 4,8 µs |
 | `setFocus` o graniță de chunk | 0,62 ms · **23 de chunk-uri noi** |
 | Chunk-uri rezidente la rază 11 | 377 |
-| Fixtura completă, meshing | 84,5 ms |
+| Fixtura completă, meshing | 88 ms |
 
 **Prezic:**
 
@@ -527,7 +527,6 @@ prezisă și bază de dovadă.
 
 | # | ce | economie prezisă | bază de dovadă |
 |---|---|---|---|
-| a | Buget de streaming: maximum N chunk-uri construite pe cadru, restul în coadă | elimină rafala de 5–7 ms | 23 chunk-uri × 209 µs, măsurat azi |
 | b | `meshHeightfield` mutat în worker | −4,8 ms din rafală | costul e pur CPU, fără atingere de GL |
 | c | Pool de typed arrays în construcția de geometrie | −20% din alocări | azi se alocă 3 array-uri noi per chunk |
 | d | Poziții Int16 + indici Uint16 sub 65.536 de vertecși | −50% bandă de upload | mesher-ul emite deja Int16 |
@@ -541,6 +540,21 @@ prezisă și bază de dovadă.
 - **tăierea fețelor de la granița de chunk: −5,3% quaduri**, la un cost nedecis. Vine cu un invariant
   nou, care e adevăratul preț: o săpătură pe marginea unui chunk trebuie să re-meshuiască și vecinul,
   altfel rămâne o gaură prin care se vede fundalul
+- **bugetul de streaming pe cadru** (`BUILD_BUDGET_PER_FRAME`, coadă sortată după distanță) — era
+  listat ca item (a) DISPONIBIL în tabelul de mai sus, deși fusese implementat. §8.4 acordă fereastra
+  GREY tocmai dacă lista de sus acoperă golul, deci documentul putea cumpăra **o amânare nemeritată
+  pe o economie deja cheltuită.** Nu o cifră învechită — un mecanism de auto-indulgență, exact ce
+  protocolul fusese scris să prevină. Găsit de un panou care a citit documentul, nu de mine
+
+> **Corecție de document, 14.09.2026, în commit separat, cum cere antetul.** Trei derapaje, toate
+> găsite în aceeași zi: §3 spunea 105 ms și §5/§9 spuneau 84,5 ms pentru **aceeași** măsurătoare
+> (diferență peste DMD); §3 spunea 2,64 MB unde măsurătoarea dă 2,34; și §10(a) de mai sus.
+>
+> Niciunul nu schimbă un prag, deci rezultatul nu devine EXPLORATOR. Dar frecvența lor spune ceva:
+> un document care conține cifre se învechește exact ca un cache fără invalidare. De aceea
+> `tools/check-gate-numbers.mjs` rulează acum în `npm run check` și în CI și **compară cifrele din
+> §3 cu măsurătoarea**, verifică faptul că aceeași măsurătoare nu apare cu două valori, și refuză
+> o optimizare listată ca disponibilă dacă e deja implementată.
 
 ---
 
