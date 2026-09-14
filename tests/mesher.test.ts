@@ -45,7 +45,7 @@ test('INVARIANTUL CENTRAL: unirea lacoma acopera exact aceleasi fete ca numarare
   const seed = 77
   for (const [cx, cy] of [[10, 10], [200, 33], [400, 400], [0, 0]] as const) {
     const chunk = generateChunk(seed, cx, cy)
-    promote(seed, chunk)
+    promote(chunk)
     const naive = countNaiveFaces(chunk)
     const mesh = meshChunk(chunk)
     assert.equal(areaOf(mesh), naive, `aria nu corespunde la chunk (${cx},${cy})`)
@@ -55,7 +55,7 @@ test('INVARIANTUL CENTRAL: unirea lacoma acopera exact aceleasi fete ca numarare
 test('invariantul se tine si dupa sapaturi si constructii', () => {
   const seed = 88
   const chunk = generateChunk(seed, 50, 50)
-  promote(seed, chunk)
+  promote(chunk)
   const rng = stream(seed, 'agents')
   const zBase = chunk.voxels!.zBaseM
 
@@ -119,7 +119,7 @@ test('un perete vertical de 20 × 8 devine un singur quad pe fiecare fata mare',
 test('quadurile stau in marginile chunk-ului', () => {
   const seed = 91
   const chunk = generateChunk(seed, 77, 77)
-  promote(seed, chunk)
+  promote(chunk)
   const mesh = meshChunk(chunk)
   for (let i = 0; i < mesh.positions.length; i += 3) {
     const x = mesh.positions[i]!
@@ -134,9 +134,9 @@ test('quadurile stau in marginile chunk-ului', () => {
 test('mesh-ul e determinist', () => {
   const seed = 5
   const a = generateChunk(seed, 12, 12)
-  promote(seed, a)
+  promote(a)
   const b = generateChunk(seed, 12, 12)
-  promote(seed, b)
+  promote(b)
   const ma = meshChunk(a)
   const mb = meshChunk(b)
   assert.equal(ma.quadCount, mb.quadCount)
@@ -152,7 +152,7 @@ test('un chunk gol nu produce niciun quad', () => {
 test('sapatul produce fete NOI, nu doar mai putine', () => {
   const seed = 61
   const chunk = generateChunk(seed, 30, 30)
-  promote(seed, chunk)
+  promote(chunk)
   const before = countNaiveFaces(chunk)
 
   // O galerie in roca: scoate un voxel ingropat, care expune 6 fete interioare noi.
@@ -167,7 +167,7 @@ test('sapatul produce fete NOI, nu doar mai putine', () => {
 test('fetele de sus ale unui teren normal se unesc bine', () => {
   const seed = 101
   const chunk = generateChunk(seed, 150, 150)
-  promote(seed, chunk)
+  promote(chunk)
   const mesh = meshChunk(chunk)
   let topQuads = 0
   let topArea = 0

@@ -55,6 +55,20 @@ export interface Chunk {
   readonly cy: number
   /** DERIVED — inaltimile varfurilor, in centimetri. (CHUNK_CELLS+1)². */
   readonly vertexCm: Int16Array
+  /**
+   * DERIVED — materialul de suprafata, la rezolutie MACRO (2×2 pe chunk).
+   *
+   * Se calculeaza o data, la generare, si il folosesc AMANDOUA caile: `promote()`
+   * cand construieste coloanele, si `materialAt` cand raspunde pe chunk-uri
+   * ne-promovate. O singura sursa, deci nu mai pot sa se contrazica — asta a fost
+   * exact defectul: calea derivata nu stia de apa si promovarea schimba 25% din
+   * celulele de suprafata.
+   *
+   * Si e ieftin: fara el, fiecare interogare de suprafata costa un `sampleMacro`,
+   * adica trei apeluri de fBm. Suita de teste a sarit de la 3 la 54 de secunde in
+   * clipa in care sistemul de regiuni a inceput sa intrebe des.
+   */
+  readonly surfaceMat: Uint8Array
   /** PERSISTED daca promovat, altfel DERIVED. */
   voxels: VoxelData | null
 }
@@ -122,7 +136,7 @@ export function generateChunk(seed: number, cx: number, cy: number): Chunk {
       vertexCm[vy * VERTS + vx] = vertexHeightCm(patch, vx, vy)
     }
   }
-  return { cx, cy, vertexCm, voxels: null }
+  return { cx, cy, vertexCm, surfaceMat: surfacePatch(seed, cx, cy), voxels: null }
 }
 
 /**
@@ -146,6 +160,12 @@ export function groundLevelFromCm(heightCm: number): number {
 }
 
 /** Inaltimea solului intr-o celula, in centimetri: media celor patru varfuri. */
+/** Materialul de suprafata al unei celule, din patch-ul deja calculat. O citire. */
+export function surfaceMatAt(chunk: Chunk, lx: number, ly: number): MaterialId {
+  const n = CHUNK_CELLS / MACRO_METERS
+  return chunk.surfaceMat[Math.floor(ly / MACRO_METERS) * n + Math.floor(lx / MACRO_METERS)]! as MaterialId
+}
+
 export function cellHeightCm(chunk: Chunk, lx: number, ly: number): number {
   const v = chunk.vertexCm
   const a = v[ly * VERTS + lx]!
@@ -272,10 +292,14 @@ export function encodeAll(zBaseM: number, columns: Uint8Array): VoxelData {
 
 /**
  * Promoveaza un chunk: transforma heightfield-ul in coloane de voxeli.
+ *
+ * Nu mai primeste `seed`: materialul de suprafata vine acum din `chunk.surfaceMat`,
+ * calculat o data la generare si folosit si de calea derivata. Un parametru mort
+ * lasat „pentru compatibilitate" e o urma care deruteaza peste trei luni.
  * Ireversibil prin decizie — o granita care se poate muta in ambele sensuri ar
  * trebui sa fie corecta in ambele sensuri in sase subsisteme.
  */
-export function promote(seed: number, chunk: Chunk): void {
+export function promote(chunk: Chunk): void {
   if (chunk.voxels) return
 
   let minCm = Infinity
@@ -288,7 +312,7 @@ export function promote(seed: number, chunk: Chunk): void {
   const zBaseM = Math.floor(minCm / 100) - LEVELS_BELOW
 
   const columns = new Uint8Array(COLUMNS * VOXEL_LEVELS)
-  const patch = surfacePatch(seed, chunk.cx, chunk.cy)
+  const patch = chunk.surfaceMat
   const patchN = CHUNK_CELLS / MACRO_METERS
 
   for (let ly = 0; ly < CHUNK_CELLS; ly++) {

@@ -699,3 +699,80 @@ care îl combate tot protocolul de gate, găsit în propria infrastructură.
 Golul nr. 5 din `bench/GATE.md` §12 e închis: commit-urile de pre-înregistrare au acum o dată emisă
 de alt sistem. `GIT_COMMITTER_DATE` se falsifică într-o secundă; un timestamp de GitHub Actions nu.
 
+---
+
+## S9-11: regiuni și reachability — și un defect de arhitectură scos la iveală de ele
+
+**Prompt:** „la grafica vom tot lucra, continua cu ce mai poti"
+**Model:** Opus 5
+
+Gate-ul e blocat pe o rulare pe care n-o pot face eu, iar grafica rămâne un workstream în curs. Ce e
+complet neblocat **și** imun la decizia de motor e `src/sim/` — exact codul pe care protocolul îl
+numește ca fiind sigur de scris cât timp D1 e deschis.
+
+### De ce regiunile înaintea agenților
+
+Research-ul pe Going Medieval e neechivoc: pathfinding-ul 3D multi-agent a fost rescris de patru ori
+în cinci ani într-un studio de zece oameni și e declarat și azi, după 1.0, problema numărul unu.
+Semnalul de alarmă citat: **FPS-ul scade când construiești un zid, nu când adaugi pioni** — adică 15
+pioni caută simultan un drum inexistent. Un A* care *eșuează* e cel mai scump lucru din joc.
+
+Trei invarianți, toți din research, toți verificați:
+
+1. **O regiune nu traversează un bloc de 16×16.** Granița e cunoscută dinainte, deci recalcularea e
+   locală.
+2. **O regiune e plată** — stă pe un singur nivel z. Legăturile verticale sunt muchii în graf, nu
+   celule în regiune; altfel un pas de scară ar fuziona două etaje și reachability-ul ar minți în sus.
+3. **Reachability e separat de cost.** Răspunde „există vreun drum?" în O(1), nu „care e cel mai
+   scurt". Falsul pozitiv e acceptat deliberat și scris în antetul modulului: *nu* e definitiv, *da*
+   înseamnă „poate", iar A*-ul rămâne autoritatea.
+
+### Ce au scos la iveală: promovarea SCHIMBA lumea
+
+Testul de zid a picat pentru că nu găsea nicio celulă pe care să se stea. Urmărind de ce, am ajuns la
+ceva care n-avea legătură cu regiunile:
+
+```
+materialAt înainte de promovare:  PAMANT
+materialAt după promovare:        APA
+```
+
+**25% din celulele de suprafață își schimbau materialul în clipa promovării.** Calea derivată nu avea
+ramura `z === groundM`, deci nu știa de apă; cea promovată o avea. Adică „ne-promovat = cache" era
+fals — cache-ul răspundea altceva decât datele.
+
+Nicio suită de teste nu l-ar fi prins: **hash-ul acoperă numai chunk-urile promovate**, deci nu poate
+compara cele două căi prin construcție. A ieșit la iveală doar pentru că sistemul de regiuni a
+întrebat „se poate sta aici?" înainte și după promovare și a primit două răspunsuri. Exact tiparul din
+research: *sistemele astea sunt invizibile — typecheck verde, teste verzi, joc rupt.*
+
+Reparat la sursă: materialul de suprafață se calculează **o dată**, la generare, în `chunk.surfaceMat`,
+și îl folosesc amândouă căile. Verificat pe 32.768 de celule în patru biomuri: **zero diferențe**.
+Invariantul e acum un test.
+
+Consecințe în lanț, toate corecte: nu se mai poate săpa în apă, deci scenariul standard își alege
+siturile pe uscat, iar testul de save sapă un nivel sub suprafață. Hash de referință:
+`c3641ad5` → `69cb5da3`.
+
+Și o urmă ștearsă: `promote(seed, chunk)` nu mai are nevoie de seed — materialul vine din chunk.
+Un parametru mort lăsat „pentru compatibilitate" e o urmă care derutează peste trei luni.
+
+### Costul, măsurat, nu presupus
+
+Suita de teste a sărit de la 3 la **54 de secunde** în clipa în care regiunile au început să întrebe
+des: fiecare interogare de suprafață costa un `sampleMacro`, adică trei apeluri de fBm. Cu patch-ul
+cache-uit pe chunk: **22 s**, din care 22,6 s e fuzz-ul singur.
+
+Iar fuzz-ul spune ceva ce nu voiam să aud (`node tools/bench-regions.mjs`):
+
+| blocuri rezidente | o reconstrucție |
+|---|---|
+| 44 | ~25 ms |
+| 94 | ~30 ms |
+| 171 | ~34 ms |
+
+Bugetul unei săpături e sub 1 ms. **Reconstrucția completă e cu peste 30× peste** și n-are ce căuta
+sincron în cadrul în care jucătorul a dat click. Merge acum fiindcă nu există încă agenți care să
+întrebe — și e scris în cod, cu cifra, tocmai ca să nu treacă drept „destul de rapid" la S12-15.
+Pragul la care devine obligatorie etichetarea incrementală: **primul agent care cere un drum.**
+

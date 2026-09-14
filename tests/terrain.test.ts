@@ -141,7 +141,7 @@ test('chunk-urile vecine sunt CONTINUE pe muchia comuna', () => {
 
 test('RLE: desfacere si recodare dau acelasi lucru', () => {
   const chunk = generateChunk(3, 5, 5)
-  promote(3, chunk)
+  promote(chunk)
   const v = chunk.voxels!
   const columns = decodeAll(v)
   const again = encodeAll(v.zBaseM, columns)
@@ -152,7 +152,7 @@ test('RLE: desfacere si recodare dau acelasi lucru', () => {
 
 test('RLE chiar comprima: un chunk proaspat promovat are putine runs', () => {
   const chunk = generateChunk(3, 5, 5)
-  promote(3, chunk)
+  promote(chunk)
   const runs = runCount(chunk.voxels!)
   const columns = CHUNK_CELLS * CHUNK_CELLS
   // Fara compresie ar fi 1024 × 64 = 65.536 de celule. Cu RLE, sub 5 runs pe coloana.
@@ -162,7 +162,7 @@ test('RLE chiar comprima: un chunk proaspat promovat are putine runs', () => {
 
 test('fiecare coloana acopera exact 64 de niveluri', () => {
   const chunk = generateChunk(8, 2, 3)
-  promote(8, chunk)
+  promote(chunk)
   const v = chunk.voxels!
   for (let c = 0; c < CHUNK_CELLS * CHUNK_CELLS; c++) {
     let sum = 0
@@ -174,7 +174,7 @@ test('fiecare coloana acopera exact 64 de niveluri', () => {
 test('promovarea pastreaza suprafata: primul solid de sus e chiar nivelul solului', () => {
   const seed = 55
   const chunk = generateChunk(seed, 20, 20)
-  promote(seed, chunk)
+  promote(chunk)
   const v = chunk.voxels!
   const scratch = new Uint8Array(VOXEL_LEVELS)
 
@@ -200,15 +200,15 @@ test('promovarea pastreaza suprafata: primul solid de sus e chiar nivelul solulu
 
 test('promovarea e idempotenta', () => {
   const chunk = generateChunk(9, 1, 1)
-  promote(9, chunk)
+  promote(chunk)
   const before = Array.from(chunk.voxels!.runMaterial)
-  promote(9, chunk)
+  promote(chunk)
   assert.deepEqual(Array.from(chunk.voxels!.runMaterial), before)
 })
 
 test('setVoxel scrie si citeste acelasi lucru, si pe cazul care schimba numarul de runs', () => {
   const chunk = generateChunk(4, 6, 6)
-  promote(4, chunk)
+  promote(chunk)
   const zBase = chunk.voxels!.zBaseM
   const ground = Math.floor(cellHeightCm(chunk, 5, 5) / 100)
 
@@ -229,7 +229,7 @@ test('setVoxel scrie si citeste acelasi lucru, si pe cazul care schimba numarul 
 
 test('o coloana ramane consistenta dupa multe editari', () => {
   const chunk = generateChunk(17, 3, 3)
-  promote(17, chunk)
+  promote(chunk)
   const zBase = chunk.voxels!.zBaseM
   const expected = new Uint8Array(VOXEL_LEVELS)
   const scratch = new Uint8Array(VOXEL_LEVELS)
@@ -409,7 +409,11 @@ test('save-ul NU contine chunk-urile ne-promovate', () => {
   const wy = 90 * CHUNK_CELLS
   const g = groundLevelM(w.terrain, wx, wy)
   assert.ok(g.ok)
-  applyCommand(w, { kind: 'dig', wx, wy, z: g.value })
+  // Se sapa UN NIVEL SUB suprafata, nu chiar la suprafata: de cand calea derivata
+  // spune adevarul despre apa, celula de la `groundM` poate fi APA — care nu e
+  // solida, deci saparea ei se refuza, cum e si corect. Sub ea e mereu pamant.
+  const dug = applyCommand(w, { kind: 'dig', wx, wy, z: g.value - 1 })
+  assert.ok(dug.ok, 'sapatura de referinta a fost refuzata')
   const withDigging = encode(w).length
 
   assert.ok(withoutDigging < 20000, `save fara sapaturi prea mare: ${withoutDigging} bytes pentru ${w.terrain.keys.length} chunk-uri rezidente`)
@@ -478,4 +482,45 @@ test('chunk-urile raman in lume: ensureChunk nu accepta coordonate invalide prin
   const c = ensureChunk(t, CHUNK_GRID - 1, CHUNK_GRID - 1)
   assert.equal(c.cx, CHUNK_GRID - 1)
   assert.ok(MACRO_SIZE > 0)
+})
+
+test('promovarea NU schimba lumea: calea derivata si cea de voxeli spun acelasi lucru', () => {
+  // Invariantul central al arhitecturii: „ne-promovat = cache (DERIVED),
+  // promovat = date (PERSISTED)". Un cache care raspunde ALTCEVA decat datele nu
+  // e un cache, e un al doilea adevar.
+  //
+  // Era incalcat, si nu de putin: masurat, 25% din celulele de suprafata treceau
+  // din PAMANT in APA in clipa promovarii, fiindca `materialAt` nu avea ramura
+  // `z === groundM`. Nicio suita de teste nu l-a prins, fiindca hash-ul acopera
+  // numai chunk-urile promovate — deci nu poate compara cele doua cai prin
+  // constructie. A iesit la iveala cand sistemul de regiuni a intrebat „se poate
+  // sta aici?" inainte si dupa promovare si a primit doua raspunsuri diferite.
+  for (const [cx, cy] of [[220, 220], [300, 300], [100, 400]] as const) {
+    const t = createTerrain(777, 3)
+    setFocus(t, cx, cy)
+    const baseX = cx * CHUNK_CELLS
+    const baseY = cy * CHUNK_CELLS
+
+    const inainte: Array<[number, number, number, number]> = []
+    for (let dy = 0; dy < CHUNK_CELLS; dy += 2) {
+      for (let dx = 0; dx < CHUNK_CELLS; dx += 2) {
+        const g = groundLevelM(t, baseX + dx, baseY + dy)
+        assert.ok(g.ok)
+        for (let z = g.value + 2; z >= g.value - 5; z--) {
+          const m = materialAt(t, baseX + dx, baseY + dy, z)
+          assert.ok(m.ok)
+          inainte.push([dx, dy, z, m.value])
+        }
+      }
+    }
+
+    promote(t.chunks.get(cy * CHUNK_GRID + cx)!)
+
+    for (const [dx, dy, z, vechi] of inainte) {
+      const m = materialAt(t, baseX + dx, baseY + dy, z)
+      assert.ok(m.ok)
+      assert.equal(m.value, vechi, `chunk ${cx}/${cy}, celula +${dx}/+${dy} la z=${z}: ${vechi} -> ${m.value}`)
+    }
+    assert.ok(inainte.length > 2000, `doar ${inainte.length} celule verificate`)
+  }
 })

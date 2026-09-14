@@ -4,5 +4,7 @@
   "agentCapacity": 64,
   "agentStepMm": 250,
   "ticksPerSecond": 20,
-  "chunkResidentRadius": 11
+  "chunkResidentRadius": 11,
+  "maxStepM": 1,
+  "agentHeadroomM": 2
 }

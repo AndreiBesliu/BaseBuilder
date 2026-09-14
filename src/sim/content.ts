@@ -26,6 +26,10 @@ export interface Rules {
   readonly ticksPerSecond: number
   /** Raza discului de chunk-uri rezidente, in chunk-uri. 11 ≈ 377 de chunk-uri. */
   readonly chunkResidentRadius: number
+  /** Cate niveluri urca sau coboara un agent dintr-un pas. 1 = o treapta. */
+  readonly maxStepM: number
+  /** De cate niveluri libere are nevoie un agent deasupra podelei. */
+  readonly agentHeadroomM: number
 }
 
 type FieldSpec = { min: number; max: number }
@@ -37,6 +41,8 @@ const RULES_SPEC: Record<keyof Rules, FieldSpec> = {
   agentStepMm: { min: 1, max: 100000 },
   ticksPerSecond: { min: 1, max: 240 },
   chunkResidentRadius: { min: 0, max: 64 },
+  maxStepM: { min: 0, max: 4 },
+  agentHeadroomM: { min: 1, max: 8 },
 }
 
 /**
@@ -85,4 +91,6 @@ export const DEFAULT_RULES: Rules = {
   agentStepMm: 250,
   ticksPerSecond: 20,
   chunkResidentRadius: 11,
+  maxStepM: 1,
+  agentHeadroomM: 2,
 }

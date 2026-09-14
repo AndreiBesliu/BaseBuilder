@@ -13,8 +13,8 @@ import type { Command, LoggedCommand } from '../sim/commands.ts'
 import { applyCommand } from '../sim/commands.ts'
 import { hashWorld } from '../sim/hash.ts'
 import { describe } from '../sim/result.ts'
-import { CHUNK_CELLS, Material } from '../sim/terrain/chunk.ts'
-import { createTerrain, groundLevelM, WORLD_CELLS } from '../sim/terrain/terrain.ts'
+import { CHUNK_CELLS, isSolid, Material } from '../sim/terrain/chunk.ts'
+import { createTerrain, groundLevelM, materialAt, WORLD_CELLS } from '../sim/terrain/terrain.ts'
 import type { World } from '../sim/state.ts'
 import { advance, createWorld, liveAgentCount, tick } from '../sim/world.ts'
 
@@ -146,6 +146,11 @@ function pickSites(seed: number): Site[] {
     const wy = (k * 7919 + seed * 31) % WORLD_CELLS
     const g = groundLevelM(scratch, wx, wy)
     if (!g.ok) continue
+    // Sub apa nu se sapa. Pana la corectarea caii derivate, `materialAt` spunea
+    // PAMANT si pe fundul lacului, deci scenariul „reusea" sa sape acolo; acum
+    // primeste APA si e refuzat, cum e si corect. Situl se alege pe uscat.
+    const sus = materialAt(scratch, wx, wy, g.value)
+    if (!sus.ok || !isSolid(sus.value)) continue
     const site: Site = { wx, wy, groundM: g.value }
     if (g.value < 0 && below.length < SITES_PER_SIGN) below.push(site)
     else if (g.value >= 0 && above.length < SITES_PER_SIGN) above.push(site)

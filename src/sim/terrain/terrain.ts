@@ -16,7 +16,7 @@
 import type { Outcome } from '../result.ts'
 import { accept, refuse, Reason } from '../result.ts'
 import type { Chunk, MaterialId } from './chunk.ts'
-import { CHUNK_CELLS, cellHeightCm, groundLevelFromCm, generateChunk, isSolid, Material, promote, setVoxel, voxelAt, VOXEL_LEVELS } from './chunk.ts'
+import { CHUNK_CELLS, cellHeightCm, groundLevelFromCm, generateChunk, isSolid, Material, promote, setVoxel, surfaceMatAt, voxelAt, VOXEL_LEVELS } from './chunk.ts'
 import { MACRO_METERS, MACRO_SIZE } from './macro.ts'
 
 /** Latimea lumii in chunk-uri: 1024 esantioane × 16 m / 32 m = 512. */
@@ -114,7 +114,7 @@ export function promoteWithApron(t: Terrain, cx: number, cy: number): void {
       const nx = cx + dx
       const ny = cy + dy
       if (!inWorld(nx, ny)) continue
-      promote(t.seed, ensureChunk(t, nx, ny))
+      promote(ensureChunk(t, nx, ny))
     }
   }
 }
@@ -153,8 +153,20 @@ export function materialAt(t: Terrain, wx: number, wy: number, z: number): Outco
   if (!ref) return refuse(Reason.IN_AFARA_LUMII, { x: wx, y: wy, limita: WORLD_CELLS })
   if (ref.chunk.voxels) return accept(voxelAt(ref.chunk, ref.lx, ref.ly, z))
 
+  // Trebuie sa spuna EXACT ce ar spune `promote()` pentru aceeasi celula.
+  //
+  // Lipsea cazul `z === groundM`, si de aia promovarea SCHIMBA lumea: masurat,
+  // 25% din celulele de suprafata treceau din PAMANT in APA in clipa in care
+  // chunk-ul devenea voxeli. Adica „ne-promovat = cache" era fals — cache-ul
+  // raspundea altceva decat datele.
+  //
+  // Defectul a iesit la iveala abia cand sistemul de regiuni a intrebat „se poate
+  // sta aici?" de doua ori, inainte si dupa promovare, si a primit doua raspunsuri.
+  // Exact tiparul din research: sistemele astea sunt invizibile — typecheck verde,
+  // teste verzi, joc rupt.
   const groundM = groundLevelFromCm(cellHeightCm(ref.chunk, ref.lx, ref.ly))
   if (z > groundM) return accept(Material.AER)
+  if (z === groundM) return accept(surfaceMatAt(ref.chunk, ref.lx, ref.ly))
   if (z > groundM - 3) return accept(Material.PAMANT)
   return accept(Material.ROCA)
 }
