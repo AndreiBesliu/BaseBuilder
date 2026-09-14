@@ -573,7 +573,8 @@ era `true` chiar în momentul în care credeam că măsor.
 Deci rularea e o acțiune de om, de o comandă:
 
 ```
-benchuleaza-gate.cmd
+bench
+uleaza-gate.cmd
 ```
 
 Build de producție, server de preview, Chrome pe profil curat cu flagurile din protocol, iar la final
@@ -590,4 +591,57 @@ invalidare și amprenta constantelor tipărită în raport ca să nu poată fi m
 Sonda stă lângă viewer, nu în `src/harness/`, fiindcă are nevoie de DOM — iar `tsconfig.json` al
 nucleului nu are `lib: DOM`, exact regula care ține `src/` portabil. Statistica și verdictul rămân în
 afara browserului.
+
+---
+
+## Scenariile de gate, și probele care trebuie să iasă roșii
+
+**Prompt:** „continua"
+**Model:** Opus 5
+
+### Gate-ul ar fi rulat pe fixtura greșită
+
+Viewerul construia fortăreața de **12 chunk-uri**. Protocolul cere fixtura M10, de **225**. Un gate
+rulat pe cea mică trece cu orice stivă — fals pozitiv prin construcție, exact ce semnalase un
+judecător. Acum `?scenario=...` încarcă M10; verificat în pagină: 225 de chunk-uri promovate.
+
+### Cele trei scenarii, pe șine
+
+`?scenario=fortress|dig|traverse`. Camera merge pe traseu fix, cu oprire la număr fix de cadre — la
+durată fixă, o configurație lentă parcurge alt traseu și compari două scene diferite. Excepția e
+traversarea, care rulează pe **timp real**: cu pas fix, o configurație lentă primește mai mult timp
+de perete pe metru, deci streamerul asincron arată mai bine decât va fi în joc.
+
+### Probele negative
+
+| probă | rezultat |
+|---|---|
+| A · draw calls | **CONFIRMATĂ** — 236 → **5.236**, geometrii +1. Roșu pe axa corectă și numai pe ea. |
+| B · leak de geometrii | **CONFIRMATĂ** — 400 de cadre de traversare: 227 → **337** geometrii, la același număr de mesh-uri. 110 orfane. |
+| C · stall de 120 ms | **neverificată** |
+
+### De ce proba C n-a trecut, și ce am învățat din asta
+
+Ca să verific probele fără `requestAnimationFrame` — care nu e apelat într-o fereastră ascunsă — am
+extras `stepFrame()` și am pășit 700 de cadre sincron. Referința, **fără nicio probă**, a produs 30
+de cadre peste 100 ms.
+
+Înainte să dau vina pe cod, m-am uitat la valori: 100 · 116,7 · 133,3 · 150 · 167 · 183,5 ms.
+**Toate multipli exacți de 16,67.** Sunt așteptări de vsync: `render()` într-o buclă strânsă umple
+lanțul de buffere și browserul blochează până la următorul vsync.
+
+Deci pășirea sincronă verifică **logica** — număr de draw calls, geometrii scurse, stare — și
+**niciodată timpul**. Scris în cod, lângă funcție, ca să nu fie folosită greșit peste trei luni.
+
+Consecință pentru protocol: instrumentul e **incomplet** până la prima rulare reală, iar §8 tratează
+un instrument absent ca blocant pentru STAY, fără să producă singur FAIL.
+
+### Ce rămâne de apăsat
+
+```
+benchuleaza-gate.cmd fortress
+```
+
+Fereastră reală, nemimimizată. Fișierul `.json` se descarcă singur și spune, în el, dacă rularea a
+fost validă.
 

@@ -247,6 +247,10 @@ compilare la cadrul 900.
 | **S-DIG** | 20 de săpături/s timp de 60 s peste fixtura M10 | bucla de construcție |
 | **S-TRAVERSE** | 40 m/s, `setFocus` la fiecare graniță de chunk, build/dispose cu buget de 2 chunk-uri/cadru | **criteriul scris în PLAN** |
 
+**Toate trei sunt implementate** (`?scenario=fortress|dig|traverse`) și încarcă **fixtura M10**, nu
+fortăreața de 12 chunk-uri a viewerului — verificat: 225 de chunk-uri promovate la pornire. Fără asta
+gate-ul ar fi fost fals pozitiv prin construcție, indiferent ce stivă.
+
 **S-TRAVERSE cerea cod care nu exista. Acum există** (commit `streaming`): coadă de build cu buget de
 2 chunk-uri/cadru, evacuare de mesh pe rază de desen, traversare pe șine la 40 m/s cu ambele ceasuri
 (`T`, `F`) și sens reversibil (`Shift+T`, adică S4b — întoarcerea). Măsurat la implementare:
@@ -279,8 +283,10 @@ de măsurare: `document.hidden === true`, contor de cadre 0, iar HUD-ul arăta �
 Deci rularea de gate e o acțiune de OM, într-o fereastră reală:
 
 ```
-benchuleaza-gate.cmd            # bisecția pentru X_max
-benchuleaza-gate.cmd fortress   # un scenariu anume
+bench
+uleaza-gate.cmd            # bisecția pentru X_max
+bench
+uleaza-gate.cmd fortress   # un scenariu anume
 ```
 
 Scriptul construiește build-ul de producție, pornește serverul de preview, deschide Chrome pe un
@@ -319,6 +325,22 @@ producă verde.**
 | 4 | **Probă negativă A** — 5.000 de mesh-uri goale | TREBUIE să iasă roșu pe draw calls |
 | 5 | **Probă negativă B** — `geometry.dispose()` dezactivat | contorul de geometrii TREBUIE să crească monoton |
 | 6 | **Probă negativă C** — busy-loop de 120 ms la fiecare 5 s | TREBUIE raportat ca stall **și atribuit** prin `PerformanceObserver('long-animation-frame')` |
+
+> **Stadiul probelor, 14.09.2026** — armate prin `?probe=drawcalls|leak|stall`, verificate pășind
+> cadre din afara lui rAF (`__kinstead.stepFrame`):
+>
+> | probă | rezultat |
+> |---|---|
+> | A · draw calls | **CONFIRMATĂ** — 236 → **5.236** apeluri, geometrii +1 (partajată). Roșu pe axa corectă și numai pe ea. |
+> | B · leak de geometrii | **CONFIRMATĂ** — după 400 de cadre de traversare: 227 → **337** geometrii, la **același** număr de mesh-uri (377). 110 orfane. |
+> | C · stall de 120 ms | **NEVERIFICATĂ ÎNCĂ, și de ce contează** |
+>
+> Proba C nu se poate verifica prin pășire sincronă: mediul însuși produce cadre lungi. Măsurat, 30
+> din 700 de cadre peste 100 ms, împrăștiate, **toate multipli exacți de 16,67 ms** (100 · 116,7 ·
+> 133,3 · 150 · 167 · 183,5) — adică așteptări de vsync, fiindcă `render()` într-o buclă strânsă
+> umple lanțul de buffere. Pășirea sincronă verifică **logica**, niciodată timpul. Proba C se
+> confirmă la prima rulare reală, și până atunci §8 tratează instrumentul ca **incomplet**: un
+> instrument ABSENT blochează STAY, fără să producă singur FAIL.
 | 7 | **Calibrarea benzilor CPU/GPU** — quad fullscreen cu shader scump (fill pur) și 2.000 de mesh-uri goale (draw-call pur) | benzile din §7 se **citesc** de aici, nu se inventează |
 | 8 | **Test A/A** — 5 rulări „A" și 5 „B", aceeași configurație, proces nou, ordine intercalată | verdictul programului TREBUIE să fie **„nedecis"**. Dacă declară o diferență, programul e rupt și se repară întâi |
 

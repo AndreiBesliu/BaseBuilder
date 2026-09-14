@@ -23,10 +23,19 @@ import { Face, meshChunk } from '../src/render/mesher.ts'
 import { quadColor } from '../src/render/palette.ts'
 import { Ballast, Bisector, checkGuards, clockGranularityMs, FrameProbe, heapMB } from './probe.ts'
 import { meshHeightfield } from '../src/render/heightfield.ts'
+import { buildM10 } from '../src/harness/fixture-m10.ts'
 
 const SEED = 20260913
 /** Cate chunk-uri in jurul focusului se deseneaza. 11 = discul rezident intreg. */
 const VIEW_RADIUS = 11
+
+// Parametrii de rulare se citesc din URL, nu din taste: o rulare de gate trebuie
+// sa poata fi repornita identic si sa-si scrie propriile metadate.
+const params = new URLSearchParams(location.search)
+/** Scenariul de gate. Absent = explorare libera, cu fortareata mica. */
+const SCENARIO = params.get('scenario')
+/** Proba negativa ceruta: instrumentul TREBUIE sa iasa rosu pe ea. */
+const NEGATIVE_PROBE = params.get('probe')
 
 // Paleta si regula de culoare stau in src/render/palette.ts, una singura pentru
 // teren si pentru voxeli. `FACE_SHADE` a disparut: umbrirea per directie era un
@@ -127,7 +136,17 @@ function buildFortress(): void {
   }
 }
 
-buildFortress()
+// Pe ce se masoara.
+//
+// Fortareata de mai sus promoveaza 12 chunk-uri. Fixtura M10 promoveaza 225 —
+// adica bugetul din PLAN §2 pentru asezarea de la luna 10. Un gate rulat pe cea
+// mica trece cu ORICE stiva si nu spune nimic; e fals pozitiv prin constructie.
+// De asta scenariile de gate incarca mereu M10, si niciodata fortareata.
+if (SCENARIO === null) {
+  buildFortress()
+} else {
+  buildM10(world.terrain, FOCUS_CX, FOCUS_CY)
+}
 
 // --------------------------------------------------------------------------
 // 2. scena
@@ -309,7 +328,10 @@ function dropMesh(key: number): void {
   const mesh = meshes.get(key)
   if (!mesh) return
   group.remove(mesh)
-  mesh.geometry.dispose()
+  // `leakProbeActive` NU e un flag de configurare: e proba negativa B din
+  // bench/GATE.md §6. Daca sonda nu vede contorul de geometrii crescand monoton
+  // cand asta e pornit, sonda e stricata si n-are dreptul sa dea verde.
+  if (!leakProbeActive) mesh.geometry.dispose()
   meshes.delete(key)
 }
 
@@ -570,7 +592,6 @@ function gpuName(): string {
   return String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL))
 }
 
-const params = new URLSearchParams(location.search)
 const probe = new FrameProbe()
 const ballast = new Ballast()
 ballast.enabled = params.get('ballast') === '1'
@@ -595,6 +616,8 @@ let gateDone = false
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') probe.invalidate('fereastra a devenit invizibila in timpul rularii')
 })
+
+armNegativeProbe()
 
 const guardFails = checkGuards({
   rendererName: gpuName(),
@@ -622,6 +645,9 @@ function finishGateRun(): void {
       // invalida prin protocol: module netranspilate, HMR, sourcemaps.
       isDevServer: 'hot' in import.meta,
     },
+    // Contorul de geometrii: proba negativa B nu se poate verifica fara el.
+    geometrii: renderer.info.memory.geometries,
+    probaNegativa: NEGATIVE_PROBE ?? 'niciuna',
     invalid: probe.invalid,
     xMaxMs: bisector ? bisector.result : null,
     bisectionResolutionMs: bisector ? bisector.resolutionMs : null,
@@ -647,8 +673,136 @@ function finishGateRun(): void {
   el('spot').className = result.invalid ? 'warn' : ''
 }
 
+// --------------------------------------------------------------------------
+// 5b. scenariile de gate — camera pe sine, nu pe degete
+// --------------------------------------------------------------------------
+//
+// Un om care misca mouse-ul nu produce doua rulari comparabile. Camera merge pe
+// TIMP SIMULAT cu pas fix si se opreste la NUMAR FIX de cadre — la durata fixa,
+// o configuratie lenta parcurge alt traseu si compari doua scene diferite.
+//
+// Exceptia e S-TRAVERSE, care se ruleaza pe timp REAL: cu pas fix, o configuratie
+// lenta primeste mai mult timp de perete pe metru, deci streamerul asincron arata
+// mai bine decat va fi in joc. Fals PASS structural. Vezi bench/GATE.md §5.
+
+/** Cate cadre are o rotatie completa in S-FORTRESS. */
+const ORBIT_FRAMES = 1800
+/** La ce cadre comuta slice-ul. Numarul de clipping planes ramane CONSTANT. */
+const SLICE_AT = [900, 1800, 2700]
+/** Sapaturi pe secunda in S-DIG. La 60 fps inseamna una la trei cadre. */
+const DIGS_PER_SECOND = 20
+
+const settleCenterX = FOCUS_CX * CHUNK_CELLS + 16
+const settleCenterZ = FOCUS_CY * CHUNK_CELLS + 16
+let digCursor = 0
+
+function driveScenario(frame: number): void {
+  if (SCENARIO === null) return
+
+  if (SCENARIO === 'fortress') {
+    const a = (frame / ORBIT_FRAMES) * Math.PI * 2
+    const r = 90
+    const g = groundLevelM(world.terrain, Math.floor(settleCenterX), Math.floor(settleCenterZ))
+    const y = (g.ok ? g.value : 0) + 45
+    camera.position.set(settleCenterX + Math.cos(a) * r, y, settleCenterZ + Math.sin(a) * r)
+    controls.target.set(settleCenterX, y - 40, settleCenterZ)
+    if (SLICE_AT.includes(frame)) {
+      sliceLevel = sliceLevel >= VOXEL_LEVELS ? 18 : VOXEL_LEVELS
+      applySlice()
+    }
+    return
+  }
+
+  if (SCENARIO === 'dig') {
+    // Camera sta; se masoara bucla de constructie, nu cea de privit.
+    if (frame % Math.round(60 / DIGS_PER_SECOND) !== 0) return
+    // Pozitii deterministe, imprastiate peste asezare cu doua numere prime.
+    const span = 13 * CHUNK_CELLS
+    const wx = FOCUS_CX * CHUNK_CELLS + ((digCursor * 1237) % span)
+    const wy = FOCUS_CY * CHUNK_CELLS + ((digCursor * 7919) % span)
+    digCursor++
+    const g = groundLevelM(world.terrain, wx, wy)
+    if (!g.ok) return
+    const out = applyCommand(world, { kind: 'dig', wx, wy, z: g.value - (digCursor % 5) })
+    if (!out.ok) return
+    const c = world.terrain.chunks.get(Math.floor(wy / CHUNK_CELLS) * 512 + Math.floor(wx / CHUNK_CELLS))
+    if (c) buildChunkMesh(c)
+    return
+  }
+
+  if (SCENARIO === 'traverse') {
+    traversing = true
+    traverseFixedClock = false
+  }
+}
+
+// --------------------------------------------------------------------------
+// 5c. probele negative — instrumentul TREBUIE sa poata iesi rosu
+// --------------------------------------------------------------------------
+//
+// „Un harness care nu poate produce rosu n-are dreptul sa produca verde."
+// Fiecare proba strica DELIBERAT ceva si se verifica faptul ca sonda o vede.
+// Se ruleaza inaintea oricarei rulari de gate — bench/GATE.md §6.
+
+/** Proba B: geometriile nu se mai elibereaza. Contorul trebuie sa creasca monoton. */
+let leakProbeActive = false
+/** Proba C: un blocaj de 120 ms la fiecare 5 secunde, care trebuie raportat ca stall. */
+let lastStallMs = -1e9
+
+function armNegativeProbe(): void {
+  if (NEGATIVE_PROBE === null) return
+
+  if (NEGATIVE_PROBE === 'drawcalls') {
+    // 5.000 de mesh-uri separate, fiecare cu un singur triunghi: geometria e
+    // neinsemnata, numarul de draw calls nu.
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), 3))
+    for (let i = 0; i < 5000; i++) {
+      const m = new THREE.Mesh(geo, terrainMaterial)
+      m.position.set(settleCenterX + (i % 70), 60 + Math.floor(i / 70), settleCenterZ)
+      scene.add(m)
+    }
+    return
+  }
+
+  if (NEGATIVE_PROBE === 'leak') {
+    leakProbeActive = true
+    return
+  }
+}
+
+function stepNegativeProbe(): void {
+  if (NEGATIVE_PROBE !== 'stall') return
+  const now = performance.now()
+  if (now - lastStallMs < 5000) return
+  lastStallMs = now
+  ballast.burnMs(120)
+}
+
 function tick(ts: number): void {
   requestAnimationFrame(tick)
+  stepFrame(ts)
+}
+
+/**
+ * Un cadru, fara `requestAnimationFrame`.
+ *
+ * Separat de `tick` dintr-un motiv practic: intr-o fereastra ascunsa rAF nu e
+ * apelat DELOC, deci nici probele negative nu se pot verifica. Asa se poate pasi
+ * cadru cu cadru din afara — exact ce trebuie ca sa dovedesti ca un instrument
+ * chiar iese rosu cand trebuie.
+ *
+ * LIMITA, MASURATA, ca sa nu fie folosit gresit: pasirea SINCRONA nu e un mediu
+ * de masurare a TIMPULUI. Chemand `render()` intr-o bucla stransa, lantul de
+ * buffere se umple si browserul blocheaza pana la urmatorul vsync — 30 din 700
+ * de cadre au iesit peste 100 ms, imprastiate, si toate erau multipli exacti de
+ * 16,67 ms: 100 · 116,7 · 133,3 · 150 · 167 · 183,5. Alea sunt asteptari de
+ * vsync, nu cost de cod.
+ *
+ * Deci: `stepFrame` verifica LOGICA (numar de draw calls, geometrii scurse,
+ * stare), niciodata performanta. Cifrele de gate vin din rularea reala.
+ */
+function stepFrame(ts: number): void {
   const now = performance.now()
   const dt = now - last
   last = now
@@ -657,6 +811,8 @@ function tick(ts: number): void {
   if (frames.length > 240) frames.shift()
 
   const cpuStart = performance.now()
+  driveScenario(frameIndex)
+  stepNegativeProbe()
   stepTraverse(dt)
   controls.update()
   updateFocus()
@@ -715,4 +871,4 @@ hud.removeAttribute('hidden')
 requestAnimationFrame(tick)
 
 // Expus pentru masuratori din consola, nu pentru joc.
-Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast } })
+Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes } })
