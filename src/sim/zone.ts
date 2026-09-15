@@ -33,11 +33,22 @@ import { cellKey } from './path.ts'
 import { rezervariPentru, Strat } from './rezervari.ts'
 import { DetaliuItem } from './iteme.ts'
 
-/** Felurile de zona. Un singur fel azi. */
+/**
+ * Felurile de zona.
+ *
+ * Felul nu e decor: pana la taietura 3 nimic din index nu-l citea, iar panoul a
+ * aratat ce s-ar fi intamplat la al DOILEA fel — dormitorul ar fi devenit
+ * automat depozit. Carausii ar fi umplut paturile, `maxPrioLibera` ar fi ramas
+ * sus (deci fiecare morman de pe jos ar fi ramas candidat la evaluare scumpa pe
+ * veci — K05 pe usa din dos), iar un morman cazut in dormitor n-ar mai fi iesit
+ * niciodata, fiindca `prioritateaLocului` i-ar fi dat prioritatea dormitorului.
+ */
 export const Zona = {
   DEPOZIT: 0,
+  DORMIT: 1,
 } as const
 export type ZonaKind = (typeof Zona)[keyof typeof Zona]
+export const ZONE_FELURI = 2
 
 export interface ZoneCellStore {
   /** PERSISTED */ count: number
@@ -70,8 +81,15 @@ export interface IndexZone {
   maxLocLiber: Int32Array
   /** Per fel: prioritatea maxima a unei zone cu cel putin o celula acceptanta; 0 = niciuna. */
   readonly maxPrioLibera: Int32Array
-  /** Sloturile zonelor vii, in ordinea (prioritate desc, id asc). */
-  readonly zoneOrdonate: number[]
+  /**
+   * Sloturile zonelor de DEPOZIT vii, in ordinea (prioritate desc, id asc).
+   *
+   * Numai DEPOZIT: lista asta e ordinea in care se cauta o destinatie de carat,
+   * si un dormitor n-are ce cauta in ea. Vezi `Zona`.
+   */
+  readonly depoziteOrdonate: number[]
+  /** Sloturile celulelor libere (nerezervate, fara pion pe ele) din zonele de DORMIT, in ordinea slotului. */
+  readonly paturiLibere: number[]
   /** Sloturile itemelor care AU unde sa fie mutate (o zona strict mai buna decat locul lor), in ordinea slotului. */
   readonly deMutat: number[]
   /** Cate iteme zac pe jos (nu intr-o zona) fara nicio zona care sa le primeasca. Pentru cauza pe pion. */
@@ -132,7 +150,8 @@ export function makeZoneStore(capacity: number, cellCapacity: number): ZoneStore
       acceptante: new Int32Array(capacity * ITEME),
       maxLocLiber: new Int32Array(capacity * ITEME),
       maxPrioLibera: new Int32Array(ITEME),
-      zoneOrdonate: [],
+      depoziteOrdonate: [],
+      paturiLibere: [],
       deMutat: [],
       peJosFaraDepozit: 0,
       reconstructii: 0,
@@ -157,12 +176,20 @@ export function celulaDeZonaLa(s: ZoneStore, wx: number, wy: number, z: number):
   return i === undefined ? -1 : i
 }
 
-/** Prioritatea zonei in care sta celula (wx, wy, z), sau 0 daca nu e in nicio zona. */
+/**
+ * Prioritatea DEPOZITULUI in care sta celula (wx, wy, z), sau 0.
+ *
+ * 0 si pentru o celula dintr-o zona de alt fel: „cat de bine e asezata marfa
+ * aici" are sens doar intr-un depozit. Fara clauza asta, un morman cazut intr-un
+ * dormitor ar mosteni prioritatea dormitorului, si cum scannerul cere o zona
+ * STRICT mai buna decat locul, n-ar mai fi luat de acolo niciodata.
+ */
 export function prioritateaLocului(s: ZoneStore, wx: number, wy: number, z: number): number {
   const cs = celulaDeZonaLa(s, wx, wy, z)
   if (cs === -1) return 0
   const zs = slotZona(s, s.celule.zonaId[cs]!)
-  return zs === -1 ? 0 : s.prioritate[zs]!
+  if (zs === -1 || s.kind[zs] !== Zona.DEPOZIT) return 0
+  return s.prioritate[zs]!
 }
 
 export function marcheazaZoneMurdare(w: World): void {
@@ -250,6 +277,10 @@ export function reindexeazaZone(s: ZoneStore, rules: Rules): Outcome<void> {
     if (s.laId.has(s.id[i]!)) return refuse(Reason.ENTITATE_INEXISTENTA, { camp: 'zone.id', motiv: 'duplicat', id: s.id[i]! })
     const p = s.prioritate[i]!
     if (p < 1 || p > rules.zonePriorityLevels) return refuse(Reason.VALOARE_INVALIDA, { camp: `zone.prioritate[${i}]`, valoare: p, min: 1, max: rules.zonePriorityLevels })
+    // Un fel necunoscut e un save dintr-o versiune mai noua. Se REFUZA: tacut,
+    // ar cadea pe ramura „nu e depozit" si dormitorul lui ar deveni inert.
+    const f = s.kind[i]!
+    if (f >= ZONE_FELURI) return refuse(Reason.VALOARE_INVALIDA, { camp: `zone.kind[${i}]`, valoare: f, min: 0, max: ZONE_FELURI - 1 })
     s.laId.set(s.id[i]!, i)
     s.vii++
   }
@@ -291,7 +322,7 @@ export function reindexeazaZone(s: ZoneStore, rules: Rules): Outcome<void> {
  */
 /** Exista o zona strict mai buna decat `prioLoc` cu loc pentru `cant` din felul `kind`? */
 function incapeUndeva(s: ZoneStore, ix: IndexZone, kind: number, cant: number, prioLoc: number): boolean {
-  for (const zs of ix.zoneOrdonate) {
+  for (const zs of ix.depoziteOrdonate) {
     if (s.prioritate[zs]! <= prioLoc) return false
     if (ix.maxLocLiber[zs * ITEME + kind]! >= cant) return true
   }
@@ -305,10 +336,10 @@ export function indexZone(w: World, rules: Rules): IndexZone {
   ix.murdar = false
   ix.reconstructii++
 
-  // Zonele vii, ordonate. Ordine TOTALA pe date persistate (prioritate, id).
-  ix.zoneOrdonate.length = 0
-  for (let i = 0; i < s.count; i++) if (s.alive[i] === 1) ix.zoneOrdonate.push(i)
-  ix.zoneOrdonate.sort((a, b) => s.prioritate[b]! - s.prioritate[a]! || s.id[a]! - s.id[b]!)
+  // Depozitele vii, ordonate. Ordine TOTALA pe date persistate (prioritate, id).
+  ix.depoziteOrdonate.length = 0
+  for (let i = 0; i < s.count; i++) if (s.alive[i] === 1 && s.kind[i] === Zona.DEPOZIT) ix.depoziteOrdonate.push(i)
+  ix.depoziteOrdonate.sort((a, b) => s.prioritate[b]! - s.prioritate[a]! || s.id[a]! - s.id[b]!)
 
   if (ix.acceptante.length < s.count * ITEME) ix.acceptante = new Int32Array(s.capacity * ITEME)
   if (ix.maxLocLiber.length < s.count * ITEME) ix.maxLocLiber = new Int32Array(s.capacity * ITEME)
@@ -322,12 +353,19 @@ export function indexZone(w: World, rules: Rules): IndexZone {
 
   const c = s.celule
   const it = w.iteme
+  ix.paturiLibere.length = 0
   for (let cs = 0; cs < c.count; cs++) {
     ix.pasi++
     if (c.alive[cs] === 0) continue
     const zs = slotZona(s, c.zonaId[cs]!)
     if (zs === -1) continue
     if (rezervariPentru(w.rezervari, c.id[cs]!, Strat.LUCRU).length > 0) continue
+    // Felul zonei alege lista. O celula de dormit nu e loc de depozitare: daca
+    // ar cadea in `libere`/`acceptante`, carausii ar umple paturile.
+    if (s.kind[zs] !== Zona.DEPOZIT) {
+      if (s.kind[zs] === Zona.DORMIT) ix.paturiLibere.push(cs)
+      continue
+    }
     const item = it.laCelula.get(cellKey(c.wx[cs]!, c.wy[cs]!, c.z[cs]!))
     if (item === undefined) {
       ix.libere[zs]!.push(cs)
@@ -343,7 +381,7 @@ export function indexZone(w: World, rules: Rules): IndexZone {
       if (loc > ix.maxLocLiber[zs * ITEME + k]!) ix.maxLocLiber[zs * ITEME + k] = loc
     }
   }
-  for (const zs of ix.zoneOrdonate) {
+  for (const zs of ix.depoziteOrdonate) {
     for (let k = 0; k < ITEME; k++) {
       if (ix.acceptante[zs * ITEME + k]! > 0 && s.prioritate[zs]! > ix.maxPrioLibera[k]!) ix.maxPrioLibera[k] = s.prioritate[zs]!
     }
@@ -363,7 +401,9 @@ export function indexZone(w: World, rules: Rules): IndexZone {
       // vizibila fara ca vreun pion sa plateasca o evaluare pentru ea.
       ix.peJosFaraDepozit++
       it.ultimulMotiv[i] = codMotiv(Reason.FARA_DEPOZIT)
-      it.ultimulMotivDetaliu[i] = s.vii === 0 ? DetaliuItem.NICIO_ZONA : DetaliuItem.DEPOZITE_PLINE
+      // „Nicio zona" inseamna niciun DEPOZIT: cu un dormitor pictat si zero
+      // depozite, cauza corecta ramane „n-ai unde pune", nu „depozitele sunt pline".
+      it.ultimulMotivDetaliu[i] = ix.depoziteOrdonate.length === 0 ? DetaliuItem.NICIO_ZONA : DetaliuItem.DEPOZITE_PLINE
     }
   }
   return ix

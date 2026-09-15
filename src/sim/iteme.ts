@@ -284,11 +284,31 @@ export function asazaItem(w: World, rules: Rules, kind: number, cantitate: numbe
  * Ia `cantitate` din mormanul `slot`. Daca ramane gol, moare. Intoarce cat s-a
  * luat. Rezervarile de pe un morman mort sunt treaba apelantului.
  */
-export function iaDinItem(w: World, slot: number, cantitate: number): number {
+export function iaDinItem(w: World, rules: Rules, slot: number, cantitate: number): number {
   const s = w.iteme
-  const luat = Math.min(cantitate, s.cantitate[slot]!)
-  s.cantitate[slot] = s.cantitate[slot]! - luat
-  if (s.cantitate[slot] === 0) stergeItem(s, slot)
-  marcheazaZoneMurdare(w)
+  const inainte = s.cantitate[slot]!
+  const luat = Math.min(cantitate, inainte)
+  const dupa = inainte - luat
+  s.cantitate[slot] = dupa
+
+  // Indexul se murdareste doar cand luatul poate SCHIMBA indexul. Panoul
+  // taieturii 3 a masurat de ce conteaza: mancatul cheama rutina asta la fiecare
+  // imbucatura, iar o murdarire neconditionata ar plati o reconstructie
+  // O(celule + iteme) de fiecare data — la tinta din DESIGN §10, ~114 pasi/tick
+  // doar din mancat, de 3,8 ori peste pragul care leaga azi.
+  //
+  // Trei cauze, si atat:
+  //   - mormanul moare: iese din `deMutat`, si celula lui de depozit se elibereaza;
+  //   - sta pe o celula de zona: `libere`/`acceptante`/`maxLocLiber` se schimba;
+  //   - `min(cantitate, haulCarryMax)` se schimba: alta cerere in `incapeUndeva`.
+  // O imbucatura de 20 dintr-un morman de 75 de pe jos nu atinge niciuna.
+  const peZona = celulaDeZonaLa(w.zone, s.wx[slot]!, s.wy[slot]!, s.z[slot]!) !== -1
+  const caraSchimbat = Math.min(inainte, rules.haulCarryMax) !== Math.min(dupa, rules.haulCarryMax)
+  if (dupa === 0) {
+    stergeItem(s, slot)
+    marcheazaZoneMurdare(w)
+  } else if (peZona || caraSchimbat) {
+    marcheazaZoneMurdare(w)
+  }
   return luat
 }

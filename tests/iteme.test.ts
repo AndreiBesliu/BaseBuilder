@@ -280,12 +280,13 @@ test('indexul zonelor e o functie de stare: dupa orice schimbare se reconstruies
   const b = indexZone(loaded.value, R)
   assert.deepEqual([...a.maxPrioLibera], [...b.maxPrioLibera])
   assert.deepEqual(a.deMutat, b.deMutat)
-  assert.deepEqual(a.zoneOrdonate, b.zoneOrdonate)
+  assert.deepEqual(a.depoziteOrdonate, b.depoziteOrdonate)
+  assert.deepEqual(a.paturiLibere, b.paturiLibere)
   assert.deepEqual(a.libere.map((l) => [...l]), b.libere.map((l) => [...l]))
   assert.equal(a.peJosFaraDepozit, b.peJosFaraDepozit)
 })
 
-function await_import(): { indexZone: (w: World, r: typeof R) => { maxPrioLibera: Int32Array; deMutat: number[]; zoneOrdonate: number[]; libere: number[][]; peJosFaraDepozit: number } } {
+function await_import(): { indexZone: (w: World, r: typeof R) => { maxPrioLibera: Int32Array; deMutat: number[]; depoziteOrdonate: number[]; paturiLibere: number[]; libere: number[][]; peJosFaraDepozit: number } } {
   // Import static ar fi mai simplu; functia exista ca testul de mai sus sa ramana sincron.
   return { indexZone: indexZoneRef }
 }

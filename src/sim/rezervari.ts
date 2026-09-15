@@ -48,17 +48,25 @@ import { accept, refuse, Reason } from './result.ts'
 import type { AgentStore } from './state.ts'
 
 /**
- * Straturile. LUCRU e singurul folosit azi; CARAT e rezervat pentru taietura 2
- * (un morman rezervat „ca sa-l car" nu blocheaza „ca sa lucrez langa el").
- * Dimensiunea exista din prima zi tocmai ca al doilea strat sa nu ceara nimic.
+ * Straturile. Un morman rezervat „ca sa-l car" nu blocheaza „ca sa lucrez langa
+ * el", si niciunul din ele nu blocheaza „ca sa mananc din el".
+ *
+ * MANCAT e un strat PROPRIU, nu o refolosire a lui CARAT, si motivul e din
+ * panoul taieturii 3: pe stratul CARAT, cu `maxClaimants = 1` al caratului, un
+ * singur caraus ar bloca toata mancarea coloniei pe tot drumul lui. Iar daca
+ * mancatul ar sta pe CARAT cu ALT `maxClaimants`, cele doua verificari n-ar mai
+ * fi de acord — `verificaUna` judeca dupa cererea NOUA, iar `verificaRezervari`
+ * ia MINIMUL peste lista existenta — deci acceptanta ar deveni rosie pe o stare
+ * pe care API-ul tocmai a acceptat-o. Straturile exact pentru asta exista.
  */
 export const Strat = {
   LUCRU: 0,
   CARAT: 1,
+  MANCAT: 2,
 } as const
 export type StratId = (typeof Strat)[keyof typeof Strat]
 /** Cate straturi sunt. Structura, nu numar de gameplay. */
-export const STRATURI = 2
+export const STRATURI = 3
 
 /** Ce cere un job de la o tinta, INAINTE de a porni. */
 export interface Cerere {

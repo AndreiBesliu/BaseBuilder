@@ -88,7 +88,7 @@
 import type { Rules } from './content.ts'
 import type { Outcome, ReasonCode } from './result.ts'
 import { accept, codMotiv, refuse, Reason } from './result.ts'
-import type { World } from './state.ts'
+import type { FelJobId, World } from './state.ts'
 import { Categorie, CATEGORII, FelJob, ITEME, PasCara, PasJob } from './state.ts'
 import { cellOf, clearPath } from './drumuri.ts'
 import { blockOfCell, ensureArea, find, isWalkable, markDirty, NO_REGION, regionAt, REGION_SIZE } from './regions.ts'
@@ -297,11 +297,8 @@ export function cereriCara(rules: Rules, itemId: number, destId: number, cant: n
  * ce mormanul crescuse prin contopire, si o lume incarcata lua alt job.
  */
 export function cereriPentru(w: World, rules: Rules, slot: number): readonly Cerere[] {
-  const a = w.agents
-  if (a.jobKind[slot] === FelJob.CARA) {
-    return cereriCara(rules, a.jobTarget[slot]!, a.jobDest[slot]!, a.jobCantitate[slot]!, a.jobStep[slot]!)
-  }
-  return cereriSapa(a.jobTarget[slot]!)
+  const drv = driverul(w, slot)
+  return drv === undefined ? [] : drv.cereri(w, rules, slot)
 }
 
 // ---------------------------------------------------------------------------
@@ -580,7 +577,7 @@ export function cautaDestinatie(
   let zoneCuLoc = 0
   let evitate = 0
   let inAltaComponenta = false
-  for (const zs of ix.zoneOrdonate) {
+  for (const zs of ix.depoziteOrdonate) {
     const prio = s.prioritate[zs]!
     if (prio <= prioLoc) break
     // Poarta ieftina intreaba „incape CAT car?", nu „e vreun loc?": altfel un
@@ -1106,59 +1103,15 @@ export function terminaJob(
 ): void {
   const a = w.agents
   if (a.jobKind[slot] === 0) return
-  const fel = a.jobKind[slot]!
-  const step = a.jobStep[slot]!
-  const target = a.jobTarget[slot]!
-  const dest = a.jobDest[slot]!
+  const drv = driverul(w, slot)
   elibereaza(w.rezervari, a.id[slot]!, a.jobId[slot]!)
-  if (fel === FelJob.CARA) marcheazaZoneMurdare(w)
+  if (drv?.atingeZone === true) marcheazaZoneMurdare(w)
 
   // Marfa nu dispare: orice sfarsit cu mana plina o lasa jos.
   const rezultat = lasaLaPicioare(w, rules, slot)
 
   if (cum === Sfarsit.INCOMPLET) {
-    if (fel === FelJob.SAPA) {
-      const ds = slotDesemnare(w.desemnari, target)
-      if (racire === Racire.TINTA) {
-        if (ds !== -1) {
-          w.desemnari.reincercaLaTick[ds] = w.tick + racireDesemnare(w, rules)
-          w.desemnari.ultimulMotiv[ds] = codMotiv(motiv ?? Reason.INACCESIBIL)
-          w.desemnari.ultimulMotivDetaliu[ds] = detaliuDesemnareDin(motiv ?? Reason.INACCESIBIL)
-        }
-      } else {
-        evitaTinta(w, slot, target, w.tick + rules.jobRetryTicks)
-        // Cauza se vede si pe tinta, ca overlay-ul sa aiba ce arata — dar fara
-        // racire pe ea: altcineva o poate lua chiar acum.
-        if (ds !== -1 && motiv) {
-          w.desemnari.ultimulMotiv[ds] = codMotiv(motiv)
-          w.desemnari.ultimulMotivDetaliu[ds] = DetaliuMotiv.NICIUNUL
-        }
-      }
-    } else {
-      // Caratul: ce EXISTA dupa refuz e sursa (daca n-a fost ridicata) sau
-      // mormanul lasat la picioare. Racirea se scrie pe ele, nu pe un id mort.
-      const sursa = step <= PasCara.RIDICA ? slotItem(w.iteme, target) : -1
-      const is = sursa !== -1 ? sursa : rezultat
-      if (racire === Racire.TINTA) {
-        if (is !== -1) memoreazaPeItem(w, rules, is, motiv ?? Reason.INACCESIBIL, detaliuItemDin(motiv ?? Reason.INACCESIBIL))
-      } else {
-        if (step >= PasCara.MERGE_DEST) {
-          // Drumul MEU spre depozitul ala e blocat; zona ramane pentru altii.
-          const cs = slotCelulaDeZona(w.zone, dest)
-          if (cs !== -1) evitaTinta(w, slot, w.zone.celule.zonaId[cs]!, w.tick + rules.jobRetryTicks)
-        }
-        if (sursa !== -1) evitaTinta(w, slot, target, w.tick + rules.jobRetryTicks)
-        // Mormanul lasat jos NU se raceste pe pereche: cu zona evitata, scannerul
-        // il respinge singur (toate zonele cu loc sunt evitate → racire pe item,
-        // scrisa de scanner), iar daca exista ALT depozit, pionul are voie sa-l
-        // incerce. O racire aici ar fi fost redundanta (mutatia a trecut verde)
-        // si ar fi ascuns depozitul bun timp de `jobRetryTicks`.
-        if (is !== -1 && motiv) {
-          w.iteme.ultimulMotiv[is] = codMotiv(motiv)
-          w.iteme.ultimulMotivDetaliu[is] = DetaliuItem.NICIUNUL
-        }
-      }
-    }
+    drv?.incheie(w, rules, slot, motiv, racire, rezultat)
     if (motiv) {
       w.ratiune.stare[slot] = StareRatiune.RESPINS
       w.ratiune.motivFinal[slot] = codMotiv(motiv)
@@ -1211,7 +1164,7 @@ export function terminaJob(
 export function drumRefuzat(w: World, rules: Rules, slot: number, motiv: ReasonCode): void {
   const a = w.agents
   raport.refuzuriDrum++
-  const cara = a.jobKind[slot] === FelJob.CARA
+  const drv = driverul(w, slot)
 
   // Pe regiuni stale nu se decide nimic: o celula proaspat calcabila e invizibila
   // pana la reconstructie, si jobul s-ar incheia cu un motiv fals.
@@ -1244,12 +1197,7 @@ export function drumRefuzat(w: World, rules: Rules, slot: number, motiv: ReasonC
   // sta cineva ostil in drum. „Prea scump ACUM" nu se repara mutandu-te cu o
   // celula mai incolo — se asteapta, si se numara incercarea.
   if ((motiv === Reason.INACCESIBIL || motiv === Reason.OCUPAT_DE_OSTIL) && w.regions.dirty.size === 0) {
-    if (!cara) {
-      const curenta = cellKey(a.jobWorkX[slot]!, a.jobWorkY[slot]!, a.jobWorkZ[slot]!)
-      if (refaLoculDeLucru(w, rules, slot, curenta)) return
-    } else if (a.jobStep[slot] === PasCara.MERGE_DEST) {
-      if (refaDestinatia(w, rules, slot, slotCelulaDeZona(w.zone, a.jobDest[slot]!))) return
-    }
+    if (drv !== undefined && drv.refaTinta(w, rules, slot)) return
     // Nicio alta tinta, si drumul spre asta nu exista: e o proprietate a TINTEI.
     if (motiv === Reason.INACCESIBIL) {
       terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.INACCESIBIL, Racire.TINTA)
@@ -1325,13 +1273,16 @@ function refaDestinatia(w: World, rules: Rules, slot: number, evitaCs = -1): boo
 
 /** Un tick intr-un pas de oprire. Dispecerizeaza pe felul jobului si pasul lui. */
 export function lucreaza(w: World, rules: Rules, slot: number): void {
-  const a = w.agents
-  if (a.jobKind[slot] === FelJob.CARA) {
-    if (a.jobStep[slot] === PasCara.RIDICA) ridica(w, rules, slot)
-    else lasa(w, rules, slot)
+  const drv = driverul(w, slot)
+  if (drv === undefined) {
+    // Fel necunoscut: se incheie, nu se executa ca sapat. Nu se poate ajunge
+    // aici pe o cale normala — `reconstruiesteRezervari` refuza deja felurile
+    // fara driver la incarcare — dar un `lucreaza` care presupune e exact
+    // bucla de doua tickuri pe care tabelul a venit s-o inchida.
+    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
     return
   }
-  lucreazaSapa(w, rules, slot)
+  drv.lucreaza(w, rules, slot)
 }
 
 function peCelula(w: World, slot: number, wx: number, wy: number, z: number): boolean {
@@ -1430,7 +1381,7 @@ function ridica(w: World, rules: Rules, slot: number): void {
   a.jobEfect[slot] = 1
   // Sursa s-a consumat: DOAR ea se elibereaza, destinatia ramane tinuta.
   elibereazaUna(w.rezervari, a.id[slot]!, a.jobId[slot]!, idItem, Strat.CARAT)
-  const luat = iaDinItem(w, is, cant)
+  const luat = iaDinItem(w, rules, is, cant)
   if (luat !== cant) a.caraCantitate[slot] = luat
   if (it.alive[is] === 0) elibereazaTinta(w.rezervari, idItem)
 
@@ -1618,7 +1569,11 @@ export function anuleazaCelulaDeZona(w: World, rules: Rules, cs: number): void {
   const a = w.agents
   const id = w.zone.celule.id[cs]!
   for (let i = 0; i < a.count; i++) {
-    if (a.alive[i] === 0 || a.jobKind[i] !== FelJob.CARA || a.jobDest[i] !== id) continue
+    // ORICE job care tine celula, nu doar caratul: `jobDest` e 0 pentru cine nu
+    // foloseste o a doua tinta, si un id de celula vie nu e niciodata 0. Cu
+    // filtrul pe CARA, stergerea unui dormitor ar lasa un pion adormit pe o
+    // celula inexistenta, fara rezervare — si lumea incarcata ar diverge.
+    if (a.alive[i] === 0 || a.jobKind[i] === 0 || a.jobDest[i] !== id) continue
     terminaJob(w, rules, i, Sfarsit.INTRERUPT)
   }
   elibereazaTinta(w.rezervari, id)
@@ -1650,20 +1605,16 @@ export function reconstruiesteRezervari(w: World, rules: Rules): number {
   for (let i = 0; i < a.count; i++) {
     if (a.jobKind[i] === 0) continue
     let out: Outcome<void>
+    const drv = driverul(w, i)
     if (a.alive[i] === 0) {
       out = refuse(Reason.ENTITATE_INEXISTENTA, { id: a.id[i]!, motiv: 'claimant mort' })
-    } else if (a.jobKind[i] === FelJob.CARA) {
-      const sursaOk = a.jobStep[i]! > PasCara.RIDICA || slotItem(w.iteme, a.jobTarget[i]!) !== -1
-      const destOk = slotCelulaDeZona(w.zone, a.jobDest[i]!) !== -1
-      out = !sursaOk
-        ? refuse(Reason.ENTITATE_INEXISTENTA, { id: a.jobTarget[i]! })
-        : !destOk
-          ? refuse(Reason.ENTITATE_INEXISTENTA, { id: a.jobDest[i]! })
-          : rezervaToate(w.rezervari, a.id[i]!, a.jobId[i]!, cereriPentru(w, rules, i))
+    } else if (drv === undefined) {
+      // Un fel de job pe care versiunea asta nu-l cunoaste (save mai nou, sau
+      // stare corupta). Se ANULEAZA cu raport — nu se executa ca sapat.
+      out = refuse(Reason.VALOARE_INVALIDA, { camp: 'jobKind', valoare: a.jobKind[i]!, motiv: 'fel de job fara driver' })
     } else {
-      out = slotDesemnare(w.desemnari, a.jobTarget[i]!) === -1
-        ? refuse(Reason.ENTITATE_INEXISTENTA, { id: a.jobTarget[i]! })
-        : rezervaToate(w.rezervari, a.id[i]!, a.jobId[i]!, cereriPentru(w, rules, i))
+      const vii = drv.tinteVii(w, i)
+      out = vii.ok ? rezervaToate(w.rezervari, a.id[i]!, a.jobId[i]!, drv.cereri(w, rules, i)) : vii
     }
     if (out.ok) continue
     a.jobKind[i] = 0
@@ -1717,9 +1668,180 @@ export function uitaRacirileDeMarfa(w: World): void {
 /** Exista tinta unei rezervari? Pentru `verificaRezervari` (clauza 5), in teste si acceptanta. */
 export function existaTinta(w: World): (targetId: number, layer: number) => boolean {
   return (targetId, layer) => {
-    if (layer === Strat.CARAT) return slotItem(w.iteme, targetId) !== -1
+    if (layer === Strat.CARAT || layer === Strat.MANCAT) return slotItem(w.iteme, targetId) !== -1
     return slotDesemnare(w.desemnari, targetId) !== -1 || slotCelulaDeZona(w.zone, targetId) !== -1
   }
+}
+
+// ---------------------------------------------------------------------------
+// tabelul de drivere
+// ---------------------------------------------------------------------------
+
+/**
+ * Tot ce stie motorul de joburi despre UN fel de job.
+ *
+ * ## De ce un tabel si nu `if`-uri
+ *
+ * Pana aici, cinci locuri ramificau pe `=== FelJob.CARA` cu `else` = SAPA:
+ * `cereriPentru`, `reconstruiesteRezervari`, `lucreaza`, `terminaJob` si
+ * `drumRefuzat`. Cu doua feluri, un `else` e o alternativa. Cu trei, e o
+ * PRESUPUNERE — si panoul taieturii 3 a masurat ce presupune gresit, din patru
+ * lentile independente care au ajuns la aceeasi radacina:
+ *
+ *   - la incarcare, `reconstruiesteRezervari` ar fi cerut `slotDesemnare(...)`
+ *     pentru un id de ITEM, ar fi primit -1 si ar fi anulat jobul. Adica
+ *     `1000 + save + load + 1000 != 2000` pentru FIECARE pion care mananca sau
+ *     doarme in momentul salvarii — aproape mereu. Exact invarianta pe care sta
+ *     tot determinismul.
+ *   - in executie, `lucreaza` ar fi trimis orice fel != CARA in `lucreazaSapa`,
+ *     care n-ar fi gasit desemnarea si ar fi facut `terminaJob(INTRERUPT)`;
+ *     pionul ar fi reluat, si tot asa — o bucla de ~2 tickuri, fiecare arzand un
+ *     `w.nextId`, care e PERSISTED si intra in hash.
+ *   - la un refuz de drum, racirea s-ar fi scris pe `slotItem(...)` = -1, adica
+ *     NICAIERI, deci reluarea ar fi fost imediata si infinita.
+ *
+ * Si tabelul e ce face adevarata propozitia „o nevoie noua e un rand de tabel":
+ * fara el, un fel nou de job cere noua schimbari imprastiate, nu una.
+ *
+ * `default` REFUZA, nu presupune. Un `FelJob` necunoscut dintr-un save mai nou
+ * anuleaza jobul cu raport, nu il executa ca sapat.
+ */
+export interface DriverJob {
+  readonly fel: FelJobId
+  /** Sfarsitul jobului schimba ce e liber intr-o zona? Atunci indexul se murdareste. */
+  readonly atingeZone: boolean
+  /**
+   * Cererile de rezervare ale jobului, calculate DOAR din tuplul PERSISTAT
+   * (`jobTarget, jobDest, jobCantitate, jobStep`) — deci identic in lumea
+   * continua si in cea incarcata. Nimic de aici nu citeste un camp mutabil al
+   * tintei; vezi `cereriPentru`.
+   */
+  cereri(w: World, rules: Rules, slot: number): readonly Cerere[]
+  /** Mai exista tintele jobului in lume? Refuzul poarta id-ul lipsa. */
+  tinteVii(w: World, slot: number): Outcome<void>
+  /** Un tick intr-un pas de oprire (sapa, ridica, lasa, mananca, doarme). */
+  lucreaza(w: World, rules: Rules, slot: number): void
+  /**
+   * Un INCOMPLET: unde se scrie racirea si cauza. `rezultat` e slotul mormanului
+   * lasat la picioare (sau -1); restul se citeste din tuplul jobului, care inca
+   * nu s-a sters.
+   */
+  incheie(w: World, rules: Rules, slot: number, motiv: ReasonCode | undefined, racire: RacireId, rezultat: number): void
+  /**
+   * Dupa un refuz de drum care tine de TINTA: se poate re-alege tinta pasului de
+   * mers curent, sarind peste cea de acum? `false` inseamna „nu mai am unde".
+   */
+  refaTinta(w: World, rules: Rules, slot: number): boolean
+}
+
+const DRIVER_SAPA: DriverJob = {
+  fel: FelJob.SAPA,
+  atingeZone: false,
+  cereri(w, _rules, slot) {
+    return cereriSapa(w.agents.jobTarget[slot]!)
+  },
+  tinteVii(w, slot) {
+    const id = w.agents.jobTarget[slot]!
+    return slotDesemnare(w.desemnari, id) === -1 ? refuse(Reason.ENTITATE_INEXISTENTA, { id }) : accept()
+  },
+  lucreaza(w, rules, slot) {
+    lucreazaSapa(w, rules, slot)
+  },
+  incheie(w, rules, slot, motiv, racire) {
+    const target = w.agents.jobTarget[slot]!
+    const ds = slotDesemnare(w.desemnari, target)
+    if (racire === Racire.TINTA) {
+      if (ds !== -1) {
+        w.desemnari.reincercaLaTick[ds] = w.tick + racireDesemnare(w, rules)
+        w.desemnari.ultimulMotiv[ds] = codMotiv(motiv ?? Reason.INACCESIBIL)
+        w.desemnari.ultimulMotivDetaliu[ds] = detaliuDesemnareDin(motiv ?? Reason.INACCESIBIL)
+      }
+      return
+    }
+    evitaTinta(w, slot, target, w.tick + rules.jobRetryTicks)
+    // Cauza se vede si pe tinta, ca overlay-ul sa aiba ce arata — dar fara
+    // racire pe ea: altcineva o poate lua chiar acum.
+    if (ds !== -1 && motiv) {
+      w.desemnari.ultimulMotiv[ds] = codMotiv(motiv)
+      w.desemnari.ultimulMotivDetaliu[ds] = DetaliuMotiv.NICIUNUL
+    }
+  },
+  refaTinta(w, rules, slot) {
+    const a = w.agents
+    return refaLoculDeLucru(w, rules, slot, cellKey(a.jobWorkX[slot]!, a.jobWorkY[slot]!, a.jobWorkZ[slot]!))
+  },
+}
+
+const DRIVER_CARA: DriverJob = {
+  fel: FelJob.CARA,
+  atingeZone: true,
+  cereri(w, rules, slot) {
+    const a = w.agents
+    return cereriCara(rules, a.jobTarget[slot]!, a.jobDest[slot]!, a.jobCantitate[slot]!, a.jobStep[slot]!)
+  },
+  tinteVii(w, slot) {
+    const a = w.agents
+    // Sursa conteaza doar pana la ridicare inclusiv; dupa aia marfa e in mana.
+    if (a.jobStep[slot]! <= PasCara.RIDICA && slotItem(w.iteme, a.jobTarget[slot]!) === -1) {
+      return refuse(Reason.ENTITATE_INEXISTENTA, { id: a.jobTarget[slot]! })
+    }
+    if (slotCelulaDeZona(w.zone, a.jobDest[slot]!) === -1) {
+      return refuse(Reason.ENTITATE_INEXISTENTA, { id: a.jobDest[slot]! })
+    }
+    return accept()
+  },
+  lucreaza(w, rules, slot) {
+    if (w.agents.jobStep[slot] === PasCara.RIDICA) ridica(w, rules, slot)
+    else lasa(w, rules, slot)
+  },
+  incheie(w, rules, slot, motiv, racire, rezultat) {
+    const a = w.agents
+    const step = a.jobStep[slot]!
+    const target = a.jobTarget[slot]!
+    // Ce EXISTA dupa refuz e sursa (daca n-a fost ridicata) sau mormanul lasat
+    // la picioare. Racirea se scrie pe ele, nu pe un id mort.
+    const sursa = step <= PasCara.RIDICA ? slotItem(w.iteme, target) : -1
+    const is = sursa !== -1 ? sursa : rezultat
+    if (racire === Racire.TINTA) {
+      if (is !== -1) memoreazaPeItem(w, rules, is, motiv ?? Reason.INACCESIBIL, detaliuItemDin(motiv ?? Reason.INACCESIBIL))
+      return
+    }
+    if (step >= PasCara.MERGE_DEST) {
+      // Drumul MEU spre depozitul ala e blocat; zona ramane pentru altii.
+      const cs = slotCelulaDeZona(w.zone, a.jobDest[slot]!)
+      if (cs !== -1) evitaTinta(w, slot, w.zone.celule.zonaId[cs]!, w.tick + rules.jobRetryTicks)
+    }
+    if (sursa !== -1) evitaTinta(w, slot, target, w.tick + rules.jobRetryTicks)
+    // Mormanul lasat jos NU se raceste pe pereche: cu zona evitata, scannerul
+    // il respinge singur (toate zonele cu loc sunt evitate → racire pe item,
+    // scrisa de scanner), iar daca exista ALT depozit, pionul are voie sa-l
+    // incerce. O racire aici ar fi fost redundanta (mutatia a trecut verde)
+    // si ar fi ascuns depozitul bun timp de `jobRetryTicks`.
+    if (is !== -1 && motiv) {
+      w.iteme.ultimulMotiv[is] = codMotiv(motiv)
+      w.iteme.ultimulMotivDetaliu[is] = DetaliuItem.NICIUNUL
+    }
+  },
+  refaTinta(w, rules, slot) {
+    const a = w.agents
+    // Doar destinatia se re-alege. Spre SURSA nu exista „alta celula": mormanul
+    // e unde e, si daca drumul pana la el nu tine, jobul se incheie.
+    if (a.jobStep[slot] !== PasCara.MERGE_DEST) return false
+    return refaDestinatia(w, rules, slot, slotCelulaDeZona(w.zone, a.jobDest[slot]!))
+  },
+}
+
+/** Indexat pe `FelJob`. `undefined` = fel necunoscut, si atunci se REFUZA. */
+const DRIVERE: readonly (DriverJob | undefined)[] = [undefined, DRIVER_SAPA, DRIVER_CARA]
+
+/** Driverul unui fel de job, sau `undefined` daca felul nu e cunoscut. */
+export function driverPentru(fel: number): DriverJob | undefined {
+  return DRIVERE[fel]
+}
+
+/** Driverul jobului CURENT al unui pion, sau `undefined` (fara job, sau fel necunoscut). */
+export function driverul(w: World, slot: number): DriverJob | undefined {
+  return DRIVERE[w.agents.jobKind[slot]!]
 }
 
 void slotZona

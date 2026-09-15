@@ -125,11 +125,11 @@ export function lasaItem(w: World, fel: number, cantitate: number, wx: number, w
   return out.ok ? out.value : -1
 }
 
-/** Picteaza un depozit patrat cu coltul la (x0, y0) pe cota solului + 1. Intoarce id-ul zonei. */
-export function picteaza(w: World, x0: number, y0: number, latura: number, prioritate?: number, rules: Rules = R): number {
+/** Picteaza o zona patrata cu coltul la (x0, y0) pe cota solului + 1. `fel` lipsa = DEPOZIT. Intoarce id-ul zonei. */
+export function picteaza(w: World, x0: number, y0: number, latura: number, prioritate?: number, rules: Rules = R, fel?: number): number {
   const g = solid(w, x0, y0)
   assert.notEqual(g, null, `nu e sol solid la ${x0},${y0}`)
-  const out = applyCommand(w, { kind: 'picteazaZona', x0, y0, x1: x0 + latura - 1, y1: y0 + latura - 1, z: g! + 1, prioritate }, rules)
+  const out = applyCommand(w, { kind: 'picteazaZona', x0, y0, x1: x0 + latura - 1, y1: y0 + latura - 1, z: g! + 1, prioritate, fel }, rules)
   assert.ok(out.ok, `picteazaZona la ${x0},${y0} refuzat: ${JSON.stringify(out)}`)
   return out.ok ? out.value : -1
 }

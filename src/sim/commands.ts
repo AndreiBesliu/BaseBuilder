@@ -25,7 +25,7 @@ import { CHUNK_GRID, fill, inWorld, materialAt, setFocus, voxelRangeM, WORLD_CEL
 import { adaugaDesemnare, Desemnare, slotDesemnare } from './desemnari.ts'
 import { acoperaDesemnarea, anuleazaCelulaDeZona, anuleazaDesemnare, retrageCeluleDeZonaNecalcabile, sapaManual, Sfarsit, terminaJob, uitaRacirileDeMarfa, uitaTintele } from './joburi.ts'
 import { asazaItem, itemLaCelula } from './iteme.ts'
-import { adaugaCelulaDeZona, celulaDeZonaLa, creeazaZona, marcheazaZoneMurdare, slotZona, stergeCelulaDeZona, stergeZona, Zona } from './zone.ts'
+import { adaugaCelulaDeZona, celulaDeZonaLa, creeazaZona, marcheazaZoneMurdare, slotZona, stergeCelulaDeZona, stergeZona, Zona, ZONE_FELURI } from './zone.ts'
 
 export type Command =
   | { readonly kind: 'spawnAgent'; readonly x: number; readonly y: number; readonly z: number; readonly faction: FactionId }
@@ -48,7 +48,7 @@ export type Command =
    * de log. Celulele necalcabile si cele deja pictate se sar (contorizate in
    * refuzul de „niciuna" sau in valoarea de retur). `zonaId` lipsa = zona noua.
    */
-  | { readonly kind: 'picteazaZona'; readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number; readonly z: number; readonly zonaId?: number | undefined; readonly prioritate?: number | undefined }
+  | { readonly kind: 'picteazaZona'; readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number; readonly z: number; readonly zonaId?: number | undefined; readonly prioritate?: number | undefined; readonly fel?: number | undefined }
   /** Sterge o zona cu toate celulele ei. Cine ducea ceva acolo e intrerupt (marfa la picioare). */
   | { readonly kind: 'stergeZona'; readonly id: number }
   | { readonly kind: 'setPrioritateZona'; readonly id: number; readonly prioritate: number }
@@ -309,6 +309,16 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
         zs = slotZona(w.zone, cmd.zonaId)
         if (zs === -1) return refuse(Reason.ENTITATE_INEXISTENTA, { id: cmd.zonaId })
       }
+      // Extinderea mosteneste felul zonei; doar o zona NOUA il ia din comanda.
+      const fel = cmd.fel ?? (zs !== -1 ? w.zone.kind[zs]! : Zona.DEPOZIT)
+      if (!Number.isInteger(fel) || fel < 0 || fel >= ZONE_FELURI) {
+        return refuse(Reason.VALOARE_INVALIDA, { camp: 'fel', valoare: String(fel), min: 0, max: ZONE_FELURI - 1 })
+      }
+      // O zona are UN fel: indexul o pune intr-o singura lista, deci o zona cu
+      // si paturi, si rafturi, n-ar avea raspuns.
+      if (zs !== -1 && w.zone.kind[zs] !== fel) {
+        return refuse(Reason.VALOARE_INVALIDA, { camp: 'fel', valoare: String(fel), motiv: 'zona existenta e de alt fel', existent: w.zone.kind[zs]! })
+      }
       // Intai se numara ce ar intra, fara sa se scrie nimic: o zona noua se
       // creeaza (si id-ul se consuma) DOAR daca intra macar o celula.
       let bune = 0
@@ -321,7 +331,7 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       }
       if (bune === 0) return refuse(Reason.LOC_NECALCABIL, { motiv: 'nicio celula calcabila si nepictata in dreptunghi', sarite })
       if (zs === -1) {
-        const out = creeazaZona(w.zone, w.nextId, Zona.DEPOZIT, prioritate)
+        const out = creeazaZona(w.zone, w.nextId, fel as 0 | 1, prioritate)
         if (!out.ok) return out
         zs = out.value
         w.nextId++
