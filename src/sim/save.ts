@@ -61,6 +61,8 @@ export function encode(w: World): string {
       seed: w.seed,
       tick: w.tick,
       nextId: w.nextId,
+      // PERSISTED: plecatii raman plecati. Vezi `World.plecatiTotal`.
+      plecatiTotal: w.plecatiTotal,
       // Terenul: se salveaza DOAR chunk-urile promovate. Restul lumii — 268 km² —
       // se regenereaza din seed. Asta e trucul care face ca un save sa fie de
       // ordinul megabytelor si nu al gigabytelor.
@@ -155,6 +157,12 @@ export function encode(w: World): string {
         nevoiFeluri: NEVOI,
         nevoi: Array.from(a.nevoi.subarray(0, a.count * NEVOI)),
         nevoieReincercaLaTick: Array.from(a.nevoieReincercaLaTick.subarray(0, a.count * NEVOI)),
+        // Dispozitia si gandurile de EVENIMENT. Tinta NU se scrie: e DERIVED din
+        // nevoi si din gandurile astea, deci se recalculeaza la incarcare.
+        dispozitie: Array.from(a.dispozitie.subarray(0, a.count)),
+        ganduriSloturi: a.ganduriSloturi,
+        gandFel: Array.from(a.gandFel.subarray(0, a.count * a.ganduriSloturi)),
+        gandPanaLa: Array.from(a.gandPanaLa.subarray(0, a.count * a.ganduriSloturi)),
       },
       // Desemnarile: ce a cerut jucatorul. `ultimulMotiv` e TRANSIENT si nu
       // se scrie; `laCelula` si `vii` sunt DERIVED si se reindexeaza la incarcare.
@@ -240,6 +248,18 @@ const MIGRATIONS: Record<number, (data: Record<string, unknown>) => Record<strin
   // `cara*` zero). `prioPersonala` avea o singura categorie: se declara pasul
   // vechi (`categorii: 1`), iar `decode` il largeste la CATEGORII cu implicitul
   // din content — altfel fiecare save de schema 3 ar fi refuzat pe lungime.
+  // 5 -> 6 (S16-19, taietura 3): dispozitia si gandurile. Un save de schema 5
+  // n-are niciun gand si nicio bara; `decode` pune baza din content si zero
+  // ganduri. Fara OPTIMISM_INITIAL: nu sunt nou-nascuti, sunt oameni care traiau
+  // deja acolo.
+  5: (d) => {
+    const a = (d.agents as Record<string, unknown> | undefined) ?? {}
+    return {
+      ...d,
+      plecatiTotal: d.plecatiTotal ?? 0,
+      agents: { ...a, ganduriSloturi: a.ganduriSloturi ?? 0 },
+    }
+  },
   // 4 -> 5 (S16-19, taietura 3): nevoile. Un save de schema 4 n-are nicio
   // coloana de nevoi inregistrata, si asta se spune EXPLICIT: `nevoiFeluri: 0`.
   //
@@ -344,7 +364,7 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
     return refuse(Reason.CAPACITATE_DEPASITA, { camp: 'agents.count', valoare: String(count), maxim: String(capacity) })
   }
 
-  const agents = makeAgentStore(capacity, rules.personalPriorityDefault, rules.jobAvoidSlots, rules.nevoieMax)
+  const agents = makeAgentStore(capacity, rules.personalPriorityDefault, rules.jobAvoidSlots, rules.nevoieMax, rules.ganduriSloturi, rules.dispozitieBaza)
   agents.count = count
   agents.id.set(agentsRaw.id as number[])
   agents.x.set(agentsRaw.x as number[])
@@ -439,6 +459,39 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
     }
   }
 
+  // Dispozitia si gandurile de eveniment. Bara lipsa = baza din content, nu zero:
+  // zero ar incarca fiecare pion sub pragul de PLECARE, si toata asezarea ar
+  // pleca in primele tickuri de dupa incarcare.
+  {
+    const disp = agentsRaw.dispozitie as number[] | undefined
+    if (disp && disp.length !== count) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: 'agents.dispozitie', lungime: disp.length, asteptat: count })
+    }
+    for (let i = 0; i < count; i++) agents.dispozitie[i] = disp ? disp[i]! : rules.dispozitieBaza
+
+    const k = (agentsRaw.ganduriSloturi as number | undefined) ?? 0
+    if (!Number.isInteger(k) || k < 0) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: 'agents.ganduriSloturi', valoare: k, min: 0 })
+    }
+    const gf = agentsRaw.gandFel as number[] | undefined
+    const gp = agentsRaw.gandPanaLa as number[] | undefined
+    if (k > 0 && (!gf || !gp || gf.length !== count * k || gp.length !== count * k)) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: 'agents.gandFel', lungime: gf?.length ?? -1, asteptat: count * k })
+    }
+    // Un save cu MAI MULTE sloturi de gand decat are codul se REFUZA, spre
+    // deosebire de racirea din `evitaTinta`, unde restul se poate pierde.
+    // Un gand pierdut MUTA dispozitia, deci nu e o degradare gratioasa.
+    if (k > agents.ganduriSloturi) {
+      return refuse(Reason.CAPACITATE_DEPASITA, { camp: 'agents.ganduriSloturi', valoare: k, capacitate: agents.ganduriSloturi })
+    }
+    for (let i = 0; i < count; i++) {
+      for (let j = 0; j < agents.ganduriSloturi; j++) {
+        agents.gandFel[i * agents.ganduriSloturi + j] = j < k && gf ? gf[i * k + j]! : 0
+        agents.gandPanaLa[i * agents.ganduriSloturi + j] = j < k && gp ? gp[i * k + j]! : 0
+      }
+    }
+  }
+
   // Identitati unice — un save corupt sau editat manual nu are voie sa treaca tacut.
   const seen = new Set<number>()
   for (let i = 0; i < count; i++) {
@@ -519,6 +572,7 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
     zone: zone.value,
     rezervari: createReservations(),
     ratiune: makeRatiuneStore(capacity),
+    plecatiTotal: (data.plecatiTotal as number | undefined) ?? 0,
   }
   // Rezervarile sunt DERIVED din joburi. Ce nu se poate reconstrui e un save
   // inconsistent: jobul se anuleaza si se numara, nu se lasa tacut.

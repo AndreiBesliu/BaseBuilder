@@ -26,12 +26,13 @@
 
 import * as THREE from 'three'
 import type { World } from '../src/sim/state.ts'
-import { Categorie, CATEGORII, Faction, pasDeMers } from '../src/sim/state.ts'
+import { Categorie, CATEGORII, Faction, Nevoie, NEVOI, pasDeMers } from '../src/sim/state.ts'
 import { cellOf } from '../src/sim/drumuri.ts'
 import { DetaliuMotiv } from '../src/sim/desemnari.ts'
 import { motivDinCod, Reason } from '../src/sim/result.ts'
 import { rezervariPentru, Strat } from '../src/sim/rezervari.ts'
 import { DetaliuItem, itemLaCelula } from '../src/sim/iteme.ts'
+import { tintaDispozitiei } from '../src/sim/joburi.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
 
 const CHIHLIMBAR = new THREE.Color(0xd9a441)
@@ -211,6 +212,20 @@ export interface RezumatJoburi {
   cara: number
   faraMuncitori: boolean
   faraCarausi: boolean
+  /** Cati sunt sub pragul de foame, si cati sub cel de odihna. */
+  flamanzi: number
+  obositi: number
+  /** Cati REFUZA munca. Separat de „nefericiti": nu e acelasi lucru. */
+  refuza: number
+  /** Cati au TINTA sub pragul de avertisment, deci urmeaza sa plece. */
+  pleacaCurand: number
+  /** Cati au plecat de la inceputul lumii. PERSISTED. */
+  plecati: number
+  /**
+   * Nu mai e mancare in asezare. Derivat gratuit in aceeasi trecere; fara el,
+   * colonia se opreste, contoarele cresc, si nimic nu leaga cele trei.
+   */
+  faraMancare: boolean
 }
 
 /**
@@ -226,6 +241,10 @@ export function rezumatJoburi(w: World): RezumatJoburi {
   let cara = 0
   let sapatori = 0
   let carausi = 0
+  let flamanzi = 0
+  let obositi = 0
+  let refuza = 0
+  let pleacaCurand = 0
   for (let i = 0; i < a.count; i++) {
     if (a.alive[i] === 0 || a.faction[i] !== Faction.ASEZARE) continue
     if (a.prioPersonala[i * CATEGORII + Categorie.SAPA]! > 0) sapatori++
@@ -234,10 +253,23 @@ export function rezumatJoburi(w: World): RezumatJoburi {
     if (a.jobKind[i] === 0) idle++
     else if (!pasDeMers(a.jobStep[i]!)) lucreaza++
     else merg++
+    if (a.nevoi[i * NEVOI + Nevoie.FOAME]! < DEFAULT_RULES.nevoi[Nevoie.FOAME]!.prag) flamanzi++
+    if (a.nevoi[i * NEVOI + Nevoie.ODIHNA]! < DEFAULT_RULES.nevoi[Nevoie.ODIHNA]!.prag) obositi++
+    if (a.dispozitie[i]! < DEFAULT_RULES.dispozitiePragRefuz) refuza++
+    // Avertismentul se uita la TINTA, nu la bara. Tinta se muta instantaneu,
+    // deci da o fereastra reala; bara ajunge sub prag exact in tickul in care
+    // pionul pleaca, deci un avertisment pe bara are fereastra ZERO.
+    if (tintaDispozitiei(w, DEFAULT_RULES, i) < DEFAULT_RULES.dispozitiePragAvertisment) pleacaCurand++
+  }
+  let hrana = 0
+  for (let i = 0; i < w.iteme.count; i++) {
+    if (w.iteme.alive[i] === 1 && DEFAULT_RULES.nutritie[w.iteme.kind[i]!]! > 0) hrana += w.iteme.cantitate[i]!
   }
   return {
     idle, merg, lucreaza, cara,
     faraMuncitori: sapatori === 0 && w.desemnari.vii > 0,
     faraCarausi: carausi === 0 && w.iteme.vii > 0 && w.zone.vii > 0,
+    flamanzi, obositi, refuza, pleacaCurand, plecati: w.plecatiTotal,
+    faraMancare: hrana === 0,
   }
 }

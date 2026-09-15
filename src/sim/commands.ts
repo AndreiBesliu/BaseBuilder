@@ -15,7 +15,7 @@
 import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import type { World, FactionId } from './state.ts'
-import { CATEGORII, ITEME, NEVOI, nevoiaInitiala, slotOf } from './state.ts'
+import { CATEGORII, Gand, ITEME, NEVOI, nevoiaInitiala, puneGand, slotOf } from './state.ts'
 import { cellOf, clearPath } from './drumuri.ts'
 import type { Rules } from './content.ts'
 import { DEFAULT_RULES } from './content.ts'
@@ -151,6 +151,18 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       for (let n = 0; n < NEVOI; n++) {
         a.nevoi[slot * NEVOI + n] = nevoiaInitiala(id, n, rules.nevoieMax, rules.nevoieFazaPas, rules.nevoieFazaSpan)
         a.nevoieReincercaLaTick[slot * NEVOI + n] = 0
+      }
+      // Si dispozitia, tot explicit: un slot reutilizat ar mosteni bara mortului
+      // si ar pleca imediat — iar gandurile lui ar trage-o in jos degeaba.
+      a.dispozitie[slot] = rules.dispozitieBaza
+      for (let g = 0; g < a.ganduriSloturi; g++) {
+        a.gandFel[slot * a.ganduriSloturi + g] = 0
+        a.gandPanaLa[slot * a.ganduriSloturi + g] = 0
+      }
+      // Optimismul de inceput se ACORDA la nastere. In v1 era continut fara
+      // scriitor: o intrare in catalog pe care nimeni n-o punea vreodata.
+      if (rules.ganduri[Gand.OPTIMISM_INITIAL]!.durata > 0) {
+        puneGand(a, slot, w.tick, Gand.OPTIMISM_INITIAL, w.tick + rules.ganduri[Gand.OPTIMISM_INITIAL]!.durata)
       }
       uitaTintele(w, slot)
       for (let c = 0; c < CATEGORII; c++) a.prioPersonala[slot * CATEGORII + c] = rules.personalPriorityDefault

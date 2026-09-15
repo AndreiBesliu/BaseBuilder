@@ -36,8 +36,9 @@ import type { ZoneStore } from './zone.ts'
  *   4 — S16-19 taietura 2: iteme, zone pictate, joburi de carat (a doua
  *       categorie, deci `prioPersonala` isi schimba pasul)
  *   5 — S16-19 taietura 3: nevoi (foame, odihna) si racirea lor
+ *   6 — S16-19 taietura 3: dispozitia, gandurile de eveniment, plecatii
  */
-export const SCHEMA_VERSION = 5
+export const SCHEMA_VERSION = 6
 
 /**
  * Categoriile de munca. Lista de STRUCTURA (ce feluri de munca exista), nu numar
@@ -87,6 +88,43 @@ export const PasNevoie = {
   CONSUMA: 1,
 } as const
 export type PasNevoieId = (typeof PasNevoie)[keyof typeof PasNevoie]
+
+/**
+ * Gandurile — ce trage dispozitia in sus sau in jos.
+ *
+ * Doua feluri, si distinctia e de ARHITECTURA, nu de continut:
+ *
+ *   - de STARE (FLAMAND, INFOMETAT, OBOSIT, EPUIZAT): functie PURA a nevoii
+ *     curente, prin pragurile ei. NU se stocheaza — un gand stocat care descrie
+ *     o stare e inca o copie care poate ramane in urma realitatii.
+ *   - de EVENIMENT (DORMIT_PE_JOS, OPTIMISM_INITIAL): s-au INTAMPLAT, deci n-au
+ *     de unde fi recalculate. Se tin intr-o multime marginita per pion, cu
+ *     termen, exact ca racirea din `evitaTinta`.
+ */
+export const Gand = {
+  NICIUNUL: 0,
+  FLAMAND: 1,
+  INFOMETAT: 2,
+  OBOSIT: 3,
+  EPUIZAT: 4,
+  DORMIT_PE_JOS: 5,
+  OPTIMISM_INITIAL: 6,
+} as const
+export type GandId = (typeof Gand)[keyof typeof Gand]
+export const GANDURI = 7
+
+/**
+ * Ce gand produce fiecare nevoie la fiecare prag, indexat cu `Nevoie`.
+ *
+ * STRUCTURA (care nevoie da care gand), nu continut — valorile lor sunt in
+ * `rules.ganduri`. Cele doua se EXCLUD: sub pragul critic e `critic`, nu
+ * amandoua, si invariantul din `parseRules` conteaza pe asta cand verifica daca
+ * pragul de plecare e atins de catalog.
+ */
+export const GAND_PENTRU_NEVOIE: readonly { readonly prag: GandId; readonly critic: GandId }[] = [
+  { prag: Gand.FLAMAND, critic: Gand.INFOMETAT },
+  { prag: Gand.OBOSIT, critic: Gand.EPUIZAT },
+]
 
 /** Pasii unui job de sapat. Un job e o masina de stare liniara, nu un arbore. */
 export const PasJob = {
@@ -307,6 +345,32 @@ export interface AgentStore {
    * Nu intrerupi ca sa nu faci nimic.
    */
   nevoieReincercaLaTick: Int32Array
+
+  // --- dispozitia (S16-19, taietura 3). Toate PERSISTED. ---
+  /**
+   * Bara de dispozitie, 0..dispozitieMax. MARE = bine.
+   *
+   * Bara e PERSISTED, dar TINTA ei e DERIVED: tinta e suma gandurilor active si
+   * se recalculeaza oricand, bara o urmareste lent si asimetric. Doua valori, nu
+   * una, fiindca altfel un gand care apare si dispare ar smuci bara instantaneu,
+   * iar jucatorul n-ar avea nicio fereastra in care sa reactioneze.
+   *
+   * Ca si nevoile: se UMPLE la creare (cu `dispozitieBaza`) si se rescrie la
+   * nastere. Zero ar insemna fiecare pion nascut sub pragul de plecare.
+   */
+  dispozitie: Int32Array
+  /**
+   * Gandurile de EVENIMENT: multime marginita per pion, `slot * ganduriSloturi + k`.
+   * `gandFel` 0 = slot liber. Acelasi tipar ca `evitaTinta`, si din acelasi motiv:
+   * un tablou nemarginit per pion e stare care creste cu timpul de joc.
+   *
+   * Evictia e a termenului MINIM. La `ganduriSloturi = 4` si doua feluri de
+   * eveniment ea e INACCESIBILA azi — testul ei foloseste un content cu cinci
+   * feluri, altfel ar fi o garda care nu poate lega.
+   */
+  ganduriSloturi: number
+  gandFel: Uint8Array
+  gandPanaLa: Int32Array
 }
 
 /**
@@ -371,9 +435,17 @@ export interface World {
   rezervari: ReservationStore
   /** TRANSIENT — de ce sta fiecare pion. Pentru overlay si teste, nu pentru simulare. */
   ratiune: RatiuneStore
+  /**
+   * PERSISTED — cati pioni au PLECAT din asezare, de la inceputul lumii.
+   *
+   * Pe `World`, nu in `RatiuneStore`: acela e TRANSIENT si ar fi aratat 0 dupa
+   * fiecare incarcare, desi plecatii raman plecati. Un numar care se reseteaza
+   * cand salvezi nu e un numar. Intra si in hash.
+   */
+  plecatiTotal: number
 }
 
-export function makeAgentStore(capacity: number, prioPersonalaImplicita = 1, evitaSloturi = 4, nevoieMax = 1000): AgentStore {
+export function makeAgentStore(capacity: number, prioPersonalaImplicita = 1, evitaSloturi = 4, nevoieMax = 1000, ganduriSloturi = 4, dispozitieBaza = 500): AgentStore {
   return {
     count: 0,
     capacity,
@@ -412,7 +484,45 @@ export function makeAgentStore(capacity: number, prioPersonalaImplicita = 1, evi
     // `spawnAgent`, care e singurul loc unde id-ul exista.
     nevoi: new Int32Array(capacity * NEVOI).fill(nevoieMax),
     nevoieReincercaLaTick: new Int32Array(capacity * NEVOI),
+    // UMPLUTA, ca nevoile: zero ar insemna fiecare pion nascut sub pragul de plecare.
+    dispozitie: new Int32Array(capacity).fill(dispozitieBaza),
+    ganduriSloturi,
+    gandFel: new Uint8Array(capacity * ganduriSloturi),
+    gandPanaLa: new Int32Array(capacity * ganduriSloturi),
   }
+}
+
+/**
+ * Are pionul gandul asta, la tickul asta? Numai gandurile de EVENIMENT stau in
+ * multime; cele de stare se calculeaza din nevoi.
+ */
+export function areGand(a: AgentStore, slot: number, tick: number, fel: number): boolean {
+  const k = a.ganduriSloturi
+  const baza = slot * k
+  for (let i = 0; i < k; i++) {
+    if (a.gandFel[baza + i] === fel && a.gandPanaLa[baza + i]! > tick) return true
+  }
+  return false
+}
+
+/**
+ * Scrie un gand de EVENIMENT. Acelasi fel isi REINNOIESTE termenul; altfel ia un
+ * slot liber sau expirat, iar daca nu e niciunul, pe cel cu termenul cel mai mic.
+ * Determinist: ordinea sloturilor e fixa.
+ */
+export function puneGand(a: AgentStore, slot: number, tick: number, fel: number, panaLa: number): void {
+  const k = a.ganduriSloturi
+  const baza = slot * k
+  let liber = -1
+  let celMaiVechi = 0
+  for (let i = 0; i < k; i++) {
+    if (a.gandFel[baza + i] === fel) { a.gandPanaLa[baza + i] = panaLa; return }
+    if (liber === -1 && (a.gandFel[baza + i] === 0 || a.gandPanaLa[baza + i]! <= tick)) liber = i
+    if (a.gandPanaLa[baza + i]! < a.gandPanaLa[baza + celMaiVechi]!) celMaiVechi = i
+  }
+  const i = liber === -1 ? celMaiVechi : liber
+  a.gandFel[baza + i] = fel
+  a.gandPanaLa[baza + i] = panaLa
 }
 
 /** Indexul slotului pentru un id, sau -1. Liniar deocamdata; devine index cand conteaza. */

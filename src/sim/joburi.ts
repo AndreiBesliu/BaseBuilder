@@ -89,7 +89,7 @@ import type { Rules } from './content.ts'
 import type { Outcome, ReasonCode } from './result.ts'
 import { accept, codMotiv, refuse, Reason } from './result.ts'
 import type { FelJobId, World } from './state.ts'
-import { Categorie, CATEGORII, FelJob, ITEME, Nevoie, NEVOI, PasCara, PasJob, pasDeMers, PasNevoie } from './state.ts'
+import { Categorie, CATEGORII, FelJob, Gand, GAND_PENTRU_NEVOIE, ITEME, Nevoie, NEVOI, PasCara, PasJob, pasDeMers, PasNevoie, puneGand } from './state.ts'
 import { cellOf, clearPath } from './drumuri.ts'
 import { blockOfCell, ensureArea, find, isWalkable, markDirty, NO_REGION, regionAt, REGION_SIZE } from './regions.ts'
 import type { RegionStore } from './regions.ts'
@@ -123,6 +123,8 @@ export const StareRatiune = {
   PLAFON: 5,
   /** Are job, dar drumul ii e refuzat si asteapta; `motivFinal` spune de ce. */
   ASTEAPTA_DRUM: 6,
+  /** E prea nefericit ca sa munceasca. Se scrie INAINTE de poarta, nu dupa. */
+  REFUZA_MUNCA: 7,
 } as const
 
 /**
@@ -228,6 +230,14 @@ export interface JobTickReport {
   /** Cate unitati de hrana s-au consumat. Cu ea se poate asserta conservarea mancarii. */
   unitatiMancate: number
   /**
+   * Cati pioni au PLECAT din asezare in tickul asta (a treia treapta).
+   *
+   * Refuzul muncii (treapta a doua) e in raportul de AGENTI, nu aici: se decide
+   * la poarta de scanare, si un al doilea camp cu acelasi nume in doua rapoarte
+   * a facut deja ca o sonda sa citeasca mereu zero.
+   */
+  plecati: number
+  /**
    * Cate INTRARI au parcurs cautarile de nevoie. Ca `zone.index.pasi`: numarul de
    * cautari nu spune nimic despre cost, iar asta e cifra pe care o masoara garda
    * K05 a taieturii 3.
@@ -241,7 +251,7 @@ const raport: JobTickReport = {
   tickuriDeLucru: 0, locuriDeLucruRefacute: 0, refuzuriDrum: 0,
   faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0, faraDepozit: 0,
   evaluariDestinatie: 0, itemeProduse: 0, unitatiProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
-  joburiDeNevoie: 0, unitatiMancate: 0, pasiNevoi: 0,
+  joburiDeNevoie: 0, unitatiMancate: 0, pasiNevoi: 0, plecati: 0,
 }
 
 export function lastJobReport(): JobTickReport {
@@ -1333,7 +1343,7 @@ function lucreazaSapa(w: World, rules: Rules, slot: number): void {
     return
   }
 
-  a.jobProgres[slot] = a.jobProgres[slot]! + rules.workUnitsPerTick
+  a.jobProgres[slot] = a.jobProgres[slot]! + unitatiDeMunca(w, rules, slot)
   raport.tickuriDeLucru++
   w.ratiune.tickuriDeLucru++
   if (a.jobProgres[slot]! < rules.digWorkUnits) return
@@ -1380,7 +1390,7 @@ function ridica(w: World, rules: Rules, slot: number): void {
     return
   }
 
-  a.jobProgres[slot] = a.jobProgres[slot]! + rules.workUnitsPerTick
+  a.jobProgres[slot] = a.jobProgres[slot]! + unitatiDeMunca(w, rules, slot)
   raport.tickuriDeLucru++
   w.ratiune.tickuriDeLucru++
   if (a.jobProgres[slot]! < rules.haulPickupUnits) return
@@ -1434,7 +1444,7 @@ function lasa(w: World, rules: Rules, slot: number): void {
     return
   }
 
-  a.jobProgres[slot] = a.jobProgres[slot]! + rules.workUnitsPerTick
+  a.jobProgres[slot] = a.jobProgres[slot]! + unitatiDeMunca(w, rules, slot)
   raport.tickuriDeLucru++
   w.ratiune.tickuriDeLucru++
   if (a.jobProgres[slot]! < rules.haulDropUnits) return
@@ -1934,6 +1944,12 @@ function doarme(w: World, rules: Rules, slot: number): void {
     }
   }
   a.jobEfect[slot] = 1
+  // Un gand de EVENIMENT: s-a intamplat, deci n-are de unde fi recalculat. Se
+  // reinnoieste cat timp doarme pe jos, si expira singur dupa aceea.
+  if (a.jobDest[slot] === 0) {
+    const g = rules.ganduri[Gand.DORMIT_PE_JOS]!
+    if (g.durata > 0) puneGand(a, slot, w.tick, Gand.DORMIT_PE_JOS, w.tick + g.durata)
+  }
   if (a.nevoi[slot * NEVOI + Nevoie.ODIHNA]! >= rules.nevoieMax) {
     terminaJob(w, rules, slot, Sfarsit.TERMINAT)
   }
@@ -2025,6 +2041,105 @@ export function verificaNevoi(w: World, rules: Rules, slot: number): boolean {
     w.ratiune.nevoiNerezolvate++
   }
   return false
+}
+
+// ---------------------------------------------------------------------------
+// dispozitia
+// ---------------------------------------------------------------------------
+
+/**
+ * Tinta de dispozitie: baza plus suma gandurilor active. DERIVED — se
+ * recalculeaza oricand din nevoi si din multimea de ganduri de eveniment.
+ *
+ * Gandurile de STARE nu se stocheaza: un gand stocat care descrie o stare e inca
+ * o copie care poate ramane in urma realitatii. Cele doua praguri ale unei nevoi
+ * se EXCLUD — sub pragul critic conteaza doar gandul critic.
+ */
+export function tintaDispozitiei(w: World, rules: Rules, slot: number): number {
+  const a = w.agents
+  let t = rules.dispozitieBaza
+  for (let n = 0; n < NEVOI; n++) {
+    const spec = rules.nevoi[n]!
+    const v = a.nevoi[slot * NEVOI + n]!
+    const par = GAND_PENTRU_NEVOIE[n]!
+    if (v < spec.pragCritic) t += rules.ganduri[par.critic]!.valoare
+    else if (v < spec.prag) t += rules.ganduri[par.prag]!.valoare
+  }
+  const k = a.ganduriSloturi
+  const baza = slot * k
+  for (let i = 0; i < k; i++) {
+    const fel = a.gandFel[baza + i]!
+    if (fel === 0 || a.gandPanaLa[baza + i]! <= w.tick) continue
+    t += rules.ganduri[fel]!.valoare
+  }
+  return Math.max(0, Math.min(rules.dispozitieMax, t))
+}
+
+/**
+ * Bara urmareste tinta, lent si asimetric. La ticul de dispozitie al pionului.
+ *
+ * Pasul e LIMITAT la distanta ramasa. Fara limitare, bara sare peste tinta si
+ * oscileaza la infinit in jurul ei cu ±rata — marcajul de tinta din HUD nu s-ar
+ * suprapune niciodata cu bara, desi situatia e perfect stabila.
+ *
+ * Si NU se misca in somn (research: cat timp pionul doarme, bara sta pe loc).
+ * Altfel un pion ar putea pleca din asezare exact in timp ce isi rezolva nevoia
+ * care il facea nefericit.
+ */
+export function miscaDispozitia(w: World, rules: Rules, slot: number): void {
+  const a = w.agents
+  if (a.jobKind[slot] === FelJob.DOARME && !pasDeMers(a.jobStep[slot]!)) return
+  const tinta = tintaDispozitiei(w, rules, slot)
+  const bara = a.dispozitie[slot]!
+  if (tinta === bara) return
+  const rata = tinta > bara ? rules.dispozitieUrcare : rules.dispozitieCoborare
+  const pas = Math.min(rata, Math.abs(tinta - bara))
+  a.dispozitie[slot] = tinta > bara ? bara + pas : bara - pas
+}
+
+/** Multiplicatorul de productivitate, in miimi: liniar intre min si max pe bara. */
+export function multiplicatorDeMunca(w: Rules, dispozitie: number): number {
+  return w.multiplicatorMin + Math.floor(((w.multiplicatorMax - w.multiplicatorMin) * dispozitie) / w.dispozitieMax)
+}
+
+/**
+ * Cate unitati de munca face pionul intr-un tick.
+ *
+ * PODEAUA E PE REZULTAT, nu pe factor. Cu ea pe factor, un continut perfect
+ * legal (`workUnitsPerTick: 1`, minimul din `RULES_SPEC`) dadea 0 unitati pe
+ * tick: jobul nu se incheia niciodata, tinta ramanea rezervata pentru toata
+ * colonia, si niciun plafon nu se incrementa. Clasa asta a fost inchisa de doua
+ * ori la taietura 2; a treia oara intra prin productivitate.
+ */
+export function unitatiDeMunca(w: World, rules: Rules, slot: number): number {
+  const m = multiplicatorDeMunca(rules, w.agents.dispozitie[slot]!)
+  return Math.max(1, Math.floor((rules.workUnitsPerTick * m) / 1000))
+}
+
+/** E prea nefericit ca sa munceasca? */
+export function refuzaMunca(w: World, rules: Rules, slot: number): boolean {
+  return w.agents.dispozitie[slot]! < rules.dispozitiePragRefuz
+}
+
+/**
+ * A treia treapta: pionul pleaca din asezare. Intoarce `true` daca a plecat.
+ *
+ * Contorul sta pe `World` si e PERSISTED. In `RatiuneStore` (TRANSIENT) ar fi
+ * aratat 0 dupa fiecare incarcare, desi plecatii raman plecati — un numar care
+ * se reseteaza cand salvezi nu e un numar.
+ */
+export function verificaPlecarea(w: World, rules: Rules, slot: number): boolean {
+  const a = w.agents
+  if (a.dispozitie[slot]! >= rules.dispozitiePragPlecare) return false
+  // `terminaJob` elibereaza rezervarile si lasa marfa la picioare — exact ca la
+  // `killAgent`. Un plecat care si-ar lua marfa cu el ar fi marfa disparuta.
+  terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
+  a.alive[slot] = 0
+  a.hasGoal[slot] = 0
+  clearPath(w.paths, slot)
+  w.plecatiTotal++
+  raport.plecati++
+  return true
 }
 
 // ---------------------------------------------------------------------------

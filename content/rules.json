@@ -58,6 +58,25 @@
     "ODIHNA": { "scurgere": 4, "prag": 400, "pragCritic": 150 }
   },
   "nutritie": { "PIATRA": 0, "PAMANT": 0, "LEMN": 0, "HRANA": 15 },
+  "dispozitieMax": 1000,
+  "dispozitieBaza": 500,
+  "dispozitieTicks": 500,
+  "dispozitieUrcare": 120,
+  "dispozitieCoborare": 80,
+  "dispozitiePragRefuz": 250,
+  "dispozitiePragAvertisment": 150,
+  "dispozitiePragPlecare": 60,
+  "multiplicatorMin": 500,
+  "multiplicatorMax": 1500,
+  "ganduriSloturi": 4,
+  "ganduri": {
+    "FLAMAND": { "valoare": -50, "durata": 0 },
+    "INFOMETAT": { "valoare": -450, "durata": 0 },
+    "OBOSIT": { "valoare": -80, "durata": 0 },
+    "EPUIZAT": { "valoare": -200, "durata": 0 },
+    "DORMIT_PE_JOS": { "valoare": -70, "durata": 6000 },
+    "OPTIMISM_INITIAL": { "valoare": 250, "durata": 20000 }
+  },
   "digYield": {
     "ROCA": { "fel": "PIATRA", "cantitate": 20 },
     "PAMANT": { "fel": "PAMANT", "cantitate": 10 },

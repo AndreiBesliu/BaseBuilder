@@ -59,6 +59,7 @@ export function createWorld(seed: number, rules: Rules = DEFAULT_RULES): World {
     zone: makeZoneStore(rules.zoneCapacity, rules.zoneCellCapacity),
     rezervari: createReservations(),
     ratiune: makeRatiuneStore(rules.agentCapacity),
+    plecatiTotal: 0,
   }
 }
 

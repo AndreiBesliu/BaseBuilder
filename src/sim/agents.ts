@@ -63,7 +63,7 @@ import { cellKey, findPath, pathLength } from './path.ts'
 import type { Ocupare } from './path.ts'
 import { Reason } from './result.ts'
 import { cellOf, centerMm, clearPath } from './drumuri.ts'
-import { cautaJob, drumRefuzat, lucreaza, resetJobReport, scurgeNevoile, Sfarsit, terminaJob, tintesteLocDeLucru, verificaNevoi } from './joburi.ts'
+import { cautaJob, drumRefuzat, lucreaza, miscaDispozitia, refuzaMunca, resetJobReport, scurgeNevoile, Sfarsit, StareRatiune, terminaJob, tintesteLocDeLucru, verificaNevoi, verificaPlecarea } from './joburi.ts'
 
 // Drumurile si aritmetica de celule stau in `drumuri.ts` (ca `joburi.ts` sa le
 // poata folosi fara un ciclu de import). Re-exportate de aici pentru cine le
@@ -181,9 +181,11 @@ export interface AgentTickReport {
   maxIncercariUnAgent: number
   /** Cati pioni sunt ocupati cu o nevoie (mananca, dorm, sau tocmai au pornit-o). */
   ocupatiCuNevoi: number
+  /** Cati pioni au REFUZAT sa munceasca in tickul asta (a doua treapta de nefericire). */
+  refuzaMunca: number
 }
 
-const raport: AgentTickReport = { replans: 0, refuzuri: 0, blocatiDeOstili: 0, sosiri: 0, ingropati: 0, incercariTinta: 0, maxIncercariUnAgent: 0, ocupatiCuNevoi: 0 }
+const raport: AgentTickReport = { replans: 0, refuzuri: 0, blocatiDeOstili: 0, sosiri: 0, ingropati: 0, incercariTinta: 0, maxIncercariUnAgent: 0, ocupatiCuNevoi: 0, refuzaMunca: 0 }
 
 /** Ultimul raport de tick. TRANSIENT, pentru overlay si pentru teste. */
 export function lastAgentReport(): AgentTickReport {
@@ -325,13 +327,32 @@ export function stepAgents(w: World, rules: Rules): void {
         // tickul asta. Executia lui merge pe aceeasi cale ca oricare alt job.
         raport.ocupatiCuNevoi++
       }
+      // 1c. Dispozitia: al treilea ceas. Bara urmareste tinta lent, si sub
+      //     pragul cel mai de jos pionul PLEACA din asezare.
+      if ((w.tick + a.id[i]!) % rules.dispozitieTicks === 0) miscaDispozitia(w, rules, i)
+      if (verificaPlecarea(w, rules, i)) continue
     }
     if (
       a.jobKind[i] === 0 &&
       a.faction[i] === Faction.ASEZARE &&
       ((w.tick + a.id[i]!) % rules.jobRescanTicks === 0 || (a.scanLaTick[i] !== 0 && a.scanLaTick[i] === w.tick))
     ) {
-      cautaJob(w, rules, i)
+      // A doua treapta de nefericire: refuza munca.
+      //
+      // `ratiune` se scrie INAINTE de poarta, nu dupa. Fara asta, ratiunea
+      // pionului ingheata exact pentru cel despre care intreaba jucatorul, iar
+      // overlay-ul arata toate desemnarile „libere, nimeni nu le-a respins" in
+      // timp ce nimeni nu sapa.
+      if (refuzaMunca(w, rules, i)) {
+        w.ratiune.ultimaScanareTick[i] = w.tick
+        w.ratiune.stare[i] = StareRatiune.REFUZA_MUNCA
+        w.ratiune.motivFinal[i] = 0
+        w.ratiune.candidati[i] = 0
+        w.ratiune.taiati[i] = 0
+        raport.refuzaMunca++
+      } else {
+        cautaJob(w, rules, i)
+      }
     }
     if (a.jobKind[i] !== 0) {
       if (!pasDeMers(a.jobStep[i]!)) {

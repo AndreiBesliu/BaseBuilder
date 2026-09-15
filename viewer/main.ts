@@ -1113,7 +1113,14 @@ function stepFrame(ts: number): void {
       const d = world.desemnari.vii
       const o = jobOverlay.visible ? ` · liber ${jobOverlay.desemnari - jobOverlay.rezervate - jobOverlay.faraLoc - jobOverlay.componente - jobOverlay.altRefuz} rez ${jobOverlay.rezervate} fara-loc ${jobOverlay.faraLoc} rupt ${jobOverlay.componente}` : ''
       const m = jobOverlay.visible ? ` · mormane ${jobOverlay.iteme} (rez ${jobOverlay.itemeRezervate} fara-depozit ${jobOverlay.itemeFaraDepozit} rupt ${jobOverlay.itemeInaccesibile}) · depozit ${jobOverlay.celuleOcupate}/${jobOverlay.celuleDepozit}` : ` · mormane ${world.iteme.vii} · depozit ${world.zone.celule.vii} cel.`
-      el('jobs').textContent = `${d} desemnari · idle ${r.idle} merg ${r.merg} lucreaza ${r.lucreaza} cara ${r.cara}${o}${m}`
+      // Nevoile si dispozitia. „Nefericit" si „refuza munca" sunt DOUA contoare,
+      // fiindca nu sunt acelasi lucru; avertismentul de plecare se uita la TINTA.
+      const n = r.flamanzi + r.obositi > 0 || r.refuza > 0 || r.plecati > 0
+        ? ` · flamanzi ${r.flamanzi} obositi ${r.obositi} refuza ${r.refuza} plecati ${r.plecati}`
+        : ''
+      const av = r.pleacaCurand > 0 ? ` · ${r.pleacaCurand} pleaca in curand` : ''
+      const fm = r.faraMancare ? ' · nu mai e mancare in asezare' : ''
+      el('jobs').textContent = `${d} desemnari · idle ${r.idle} merg ${r.merg} lucreaza ${r.lucreaza} cara ${r.cara}${o}${m}${n}${av}${fm}`
       el('jobs').className = r.faraMuncitori || r.faraCarausi ? 'warn' : ''
       if (r.faraMuncitori) el('jobs').textContent += ' · NIMENI NU SAPA'
       if (r.faraCarausi) el('jobs').textContent += ' · NIMENI NU CARA'

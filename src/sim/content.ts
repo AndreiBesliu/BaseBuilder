@@ -14,7 +14,7 @@ import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import { REGION_SIZE } from './regions.ts'
 import { isSolid, Material } from './terrain/chunk.ts'
-import { Item, ITEME, Nevoie, NEVOI } from './state.ts'
+import { Gand, GAND_PENTRU_NEVOIE, GANDURI, Item, ITEME, Nevoie, NEVOI } from './state.ts'
 
 /** Ce lasa in urma un voxel sapat: felul de item si cate unitati. `cantitate` 0 = nimic (aer, apa). */
 export interface DigYield {
@@ -26,6 +26,17 @@ export interface DigYield {
  * Randul de tabel al unei nevoi. Cat scade la ticul de nevoie, sub ce valoare
  * pionul PREFERA sa si-o rezolve, si sub ce valoare ISI INTRERUPE jobul.
  */
+/**
+ * Randul de tabel al unui gand: cat muta TINTA de dispozitie, si cat tine.
+ * `durata` 0 inseamna gand de STARE — nu se stocheaza, se recalculeaza din nevoi.
+ */
+export interface SpecGand {
+  /** Cat aduna la tinta. Negativ = nefericire. */
+  readonly valoare: number
+  /** Cate tickuri tine, pentru gandurile de EVENIMENT. 0 = gand de stare. */
+  readonly durata: number
+}
+
 export interface SpecNevoie {
   /** Cat scade la fiecare tic de nevoie, in miimi. */
   readonly scurgere: number
@@ -180,6 +191,37 @@ export interface Rules {
   readonly odihnaPeTicDeNevoie: number
   /** Randul de tabel al fiecarei nevoi, indexat cu `Nevoie`. */
   readonly nevoi: readonly SpecNevoie[]
+
+  // --- dispozitia (S16-19, taietura 3) ---
+  //
+  // O SINGURA scara: bara e 0..dispozitieMax, si valorile gandurilor sunt pe
+  // aceeasi scara. Panoul a masurat ce se intampla cand nu e asa: valorile
+  // copiate dintr-un research cu bara 0..100 intr-o bara 0..1000 faceau ca tinta
+  // sa nu poata cobori sub 440, deci „refuza munca" (250) si „pleaca" (60) erau
+  // cod mort din ziua in care se scriau. Invariantul de la finalul `parseRules`
+  // verifica mecanic ca pragul cel mai de jos CHIAR se poate atinge.
+  /** Valoarea maxima a barei de dispozitie. */
+  readonly dispozitieMax: number
+  /** De la ce porneste un pion, si fata de ce se aduna gandurile. */
+  readonly dispozitieBaza: number
+  /** La cate tickuri se misca bara spre tinta. Decalat pe id. */
+  readonly dispozitieTicks: number
+  /** Cat urca bara intr-un pas, si cat coboara. Asimetric: se pierde mai greu decat se castiga. */
+  readonly dispozitieUrcare: number
+  readonly dispozitieCoborare: number
+  /** Sub atat, pionul refuza munca. */
+  readonly dispozitiePragRefuz: number
+  /** Sub atat (pe TINTA, nu pe bara), HUD-ul avertizeaza ca pionul urmeaza sa plece. */
+  readonly dispozitiePragAvertisment: number
+  /** Sub atat, pionul pleaca din asezare. */
+  readonly dispozitiePragPlecare: number
+  /** Multiplicatorul de productivitate la dispozitie 0 si la maxim, in miimi. */
+  readonly multiplicatorMin: number
+  readonly multiplicatorMax: number
+  /** Cate ganduri de EVENIMENT tine minte un pion deodata. */
+  readonly ganduriSloturi: number
+  /** Valoarea si durata fiecarui gand, indexate cu `Gand`. Durata 0 = gand de STARE (nu se stocheaza). */
+  readonly ganduri: readonly SpecGand[]
   /**
    * Cata foame astampara O UNITATE din fiecare fel de item, indexat cu `Item`.
    * 0 = necomestibil. PE UNITATE, nu pe morman: cu nutritie per morman, restul de
@@ -192,7 +234,7 @@ export interface Rules {
 type FieldSpec = { min: number; max: number }
 
 /** Campurile NUMERICE. `digYield`, `nevoi` si `nutritie` sunt tabele si se valideaza separat. */
-const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield' | 'nevoi' | 'nutritie'>, FieldSpec> = {
+const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield' | 'nevoi' | 'nutritie' | 'ganduri'>, FieldSpec> = {
   agentCapacity: { min: 1, max: 100000 },
   agentStepMm: { min: 1, max: 100000 },
   ticksPerSecond: { min: 1, max: 240 },
@@ -247,6 +289,17 @@ const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield' | 'nevoi' | 'nutritie'>
   mancatTicks: { min: 1, max: 1000000 },
   mancatoriPeMorman: { min: 1, max: 64 },
   odihnaPeTicDeNevoie: { min: 1, max: 1000000 },
+  dispozitieMax: { min: 1, max: 1000000 },
+  dispozitieBaza: { min: 0, max: 1000000 },
+  dispozitieTicks: { min: 1, max: 1000000 },
+  dispozitieUrcare: { min: 1, max: 1000000 },
+  dispozitieCoborare: { min: 1, max: 1000000 },
+  dispozitiePragRefuz: { min: 0, max: 1000000 },
+  dispozitiePragAvertisment: { min: 0, max: 1000000 },
+  dispozitiePragPlecare: { min: 0, max: 1000000 },
+  multiplicatorMin: { min: 1, max: 1000 },
+  multiplicatorMax: { min: 1000, max: 100000 },
+  ganduriSloturi: { min: 1, max: 64 },
 }
 
 /** Numele materialelor si ale felurilor de item, pentru fisierul de reguli. Liste ORDONATE, nu `Object.keys`. */
@@ -324,6 +377,54 @@ function parseNevoi(raw: unknown, nevoieMax: number): Outcome<SpecNevoie[]> {
       return refuse(Reason.VALOARE_INVALIDA, { camp: `nevoi.${nume}.scurgere`, motiv: 'o nevoie care nu scade niciodata e un sistem mort', valoare: spec.scurgere! })
     }
     out.push({ scurgere: spec.scurgere!, prag: spec.prag!, pragCritic: spec.pragCritic! })
+  }
+  return accept(out)
+}
+
+const NUME_GANDURI: readonly (readonly [string, number])[] = [
+  ['FLAMAND', Gand.FLAMAND],
+  ['INFOMETAT', Gand.INFOMETAT],
+  ['OBOSIT', Gand.OBOSIT],
+  ['EPUIZAT', Gand.EPUIZAT],
+  ['DORMIT_PE_JOS', Gand.DORMIT_PE_JOS],
+  ['OPTIMISM_INITIAL', Gand.OPTIMISM_INITIAL],
+]
+
+/** Tabelul `ganduri` din fisier → tablou indexat cu `Gand`. Slotul 0 (NICIUNUL) e mereu inert. */
+function parseGanduri(raw: unknown): Outcome<SpecGand[]> {
+  if (Array.isArray(raw)) {
+    if (raw.length !== GANDURI) return refuse(Reason.VALOARE_INVALIDA, { camp: 'ganduri', lungime: raw.length, asteptat: GANDURI })
+    const obj: Record<string, unknown> = {}
+    for (const [nume, id] of NUME_GANDURI) obj[nume] = raw[id]
+    raw = obj
+  }
+  if (typeof raw !== 'object' || raw === null) {
+    return refuse(Reason.LIPSA_MATERIAL, { camp: 'ganduri', asteptat: 'obiect', primit: typeof raw })
+  }
+  const obj = raw as Record<string, unknown>
+  const cunoscute = NUME_GANDURI.map(([n]) => n)
+  for (const key of Object.keys(obj).sort()) {
+    if (!cunoscute.includes(key)) return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: `ganduri.${key}`, cunoscute: cunoscute.join(', ') })
+  }
+  const out: SpecGand[] = new Array<SpecGand>(GANDURI).fill({ valoare: 0, durata: 0 })
+  for (const [nume, id] of NUME_GANDURI) {
+    const v = obj[nume]
+    if (typeof v !== 'object' || v === null) return refuse(Reason.LIPSA_MATERIAL, { camp: `ganduri.${nume}`, asteptat: 'obiect' })
+    const e = v as Record<string, unknown>
+    for (const key of Object.keys(e).sort()) {
+      if (key !== 'valoare' && key !== 'durata') {
+        return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: `ganduri.${nume}.${key}`, cunoscute: 'valoare, durata' })
+      }
+    }
+    const valoare = e.valoare
+    const durata = e.durata
+    if (typeof valoare !== 'number' || !Number.isInteger(valoare)) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `ganduri.${nume}.valoare`, asteptat: 'intreg', primit: String(valoare) })
+    }
+    if (typeof durata !== 'number' || !Number.isInteger(durata) || durata < 0) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `ganduri.${nume}.durata`, asteptat: 'intreg >= 0', primit: String(durata) })
+    }
+    out[id] = { valoare, durata }
   }
   return accept(out)
 }
@@ -420,13 +521,13 @@ export function parseRules(raw: unknown): Outcome<Rules> {
   // garantata de spec si nu depinde de starea rularii.
   const known = Object.keys(RULES_SPEC)
   for (const key of Object.keys(obj).sort()) {
-    if (key === 'digYield' || key === 'nevoi' || key === 'nutritie') continue
+    if (key === 'digYield' || key === 'nevoi' || key === 'nutritie' || key === 'ganduri') continue
     if (!known.includes(key)) {
-      return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: key, cunoscute: [...known, 'digYield', 'nevoi', 'nutritie'].join(', ') })
+      return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: key, cunoscute: [...known, 'digYield', 'nevoi', 'nutritie', 'ganduri'].join(', ') })
     }
   }
 
-  const out: Record<string, number | readonly DigYield[] | readonly SpecNevoie[] | readonly number[]> = {}
+  const out: Record<string, number | readonly DigYield[] | readonly SpecNevoie[] | readonly SpecGand[] | readonly number[]> = {}
   for (const key of known) {
     const spec = RULES_SPEC[key as keyof typeof RULES_SPEC]
     const v = obj[key]
@@ -453,6 +554,10 @@ export function parseRules(raw: unknown): Outcome<Rules> {
   const nutritieOut = parseNutritie(obj.nutritie)
   if (!nutritieOut.ok) return nutritieOut
   out.nutritie = nutritieOut.value
+  if (obj.ganduri === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'ganduri' })
+  const ganduriOut = parseGanduri(obj.ganduri)
+  if (!ganduriOut.ok) return ganduriOut
+  out.ganduri = ganduriOut.value
   const r = out as unknown as Rules
 
   // Invarianti INTRE campuri. Fiecare e o lege de care depinde corectitudinea,
@@ -554,6 +659,84 @@ export function parseRules(raw: unknown): Outcome<Rules> {
       })
     }
   }
+  // Ordinea pragurilor de dispozitie. Fiecare treapta trebuie sa existe ca stare
+  // distincta, si toate sub baza — altfel un pion nascut normal ar refuza munca.
+  if (!(r.dispozitiePragPlecare < r.dispozitiePragAvertisment && r.dispozitiePragAvertisment < r.dispozitiePragRefuz && r.dispozitiePragRefuz < r.dispozitieBaza && r.dispozitieBaza <= r.dispozitieMax)) {
+    return refuse(Reason.VALOARE_INVALIDA, {
+      camp: 'dispozitiePraguri',
+      motiv: 'pragurile trebuie sa fie strict crescatoare si sub baza',
+      plecare: r.dispozitiePragPlecare,
+      avertisment: r.dispozitiePragAvertisment,
+      refuz: r.dispozitiePragRefuz,
+      baza: r.dispozitieBaza,
+      max: r.dispozitieMax,
+    })
+  }
+  if (r.multiplicatorMin > 1000 || r.multiplicatorMax < 1000) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'multiplicator', motiv: 'intervalul trebuie sa contina 1000 (productivitate normala)', min: r.multiplicatorMin, max: r.multiplicatorMax })
+  }
+  // Podeaua de munca e pe REZULTAT: `max(1, floor(w * m / 1000))`. Ca ea sa nu
+  // fie nevoie sa se declanseze niciodata la continut legal, cel mai prost caz
+  // trebuie sa dea macar o unitate. Cu podeaua pe FACTOR, un continut perfect
+  // valid (`workUnitsPerTick: 1`, minimul din RULES_SPEC) dadea 0 unitati pe
+  // tick: jobul nu se incheia niciodata, tinta ramanea rezervata pentru toata
+  // colonia, si niciun plafon nu se incrementa.
+  if (r.workUnitsPerTick * r.multiplicatorMin < 1000) {
+    return refuse(Reason.VALOARE_INVALIDA, {
+      camp: 'workUnitsPerTick',
+      motiv: 'la productivitate minima un pion n-ar face nicio unitate pe tick',
+      workUnitsPerTick: r.workUnitsPerTick,
+      multiplicatorMin: r.multiplicatorMin,
+      necesar: Math.ceil(1000 / r.multiplicatorMin),
+    })
+  }
+  if (r.ganduri.length !== GANDURI) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'ganduri', lungime: r.ganduri.length, asteptat: GANDURI })
+  }
+  // CATALOGUL TREBUIE SA POATA ATINGE PRAGUL CEL MAI DE JOS.
+  //
+  // Asta e invariantul care inchide clasa de greseli pe care panoul a gasit-o:
+  // valori de gand copiate dintr-o alta scara fac treptele 2 si 3 cod mort din
+  // ziua in care se scriu, si nicio asertiune obisnuita nu observa, fiindca tot
+  // ce e acolo pare valid.
+  //
+  // Minimul REAL, nu suma tuturor negativelor: pentru fiecare nevoie, gandul de
+  // prag si cel critic se EXCLUD, deci conteaza doar cel mai negativ dintre ele.
+  let minim = r.dispozitieBaza
+  for (let n = 0; n < GAND_PENTRU_NEVOIE.length; n++) {
+    const par = GAND_PENTRU_NEVOIE[n]!
+    minim += Math.min(0, r.ganduri[par.prag]!.valoare, r.ganduri[par.critic]!.valoare)
+  }
+  const dinNevoi = new Set<number>()
+  for (const par of GAND_PENTRU_NEVOIE) { dinNevoi.add(par.prag); dinNevoi.add(par.critic) }
+  for (let g = 1; g < GANDURI; g++) {
+    if (dinNevoi.has(g)) continue
+    minim += Math.min(0, r.ganduri[g]!.valoare)
+  }
+  if (minim > r.dispozitiePragPlecare) {
+    return refuse(Reason.VALOARE_INVALIDA, {
+      camp: 'ganduri',
+      motiv: 'catalogul nu poate cobori dispozitia pana la pragul de plecare: treptele de jos ar fi cod mort',
+      minimAtins: minim,
+      pragPlecare: r.dispozitiePragPlecare,
+    })
+  }
+  // Un gand de STARE nu se stocheaza, deci `durata` lui n-are niciun cititor:
+  // scrisa, ar fi o promisiune pe care nimic n-o tine.
+  for (const par of GAND_PENTRU_NEVOIE) {
+    for (const g of [par.prag, par.critic]) {
+      if (r.ganduri[g]!.durata !== 0) {
+        return refuse(Reason.VALOARE_INVALIDA, { camp: `ganduri[${g}].durata`, motiv: 'gand de STARE: se recalculeaza din nevoi, deci durata n-are cititor', valoare: r.ganduri[g]!.durata })
+      }
+    }
+  }
+  for (let g = 1; g < GANDURI; g++) {
+    if (dinNevoi.has(g)) continue
+    if (r.ganduri[g]!.durata === 0) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `ganduri[${g}].durata`, motiv: 'gand de EVENIMENT fara durata: n-ar fi activ niciun tick' })
+    }
+  }
+
   // Acelasi invariant de acoperire ca la desemnari si la carat, pentru lantul
   // pion → mancare / pat. Fara el, singurul leac ar fi un coridor intins la
   // fiecare cautare — adica K05 pe a treia usa.
@@ -652,4 +835,50 @@ export const DEFAULT_RULES: Rules = {
   // deci o portie de 20 da 300 si un morman plin (75) da 1125 — un pion si un
   // sfert, de la zero la satul.
   nutritie: [0, 0, 0, 15],
+  // Dispozitia, pe ACEEASI scara ca nevoile: 0..1000.
+  //
+  // Bara se misca la 500 de tickuri (25 s), cu 120 in sus si 80 in jos, deci de
+  // la baza (500) la pragul de refuz (250) sunt ~4 pasi = 2000 de tickuri ≈ 100 s.
+  // Fereastra dintre avertisment (150) si plecare (60) e ~2 pasi = 1000 de
+  // tickuri ≈ 50 s — cat sa apuce jucatorul sa faca ceva.
+  dispozitieMax: 1000,
+  dispozitieBaza: 500,
+  dispozitieTicks: 500,
+  dispozitieUrcare: 120,
+  dispozitieCoborare: 80,
+  dispozitiePragRefuz: 250,
+  dispozitiePragAvertisment: 150,
+  dispozitiePragPlecare: 60,
+  // ±50% productivitate. `workUnitsPerTick` (10) x 500 / 1000 = 5 ≥ 1, deci
+  // podeaua nu se declanseaza niciodata la continutul asta.
+  multiplicatorMin: 500,
+  multiplicatorMax: 1500,
+  ganduriSloturi: 4,
+  // Indexat cu `Gand`.
+  //
+  // INFOMETAT e −450, nu −200, si cifra vine dintr-o masuratoare: cu −200, o
+  // asezare fara pic de mancare se stabiliza la o dispozitie de 230 si NIMENI nu
+  // pleca vreodata, fiindca pragul de plecare e 60. Adica treapta a treia era
+  // inaccesibila IN JOC, desi invariantul aritmetic trecea — catalogul putea
+  // atinge pragul doar adunand si EPUIZAT, iar somnul pe jos reuseste mereu,
+  // deci EPUIZAT nu apare practic niciodata. O colonie care nu-si poate hrani
+  // oamenii trebuie sa-i piarda.
+  //
+  // Cu −450: infometat si in pat da 50 (sub 60, pleaca); infometat si pe jos da
+  // 500 − 450 − 70 = −20, plafonat la 0. Bara coboara 80 la 500 de tickuri, deci
+  // de la 500 la 60 sunt ~6 pasi = 3000 de tickuri (~2,5 min de joc), din care
+  // ~1500 petrecute intre „refuza munca" (250) si plecare — o fereastra reala in
+  // care jucatorul poate aduce mancare.
+  //
+  // Minimul ATINS: 500 − 450 (INFOMETAT) − 200 (EPUIZAT) − 70 (DORMIT_PE_JOS)
+  // = −220. Verificat mecanic in `parseRules`, nu pe hartie.
+  ganduri: [
+    { valoare: 0, durata: 0 },
+    { valoare: -50, durata: 0 },
+    { valoare: -450, durata: 0 },
+    { valoare: -80, durata: 0 },
+    { valoare: -200, durata: 0 },
+    { valoare: -70, durata: 6000 },
+    { valoare: 250, durata: 20000 },
+  ],
 }

@@ -122,6 +122,11 @@ export function hashWorld(w: World): string {
   // tarziu, si fara sa se stie de unde a venit.
   h.ints(a.nevoi, a.count * NEVOI)
   h.ints(a.nevoieReincercaLaTick, a.count * NEVOI)
+  // Dispozitia si gandurile de EVENIMENT. Tinta NU intra: e DERIVED din astea.
+  h.ints(a.dispozitie, a.count)
+  h.bytes(a.gandFel, a.count * a.ganduriSloturi)
+  h.ints(a.gandPanaLa, a.count * a.ganduriSloturi)
+  h.u32(w.plecatiTotal)
   h.ints(a.evitaTinta, a.count * a.evitaSloturi)
   h.ints(a.evitaPanaLa, a.count * a.evitaSloturi)
   h.ints(a.scanLaTick, a.count)
