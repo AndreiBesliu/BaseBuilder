@@ -13,6 +13,8 @@ import {
 } from '../src/sim/terrain/chunk.ts'
 import type { Chunk } from '../src/sim/terrain/chunk.ts'
 import { nextInt, stream } from '../src/sim/rng.ts'
+import { chunkKey, createTerrain, dig, fill, groundLevelM, setFocus } from '../src/sim/terrain/terrain.ts'
+import { writeQuadIndices } from '../src/render/winding.ts'
 
 const COLUMNS = CHUNK_CELLS * CHUNK_CELLS
 
@@ -182,4 +184,84 @@ test('fetele de sus ale unui teren normal se unesc bine', () => {
   // Suprafata de sus acopera fix cele 1024 de celule ale chunk-ului.
   assert.equal(topArea, CHUNK_CELLS * CHUNK_CELLS, 'suprafata de sus nu acopera tot chunk-ul')
   assert.ok(topQuads < 1024, 'unirea nu a facut nimic pe suprafata')
+})
+
+// --- infasurarea ------------------------------------------------------------
+
+test('fiecare quad are infasurarea care il face sa arate in AFARA', () => {
+  // Defectul pe care il prinde: regula de infasurare din viewer era o CONSTANTA
+  // — „directiile pozitive se inverseaza, cele negative raman" — dedusa analitic
+  // pentru fata de sus si aplicata tuturor. Pentru majoritatea quadurilor era
+  // corecta; pentru restul, nu. Fetele gresite erau dorsale, culling-ul le
+  // elimina, si se vedea fundalul prin fortareata.
+  //
+  // Le crezusem variatie de material in teren. Trei explicatii plauzibile
+  // verificate si excluse pe rand (gauri, normale intoarse, culori inchise) —
+  // prima dintre ele, „nu sunt gauri", era GRESITA, fiindca testul meu de fundal
+  // era stricat. Chiar erau gauri.
+  const t = createTerrain(20260404, 3)
+  const CX = 389
+  const CY = 144
+  setFocus(t, CX, CY)
+  const bx = CX * CHUNK_CELLS
+  const by = CY * CHUNK_CELLS
+
+  // O fortareata in miniatura: camere sapate si zid construit, ca sa existe fete
+  // pe toate cele sase directii. Un chunk doar sapat n-ar exercita decat cateva.
+  for (let ry = 0; ry < 6; ry++) {
+    for (let rx = 0; rx < 6; rx++) {
+      const g = groundLevelM(t, bx + 4 + rx, by + 4 + ry)
+      if (g.ok) for (let d = 1; d <= 3; d++) dig(t, bx + 4 + rx, by + 4 + ry, g.value - d)
+    }
+  }
+  for (let i = 0; i < 10; i++) {
+    const g = groundLevelM(t, bx + 16 + i, by + 16)
+    if (g.ok) for (let h = 1; h <= 3; h++) fill(t, bx + 16 + i, by + 16, g.value + h, Material.PIATRA_CONSTRUITA)
+  }
+
+  const chunk = t.chunks.get(chunkKey(CX, CY))!
+  assert.ok(chunk.voxels, 'chunkul n-a fost promovat — fixtura nu dovedeste nimic')
+  const mesh = meshChunk(chunk)
+  assert.ok(mesh.quadCount > 100, `doar ${mesh.quadCount} quaduri — fixtura e prea saraca`)
+
+  // Toate cele sase directii trebuie sa apara, altfel testul acopera doar o parte.
+  const directii = new Set<number>()
+  for (let q = 0; q < mesh.quadCount; q++) directii.add(mesh.faces[q]!)
+  assert.equal(directii.size, 6, `doar ${directii.size} directii de fata in fixtura`)
+
+  // Oracolul: normala triunghiului, calculata din indicii pe care ii scrie chiar
+  // codul de productie, trebuie sa fie EXACT normala axiala a fetei.
+  const idx = new Uint32Array(6)
+  const p = mesh.positions
+  let verificate = 0
+  for (let q = 0; q < mesh.quadCount; q++) {
+    writeQuadIndices(mesh, q, 0, idx, 0)
+    const varf = (n: number): [number, number, number] => {
+      const b = n * 3
+      // spatiul lui three: (x, z, y) din spatiul mesher-ului
+      return [p[q * 12 + b]!, p[q * 12 + b + 2]!, p[q * 12 + b + 1]!]
+    }
+    const a = varf(idx[0]!)
+    const bb = varf(idx[1]!)
+    const c = varf(idx[2]!)
+    const u = [bb[0] - a[0], bb[1] - a[1], bb[2] - a[2]]
+    const v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]]
+    const n = [
+      u[1]! * v[2]! - u[2]! * v[1]!,
+      u[2]! * v[0]! - u[0]! * v[2]!,
+      u[0]! * v[1]! - u[1]! * v[0]!,
+    ]
+    const face = mesh.faces[q]!
+    const asteptat = [
+      face === Face.X_POS ? 1 : face === Face.X_NEG ? -1 : 0,
+      face === Face.Z_POS ? 1 : face === Face.Z_NEG ? -1 : 0,
+      face === Face.Y_POS ? 1 : face === Face.Y_NEG ? -1 : 0,
+    ]
+    const lung = Math.hypot(n[0]!, n[1]!, n[2]!)
+    assert.ok(lung > 0, `quadul ${q} e degenerat`)
+    const dot = (n[0]! * asteptat[0]! + n[1]! * asteptat[1]! + n[2]! * asteptat[2]!) / lung
+    assert.ok(dot > 0.99, `quadul ${q}, fata ${face}: normala triunghiului nu arata in afara (dot ${dot.toFixed(3)})`)
+    verificate++
+  }
+  assert.equal(verificate, mesh.quadCount)
 })

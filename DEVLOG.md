@@ -1183,3 +1183,43 @@ nu sunt mesh-uri străine (377 de chunk-uri + un singur InstancedMesh). Și nu v
 ## Task Completed
 
 134 de teste verzi.
+
+---
+
+## Task Started — petele întunecate: erau găuri
+
+**Prompt:** „continua" (aceeași sesiune)
+**Model:** Claude Opus 5
+
+Lăsasem deschis: pete întunecate plate pe pantă, cu trei explicații verificate și excluse. **Una dintre
+excluderi era greșită, și exact aia conta.**
+
+Scrisesem „nu sunt găuri (fundalul nu trece prin ele)". Testul meu pusese `scene.background` pe un
+obiect gol în loc de `null` — deci nu schimbase culoarea de ștergere deloc, ci doar stricase randarea.
+Refăcut corect: **petele devin magenta.** Erau găuri.
+
+De acolo, prin eliminare: ascunzând cele 12 mesh-uri de voxeli, tot solul vizibil devine magenta —
+deci toată zona e promovată și găurile sunt în mesh-ul de voxeli. Cu `side = DoubleSide` dispar. Deci
+înfășurare inversată: fețe dorsale, eliminate de culling.
+
+**Cauza.** Regula de înfășurare din viewer era o constantă — „direcțiile pozitive se inversează, cele
+negative rămân" — dedusă analitic pentru fața de SUS și aplicată tuturor șase. Pentru majoritatea
+quadurilor era corectă. Pentru fețele de pe axa Y, nu. Alea sunt contratreptele terenului voxelizat pe
+pantă, ceea ce explică și tiparul: pete regulate, numai pe coastă.
+
+Acum înfășurarea se **calculează** din geometrie (`src/render/winding.ts`): produsul vectorial al
+primului triunghi, comparat cu normala axială, care se știe exact din direcția feței. Costă două
+scăderi și un produs vectorial per quad, o dată la construirea geometriei, și e corectă prin
+construcție oricât s-ar schimba mesher-ul.
+
+Testul nou verifică **fiecare** quad al unui chunk cu cameră săpată și zid construit, și cere explicit
+ca toate cele șase direcții să apară în fixtură. Cu regula veche pusă la loc, pică pe quadul 70, fața
+`Y_POS`, cu dot −1,000 — exact invers.
+
+**Lecția, a doua oară în aceeași sesiune:** trei explicații plauzibile excluse nu valorează nimic dacă
+una dintre excluderi se sprijină pe un instrument stricat. Verdele minte, roșul minte, și „am verificat
+că nu e asta" minte la fel de ușor.
+
+## Task Completed
+
+135 de teste verzi.

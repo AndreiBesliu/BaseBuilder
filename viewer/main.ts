@@ -22,6 +22,7 @@ import { Biome, MACRO_METERS, sampleMacro } from '../src/sim/terrain/macro.ts'
 import { Face, meshChunk } from '../src/render/mesher.ts'
 import type { ChunkNeighbours } from '../src/render/mesher.ts'
 import { quadColor } from '../src/render/palette.ts'
+import { writeQuadIndices } from '../src/render/winding.ts'
 import { Ballast, Bisector, checkGuards, clockGranularityMs, FrameProbe, heapMB } from './probe.ts'
 import { createRegionOverlay, rebuildRegionOverlay } from './overlay-regions.ts'
 import { createDensePanel, densePanelReport, PANEL_HZ, tickDensePanel } from './panel-dens.ts'
@@ -256,24 +257,11 @@ function buildVoxelGeometry(chunk: Chunk): THREE.BufferGeometry | null {
       normals[dst + v * 3 + 1] = ny
       normals[dst + v * 3 + 2] = nz
     }
-    // Winding-ul.
-    //
-    // Mesher-ul emite aceeasi ordine de colturi pentru ambele directii ale unei
-    // axe, iar trecerea in spatiul lui three schimba Y cu Z, ceea ce OGLINDESTE
-    // spatiul si inverseaza toate windingurile. Verificat analitic, nu ghicit:
-    // pentru fata de sus (Z_POS), ordinea A,B,C da produsul vectorial -Y, dar
-    // avem nevoie de +Y. Deci directiile POZITIVE (0, 2, 4) se inverseaza,
-    // iar cele negative raman. Fara asta, jumatate din fete sunt back-facing,
-    // sunt eliminate de culling, si se vede fundalul prin geometrie.
-    const o = q * 4
-    const i = q * 6
-    if ((mesh.faces[q]! & 1) === 1) {
-      indices[i] = o; indices[i + 1] = o + 1; indices[i + 2] = o + 2
-      indices[i + 3] = o; indices[i + 4] = o + 2; indices[i + 5] = o + 3
-    } else {
-      indices[i] = o; indices[i + 1] = o + 2; indices[i + 2] = o + 1
-      indices[i + 3] = o; indices[i + 4] = o + 3; indices[i + 5] = o + 2
-    }
+    // Winding-ul se CALCULEAZA, nu se presupune. Vezi `src/render/winding.ts`:
+    // regula fixa de dinainte („pozitivele se inverseaza") era corecta pentru
+    // majoritatea quadurilor si gresita pentru restul, iar cele gresite se vedeau
+    // ca gauri prin care se zarea fundalul.
+    writeQuadIndices(mesh, q, q * 4, indices, q * 6)
   }
 
   const geo = new THREE.BufferGeometry()
