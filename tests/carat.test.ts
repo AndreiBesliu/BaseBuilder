@@ -6,7 +6,7 @@ import { Categorie, FelJob, Item, ITEME, PasCara } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { cellOf } from '../src/sim/drumuri.ts'
 import { codMotiv, Reason } from '../src/sim/result.ts'
-import { isWalkable, NO_REGION, regionAt } from '../src/sim/regions.ts'
+import { find, isWalkable, NO_REGION, regionAt } from '../src/sim/regions.ts'
 import { existaTinta, lastJobReport, StareRatiune } from '../src/sim/joburi.ts'
 import { itemLaCelula, slotItem } from '../src/sim/iteme.ts'
 import { celulaDeZonaLa, indexZone } from '../src/sim/zone.ts'
@@ -505,6 +505,49 @@ test('un save cu un job de carat orfan (sursa sau destinatia moarta) e anulat la
   assert.equal(loaded.value.agents.caraCantitate[0], 0)
   assert.equal(marfaTotala(loaded.value), 20, 'marfa din mana a disparut la anularea de la incarcare')
   assert.ok(verificaRezervari(loaded.value.rezervari, loaded.value.agents, existaTinta(loaded.value)).ok)
+})
+
+// ---------------------------------------------------------------------------
+// K05: costul nu creste cu VECHIMEA coloniei
+// ---------------------------------------------------------------------------
+
+test('K05: un morman pe veci inaccesibil nu face acoperirea de regiuni sa creasca — dupa asezare, zero blocuri noi in 2000 de tickuri', () => {
+  // Garda care lipsea. Taietura 2 intindea un coridor de acoperire de la PION la
+  // marfa, „ca la desemnari". Coridorul e ancorat de pozitia pionului, care se
+  // misca, deci fiecare reluare trasa alta linie si adauga un inel nou: masurat pe
+  // scenariul standard, 1138 → 2225 de coloane de blocuri in 30.000 de tickuri,
+  // fara saturare, cu `relabel` la 40% din tick. Aici: o groapa de 2 niveluri, din
+  // care nu se iese cu `maxStepM = 1`, deci mormanul din ea ramane inaccesibil
+  // pentru totdeauna si scannerul il reevalueaza la fiecare expirare a racirii.
+  const { w, sit } = laSit(620, 2)
+  const cx = cellOf(w.agents.x[0]!)
+  const cy = cellOf(w.agents.y[0]!)
+  const p = patratPlat(w, sit, 2, 8, 40)
+  assert.ok(p, 'fixtura: niciun patrat plat pentru depozit')
+  picteaza(w, p.x0, p.y0, 2)
+  // Un put de o celula, doua niveluri: fundul lui nu are niciun vecin calcabil la
+  // ±1 nivel, deci e propria componenta. Mormanul produs cade acolo.
+  const gp = solid(w, cx + 5, cy)!
+  assert.ok(applyCommand(w, { kind: 'dig', wx: cx + 5, wy: cy, z: gp }, R).ok)
+  assert.ok(applyCommand(w, { kind: 'dig', wx: cx + 5, wy: cy, z: gp - 1 }, R).ok)
+  ruleaza(w, 5)
+  const inPut = itemLaCelula(w.iteme, cx + 5, cy, gp - 1)
+  assert.notEqual(inPut, -1, 'fixtura: mormanul n-a ajuns pe fundul putului')
+  assert.notEqual(regionAt(w.regions, cx + 5, cy, gp - 1), NO_REGION, 'fixtura: fundul putului n-are regiune')
+  const compPion = find(w.regions, regionAt(w.regions, cx, cy, w.agents.z[0]!))
+  assert.notEqual(find(w.regions, regionAt(w.regions, cx + 5, cy, gp - 1)), compPion, 'fixtura: putul e in componenta pionului, deci nu exercita refuzul')
+
+  // Se lasa acoperirea sa se aseze, apoi se cere ca ea sa NU mai creasca.
+  ruleaza(w, 2000)
+  const blocuri = w.regions.keys.length
+  const legate = w.regions.legate.size
+  const t = ruleaza(w, 2000)
+  assert.equal(w.regions.keys.length, blocuri, `acoperirea a crescut cu ${w.regions.keys.length - blocuri} blocuri in 2000 de tickuri fara munca noua`)
+  assert.equal(w.regions.legate.size, legate)
+  assert.equal(t.coridoare, 0, 'un coridor de acoperire s-a intins spre marfa')
+  // Si mormanul e inca acolo, cu cauza lui — nu s-a „rezolvat" tacut.
+  assert.notEqual(itemLaCelula(w.iteme, cx + 5, cy, gp - 1), -1)
+  assert.ok(t.inaccesibil > 0, 'fixtura: nimeni n-a mai evaluat mormanul inaccesibil, deci testul nu exercita nimic')
 })
 
 // ---------------------------------------------------------------------------

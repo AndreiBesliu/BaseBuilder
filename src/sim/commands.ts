@@ -327,13 +327,21 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
           if (!out.ok) continue
           w.nextId++
           adaugate++
+          // Acoperirea de regiuni, ca la desemnari: fara ea, un depozit pictat
+          // dincolo de discurile pionilor ar fi „INACCESIBIL" pe veci, cu drum real.
+          //
+          // E MARGINITA prin constructie — cel mult un disc per celula pictata,
+          // memoizat prin `legate` — si asta e tot rostul ei. Prima versiune a
+          // taieturii 2 a scos-o fiindca mutatia „fara disc" trecea verde, si a
+          // lasat in loc un CORIDOR intins la fiecare evaluare de destinatie:
+          // masurat, acoperirea crestea nemarginit (4972 de blocuri stabile in
+          // taietura 1 → 24.350 si in crestere la 30.000 de tickuri, 898 de
+          // coridoare, `relabel` 40% din tick). Doua mecanisme pentru aceeasi
+          // garantie, si l-am scos pe cel marginit. Verde nu inseamna redundant:
+          // inseamna ca celalalt mecanism il acoperea.
+          acoperaDesemnarea(w, rules, x, y, cmd.z)
         }
       }
-      // Fara disc de acoperire la pictare: coridorul item → celula de depozit din
-      // trecerea scumpa (joburi.ts, `cautaDestinatie`) leaga blocurile o data per
-      // zona, memoizat. Designul v2 cerea si discul; mutatia „fara disc" a trecut
-      // verde, deci discul nu lega nimic — s-a scos, ca sa nu existe doua mecanisme
-      // pentru aceeasi garantie, dintre care unul netestabil.
       void sarite
       void adaugate
       return accept(zonaId)

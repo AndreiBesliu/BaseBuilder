@@ -1744,3 +1744,51 @@ pragul de batching; SAPA/CARA alternează mers/oprire cu aceeași paritate a pas
   escaping; scris în memorie.
 - Harness-ul de mutații restaurează prin `git checkout`: cu arborele necomis, ar fi șters
   implementarea. Deci: commit ÎNTÂI, mutații după.
+
+### K05 s-a declanșat, și era vina mea de acum două commit-uri
+
+Profilul scenariului standard a arătat `relabel` la **39,7% din tick**. `relabel` e O(regiuni +
+muchii), deci procentul ăla înseamnă „graful crește". Măsurat, pe același scenariu, același seed:
+
+| | acoperire la t=5000 | la t=30000 | coridoare | µs/tick |
+|---|---|---|---|---|
+| tăietura 1 (`7be843c`) | 4972 blocuri | **4972 (+0)** | 0 | 63–73 |
+| tăietura 2, prima formă | 10944 | **24350, +1824 și în creștere** | 898 | 200–330 |
+| după reparație | 5347 | 6286 (+194 la ultimele 5000) | 0 | 74–83 |
+
+A doua măsurătoare a spus *ce* crește: **coloanele** de blocuri (1138 → 2225), nu feliile de z (plate
+la 10,9). Deci frontiera de acoperire se împingea pe hartă. A treia, cu contoare pe fiecare apel:
+coridorul de la SAPA se declanșează de **0 ori** (ca în tăietura 1), acoperirea pionilor de **36** de
+ori în 20.000 de tickuri, iar coridorul **pion → marfă de ~360 de ori la fiecare 4.000 de tickuri, la
+nesfârșit**.
+
+**Mecanismul.** Coridorul e ancorat de poziția PIONULUI, care se mișcă. Un morman în fundul unei
+gropi de două niveluri e inaccesibil permanent (`maxStepM = 1`), deci scannerul îl reevaluează la
+fiecare expirare a răcirii, din altă poziție, trasează altă linie Bresenham și adaugă un inel nou.
+În tăietura 1 codul exista deja, dar nu se declanșa niciodată — defectul era latent, iar a doua țintă
+l-a trezit. E exact clasa pe care recenzia tăieturii 1 o închisese („acoperirea crește cu munca, nu
+cu plimbarea"), reintrată prin iteme.
+
+**Și ce am stricat singur.** Mutația „fără disc de acoperire la pictare" trecuse verde, iar eu am
+scos discul. Greșit: erau două mecanisme pentru aceeași garanție, iar eu l-am scos pe cel
+**mărginit** (un disc per celulă pictată, memoizat) și l-am păstrat pe cel **nemărginit** (un coridor
+per evaluare). Verde nu înseamnă redundant — înseamnă că celălalt mecanism îl acoperea.
+
+**Reparația**, în trei bucăți:
+1. Discul se întoarce la `picteazaZona`.
+2. Ambele coridoare spre marfă dispar. Un morman apare NUMAI unde a săpat sau a umblat cineva, deci
+   pe teren deja acoperit; ce rămâne în altă componentă e o groapă din care nu se iese, și ăsta e un
+   refuz onest, memorat pe item. Coridorul rămâne doar pentru desemnări, unde jucătorul chiar poate
+   cere muncă în teren neatins.
+3. Un invariant nou în `parseRules`: discul locului mărfii (cel mic dintre al pionului și al
+   desemnării) plus discul depozitului plus 2 trebuie să acopere `haulDestRadiusCells`. Cu
+   implicitele: 2 + 2 + 2 = 6 blocuri = 96 de celule, exact raza. Garanția stă în content, nu într-o
+   cârpeală la rulare.
+
+**Garda care lipsea** (`tests/carat.test.ts`, „K05: un morman pe veci inaccesibil..."): o groapă de
+două niveluri, mormanul din ea, 2000 de tickuri de așezare, apoi **zero blocuri noi în următoarele
+2000** și zero coridoare — cu aserția că reevaluările chiar au loc, altfel testul n-ar exercita nimic.
+Mutația care o probează e chiar starea de dinainte: coridorul pion → marfă repus.
+
+**Măsurat după:** scenariul standard 149 → **86 µs/tick** (tăietura 1: 68); carieră+depozit 138
+µs/tick; 249 de teste verzi. Hash de referință `24e9cb17` → `4e0d2322`.

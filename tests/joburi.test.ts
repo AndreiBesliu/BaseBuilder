@@ -871,7 +871,20 @@ test('content: discul agentului si al desemnarii trebuie sa se atinga pe toata r
     assert.equal(rau.reason, Reason.VALOARE_INVALIDA)
     assert.equal(rau.params.camp, 'jobRegionRadiusBlocks')
   }
-  assert.ok(parseRules({ ...R, jobRegionRadiusBlocks: 1, jobScanRadiusCells: 80 }).ok)
+  // Raza de scanare mai mica face configuratia valida din nou — dar numai daca
+  // si raza de cautare a destinatiei scade: lantul marfa → depozit are propriul
+  // invariant, si el se verifica pe discul MIC (al pionului sau al desemnarii).
+  assert.equal(parseRules({ ...R, jobRegionRadiusBlocks: 1, jobScanRadiusCells: 80 }).ok, false)
+  assert.ok(parseRules({ ...R, jobRegionRadiusBlocks: 1, jobScanRadiusCells: 80, haulDestRadiusCells: 64 }).ok)
+  // Si invariantul de carat leaga singur, cu discurile implicite: 96 de celule =
+  // 6 blocuri = 2 + 2 + 2, deci un pas peste el trebuie refuzat.
+  assert.ok(parseRules({ ...R, haulDestRadiusCells: 96 }).ok)
+  const departe = parseRules({ ...R, haulDestRadiusCells: 112 })
+  assert.equal(departe.ok, false)
+  if (!departe.ok) {
+    assert.equal(departe.reason, Reason.VALOARE_INVALIDA)
+    assert.equal(departe.params.camp, 'haulDestRadiusCells')
+  }
   assert.equal(parseRules({ ...R, designationPriorityDefault: 9 }).ok, false)
   assert.equal(parseRules({ ...R, personalPriorityDefault: 9 }).ok, false)
 })

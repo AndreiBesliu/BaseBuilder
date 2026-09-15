@@ -582,7 +582,6 @@ export function cautaDestinatie(
     let bestDist = 0
     let bestKey = 0
     let examinate = 0
-    let coridorIncercat = false
     for (const cs of ix.libere[zs]!) {
       if (examinate >= rules.haulDestMaxCells) break
       const cx = c.wx[cs]!
@@ -593,19 +592,23 @@ export function cautaDestinatie(
       if (locPeCelula(w, rules, kind, cx, cy, cz) < cant) continue
       examinate++
       raport.evaluariDestinatie++
-      let r = regionAt(w.regions, cx, cy, cz)
-      if (r === NO_REGION || find(w.regions, r) !== compAgent) {
-        // Inainte sa spunem „nu se ajunge", ne asiguram ca golul nu e doar
-        // acoperire necalculata: un coridor de la marfa la depozit, o data per zona.
-        if (!coridorIncercat) {
-          coridorIncercat = true
-          if (acoperaCoridor(w, rules, fx, fy, fz, cx, cy, cz)) {
-            compAgent = find(w.regions, regionAt(w.regions, ax, ay, az))
-            r = regionAt(w.regions, cx, cy, cz)
-          }
-        }
-        if (r === NO_REGION || find(w.regions, r) !== compAgent) { inAltaComponenta = true; continue }
-      }
+      // Aici NU se intinde niciun coridor de acoperire.
+      //
+      // Prima versiune intindea unul (marfa → celula de depozit) „o data per
+      // zona", adica la fiecare evaluare scumpa. Masurat pe scenariul standard:
+      // acoperirea crestea nemarginit — 1138 de coloane de blocuri la 5.000 de
+      // tickuri, 2225 la 30.000, fara semn de saturare — fiindca fiecare coridor
+      // impinge frontiera cu un inel, iar itemele apar mereu in alte locuri.
+      // `relabel` (O(regiuni + muchii)) ajunsese 40% din tick. Exact K05: costul
+      // creste cu VECHIMEA coloniei, nu cu populatia.
+      //
+      // Marginirea vine din discuri, nu din coridoare: celula de depozit isi ia
+      // discul la pictare, marfa zace intr-o zona deja acoperita (a sapat sau a
+      // umblat cineva acolo), iar invariantul din `parseRules` cere ca cele doua
+      // discuri sa se atinga pe toata raza `haulDestRadiusCells`. Ce ramane
+      // nelegat dupa asta e cu adevarat alta componenta, si se spune cinstit.
+      const r = regionAt(w.regions, cx, cy, cz)
+      if (r === NO_REGION || find(w.regions, r) !== compAgent) { inAltaComponenta = true; continue }
       if (!poateRezerva(w.rezervari, eu, { targetId: c.id[cs]!, layer: Strat.LUCRU, count: cant, maxCount: rules.itemStackMax, maxClaimants: 1 }).ok) continue
       const key = cellKey(cx, cy, cz)
       if (best === -1 || dist < bestDist || (dist === bestDist && key < bestKey)) {
@@ -862,24 +865,34 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
     const ixx = it.wx[s]!
     const iy = it.wy[s]!
     const iz = it.z[s]!
-    let r = regionAt(w.regions, ixx, iy, iz)
+    const r = regionAt(w.regions, ixx, iy, iz)
     // Un morman produs in tickul asta zace pe o celula pe care regiunile o mai
     // cred piatra pana la reconstructia de la sfarsitul tickului. Se sare fara
     // cauza si fara racire — la scanarea urmatoare regiunile sunt proaspete.
     if (r === NO_REGION && w.regions.dirty.size > 0) continue
     scumpe++
     raport.candidatiExaminati++
+    // Nici aici NU se intinde un coridor de acoperire.
+    //
+    // La desemnari are sens: jucatorul poate cere sa se sape oriunde, deci tinta
+    // poate fi in teren pe care nu l-a atins nimeni. Un morman, nu: el apare
+    // NUMAI acolo unde a sapat sau a umblat cineva, deci pe teren deja acoperit.
+    // Ce ramane in alta componenta e o groapa din care nu se iese — un refuz
+    // onest, memorat pe item.
+    //
+    // Prima versiune intindea totusi un coridor, „ca la desemnari". Masurat pe
+    // scenariul standard: coridorul de la SAPA se declanseaza de 0 ori, cel de la
+    // marfa de ~360 de ori la fiecare 4.000 de tickuri, LA NESFARSIT — fiindca e
+    // ancorat de pozitia PIONULUI, care se misca, deci fiecare reluare traseaza
+    // alta linie si impinge frontiera cu un inel nou. Acoperirea crestea de la
+    // 1138 la 2225 de coloane de blocuri in 30.000 de tickuri, fara saturare, si
+    // `relabel` ajunsese 40% din tick. E exact ce a inchis recenzia taieturii 1
+    // („acoperirea creste cu munca, nu cu plimbarea"), reintrat prin a doua tinta.
     if (r === NO_REGION || find(w.regions, r) !== compAgent) {
-      if (acoperaCoridor(w, rules, ax, ay, az, ixx, iy, iz)) {
-        compAgent = find(w.regions, regionAt(w.regions, ax, ay, az))
-        r = regionAt(w.regions, ixx, iy, iz)
-      }
-      if (r === NO_REGION || find(w.regions, r) !== compAgent) {
-        raport.inaccesibil++
-        memoreazaPeItem(w, rules, s, Reason.INACCESIBIL, DetaliuItem.COMPONENTE_DIFERITE)
-        noteaza(Reason.INACCESIBIL)
-        continue
-      }
+      raport.inaccesibil++
+      memoreazaPeItem(w, rules, s, Reason.INACCESIBIL, DetaliuItem.COMPONENTE_DIFERITE)
+      noteaza(Reason.INACCESIBIL)
+      continue
     }
     // (b) destinatia.
     const cant = Math.min(it.cantitate[s]!, rules.haulCarryMax)

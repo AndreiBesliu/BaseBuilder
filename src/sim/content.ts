@@ -315,6 +315,23 @@ export function parseRules(raw: unknown): Outcome<Rules> {
       necesar: blocuriDeScan - 2 - r.agentRegionRadiusBlocks,
     })
   }
+  // Acelasi invariant, pentru lantul de carat: marfa zace intr-un loc deja
+  // acoperit (a sapat sau a umblat cineva acolo — deci discul unui pion sau al
+  // unei desemnari, cel mai mic dintre ele), iar celula de depozit isi ia discul
+  // la pictare. Ca sa fie in aceeasi componenta cand chiar exista drum, cele doua
+  // discuri trebuie sa se atinga pe toata raza in care se cauta o destinatie.
+  // Fara asta, singurul leac ar fi un coridor intins la fiecare evaluare — masurat,
+  // aia face acoperirea sa creasca nemarginit cu vechimea coloniei (K05).
+  const blocuriDeDestinatie = Math.ceil(r.haulDestRadiusCells / REGION_SIZE)
+  const discMic = Math.min(r.agentRegionRadiusBlocks, r.jobRegionRadiusBlocks)
+  if (discMic + r.jobRegionRadiusBlocks + 2 < blocuriDeDestinatie) {
+    return refuse(Reason.VALOARE_INVALIDA, {
+      camp: 'haulDestRadiusCells',
+      motiv: 'discul locului marfii si al depozitului nu se ating pe toata raza de cautare a destinatiei',
+      valoare: r.haulDestRadiusCells,
+      maxim: (discMic + r.jobRegionRadiusBlocks + 2) * REGION_SIZE,
+    })
+  }
   if (r.designationPriorityDefault > r.designationPriorityLevels) {
     return refuse(Reason.VALOARE_INVALIDA, { camp: 'designationPriorityDefault', valoare: r.designationPriorityDefault, max: r.designationPriorityLevels })
   }
