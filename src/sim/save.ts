@@ -86,6 +86,12 @@ export function encode(w: World): string {
       regiuni: {
         blocuri: [...w.regions.keys],
         legate: [...w.regions.legate].sort((a, b) => a - b),
+        // Si blocurile MURDARE. Sunt goale la sfarsit de tick, dar un save luat
+        // intre o comanda de teren si tickul urmator le are pline; fara ele,
+        // lumea incarcata nu mai reconstruieste ce reconstruieste cea continua
+        // la tickul urmator, si hash-ul diverge la +2 tickuri (masurat de
+        // recenzie, 40 din 143 de cazuri cu graf diferit).
+        murdare: [...w.regions.dirty].sort((a, b) => a - b),
       },
       agents: {
         count: a.count,
@@ -124,8 +130,10 @@ export function encode(w: World): string {
         jobWorkY: Array.from(a.jobWorkY.subarray(0, a.count)),
         jobWorkZ: Array.from(a.jobWorkZ.subarray(0, a.count)),
         jobIncercari: Array.from(a.jobIncercari.subarray(0, a.count)),
-        tintaRefuzata: Array.from(a.tintaRefuzata.subarray(0, a.count)),
-        refuzPanaLa: Array.from(a.refuzPanaLa.subarray(0, a.count)),
+        evitaSloturi: a.evitaSloturi,
+        evitaTinta: Array.from(a.evitaTinta.subarray(0, a.count * a.evitaSloturi)),
+        evitaPanaLa: Array.from(a.evitaPanaLa.subarray(0, a.count * a.evitaSloturi)),
+        scanLaTick: Array.from(a.scanLaTick.subarray(0, a.count)),
         prioPersonala: Array.from(a.prioPersonala.subarray(0, a.count * CATEGORII)),
       },
       // Desemnarile: ce a cerut jucatorul. `ultimulMotiv` e TRANSIENT si nu
@@ -161,6 +169,15 @@ const MIGRATIONS: Record<number, (data: Record<string, unknown>) => Record<strin
   // implicitul din content — exact starea in care ar fi fost lumea daca jobul
   // ar fi existat de la inceput si nimeni n-ar fi cerut nimic.
   1: (d) => ({ ...d, desemnari: d.desemnari ?? { count: 0, capacity: 0, id: [], kind: [], wx: [], wy: [], z: [], prioritate: [], alive: [], reincercaLaTick: [] } }),
+  // 2 -> 3 (recenzia S16-19): racirea pe pereche devine multime (`evitaTinta`/
+  // `evitaPanaLa`, K sloturi per pion) in locul scalarului `tintaRefuzata`/
+  // `refuzPanaLa`; apare `scanLaTick`; blocurile murdare se salveaza. Vechea
+  // pereche, daca era activa, intra in primul slot al multimii — citirea o face
+  // `decode`, care stie K-ul din reguli; aici doar se declara ca `murdare` e gol.
+  2: (d) => {
+    const r = (d.regiuni as Record<string, unknown> | undefined) ?? {}
+    return { ...d, regiuni: { ...r, murdare: r.murdare ?? [] } }
+  },
 }
 
 /**
@@ -223,7 +240,7 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
     return refuse(Reason.CAPACITATE_DEPASITA, { camp: 'agents.count', valoare: String(count), maxim: String(capacity) })
   }
 
-  const agents = makeAgentStore(capacity, rules.personalPriorityDefault)
+  const agents = makeAgentStore(capacity, rules.personalPriorityDefault, rules.jobAvoidSlots)
   agents.count = count
   agents.id.set(agentsRaw.id as number[])
   agents.x.set(agentsRaw.x as number[])
@@ -248,8 +265,33 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
   if (agentsRaw.jobWorkY) agents.jobWorkY.set(agentsRaw.jobWorkY as number[])
   if (agentsRaw.jobWorkZ) agents.jobWorkZ.set(agentsRaw.jobWorkZ as number[])
   if (agentsRaw.jobIncercari) agents.jobIncercari.set(agentsRaw.jobIncercari as number[])
-  if (agentsRaw.tintaRefuzata) agents.tintaRefuzata.set(agentsRaw.tintaRefuzata as number[])
-  if (agentsRaw.refuzPanaLa) agents.refuzPanaLa.set(agentsRaw.refuzPanaLa as number[])
+  if (agentsRaw.scanLaTick) agents.scanLaTick.set(agentsRaw.scanLaTick as number[])
+  if (agentsRaw.evitaTinta && agentsRaw.evitaPanaLa) {
+    const k = agentsRaw.evitaSloturi as number
+    const t = agentsRaw.evitaTinta as number[]
+    const p = agentsRaw.evitaPanaLa as number[]
+    if (!Number.isInteger(k) || t.length !== count * k || p.length !== count * k) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: 'agents.evitaTinta', lungime: t.length, asteptat: count * (k ?? -1) })
+    }
+    // K-ul din save si cel din reguli pot diferi: se copiaza cat incape, in
+    // ordinea sloturilor — restul se pierde, ceea ce e o racire mai scurta, nu
+    // o stare invalida.
+    const kk = Math.min(k, agents.evitaSloturi)
+    for (let i = 0; i < count; i++) {
+      for (let j = 0; j < kk; j++) {
+        agents.evitaTinta[i * agents.evitaSloturi + j] = t[i * k + j]!
+        agents.evitaPanaLa[i * agents.evitaSloturi + j] = p[i * k + j]!
+      }
+    }
+  } else if (agentsRaw.tintaRefuzata && agentsRaw.refuzPanaLa) {
+    // Schema 2: o singura pereche per pion. Intra in primul slot.
+    const t = agentsRaw.tintaRefuzata as number[]
+    const p = agentsRaw.refuzPanaLa as number[]
+    for (let i = 0; i < count; i++) {
+      agents.evitaTinta[i * agents.evitaSloturi] = t[i] ?? 0
+      agents.evitaPanaLa[i * agents.evitaSloturi] = p[i] ?? 0
+    }
+  }
   if (agentsRaw.prioPersonala) {
     const pp = agentsRaw.prioPersonala as number[]
     if (pp.length !== count * CATEGORII) {
@@ -304,10 +346,13 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
 
   // Extinderea acoperirii. Un save mai vechi n-o are: atunci se porneste gol si se
   // reconstruieste lene, ca inainte.
-  const rRaw = data.regiuni as { blocuri?: number[]; legate?: number[] } | undefined
+  const rRaw = data.regiuni as { blocuri?: number[]; legate?: number[]; murdare?: number[] } | undefined
   const regiuni = rRaw && Array.isArray(rRaw.blocuri) && rRaw.blocuri.length > 0
     ? restoreRegions(terrain, rRaw.blocuri, rRaw.legate ?? [], rules)
     : createRegions()
+  // Blocurile murdare de la momentul salvarii: lumea incarcata le reconstruieste
+  // la tickul urmator, exact ca cea continua.
+  for (const k of rRaw?.murdare ?? []) regiuni.dirty.add(k)
 
   const desemnari = incarcaDesemnari(data.desemnari, rules)
   if (!desemnari.ok) return desemnari

@@ -16,7 +16,7 @@
 import type { Outcome } from '../result.ts'
 import { accept, refuse, Reason } from '../result.ts'
 import type { Chunk, MaterialId } from './chunk.ts'
-import { CHUNK_CELLS, cellHeightCm, groundLevelFromCm, generateChunk, isSolid, Material, promote, setVoxel, surfaceMatAt, voxelAt, VOXEL_LEVELS } from './chunk.ts'
+import { CHUNK_CELLS, cellHeightCm, groundLevelFromCm, generateChunk, isSolid, Material, promote, promotedBaseM, setVoxel, surfaceMatAt, voxelAt, VOXEL_LEVELS } from './chunk.ts'
 import { MACRO_METERS, MACRO_SIZE } from './macro.ts'
 
 /** Latimea lumii in chunk-uri: 1024 esantioane × 16 m / 32 m = 512. */
@@ -164,11 +164,26 @@ export function materialAt(t: Terrain, wx: number, wy: number, z: number): Outco
   // sta aici?" de doua ori, inainte si dupa promovare, si a primit doua raspunsuri.
   // Exact tiparul din research: sistemele astea sunt invizibile — typecheck verde,
   // teste verzi, joc rupt.
+  // Si sub baza pe care AR AVEA-O chunk-ul promovat nu exista voxel: `voxelAt`
+  // spune AER acolo, deci si calea derivata spune AER. Altfel o desemnare la 30 m
+  // sub sol era acceptata pe chunk-ul ne-promovat (ROCA), iar dupa prima
+  // sapatura devenea AER si nu mai putea fi sapata niciodata — cache-ul si datele
+  // raspundeau diferit pentru acelasi voxel.
+  const baza = promotedBaseM(ref.chunk)
+  if (z < baza || z >= baza + VOXEL_LEVELS) return accept(Material.AER)
   const groundM = groundLevelFromCm(cellHeightCm(ref.chunk, ref.lx, ref.ly))
   if (z > groundM) return accept(Material.AER)
   if (z === groundM) return accept(surfaceMatAt(ref.chunk, ref.lx, ref.ly))
   if (z > groundM - 3) return accept(Material.PAMANT)
   return accept(Material.ROCA)
+}
+
+/** Intervalul de cote [min, max] in care chunk-ul de sub (wx, wy) are (sau ar avea) voxeli. */
+export function voxelRangeM(t: Terrain, wx: number, wy: number): Outcome<{ min: number; max: number }> {
+  const ref = locate(t, wx, wy)
+  if (!ref) return refuse(Reason.IN_AFARA_LUMII, { x: wx, y: wy, limita: WORLD_CELLS })
+  const baza = promotedBaseM(ref.chunk)
+  return accept({ min: baza, max: baza + VOXEL_LEVELS - 1 })
 }
 
 function editAt(t: Terrain, wx: number, wy: number, z: number, material: MaterialId, expectSolid: boolean): Outcome<void> {

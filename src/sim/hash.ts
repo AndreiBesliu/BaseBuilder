@@ -111,9 +111,17 @@ export function hashWorld(w: World): string {
   h.ints(a.jobWorkY, a.count)
   h.ints(a.jobWorkZ, a.count)
   h.bytes(a.jobIncercari, a.count)
-  h.ints(a.tintaRefuzata, a.count)
-  h.ints(a.refuzPanaLa, a.count)
+  h.ints(a.evitaTinta, a.count * a.evitaSloturi)
+  h.ints(a.evitaPanaLa, a.count * a.evitaSloturi)
+  h.ints(a.scanLaTick, a.count)
   h.bytes(a.prioPersonala, a.count * CATEGORII)
+
+  // Blocurile murdare ale grafului de regiuni. Graful e DERIVED, dar CARE blocuri
+  // asteapta reconstructie e istorie care schimba viitorul: un save luat intre o
+  // comanda de teren si tickul urmator fara ele diverge la +2 tickuri (masurat).
+  const murdare = [...w.regions.dirty].sort((x, y) => x - y)
+  h.u32(murdare.length)
+  for (const k of murdare) h.u32(k)
 
   // Desemnarile, in ordinea slotului. `ultimulMotiv` e TRANSIENT si nu intra.
   const d = w.desemnari

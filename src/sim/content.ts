@@ -72,6 +72,8 @@ export interface Rules {
   readonly jobInfeasibleRetryTicks: number
   /** Cate refuzuri de drum tolereaza un job inainte sa se incheie. Fara plafon, pionul ramane parcat pe viata. */
   readonly jobMaxIncercari: number
+  /** Cate tinte refuzate tine minte un pion deodata (racirea pe pereche). Cu una singura, doua tinte refuzate se sterg reciproc. */
+  readonly jobAvoidSlots: number
   /** Cata munca cere sapatul unui voxel, in unitati. */
   readonly digWorkUnits: number
   /** Cate unitati de munca face un pion intr-un tick, la productivitate normala. */
@@ -115,6 +117,7 @@ const RULES_SPEC: Record<keyof Rules, FieldSpec> = {
   jobRetryTicks: { min: 0, max: 1000000 },
   jobInfeasibleRetryTicks: { min: 0, max: 1000000 },
   jobMaxIncercari: { min: 1, max: 255 },
+  jobAvoidSlots: { min: 1, max: 64 },
   digWorkUnits: { min: 1, max: 1000000 },
   workUnitsPerTick: { min: 1, max: 1000000 },
   designationCapacity: { min: 1, max: 1000000 },
@@ -220,6 +223,7 @@ export const DEFAULT_RULES: Rules = {
   jobRetryTicks: 600,
   jobInfeasibleRetryTicks: 100,
   jobMaxIncercari: 3,
+  jobAvoidSlots: 4,
   digWorkUnits: 400,
   workUnitsPerTick: 10,
   designationCapacity: 4096,

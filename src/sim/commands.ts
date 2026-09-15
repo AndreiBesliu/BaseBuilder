@@ -21,9 +21,9 @@ import type { Rules } from './content.ts'
 import { DEFAULT_RULES } from './content.ts'
 import { isWalkable, markDirty } from './regions.ts'
 import { isSolid, type MaterialId } from './terrain/chunk.ts'
-import { CHUNK_GRID, fill, inWorld, materialAt, setFocus, WORLD_CELLS } from './terrain/terrain.ts'
+import { CHUNK_GRID, fill, inWorld, materialAt, setFocus, voxelRangeM, WORLD_CELLS } from './terrain/terrain.ts'
 import { adaugaDesemnare, Desemnare, slotDesemnare } from './desemnari.ts'
-import { acoperaDesemnarea, anuleazaDesemnare, sapaManual, Sfarsit, terminaJob } from './joburi.ts'
+import { acoperaDesemnarea, anuleazaDesemnare, sapaManual, Sfarsit, terminaJob, uitaTintele } from './joburi.ts'
 
 export type Command =
   | { readonly kind: 'spawnAgent'; readonly x: number; readonly y: number; readonly z: number; readonly faction: FactionId }
@@ -119,8 +119,8 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       a.jobWorkY[slot] = 0
       a.jobWorkZ[slot] = 0
       a.jobIncercari[slot] = 0
-      a.tintaRefuzata[slot] = 0
-      a.refuzPanaLa[slot] = 0
+      a.scanLaTick[slot] = 0
+      uitaTintele(w, slot)
       for (let c = 0; c < CATEGORII; c++) a.prioPersonala[slot * CATEGORII + c] = rules.personalPriorityDefault
       clearPath(w.paths, slot)
       // Si racirea. Fara asta, un slot reutilizat mostenea racirea mortului si
@@ -212,7 +212,14 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       }
       // E ceva de sapat acolo? Aceeasi intrebare pe care o pune `dig`, pusa
       // ACUM, nu cand ajunge pionul: o desemnare in aer ar fi o tinta pe care
-      // toata lumea o ia si nimeni n-o poate termina.
+      // toata lumea o ia si nimeni n-o poate termina. Si in intervalul in care
+      // chunk-ul are (sau ar avea) voxeli: sub baza lui nu exista nimic de sapat,
+      // nici acum, nici dupa promovare.
+      const interval = voxelRangeM(w.terrain, cmd.wx, cmd.wy)
+      if (!interval.ok) return interval
+      if (cmd.z < interval.value.min || cmd.z > interval.value.max) {
+        return refuse(Reason.IN_AFARA_LUMII, { z: cmd.z, min: interval.value.min, max: interval.value.max })
+      }
       const mat = materialAt(w.terrain, cmd.wx, cmd.wy, cmd.z)
       if (!mat.ok) return mat
       if (!isSolid(mat.value)) {

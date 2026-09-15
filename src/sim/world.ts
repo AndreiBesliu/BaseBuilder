@@ -39,7 +39,7 @@ export function createWorld(seed: number, rules: Rules = DEFAULT_RULES): World {
     tick: 0,
     nextId: 1,
     rng,
-    agents: makeAgentStore(rules.agentCapacity, rules.personalPriorityDefault),
+    agents: makeAgentStore(rules.agentCapacity, rules.personalPriorityDefault, rules.jobAvoidSlots),
     // DERIVED. Marimea lumii NU e un numar de gameplay: o determina harta macro
     // (MACRO_SIZE x MACRO_METERS), deci nu are ce cauta in content/rules.json.
     //

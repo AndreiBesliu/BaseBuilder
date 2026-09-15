@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  cheieRezervare,
   createReservations,
   dumpRezervari,
   elibereaza,
@@ -154,6 +155,55 @@ test('INVARIANT: o rezervare pe un job pe care claimantul nu-l mai are e prinsa'
   a.jobId[0] = 3
   a.jobKind[0] = 0 // sau nu mai are niciun job
   assert.equal(verificaRezervari(s, a).ok, false)
+})
+
+test('INVARIANT: si celelalte trei clauze au proba negativa — prea multi claimanti, count peste capacitate, total gresit', () => {
+  // Recenzia: instrumentul pe care se sprijina acceptanta avea proba negativa
+  // doar pentru „claimant mort"; trei sferturi din el se puteau sterge verde.
+  const agenti = (): ReturnType<typeof makeAgentStore> => {
+    const a = makeAgentStore(4)
+    a.count = 2
+    for (let i = 0; i < 2; i++) { a.id[i] = 10 + i; a.alive[i] = 1; a.jobKind[i] = 1; a.jobId[i] = 100 + i }
+    return a
+  }
+  const injecteaza = (s: ReturnType<typeof createReservations>, claimant: number, jobId: number, count: number, maxCount: number, maxClaimants: number): void => {
+    const k = cheieRezervare(1, Strat.LUCRU)
+    const lista = s.peTinta.get(k) ?? []
+    lista.push({ claimant, jobId, targetId: 1, layer: Strat.LUCRU, count, maxCount, maxClaimants })
+    s.peTinta.set(k, lista)
+    s.total++
+  }
+  const preaMulti = createReservations()
+  injecteaza(preaMulti, 10, 100, 1, 2, 1)
+  injecteaza(preaMulti, 11, 101, 1, 2, 1)
+  const v1 = verificaRezervari(preaMulti, agenti())
+  assert.equal(v1.ok, false)
+  if (!v1.ok) assert.equal(v1.params.motiv, 'prea multi claimanti')
+
+  const pesteCapacitate = createReservations()
+  injecteaza(pesteCapacitate, 10, 100, 2, 2, 2)
+  injecteaza(pesteCapacitate, 11, 101, 1, 2, 2)
+  const v2 = verificaRezervari(pesteCapacitate, agenti())
+  assert.equal(v2.ok, false)
+  if (!v2.ok) assert.equal(v2.params.motiv, 'count peste capacitate')
+
+  const totalGresit = createReservations()
+  injecteaza(totalGresit, 10, 100, 1, 1, 1)
+  totalGresit.total = 5
+  const v3 = verificaRezervari(totalGresit, agenti())
+  assert.equal(v3.ok, false)
+  if (!v3.ok) assert.equal(v3.params.motiv, 'total gresit')
+})
+
+test('acelasi claimant nu ocupa un loc NOU: doua ridicari ale aceluiasi job dintr-un morman cu un singur loc trec', () => {
+  // Taietura 2 (mormanele) e exact cazul; API-ul se scrie o singura data.
+  const s = createReservations()
+  const ia = (cat: number): Cerere => cerere(1100, { count: cat, maxCount: 2, maxClaimants: 1 })
+  assert.ok(rezervaToate(s, 1, 10, [ia(1), ia(1)]).ok, 'aceeasi pereche (claimant, job) a fost numarata de doua ori')
+  assert.equal(s.total, 2)
+  const altul = rezervaToate(s, 2, 11, [cerere(1100, { count: 1, maxCount: 3, maxClaimants: 1 })])
+  assert.equal(altul.ok, false)
+  if (!altul.ok) assert.equal(altul.params.de, 1)
 })
 
 test('dumpRezervari e canonic: aceeasi multime, scrisa in alta ordine, da acelasi text', () => {

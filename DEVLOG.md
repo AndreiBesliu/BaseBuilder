@@ -1597,3 +1597,68 @@ de acoperire scos. **Toate prinse**, cu arborele restaurat prin git și verifica
 Prima rulare a scriptului a dat „7 controale invalide" — nu fiindcă gărzile lipseau, ci fiindcă primul
 `git checkout` al unui fișier îl rescrie cu CRLF, iar tiparele mele aveau LF. Capcana din memorie,
 încă o dată; scriptul își adaptează acum tiparele la terminatorul fișierului.
+
+---
+
+## Task Started — recenzia codului de la tăietura 1, și ce a schimbat
+
+**Prompt:** „continua"
+**Model:** Claude Fable 5.1 · workflow cu 6 lentile de căutare + verificare pe două lentile a
+primelor 7 constatări (20 de agenți). **Doar cele 6 lentile de căutare au terminat: 4,0 M tokeni**,
+~650 k fiecare — au scris și rulat scripturi de reproducere. Cei 14 verificatori au căzut la limita
+de sesiune. Am verificat constatările eu, pe cod, în loc să relansez.
+
+Nota de buget, a doua într-o zi: estimasem ~270 k pe agent după panoul de design; un agent care
+**reproduce** (scrie fixturi, rulează `node --test`) costă ~650 k. Scris în memorie.
+
+### 40 de constatări, 6 lentile — și ce era real
+
+Toate cele reale au venit cu script de reproducere. Le iau în ordinea gravității:
+
+| ce scrisesem | ce se întâmpla, măsurat | ce e acum |
+|---|---|---|
+| „`dirty` e gol la orice save" | fals: un save luat **între o comandă de teren și tickul următor** (exact ce face viewerul: click, apoi tick în cadrul următor) pierde blocurile murdare; lumea încărcată nu mai reconstruiește ce reconstruiește cea continuă. Hash EGAL la save, diferit la +2 tickuri. 40 din 143 de cazuri cu graf diferit | `dirty` e PERSISTED (`regiuni.murdare`) și intră în hash. Test: `dig` prin comandă, `encode` fără tick, 300 de tickuri în ambele lumi, hash egal la fiecare |
+| răcirea pe pereche „ține minte ținta refuzată" | ținea minte UNA: a doua țintă refuzată o ștergea pe prima, iar pionul le alterna pe viață — 59 de A\*-uri eșuate în 1200 de tickuri, zero muncă, chiar cu o a treia țintă fezabilă la 6 celule. Plafonul de încercări **mutase** defectul „pion parcat", nu-l închisese | o **mulțime mărginită** de perechi per pion (`jobAvoidSlots`, 4), PERSISTED, cu evicție a celei mai vechi. Test: două ținte peste buget + una fezabilă ⇒ ≤ 12 refuzuri de drum în 1200 de tickuri și cea fezabilă săpată |
+| „discul pionului și al desemnării se ating" | premisa era că pionul stă în CENTRUL discului lui. Nu stă: hoinărea în inelul calculat-dar-nelegat (unde nici job, nici drum), sau se năștea în discul altuia. De acolo, desemnări la ≤ 96 de celule cădeau într-un gol necalculat — `COMPONENTE_DIFERITE` pe veci, cu drum real de 105 celule | hoinăreala nu iese din blocuri **legate**; blocul unui pion e legat de la naștere; iar la un refuz de componentă scannerul întinde **o dată un coridor** de blocuri spre țintă (memoizat prin acoperirea persistată) înainte să spună „leagă zonele". Acoperirea crește cu munca, nu cu plimbarea |
+| `celulaDeLucru` — „prima celulă câștigă" | oarbă la componentă: primul vecin în ordinea fixă putea fi fundul unei gropi izolate, iar treapta legată de suprafață, următoarea în ordine, nu era privită niciodată. Ținta respinsă cu „leagă zonele" pentru zone legate | primește componenta pionului; două întrebări: „are vreun loc?" (răcire pe țintă) și „are unul pentru mine?" |
+| — | **jefuitorii săpau pentru jucător**: scannerul nu se uita la facțiune. În scenariul standard 10 din 47 de desemnări erau săpate de dușman; hash-ul de referință cocea munca lui | doar `ASEZARE` cere de lucru |
+| „celula de lucru se reface când se pierde" | doar la `INACCESIBIL`; un ostil care STA pe prima celulă de lucru bloca ținta deși avea alte trei | și la `OCUPAT_DE_OSTIL`: altă celulă, sărind peste cea curentă, în limita plafonului de încercări |
+| — | după fiecare voxel săpat pionul hoinărea aleator până la următorul `(tick + id) % 30`: **21,6 %** din timpul unei cariere | `scanLaTick`: cere de lucru la tickul de după orice job. Măsurat acum: 3,7 % |
+| — | regiuni stale în același tick: vecinul sapă podeaua de sub un pion care lucrează, iar refacerea locului nu vede gaura proaspătă (până la `rebuildDirty` de la sfârșit) și anulează cu un motiv fals | refacerea locului se **amână** cât graful are blocuri murdare |
+| — | `COMPONENTE_DIFERITE` nu se memora: 964 de pereți de șanț într-o altă componentă consumau plafonul la fiecare scanare — aceeași înfometare pe care panoul de design o închisese pentru „fără loc de lucru", reintrată prin a doua cauză | se memorează pe țintă, cu răcire scurtă, după ce coridorul a probat că golul e real |
+| răcirea de 100 de tickuri | cu 1700 de desemnări fără loc și 256 evaluate per scanare, exact 1024 primeau vreodată un motiv — primele expirau și reintrau în față | răcirea se derivă din câte desemnări vii sunt: cel puțin cât să acopere toate |
+| — | `desemneaza` accepta o țintă sub baza de voxeli a chunkului (pe nepromovat `materialAt` spunea ROCĂ, pe promovat AER): 750 de blocuri goale persistate pentru o țintă imposibilă | refuz `IN_AFARA_LUMII` cu intervalul; `materialAt` derivat spune AER sub bază, ca `voxelAt`. **Capcană prinsă imediat**: prima versiune recalcula baza la fiecare `materialAt` (1024 de celule) — un `isWalkable` a devenit de ~1000× mai scump, 179 ms/tick la 4 agenți. Se calculează o dată, la generare |
+| viewer | **Shift+click zidea invizibil** (ieșirea timpurie pentru „nimic de remesh-uit" prindea și zidirea); overlay-ul G nu se reîmprospăta după săpăturile pionilor; remesh-ul rata un pion care sosea și săpa în același cadru | reparate; remesh-ul compară desemnările vii înainte/după pas |
+
+Și **12 gărzi care nu legau**, din lentila de teste: 22 din 33 de mutații treceau 193/193. Cele
+mai grave: aserția răcirii pe pereche era în fază cu ciclul job → 3 refuzuri (verde și cu scannerul
+ignorând răcirea); sortarea pe margine n-avea niciun test (fără ea, 23 din 76 de layout-uri alegeau
+sub optim); cinci câmpuri PERSISTED erau mereu zero în fixturile de roundtrip (șase mutații în
+`save.ts` treceau verde); ramura „refă locul de lucru cu progresul păstrat" nu era parcursă de
+nimic. Toate au acum testul lor: pe raport (nu pe stare la un moment), cu perechea „leagă / expiră".
+
+### Ce n-am schimbat, și de ce
+
+- **Coridorul e o limită scrisă**: are 3 blocuri lățime; un drum real care ocolește mai larg tot dă
+  `COMPONENTE_DIFERITE` — onest, memorat scurt, și cu hoinăreala ținută în blocuri legate acoperirea
+  nu mai poate crește cu plimbarea.
+- Sortarea completă a candidaților (~1 ms la 4096 în rază, măsurat de recenzie) rămâne; se înlocuiește
+  cu selecție parțială când o cifră din joc o cere.
+- Invariantul de acoperire `a + j + 2` mai are un caz la 1 din 229 pe pantă (blocul de cusătură fără
+  muchii verticale interne); coridorul îl acoperă în practică. Rămâne notat.
+
+### Măsurat
+
+- **193 → 213 teste** (39 în felia de joburi). Schema 3, cu fixtură golden de schema 2 (3 pioni cu
+  joburi în curs, 6 KB) și migrarea 2→3 probată pe ea.
+- cariera: 900 săpate, 0 anulate, **3,7 % hoinăreală** (era 21,6 %), ~205 µs/tick.
+- scenariul standard: 68 µs/tick; hash `42e4501a` → `e87ed5e2` (jefuitorii nu mai sapă; hoinăreala
+  în blocuri legate; scanarea de după job).
+- fixtura de schema 1: testul „aceeași lume ca replica" a ținut o zi — hoinăreala s-a schimbat, deci
+  aceleași 300 de tickuri dau altă lume. Exact de aia fixtura e golden, nu regenerată; testul verifică
+  acum câmp cu câmp, nu prin replică.
+
+## Task Completed
+
+213 teste verzi, CI verde. Următoarea tăietură rămâne **iteme, cărat, depozite** (design în
+scratchpad, de trecut prin panou).

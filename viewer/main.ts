@@ -27,8 +27,8 @@ import { Ballast, Bisector, checkGuards, clockGranularityMs, FrameProbe, heapMB 
 import { createRegionOverlay, rebuildRegionOverlay } from './overlay-regions.ts'
 import { createAmprentaOverlay, FORME, rebuildAmprentaOverlay } from './overlay-amprenta.ts'
 import { createJobOverlay, rebuildJobOverlay, rezumatJoburi } from './overlay-joburi.ts'
-import { desemnareLaCelula, slotDesemnare } from '../src/sim/desemnari.ts'
-import { PasJob } from '../src/sim/state.ts'
+import { desemnareLaCelula } from '../src/sim/desemnari.ts'
+import { decodeCell } from '../src/sim/path.ts'
 import { createDensePanel, densePanelReport, PANEL_HZ, tickDensePanel } from './panel-dens.ts'
 import { rebuildDirty } from '../src/sim/regions.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
@@ -570,9 +570,12 @@ function refreshOverlay(): void {
   const t0 = performance.now()
   rebuildRegionOverlay(regionOverlay, world.terrain, regions, wx, wy, z, DEFAULT_RULES)
   lastOverlayMs = performance.now() - t0
+  epocaDesenata = world.regions.epoca
 }
 
 let lastOverlayMs = 0
+/** Epoca grafului la ultima desenare a overlay-ului de regiuni. */
+let epocaDesenata = -1
 
 // --------------------------------------------------------------------------
 // 4. interactiune: sapa si construieste
@@ -651,8 +654,10 @@ renderer.domElement.addEventListener('click', (ev) => {
     el('spot').textContent = `refuzat: ${describe(out)}`
     return
   }
-  if (!ev.altKey) {
-    // Nimic de remesh-uit: terenul se schimba abia cand vine pionul.
+  if (!ev.altKey && !ev.shiftKey) {
+    // Desemnarea si retragerea ei nu schimba terenul: nimic de remesh-uit.
+    // (Zidirea DA — prima versiune iesea si pentru Shift+click, iar zidul exista
+    // in simulare si nu se vedea. Exact punctul orb K13.)
     if (jobOverlay.visible) rebuildJobOverlay(jobOverlay, world)
     return
   }
@@ -1012,21 +1017,28 @@ function stepFrame(ts: number): void {
     // poate sapa in cadrul asta e cine LUCREAZA acum: se retin celulele lor
     // inainte de pas, si dupa pas se remesh-uieste in jurul celor a caror
     // desemnare a disparut. Rar (o sapatura la cateva secunde) si local.
-    const lucratori: { wx: number; wy: number; z: number }[] = []
-    for (let i = 0; i < world.agents.count; i++) {
-      if (world.agents.alive[i] === 0 || world.agents.jobKind[i] === 0 || world.agents.jobStep[i] !== PasJob.LUCREAZA) continue
-      const ds = slotDesemnare(world.desemnari, world.agents.jobTarget[i]!)
-      if (ds !== -1) lucratori.push({ wx: world.desemnari.wx[ds]!, wy: world.desemnari.wy[ds]!, z: world.desemnari.z[ds]! })
-    }
-    const promotedInainte = lucratori.length > 0 ? promotedKeys() : null
+    //
+    // Corect prin constructie, nu prin ghicit cine e in LUCREAZA: se compara
+    // desemnarile vii inainte si dupa pas si se remesh-uieste in jurul celor
+    // care au disparut. Un pion care sosea si sapa in acelasi cadru scapa
+    // variantei „doar cei in LUCREAZA la inceputul cadrului".
+    let cuJob = 0
+    for (let i = 0; i < world.agents.count; i++) if (world.agents.alive[i] === 1 && world.agents.jobKind[i] !== 0) cuJob++
+    const cheiInainte = cuJob > 0 ? new Set(world.desemnari.laCelula.keys()) : null
+    const promotedInainte = cuJob > 0 ? promotedKeys() : null
     stepSim(agentLayer, world, DEFAULT_RULES, dt, simTick)
     updateAgentLayer(agentLayer, world, DEFAULT_RULES)
-    if (promotedInainte) {
-      for (const c of lucratori) {
-        if (desemnareLaCelula(world.desemnari, c.wx, c.wy, c.z) === -1) remeshAfterEdit(c.wx, c.wy, promotedInainte)
+    if (cheiInainte && promotedInainte) {
+      for (const k of cheiInainte) {
+        if (world.desemnari.laCelula.has(k)) continue
+        const c = decodeCell(k)
+        remeshAfterEdit(c.wx, c.wy, promotedInainte)
       }
     }
     if (jobOverlay.visible && frameIndex % 6 === 0) rebuildJobOverlay(jobOverlay, world)
+    // Overlay-ul de regiuni (G) se reimprospateaza cand graful s-a schimbat —
+    // sapaturile pionilor si acoperirea desemnarilor il schimba fara niciun click.
+    if (regionOverlay.visible && world.regions.epoca !== epocaDesenata) refreshOverlay()
   }
   driveScenario(frameIndex)
   stepNegativeProbe()

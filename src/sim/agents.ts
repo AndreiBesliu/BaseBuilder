@@ -57,8 +57,8 @@ import type { Rules } from './content.ts'
 import { nextInt } from './rng.ts'
 import type { RngState } from './rng.ts'
 import type { AgentStore, World } from './state.ts'
-import { MM_PER_CELL, PasJob } from './state.ts'
-import { canStep, ensureArea, isWalkable, NO_REGION, rebuildDirty, regionAt } from './regions.ts'
+import { Faction, MM_PER_CELL, PasJob } from './state.ts'
+import { blockKey, blockOfCell, canStep, ensureArea, isWalkable, NO_REGION, rebuildDirty, regionAt } from './regions.ts'
 import { cellKey, findPath, pathLength } from './path.ts'
 import type { Ocupare } from './path.ts'
 import { Reason } from './result.ts'
@@ -135,10 +135,20 @@ function alegeTinta(w: World, rules: Rules, rng: RngState, slot: number): boolea
 
     // Cota se cauta in jurul celei proprii: o tinta la alt etaj cere scari, si
     // scarile nu exista inca.
+    //
+    // Si NUMAI in blocuri LEGATE, nu doar calculate. Inelul din jurul unui disc
+    // de acoperire e calculat (vecinii se creeaza la legare) dar nu e legat: un
+    // pion care hoinarea acolo statea intr-o regiune fara muchii — nu putea lua
+    // niciun job si nu putea primi niciun drum in afara blocului. Si, mai grav,
+    // fiecare pas in afara discului ar cere un inel nou, iar acoperirea ar creste
+    // cu plimbarea, nemarginit. Hoinareala ramane in ce e legat; acoperirea
+    // creste doar spre munca (vezi `acoperaCoridor` in joburi.ts).
     for (let dz = 0; dz <= rules.maxStepM * 2; dz++) {
       for (const tz of dz === 0 ? [a.z[slot]!] : [a.z[slot]! + dz, a.z[slot]! - dz]) {
         if (!isWalkable(w.terrain, tx, ty, tz, rules)) continue
         if (regionAt(w.regions, tx, ty, tz) === NO_REGION) continue
+        const b = blockOfCell(tx, ty)
+        if (!w.regions.legate.has(blockKey(b.bx, b.by, tz))) continue
         a.goalX[slot] = tx
         a.goalY[slot] = ty
         a.goalZ[slot] = tz
@@ -221,7 +231,15 @@ export function stepAgents(w: World, rules: Rules): void {
     if (a.alive[i] === 0) continue
     const cx = cellOf(a.x[i]!)
     const cy = cellOf(a.y[i]!)
-    if (regionAt(w.regions, cx, cy, a.z[i]!) !== NO_REGION) continue
+    // „Intr-o regiune" nu ajunge: blocul trebuie sa fie si LEGAT. Un pion nascut
+    // in inelul calculat-dar-nelegat al discului altcuiva statea intr-o regiune
+    // fara muchii: nicio tinta, niciun drum, niciun job. Hoinareala nu iese din
+    // blocuri legate, deci conditia se atinge doar la nastere si dupa o mutare
+    // fortata (`dezgroapa`) — un inel nou, o data, nu la fiecare pas.
+    if (regionAt(w.regions, cx, cy, a.z[i]!) !== NO_REGION) {
+      const b = blockOfCell(cx, cy)
+      if (w.regions.legate.has(blockKey(b.bx, b.by, a.z[i]!))) continue
+    }
     if (w.tick < p.nextReplanTick[i]!) continue
 
     ensureArea(w.terrain, w.regions, cx, cy, a.z[i]!, rules.agentRegionRadiusBlocks, rules)
@@ -269,11 +287,19 @@ export function stepAgents(w: World, rules: Rules): void {
     if (regionAt(w.regions, cx, cy, cz) === NO_REGION) continue
 
     // 2. Munca. Pull, nu push: un pion FARA job cere unul cand ii vine randul —
-    //    decalat pe id, ca sa nu scaneze toti in acelasi tick (research: id % 30).
-    //    Daca primeste, tinta de mers devine celula de lucru si hoinareala se
-    //    opreste. Un pion CU job nu re-scaneaza: politica de preemptiune din
-    //    joburi.ts.
-    if (a.jobKind[i] === 0 && (w.tick + a.id[i]!) % rules.jobRescanTicks === 0) {
+    //    decalat pe id, ca sa nu scaneze toti in acelasi tick (research: id % 30)
+    //    — sau in tickul de dupa un job incheiat, ca sa nu hoinareasca intre
+    //    doua joburi (masurat: 21,6% din timpul unei cariere). Daca primeste,
+    //    tinta de mers devine celula de lucru si hoinareala se opreste. Un pion
+    //    CU job nu re-scaneaza: politica de preemptiune din joburi.ts.
+    //
+    //    Doar ASEZAREA cere de lucru. Un jefuitor nu sapa pentru jucator:
+    //    DESIGN §5.5 il pune sub un Commander AI, nu la tabla de joburi.
+    if (
+      a.jobKind[i] === 0 &&
+      a.faction[i] === Faction.ASEZARE &&
+      ((w.tick + a.id[i]!) % rules.jobRescanTicks === 0 || (a.scanLaTick[i] !== 0 && a.scanLaTick[i] === w.tick))
+    ) {
       cautaJob(w, rules, i)
     }
     if (a.jobKind[i] !== 0) {

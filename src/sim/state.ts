@@ -29,8 +29,10 @@ import type { RatiuneStore } from './joburi.ts'
  *
  *   1 — S1-15: agenti, teren, drumuri, extinderea acoperirii de regiuni
  *   2 — S16-19: desemnari, joburi pe agenti, prioritati personale
+ *   3 — S16-19 dupa recenzie: racirea pe pereche ca MULTIME, scanarea imediata
+ *       dupa un job, blocurile murdare persistate
  */
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 /**
  * Categoriile de munca. Lista de STRUCTURA (ce feluri de munca exista), nu numar
@@ -144,11 +146,27 @@ export interface AgentStore {
   /**
    * Racirea pe PERECHEA (pion, tinta): dupa ce pionul a renuntat la o tinta din
    * cauze care tin de EL (drumul lui e blocat de un ostil, prea scump pentru el),
-   * n-o reia pana la `refuzPanaLa`. Pe tinta nu se scrie nimic — altcineva, din
-   * alta parte, poate ajunge. 0 = nicio tinta refuzata.
+   * n-o reia pana la tickul pereche. Pe tinta nu se scrie nimic — altcineva, din
+   * alta parte, poate ajunge.
+   *
+   * E o MULTIME marginita, `evitaSloturi` perechi per pion (`slot * evitaSloturi + k`),
+   * nu un scalar. Prima versiune tinea o singura tinta, si recenzia a masurat ce
+   * iese: cu doua tinte peste buget, a doua refuzata o stergea pe prima, iar
+   * pionul le alterna pe viata — 59 de A*-uri esuate in 1200 de tickuri, zero
+   * munca — exact defectul „pion parcat repetand cea mai scumpa cautare" pe care
+   * plafonul de incercari trebuia sa-l inchida. Plafonul il mutase, nu il inchisese.
+   * Evictia e a celei mai vechi (tickul de expirare cel mai mic). 0 = slot liber.
    */
-  tintaRefuzata: Int32Array
-  refuzPanaLa: Int32Array
+  evitaSloturi: number
+  evitaTinta: Int32Array
+  evitaPanaLa: Int32Array
+  /**
+   * Tickul la care pionul cere de lucru IN AFARA decalajului obisnuit — de
+   * exemplu tickul de dupa un job incheiat. Fara asta, dupa fiecare voxel sapat
+   * pionul hoinarea aleator pana la urmatorul `(tick + id) % jobRescanTicks`:
+   * masurat, 21,6% din timpul unei cariere. 0 = niciunul.
+   */
+  scanLaTick: Int32Array
   /**
    * Prioritatea personala pe fiecare categorie, `slot * CATEGORII + categorie`.
    * 0 = niciodata; 1..personalPriorityLevels. E „grila manuala"; modul Auto e
@@ -200,7 +218,7 @@ export interface World {
   ratiune: RatiuneStore
 }
 
-export function makeAgentStore(capacity: number, prioPersonalaImplicita = 1): AgentStore {
+export function makeAgentStore(capacity: number, prioPersonalaImplicita = 1, evitaSloturi = 4): AgentStore {
   return {
     count: 0,
     capacity,
@@ -224,8 +242,10 @@ export function makeAgentStore(capacity: number, prioPersonalaImplicita = 1): Ag
     jobWorkY: new Int32Array(capacity),
     jobWorkZ: new Int32Array(capacity),
     jobIncercari: new Uint8Array(capacity),
-    tintaRefuzata: new Int32Array(capacity),
-    refuzPanaLa: new Int32Array(capacity),
+    evitaSloturi,
+    evitaTinta: new Int32Array(capacity * evitaSloturi),
+    evitaPanaLa: new Int32Array(capacity * evitaSloturi),
+    scanLaTick: new Int32Array(capacity),
     prioPersonala: new Uint8Array(capacity * CATEGORII).fill(prioPersonalaImplicita),
   }
 }

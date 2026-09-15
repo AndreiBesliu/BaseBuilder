@@ -4,22 +4,24 @@
  * PLAN K13 numeste sistemele astea — regiuni, rezervari, job curent — drept
  * INVIZIBILE: typecheck verde, teste verzi, joc rupt. Overlay-ul de regiuni a
  * gasit un defect in prima privire si a ratat altul fiindca se uita la alt
- * store decat simularea. Asta se uita la `world.desemnari`, `world.rezervari`
- * si `world.ratiune` — obiectele reale, nu copii.
+ * store decat simularea. Asta se uita la `world.desemnari` si `world.rezervari`
+ * — obiectele reale, nu copii. Cauzele de pe PION (`world.ratiune`) ajung
+ * deocamdata doar in rezumatul din HUD, nu pe ecran.
  *
  * Ce arata, si de ce fiecare culoare inseamna ceva ACTIONABIL:
  *   - desemnare LIBERA (nimeni n-a respins-o): chihlimbar
  *   - REZERVATA (cineva vine sau lucreaza): albastru
  *   - FARA LOC DE LUCRU (n-are niciun vecin pe care sa stai): rosu — sapa o rampa
  *   - COMPONENTE DIFERITE (are loc, dar nu se ajunge): violet — leaga zonele
- *   - alt refuz memorat (ostil, buget): portocaliu
+ *   - alt refuz memorat (un pion a renuntat: ostil in drum, drum peste buget):
+ *     portocaliu — nu e a tintei, e a cuiva; altcineva o poate lua
  * Plus o linie de la fiecare pion care MERGE la lucru catre celula lui de lucru,
  * ca „unde se duce ala?" sa aiba raspuns fara sa dai click.
  */
 
 import * as THREE from 'three'
 import type { World } from '../src/sim/state.ts'
-import { PasJob } from '../src/sim/state.ts'
+import { Faction, PasJob } from '../src/sim/state.ts'
 import { cellOf } from '../src/sim/drumuri.ts'
 import { DetaliuMotiv } from '../src/sim/desemnari.ts'
 import { motivDinCod, Reason } from '../src/sim/result.ts'
@@ -124,7 +126,7 @@ export function rebuildJobOverlay(o: JobOverlay, w: World): void {
   o.group.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, depthTest: false })))
 }
 
-/** Rezumatul pentru HUD: cati pioni sunt in fiecare stare, si avertismentul de „nimeni nu sapa". */
+/** Rezumatul pentru HUD: cati pioni ai ASEZARII sunt in fiecare stare, si avertismentul de „nimeni nu sapa". */
 export function rezumatJoburi(w: World): { idle: number; merg: number; lucreaza: number; faraMuncitori: boolean } {
   const a = w.agents
   let idle = 0
@@ -132,7 +134,7 @@ export function rezumatJoburi(w: World): { idle: number; merg: number; lucreaza:
   let lucreaza = 0
   let activi = 0
   for (let i = 0; i < a.count; i++) {
-    if (a.alive[i] === 0) continue
+    if (a.alive[i] === 0 || a.faction[i] !== Faction.ASEZARE) continue
     if (a.prioPersonala[i]! > 0) activi++
     if (a.jobKind[i] === 0) idle++
     else if (a.jobStep[i] === PasJob.LUCREAZA) lucreaza++

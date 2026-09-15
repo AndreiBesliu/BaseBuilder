@@ -71,6 +71,8 @@ export interface Chunk {
   readonly surfaceMat: Uint8Array
   /** PERSISTED daca promovat, altfel DERIVED. */
   voxels: VoxelData | null
+  /** DERIVED — cota de baza pe care AR AVEA-O chunk-ul promovat. Vezi `promotedBaseM`. */
+  readonly baseM: number
 }
 
 const VERTS = CHUNK_CELLS + 1
@@ -136,7 +138,18 @@ export function generateChunk(seed: number, cx: number, cy: number): Chunk {
       vertexCm[vy * VERTS + vx] = vertexHeightCm(patch, vx, vy)
     }
   }
-  return { cx, cy, vertexCm, surfaceMat: surfacePatch(seed, cx, cy), voxels: null }
+  // Baza de voxeli pe care ar avea-o chunk-ul promovat: se calculeaza O DATA,
+  // aici. Prima versiune o recalcula la fiecare `materialAt` pe chunk ne-promovat
+  // (1024 de `cellHeightCm` per interogare) si un `isWalkable` a devenit de
+  // ~1000 de ori mai scump — masurat: 179 ms/tick la 4 agenti in loc de 0,3.
+  let minCm = Infinity
+  for (let ly = 0; ly < CHUNK_CELLS; ly++) {
+    for (let lx = 0; lx < CHUNK_CELLS; lx++) {
+      const h = cellHeightCmDin(vertexCm, lx, ly)
+      if (h < minCm) minCm = h
+    }
+  }
+  return { cx, cy, vertexCm, surfaceMat: surfacePatch(seed, cx, cy), voxels: null, baseM: Math.floor(minCm / 100) - LEVELS_BELOW }
 }
 
 /**
@@ -167,7 +180,10 @@ export function surfaceMatAt(chunk: Chunk, lx: number, ly: number): MaterialId {
 }
 
 export function cellHeightCm(chunk: Chunk, lx: number, ly: number): number {
-  const v = chunk.vertexCm
+  return cellHeightCmDin(chunk.vertexCm, lx, ly)
+}
+
+function cellHeightCmDin(v: Int16Array, lx: number, ly: number): number {
   const a = v[ly * VERTS + lx]!
   const b = v[ly * VERTS + lx + 1]!
   const c = v[(ly + 1) * VERTS + lx]!
@@ -299,17 +315,20 @@ export function encodeAll(zBaseM: number, columns: Uint8Array): VoxelData {
  * Ireversibil prin decizie — o granita care se poate muta in ambele sensuri ar
  * trebui sa fie corecta in ambele sensuri in sase subsisteme.
  */
+/**
+ * Cota de baza pe care AR AVEA-O chunk-ul daca ar fi promovat acum. Functie pura
+ * de relief, deci o pot intreba si calea derivata (un chunk ne-promovat) si
+ * comenzile care valideaza o tinta: sub baza asta nu exista voxel, nici inainte,
+ * nici dupa promovare.
+ */
+export function promotedBaseM(chunk: Chunk): number {
+  return chunk.voxels ? chunk.voxels.zBaseM : chunk.baseM
+}
+
 export function promote(chunk: Chunk): void {
   if (chunk.voxels) return
 
-  let minCm = Infinity
-  for (let ly = 0; ly < CHUNK_CELLS; ly++) {
-    for (let lx = 0; lx < CHUNK_CELLS; lx++) {
-      const h = cellHeightCm(chunk, lx, ly)
-      if (h < minCm) minCm = h
-    }
-  }
-  const zBaseM = Math.floor(minCm / 100) - LEVELS_BELOW
+  const zBaseM = promotedBaseM(chunk)
 
   const columns = new Uint8Array(COLUMNS * VOXEL_LEVELS)
   const patch = chunk.surfaceMat

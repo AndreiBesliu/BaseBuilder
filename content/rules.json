@@ -23,6 +23,7 @@
   "jobRetryTicks": 600,
   "jobInfeasibleRetryTicks": 100,
   "jobMaxIncercari": 3,
+  "jobAvoidSlots": 4,
   "digWorkUnits": 400,
   "workUnitsPerTick": 10,
   "designationCapacity": 4096,
