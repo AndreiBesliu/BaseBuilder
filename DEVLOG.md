@@ -1908,3 +1908,48 @@ Ce a produs fiecare pas, pe scurt:
 - sortarea completă a candidaților (~1 ms la 4096) rămâne, ca la tăietura 1.
 
 Următoarea tăietură: **foame / odihnă / dispoziție**.
+
+## Task Started — S16-19, tăietura 3: foame, odihnă, dispoziție
+
+**Prompt:** „continua cu S16-19"
+**Model:** Claude Opus 5 · panoul de design cu 5 lentile (1,16 M tokeni, 60 de constatări), apoi
+implementarea, testele și mutațiile de mine.
+
+### Ce a spus panoul despre designul v1
+
+Toate cinci lentilele: designul NU stă. 60 de constatări, 20 critice, și patru lentile independente
+au ajuns la **aceeași rădăcină** — dispecerizarea pe felul jobului era binară.
+
+Cinci locuri ramificau pe `=== FelJob.CARA` cu `else` = SAPA: `cereriPentru`,
+`reconstruiesteRezervari`, `lucreaza`, `terminaJob` și `drumRefuzat`. Cu două feluri, un `else` e o
+alternativă; cu patru, e o presupunere. Ce presupunea greșit:
+
+- la încărcare, `reconstruiesteRezervari` ar fi cerut o **desemnare** pentru un id de **item**, ar fi
+  primit −1 și ar fi anulat jobul: `1000 + save + load + 1000 ≠ 2000` pentru fiecare pion care
+  mănâncă sau doarme în momentul salvării — adică aproape mereu. Exact invarianta pe care stă tot
+  determinismul;
+- în execuție, orice fel ≠ CARA intra în `lucreazaSapa`, care nu găsea desemnarea și întrerupea
+  jobul; pionul relua — buclă de două tickuri, fiecare arzând un `nextId`, care e PERSISTED și intră
+  în hash;
+- la un refuz de drum, răcirea se scria pe `slotItem(...)` = −1, adică **nicăieri**, deci reluarea
+  era imediată și infinită.
+
+Și făcea falsă promisiunea „o nevoie nouă e un rând de tabel": recrearea ar fi cerut nouă schimbări.
+
+Celelalte trei rădăcini critice, toate reparate pe hârtie în v2 înainte de prima linie de cod:
+
+| v1 spunea | ce ar fi ieșit | v2 |
+|---|---|---|
+| `makeAgentStore` alocă `nevoi`/`dispozitie` ca zerouri | o lume **nouă** pornește cu toți pionii sub pragul critic și cu dispoziția sub pragul de plecare; un slot reutilizat moștenește dispoziția mortului | umplere explicită în store, în `spawnAgent` și în migrare, cu **defazare deterministă pe id** — altfel toată colonia trece pragul în aceeași fereastră și valul nu se sparge niciodată |
+| valorile gândurilor copiate din research (bară 0..100) într-o bară 0..1000 | ținta nu poate coborî sub 440, deci „refuză munca" (250) și „pleacă" (60) sunt **cod mort din ziua în care se scriu**; iar acceptanța care ar fi trebuit să prindă asta putea mișca bara cu 24 din 1000 | o singură scară, aritmetica scrisă lângă fiecare număr, și un invariant în `parseRules`: catalogul de gânduri **trebuie** să poată atinge pragul cel mai de jos |
+| pragurile se verifică la ticul de nevoie | momentul „fără job ȘI pe tic de nevoie" e o coincidență de ~1 la 250, deci pragul de preferință nu s-ar declanșa practic niciodată și tot jocul s-ar muta pe calea cu întreruperi | două ceasuri: scurgerea rară, **verificarea în fiecare tick** (două citiri de tablou, poartă O(1)) |
+
+Restul: nevoia nerezolvabilă primește răcire per (pion, nevoie) și cade înapoi pe muncă; nu se
+întrerupe jobul care rezolvă chiar nevoia declanșatoare, nici un cărat cu marfa în mână; podeaua
+multiplicatorului de muncă se pune pe **rezultat**, nu pe factor; mâncatul stă pe un **strat propriu**
+de rezervare; indexul de zone citește în sfârșit **felul zonei**; și scenariul standard primește
+mâncare, altfel toate măsurătorile de referință ar deveni măsurători ale unei colonii care moare de
+foame.
+
+Designul v2 e în `scratchpad/design-s16-t3.md`. Livrarea e în trei commit-uri: structura (tabel de
+drivere, fel de zonă, strat de mâncat), nevoile, dispoziția.
