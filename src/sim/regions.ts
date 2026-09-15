@@ -141,6 +141,18 @@ export interface RegionStore {
    * ieftina — in timp ce celulele, care sunt partea scumpa, raman pe loc.
    */
   readonly adj: Map<number, Set<number>>
+  /**
+   * In ce bloc traieste fiecare regiune.
+   *
+   * Doua meserii, si a doua a fost surpriza placuta. Pathfinding-ul are nevoie de
+   * ea ca sa stie unde e o regiune in lume (euristica de A* peste graf). Dar tot
+   * ea e si INDEXUL DE REGIUNI VII: cheile lui sunt exact regiunile care exista.
+   *
+   * Asta inchide limita pe care o scrisesem in `rebuildDirty`: `relabel` parcurgea
+   * toate celulele rezidente doar ca sa afle ce regiuni traiesc, si aia scala cu
+   * rezidenta. Acum le stie direct.
+   */
+  readonly regionBlock: Map<number, number>
   /** Componenta conexa a fiecarei regiuni. Indexat cu id-ul de regiune. */
   component: Int32Array
   /**
@@ -157,7 +169,15 @@ export interface RegionStore {
 }
 
 export function createRegions(): RegionStore {
-  return { cells: new Map(), keys: [], adj: new Map(), component: new Int32Array(0), nextId: 0, dirty: new Set() }
+  return {
+    cells: new Map(),
+    keys: [],
+    adj: new Map(),
+    regionBlock: new Map(),
+    component: new Int32Array(0),
+    nextId: 0,
+    dirty: new Set(),
+  }
 }
 
 function insertKey(s: RegionStore, key: number): void {
@@ -217,18 +237,10 @@ function relabel(s: RegionStore): void {
   ensureComponentCapacity(s, s.nextId)
   s.component.fill(NO_REGION, 0, s.nextId)
 
-  const vii: number[] = []
-  for (const key of s.keys) {
-    const cells = s.cells.get(key)!
-    for (let i = 0; i < BLOCK_CELLS; i++) {
-      const r = cells[i]!
-      if (r !== NO_REGION && s.component[r] === NO_REGION) {
-        s.component[r] = -2 // marcat ca existent, inca ne-etichetat
-        vii.push(r)
-      }
-    }
-  }
-  vii.sort((a, b) => a - b)
+  // Regiunile vii se CITESC din index, nu se cauta prin celule. Diferenta e intre
+  // O(regiuni) si O(celule rezidente) — la discul complet, intre mii si milioane.
+  const vii = [...s.regionBlock.keys()].sort((a, b) => a - b)
+  for (const r of vii) s.component[r] = -2 // exista, inca ne-etichetat
 
   const coada: number[] = []
   let urmatoarea = 0
@@ -278,6 +290,7 @@ function computeBlock(t: Terrain, s: RegionStore, key: number, bx: number, by: n
   for (let i = 0; i < BLOCK_CELLS; i++) {
     if (walk[i] === 0 || cells[i] !== NO_REGION) continue
     const id = s.nextId++
+    s.regionBlock.set(id, key)
 
     let head = 0
     let tail = 0
@@ -632,6 +645,11 @@ export function rebuildDirty(t: Terrain, s: RegionStore, rules: Rules): number {
   // Numai blocurile MURDARE isi pierd celulele. Vecinii si le pastreaza — asta e
   // toata diferenta fata de varianta dinainte.
   for (const key of murdare) {
+    const cells = s.cells.get(key)!
+    for (let i = 0; i < BLOCK_CELLS; i++) {
+      const r = cells[i]!
+      if (r !== NO_REGION) s.regionBlock.delete(r)
+    }
     s.cells.delete(key)
     const pos = s.keys.indexOf(key)
     if (pos >= 0) s.keys.splice(pos, 1)

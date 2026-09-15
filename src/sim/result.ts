@@ -25,6 +25,8 @@ export const Reason = {
   IN_AFARA_LUMII: 'IN_AFARA_LUMII',
   ENTITATE_INEXISTENTA: 'ENTITATE_INEXISTENTA',
   COMANDA_NECUNOSCUTA: 'COMANDA_NECUNOSCUTA',
+  /** Cautarea a atins plafonul de noduri. NU inseamna imposibil — inseamna prea scump ACUM. */
+  BUGET_DEPASIT: 'BUGET_DEPASIT',
   CAPACITATE_DEPASITA: 'CAPACITATE_DEPASITA',
 } as const
 

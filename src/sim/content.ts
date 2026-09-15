@@ -30,6 +30,16 @@ export interface Rules {
   readonly maxStepM: number
   /** De cate niveluri libere are nevoie un agent deasupra podelei. */
   readonly agentHeadroomM: number
+  /** Costul unui pas normal, in sutimi de celula. Toate celelalte se raporteaza la el. */
+  readonly stepCost: number
+  /** Cat costa in plus pasitul peste un agent PROPRIU. RimWorld foloseste 175. */
+  readonly allyStepPenalty: number
+  /** Cat costa in plus un pas care schimba nivelul. Fara el, drumurile serpuiesc pe verticala. */
+  readonly climbCost: number
+  /** Plafon de noduri pentru cautarea peste regiuni. */
+  readonly maxRegionNodes: number
+  /** Plafon de noduri pentru cautarea pe celule. Depasirea NU inseamna „imposibil". */
+  readonly maxPathNodes: number
 }
 
 type FieldSpec = { min: number; max: number }
@@ -43,6 +53,11 @@ const RULES_SPEC: Record<keyof Rules, FieldSpec> = {
   chunkResidentRadius: { min: 0, max: 64 },
   maxStepM: { min: 0, max: 4 },
   agentHeadroomM: { min: 1, max: 8 },
+  stepCost: { min: 1, max: 10000 },
+  allyStepPenalty: { min: 0, max: 100000 },
+  climbCost: { min: 0, max: 100000 },
+  maxRegionNodes: { min: 16, max: 1000000 },
+  maxPathNodes: { min: 64, max: 10000000 },
 }
 
 /**
@@ -93,4 +108,9 @@ export const DEFAULT_RULES: Rules = {
   chunkResidentRadius: 11,
   maxStepM: 1,
   agentHeadroomM: 2,
+  stepCost: 100,
+  allyStepPenalty: 175,
+  climbCost: 60,
+  maxRegionNodes: 4000,
+  maxPathNodes: 20000,
 }

@@ -6,5 +6,10 @@
   "ticksPerSecond": 20,
   "chunkResidentRadius": 11,
   "maxStepM": 1,
-  "agentHeadroomM": 2
+  "agentHeadroomM": 2,
+  "stepCost": 100,
+  "allyStepPenalty": 175,
+  "climbCost": 60,
+  "maxRegionNodes": 4000,
+  "maxPathNodes": 20000
 }
