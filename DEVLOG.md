@@ -1281,3 +1281,42 @@ lungime și unghiul rămân libere.
 
 142 de teste verzi. Ce am livrat e traducerea poză↔grilă, dovedită; ce urmează — modelul de date al
 clădirilor, camerele, stabilitatea — așteaptă D20.
+
+---
+
+## Task Started — D20 se poate vedea, nu doar citi
+
+**Prompt:** „continua" (aceeași sesiune)
+**Model:** Claude Opus 5
+
+Ridicasem o decizie **vizuală** și ți-o predasem ca tabel de cifre. „Hala blochează de 1,24–1,33×
+aria ei reală" e adevărat și inutil pentru cine trebuie să răspundă la *asta voiai?*. Diferența
+dintre conturul desenat și celulele blocate se vede sau nu se vede.
+
+Tasta **B** în viewer. `,` / `.` rotesc din 5 în 5 grade, **N** schimbă forma, **M** pornește și
+oprește ancorarea pe centru de celulă.
+
+- **conturul alb** — dreptunghiul rotit adevărat, ce s-ar desena în joc
+- **verde** — celule pe care clădirea le acoperă oricum
+- **chihlimbar** — celule blocate în plus. **Taxa.** Acolo nu poți păși, deși pe ecran e loc
+- **roșu** — marginile pe care regula CENTRU le lasă deschise, adică pe unde ar curge
+
+HUD-ul scrie forma, unghiul, numărul de celule, grăsimea și — coloana care contează —
+**câte celule ar bloca regula CENTRU**.
+
+Cazul care închide discuția, vizibil dintr-o privire: **zid 0,2 × 8 m la 30° → 15 celule cu ORICE,
+1 celulă cu CENTRU.** Un zid întreg de opt metri ar opri pe cineva într-un singur loc. Arată ca un
+zid. Nu e un zid.
+
+Trigonometria stă în overlay, niciodată în simulare: unghiul devine un vector Q14 înainte să treacă
+granița spre `sim/` — exact ce va face și interfața de construcție a jocului.
+
+Și o notă de instrument: o eroare `writeQuadIndices is not defined` din consolă m-a trimis să
+verific, dar era o intrare **veche** — URL-ul modulului purta marca de timp HMR de dinainte de
+repornirea serverului. Dovada funcțională e că cele 12 mesh-uri de voxeli există cu 5637 de quaduri
+și zero găuri; dacă importul ar fi lipsit, `buildVoxelGeometry` ar fi aruncat și n-ar fi existat
+niciunul.
+
+## Task Completed
+
+142 de teste verzi. D20 se poate acum judeca uitându-te la ea.

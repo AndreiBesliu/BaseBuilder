@@ -25,6 +25,7 @@ import { quadColor } from '../src/render/palette.ts'
 import { writeQuadIndices } from '../src/render/winding.ts'
 import { Ballast, Bisector, checkGuards, clockGranularityMs, FrameProbe, heapMB } from './probe.ts'
 import { createRegionOverlay, rebuildRegionOverlay } from './overlay-regions.ts'
+import { createAmprentaOverlay, FORME, rebuildAmprentaOverlay } from './overlay-amprenta.ts'
 import { createDensePanel, densePanelReport, PANEL_HZ, tickDensePanel } from './panel-dens.ts'
 import { createRegions, markDirty, rebuildDirty } from '../src/sim/regions.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
@@ -535,6 +536,17 @@ const regions = createRegions()
 const regionOverlay = createRegionOverlay()
 scene.add(regionOverlay.group)
 
+// D20: cladirea asezata liber si celulele pe care le ocupa. Vezi overlay-amprenta.ts.
+const amprentaOverlay = createAmprentaOverlay()
+scene.add(amprentaOverlay.group)
+
+function refreshAmprenta(): void {
+  const wx = Math.floor(controls.target.x)
+  const wy = Math.floor(controls.target.z)
+  const g = groundLevelM(world.terrain, wx, wy)
+  rebuildAmprentaOverlay(amprentaOverlay, wx, wy, (g.ok ? g.value : 0) + 1)
+}
+
 function refreshOverlay(): void {
   if (!regionOverlay.visible) return
   const wx = Math.floor(controls.target.x)
@@ -638,6 +650,19 @@ renderer.domElement.addEventListener('click', (ev) => {
 })
 
 window.addEventListener('keydown', (ev) => {
+  // --- D20: amprenta unei cladiri asezate liber ---
+  if (ev.key === 'b' || ev.key === 'B') {
+    amprentaOverlay.visible = !amprentaOverlay.visible
+    amprentaOverlay.group.visible = amprentaOverlay.visible
+    refreshAmprenta()
+    return
+  }
+  if (amprentaOverlay.visible) {
+    if (ev.key === ',' || ev.key === '<') { amprentaOverlay.grade = (amprentaOverlay.grade + 355) % 360; refreshAmprenta(); return }
+    if (ev.key === '.' || ev.key === '>') { amprentaOverlay.grade = (amprentaOverlay.grade + 5) % 360; refreshAmprenta(); return }
+    if (ev.key === 'n' || ev.key === 'N') { amprentaOverlay.forma = (amprentaOverlay.forma + 1) % FORME.length; refreshAmprenta(); return }
+    if (ev.key === 'm' || ev.key === 'M') { amprentaOverlay.ancorat = !amprentaOverlay.ancorat; refreshAmprenta(); return }
+  }
   if (ev.key === 'g' || ev.key === 'G') {
     regionOverlay.visible = !regionOverlay.visible
     regionOverlay.group.visible = regionOverlay.visible
@@ -985,6 +1010,9 @@ function stepFrame(ts: number): void {
     el('calls').textContent = String(renderer.info.render.calls)
     el('tris').textContent = renderer.info.render.triangles.toLocaleString('ro-RO')
     if (bisector) el('slice').textContent = bisector.progress
+    el('build').textContent = amprentaOverlay.visible
+      ? `${FORME[amprentaOverlay.forma]!.nume} · ${amprentaOverlay.grade}° · ${amprentaOverlay.celule} cel. (×${amprentaOverlay.grasime.toFixed(2)}) · CENTRU ${amprentaOverlay.celuleCentru}${amprentaOverlay.ancorat ? ' · ancorat' : ''}`
+      : 'B'
     el('agents').textContent = AGENTI_ACTIVI ? `${agentLayer.vii} · t${world.tick}` : 'oprit la gate'
     el('regions').textContent = regionOverlay.visible
       ? `${regionOverlay.cells.toLocaleString('ro-RO')} celule · ${regionOverlay.components} componente · ${lastOverlayMs.toFixed(0)} ms`
