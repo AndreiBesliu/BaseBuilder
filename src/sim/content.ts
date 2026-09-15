@@ -13,6 +13,14 @@
 import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import { REGION_SIZE } from './regions.ts'
+import { isSolid, Material } from './terrain/chunk.ts'
+import { Item, ITEME } from './state.ts'
+
+/** Ce lasa in urma un voxel sapat: felul de item si cate unitati. `cantitate` 0 = nimic (aer, apa). */
+export interface DigYield {
+  readonly fel: number
+  readonly cantitate: number
+}
 
 export interface Rules {
   /** Cati agenti incap. Plafon dur, verificat de comanda de spawn. */
@@ -57,7 +65,7 @@ export interface Rules {
   readonly jobScanRadiusCells: number
   /** Cate evaluari SCUMPE (loc de lucru, componenta) face o scanare cel mult. Ieftin > optim. */
   readonly jobScanMaxCandidates: number
-  /** Ce raza de blocuri de regiuni isi asigura o desemnare la creare, ca sa poata fi evaluata. */
+  /** Ce raza de blocuri de regiuni isi asigura o desemnare sau o celula de zona la creare, ca sa poata fi evaluata. */
   readonly jobRegionRadiusBlocks: number
   /**
    * Cate tickuri evita un PION o tinta la care a renuntat din cauze care tin de el
@@ -65,9 +73,9 @@ export interface Rules {
    */
   readonly jobRetryTicks: number
   /**
-   * Cate tickuri asteapta o DESEMNARE dupa ce s-a dovedit ca n-are niciun loc de
-   * lucru. E o proprietate a ei, nu a pionului, deci se scrie pe ea; scurta,
-   * fiindca o sapatura vecina o poate deschide oricand.
+   * Cate tickuri asteapta o DESEMNARE sau un ITEM dupa ce s-a dovedit ca n-are
+   * niciun loc de lucru / niciun depozit. E o proprietate a tintei, nu a pionului,
+   * deci se scrie pe ea; scurta, fiindca o sapatura vecina o poate deschide oricand.
    */
   readonly jobInfeasibleRetryTicks: number
   /** Cate refuzuri de drum tolereaza un job inainte sa se incheie. Fara plafon, pionul ramane parcat pe viata. */
@@ -88,11 +96,43 @@ export interface Rules {
   readonly personalPriorityLevels: number
   /** Prioritatea personala cu care se naste un pion, pe fiecare categorie. „Auto" = toti la normal. */
   readonly personalPriorityDefault: number
+
+  // --- iteme, carat, zone (S16-19, taietura 2) ---
+  /** Cate unitati incap intr-un morman. Doua mormane de acelasi fel pe o celula se contopesc pana aici. */
+  readonly itemStackMax: number
+  /** Cat ia un pion dintr-un morman intr-un drum. Sub `itemStackMax`, altfel n-ar lega niciodata. */
+  readonly haulCarryMax: number
+  /** Cata munca cere ridicatul unui morman, in unitati. */
+  readonly haulPickupUnits: number
+  /** Cata munca cere depusul, in unitati. */
+  readonly haulDropUnits: number
+  /** Cate celule LIBERE de depozit examineaza cel mult o cautare de destinatie, per zona. */
+  readonly haulDestMaxCells: number
+  /** Cat de departe de item se cauta o celula de depozit, in celule (Manhattan). */
+  readonly haulDestRadiusCells: number
+  /** Cate mormane incap in lume. Plafon dur: cand e atins, sapatul refuza pana se cara ceva. */
+  readonly itemCapacity: number
+  /** Cate zone incap. */
+  readonly zoneCapacity: number
+  /** Cate celule de zona incap, in total. */
+  readonly zoneCellCapacity: number
+  /** Cate niveluri de prioritate are o zona: 1..N. */
+  readonly zonePriorityLevels: number
+  /** Prioritatea unei zone cand jucatorul nu spune. */
+  readonly zonePriorityDefault: number
+  /**
+   * Ce lasa fiecare material la sapat, indexat cu `MaterialId`. In fisier e un
+   * obiect cu numele materialelor solide drept chei; loader-ul REFUZA daca
+   * lipseste vreunul — un material fara yield ar produce iteme de zero bucati pe
+   * care pionii le-ar „cara" la nesfarsit.
+   */
+  readonly digYield: readonly DigYield[]
 }
 
 type FieldSpec = { min: number; max: number }
 
-const RULES_SPEC: Record<keyof Rules, FieldSpec> = {
+/** Campurile NUMERICE. `digYield` e singurul camp imbricat si se valideaza separat. */
+const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield'>, FieldSpec> = {
   agentCapacity: { min: 1, max: 100000 },
   agentStepMm: { min: 1, max: 100000 },
   ticksPerSecond: { min: 1, max: 240 },
@@ -125,6 +165,85 @@ const RULES_SPEC: Record<keyof Rules, FieldSpec> = {
   designationPriorityDefault: { min: 1, max: 9 },
   personalPriorityLevels: { min: 1, max: 9 },
   personalPriorityDefault: { min: 0, max: 9 },
+  itemStackMax: { min: 1, max: 1000000 },
+  haulCarryMax: { min: 1, max: 1000000 },
+  haulPickupUnits: { min: 1, max: 1000000 },
+  haulDropUnits: { min: 1, max: 1000000 },
+  haulDestMaxCells: { min: 1, max: 1000000 },
+  haulDestRadiusCells: { min: 1, max: 4096 },
+  itemCapacity: { min: 1, max: 1000000 },
+  zoneCapacity: { min: 1, max: 1000000 },
+  zoneCellCapacity: { min: 1, max: 1000000 },
+  zonePriorityLevels: { min: 1, max: 9 },
+  zonePriorityDefault: { min: 1, max: 9 },
+}
+
+/** Numele materialelor si ale felurilor de item, pentru fisierul de reguli. Liste ORDONATE, nu `Object.keys`. */
+const NUME_MATERIALE: readonly (readonly [string, number])[] = [
+  ['AER', Material.AER],
+  ['ROCA', Material.ROCA],
+  ['PAMANT', Material.PAMANT],
+  ['IARBA', Material.IARBA],
+  ['APA', Material.APA],
+  ['LEMN_CONSTRUIT', Material.LEMN_CONSTRUIT],
+  ['PIATRA_CONSTRUITA', Material.PIATRA_CONSTRUITA],
+]
+const NUME_ITEME: readonly (readonly [string, number])[] = [
+  ['PIATRA', Item.PIATRA],
+  ['PAMANT', Item.PAMANT],
+  ['LEMN', Item.LEMN],
+]
+const MAX_YIELD = 10000
+
+/**
+ * Tabelul `digYield` din fisier → tablou indexat cu `MaterialId`. Fiecare
+ * material SOLID trebuie sa aiba o intrare; AER si APA nu au voie sa aiba.
+ */
+function parseDigYield(raw: unknown): Outcome<DigYield[]> {
+  // Forma deja parsata (un tablou indexat cu MaterialId), cum e `DEFAULT_RULES`:
+  // se valideaza cu aceleasi reguli ca fisierul.
+  if (Array.isArray(raw)) {
+    if (raw.length !== NUME_MATERIALE.length) return refuse(Reason.VALOARE_INVALIDA, { camp: 'digYield', lungime: raw.length, asteptat: NUME_MATERIALE.length })
+    const obj: Record<string, unknown> = {}
+    for (const [nume, id] of NUME_MATERIALE) {
+      const e = raw[id] as { fel?: number; cantitate?: number } | undefined
+      if (!isSolid(id)) {
+        if (e && e.cantitate !== 0) return refuse(Reason.VALOARE_INVALIDA, { camp: `digYield.${nume}`, motiv: 'materialul nu e solid, nu se sapa' })
+        continue
+      }
+      const fel = NUME_ITEME.find(([, k]) => k === e?.fel)
+      obj[nume] = { fel: fel ? fel[0] : String(e?.fel), cantitate: e?.cantitate }
+    }
+    raw = obj
+  }
+  if (typeof raw !== 'object' || raw === null) {
+    return refuse(Reason.LIPSA_MATERIAL, { camp: 'digYield', asteptat: 'obiect', primit: typeof raw })
+  }
+  const obj = raw as Record<string, unknown>
+  const cunoscute = NUME_MATERIALE.map(([n]) => n)
+  for (const key of Object.keys(obj).sort()) {
+    if (!cunoscute.includes(key)) return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: `digYield.${key}`, cunoscute: cunoscute.join(', ') })
+  }
+  const out: DigYield[] = []
+  for (const [nume, id] of NUME_MATERIALE) {
+    const v = obj[nume]
+    if (!isSolid(id)) {
+      if (v !== undefined) return refuse(Reason.VALOARE_INVALIDA, { camp: `digYield.${nume}`, motiv: 'materialul nu e solid, nu se sapa' })
+      out[id] = { fel: 0, cantitate: 0 }
+      continue
+    }
+    if (v === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: `digYield.${nume}` })
+    if (typeof v !== 'object' || v === null) return refuse(Reason.LIPSA_MATERIAL, { camp: `digYield.${nume}`, asteptat: 'obiect {fel, cantitate}' })
+    const e = v as Record<string, unknown>
+    const fel = NUME_ITEME.find(([n]) => n === e.fel)
+    if (!fel) return refuse(Reason.VALOARE_INVALIDA, { camp: `digYield.${nume}.fel`, valoare: String(e.fel), cunoscute: NUME_ITEME.map(([n]) => n).join(', ') })
+    const c = e.cantitate
+    if (typeof c !== 'number' || !Number.isInteger(c) || c < 1 || c > MAX_YIELD) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `digYield.${nume}.cantitate`, valoare: String(c), min: 1, max: MAX_YIELD })
+    }
+    out[id] = { fel: fel[1], cantitate: c }
+  }
+  return accept(out)
 }
 
 /**
@@ -141,14 +260,15 @@ export function parseRules(raw: unknown): Outcome<Rules> {
   // garantata de spec si nu depinde de starea rularii.
   const known = Object.keys(RULES_SPEC)
   for (const key of Object.keys(obj).sort()) {
+    if (key === 'digYield') continue
     if (!known.includes(key)) {
-      return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: key, cunoscute: known.join(', ') })
+      return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: key, cunoscute: [...known, 'digYield'].join(', ') })
     }
   }
 
-  const out: Record<string, number> = {}
+  const out: Record<string, number | readonly DigYield[]> = {}
   for (const key of known) {
-    const spec = RULES_SPEC[key as keyof Rules]
+    const spec = RULES_SPEC[key as keyof typeof RULES_SPEC]
     const v = obj[key]
     if (v === undefined) {
       return refuse(Reason.LIPSA_MATERIAL, { camp: key })
@@ -161,6 +281,11 @@ export function parseRules(raw: unknown): Outcome<Rules> {
     }
     out[key] = v
   }
+  if (obj.digYield === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'digYield' })
+  const yieldOut = parseDigYield(obj.digYield)
+  if (!yieldOut.ok) return yieldOut
+  out.digYield = yieldOut.value
+  const r = out as unknown as Rules
 
   // Invarianti INTRE campuri. Fiecare e o lege de care depinde corectitudinea,
   // nu o preferinta, si fiecare a fost gasita de cineva care a cautat esecul.
@@ -177,24 +302,41 @@ export function parseRules(raw: unknown): Outcome<Rules> {
   // legarea unui bloc ii calculeaza si ii conecteaza vecinii. Doua discuri la D
   // blocuri sunt legate daca muchiile lor ajung in acelasi bloc: D ≤ a + j + 2.
   // Raza de scanare de 96 de celule inseamna D ≤ 6, deci 2 + 2 + 2 = 6 ajunge.
-  const blocuriDeScan = Math.ceil(out.jobScanRadiusCells! / REGION_SIZE)
-  if (out.agentRegionRadiusBlocks! + out.jobRegionRadiusBlocks! + 2 < blocuriDeScan) {
+  //
+  // Zonele pictate primesc acelasi disc (`picteazaZona` cheama `ensureArea`),
+  // iar coridorul item → celula de depozit acopera lantul pion → item → zona.
+  const blocuriDeScan = Math.ceil(r.jobScanRadiusCells / REGION_SIZE)
+  if (r.agentRegionRadiusBlocks + r.jobRegionRadiusBlocks + 2 < blocuriDeScan) {
     return refuse(Reason.VALOARE_INVALIDA, {
       camp: 'jobRegionRadiusBlocks',
       motiv: 'discul agentului si al desemnarii nu se ating pe toata raza de scanare',
-      agentRegionRadiusBlocks: out.agentRegionRadiusBlocks!,
-      jobRegionRadiusBlocks: out.jobRegionRadiusBlocks!,
-      necesar: blocuriDeScan - 2 - out.agentRegionRadiusBlocks!,
+      agentRegionRadiusBlocks: r.agentRegionRadiusBlocks,
+      jobRegionRadiusBlocks: r.jobRegionRadiusBlocks,
+      necesar: blocuriDeScan - 2 - r.agentRegionRadiusBlocks,
     })
   }
-  if (out.designationPriorityDefault! > out.designationPriorityLevels!) {
-    return refuse(Reason.VALOARE_INVALIDA, { camp: 'designationPriorityDefault', valoare: out.designationPriorityDefault!, max: out.designationPriorityLevels! })
+  if (r.designationPriorityDefault > r.designationPriorityLevels) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'designationPriorityDefault', valoare: r.designationPriorityDefault, max: r.designationPriorityLevels })
   }
-  if (out.personalPriorityDefault! > out.personalPriorityLevels!) {
-    return refuse(Reason.VALOARE_INVALIDA, { camp: 'personalPriorityDefault', valoare: out.personalPriorityDefault!, max: out.personalPriorityLevels! })
+  if (r.personalPriorityDefault > r.personalPriorityLevels) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'personalPriorityDefault', valoare: r.personalPriorityDefault, max: r.personalPriorityLevels })
   }
+  if (r.zonePriorityDefault > r.zonePriorityLevels) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'zonePriorityDefault', valoare: r.zonePriorityDefault, max: r.zonePriorityLevels })
+  }
+  // Un pion nu ia mai mult decat incape intr-un morman: altfel destinatia n-ar
+  // putea primi niciodata toata mana, si `haulCarryMax` n-ar lega nimic.
+  if (r.haulCarryMax > r.itemStackMax) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'haulCarryMax', valoare: r.haulCarryMax, max: r.itemStackMax })
+  }
+  for (const y of r.digYield) {
+    if (y.cantitate > r.itemStackMax) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: 'digYield', motiv: 'un voxel nu poate da mai mult decat incape intr-un morman', valoare: y.cantitate, max: r.itemStackMax })
+    }
+  }
+  void ITEME
 
-  return accept(out as unknown as Rules)
+  return accept(r)
 }
 
 /** Reguli implicite, folosite doar de teste si de harness cand nu se da un fisier. */
@@ -231,4 +373,25 @@ export const DEFAULT_RULES: Rules = {
   designationPriorityDefault: 3,
   personalPriorityLevels: 3,
   personalPriorityDefault: 1,
+  itemStackMax: 75,
+  haulCarryMax: 50,
+  haulPickupUnits: 100,
+  haulDropUnits: 100,
+  haulDestMaxCells: 512,
+  haulDestRadiusCells: 96,
+  itemCapacity: 4096,
+  zoneCapacity: 256,
+  zoneCellCapacity: 4096,
+  zonePriorityLevels: 5,
+  zonePriorityDefault: 3,
+  // Indexat cu MaterialId: AER, ROCA, PAMANT, IARBA, APA, LEMN_CONSTRUIT, PIATRA_CONSTRUITA.
+  digYield: [
+    { fel: 0, cantitate: 0 },
+    { fel: Item.PIATRA, cantitate: 20 },
+    { fel: Item.PAMANT, cantitate: 10 },
+    { fel: Item.PAMANT, cantitate: 10 },
+    { fel: 0, cantitate: 0 },
+    { fel: Item.LEMN, cantitate: 5 },
+    { fel: Item.PIATRA, cantitate: 20 },
+  ],
 }

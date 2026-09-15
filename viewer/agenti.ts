@@ -31,7 +31,7 @@ import * as THREE from 'three'
 import type { Rules } from '../src/sim/content.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { cellOf } from '../src/sim/agents.ts'
-import { Faction, MM_PER_CELL, PasJob } from '../src/sim/state.ts'
+import { Faction, MM_PER_CELL, pasDeMers } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { groundLevelM, materialAt } from '../src/sim/terrain/terrain.ts'
@@ -137,6 +137,8 @@ export function stepSim(
 const culoareAsezare = new THREE.Color(0xd9c9a3)
 const culoareMerge = new THREE.Color(0x8fb5cc)
 const culoareLucreaza = new THREE.Color(0x8fbf6f)
+// Si una pentru cine CARA ceva: marfa in mana e o stare pe care jucatorul trebuie s-o citeasca de la distanta.
+const culoareCara = new THREE.Color(0xd08a5a)
 const culoareJefuitor = new THREE.Color(0xb1553f)
 const m = new THREE.Matrix4()
 const q = new THREE.Quaternion()
@@ -181,8 +183,9 @@ export function updateAgentLayer(layer: AgentLayer, world: World, rules: Rules):
     m.compose(pozitie, q, unu)
     mesh.setMatrixAt(n, m)
     const culoare = a.faction[i] === Faction.JEFUITOR ? culoareJefuitor
+      : a.caraCantitate[i]! > 0 ? culoareCara
       : a.jobKind[i] === 0 ? culoareAsezare
-      : a.jobStep[i] === PasJob.LUCREAZA ? culoareLucreaza
+      : !pasDeMers(a.jobStep[i]!) ? culoareLucreaza
       : culoareMerge
     mesh.setColorAt(n, culoare)
     n++

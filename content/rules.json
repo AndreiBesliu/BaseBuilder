@@ -30,5 +30,23 @@
   "designationPriorityLevels": 5,
   "designationPriorityDefault": 3,
   "personalPriorityLevels": 3,
-  "personalPriorityDefault": 1
+  "personalPriorityDefault": 1,
+  "itemStackMax": 75,
+  "haulCarryMax": 50,
+  "haulPickupUnits": 100,
+  "haulDropUnits": 100,
+  "haulDestMaxCells": 512,
+  "haulDestRadiusCells": 96,
+  "itemCapacity": 4096,
+  "zoneCapacity": 256,
+  "zoneCellCapacity": 4096,
+  "zonePriorityLevels": 5,
+  "zonePriorityDefault": 3,
+  "digYield": {
+    "ROCA": { "fel": "PIATRA", "cantitate": 20 },
+    "PAMANT": { "fel": "PAMANT", "cantitate": 10 },
+    "IARBA": { "fel": "PAMANT", "cantitate": 10 },
+    "LEMN_CONSTRUIT": { "fel": "LEMN", "cantitate": 5 },
+    "PIATRA_CONSTRUITA": { "fel": "PIATRA", "cantitate": 20 }
+  }
 }

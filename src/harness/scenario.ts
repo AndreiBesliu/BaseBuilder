@@ -156,6 +156,11 @@ export function standardScenario(seed: number, ticks: number, agents = 20): Scen
       commands.push({ tick: t + (k % 7), cmd: { kind: 'desemneaza', wx, wy, z: g.value, prioritate: 1 + (k % 5) } })
       k++
     }
+    // Si un depozit langa fiecare sit (taietura 2), ca hash-ul sa acopere si
+    // caratul: itemele produse de sapaturi au unde sa mearga. Dreptunghiul se
+    // valideaza celula cu celula in comanda; ce nu e calcabil se sare.
+    const dz = celulaBuna(scratch, s.wx + 4, s.wy + 4)
+    if (dz) commands.push({ tick: t + 8, cmd: { kind: 'picteazaZona', x0: s.wx + 4, y0: s.wy + 4, x1: s.wx + 6, y1: s.wy + 6, z: dz.z, prioritate: 1 + (k % 5) } })
   }
 
   return { seed, ticks, commands }

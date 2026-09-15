@@ -100,8 +100,9 @@ interface Totaluri extends JobTickReport { refuzuriAgenti: number; maxScanariPeT
 /** Ruleaza N tickuri si aduna raportul de joburi. */
 function ruleaza(w: World, ticks: number, rules: Rules = R, laFiecareTick?: (w: World) => void): Totaluri {
   const t: Totaluri = {
-    scanari: 0, candidatiExaminati: 0, candidatiTaiati: 0, coridoare: 0, joburiPornite: 0, joburiTerminate: 0, joburiAnulate: 0,
+    scanari: 0, vizite: 0, candidatiExaminati: 0, candidatiTaiati: 0, coridoare: 0, joburiPornite: 0, joburiTerminate: 0, joburiAnulate: 0,
     tickuriDeLucru: 0, locuriDeLucruRefacute: 0, refuzuriDrum: 0, faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0,
+    faraDepozit: 0, evaluariDestinatie: 0, itemeProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
     refuzuriAgenti: 0, maxScanariPeTick: 0,
   }
   for (let i = 0; i < ticks; i++) {
@@ -111,6 +112,7 @@ function ruleaza(w: World, ticks: number, rules: Rules = R, laFiecareTick?: (w: 
     t.joburiPornite += r.joburiPornite; t.joburiTerminate += r.joburiTerminate; t.joburiAnulate += r.joburiAnulate
     t.tickuriDeLucru += r.tickuriDeLucru; t.locuriDeLucruRefacute += r.locuriDeLucruRefacute; t.refuzuriDrum += r.refuzuriDrum
     t.faraMuncitor += r.faraMuncitor; t.preaDeparte += r.preaDeparte; t.inaccesibil += r.inaccesibil; t.rezervat += r.rezervat
+    t.faraDepozit += r.faraDepozit; t.evaluariDestinatie += r.evaluariDestinatie; t.itemeProduse += r.itemeProduse; t.itemeMutate += r.itemeMutate; t.lasateLaPicioare += r.lasateLaPicioare
     t.refuzuriAgenti += lastAgentReport().refuzuri
     if (r.scanari > t.maxScanariPeTick) t.maxScanariPeTick = r.scanari
     if (laFiecareTick) laFiecareTick(w)

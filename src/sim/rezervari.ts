@@ -231,6 +231,26 @@ export function elibereaza(s: ReservationStore, claimant: number, jobId: number)
 }
 
 /**
+ * Elibereaza O SINGURA rezervare a perechii (claimant, jobId): cea de pe
+ * (targetId, layer). Exista fiindca un job de carat consuma sursa la ridicare si
+ * tine destinatia pana la depunere — cu `elibereaza` pe pereche, ridicarea ar fi
+ * scos si destinatia, iar intre ridicat si lasat celula ar fi fost libera pentru
+ * al doilea caraus. Intoarce cate a eliberat (0 sau 1).
+ */
+export function elibereazaUna(s: ReservationStore, claimant: number, jobId: number, targetId: number, layer: StratId): number {
+  const k = cheieRezervare(targetId, layer)
+  const lista = s.peTinta.get(k)
+  if (!lista) return 0
+  const ramase = lista.filter((r) => !(r.claimant === claimant && r.jobId === jobId))
+  const eliberate = lista.length - ramase.length
+  if (eliberate === 0) return 0
+  if (ramase.length === 0) s.peTinta.delete(k)
+  else s.peTinta.set(k, ramase)
+  s.total -= eliberate
+  return eliberate
+}
+
+/**
  * Tinta a disparut: tot ce o tinea, pe orice strat, se sterge. Intoarce
  * claimantii afectati, SORTATI si fara duplicate, ca apelantul sa le poata
  * incheia joburile intr-o ordine fixa.
@@ -254,12 +274,18 @@ export function elibereazaTinta(s: ReservationStore, targetId: number): number[]
  *   1. fiecare rezervare are un claimant VIU, al carui job CURENT e cel din tuplu;
  *   2. pe fiecare (tinta, strat), claimantii distincti ≤ maxClaimants;
  *   3. pe fiecare (tinta, strat), suma `count` ≤ maxCount;
- *   4. `total` numara corect.
+ *   4. `total` numara corect;
+ *   5. daca apelantul spune ce tinte exista (`existaTinta`), fiecare tinta EXISTA —
+ *      o rezervare pe un id mort e o tinta „ocupata" pe care n-o mai vede nimeni.
  *
  * Primul esec iese ca refuz, cu tot ce trebuie ca sa-l gasesti. Ruleaza in teste
  * si in acceptanta; NU in tickul de simulare.
  */
-export function verificaRezervari(s: ReservationStore, agents: AgentStore): Outcome<void> {
+export function verificaRezervari(
+  s: ReservationStore,
+  agents: AgentStore,
+  existaTinta?: (targetId: number, layer: number) => boolean,
+): Outcome<void> {
   let numarate = 0
   const chei = [...s.peTinta.keys()].sort((a, b) => a - b)
   for (const k of chei) {
@@ -284,6 +310,9 @@ export function verificaRezervari(s: ReservationStore, agents: AgentStore): Outc
       }
       if (agents.jobKind[slot] === 0 || agents.jobId[slot] !== r.jobId) {
         return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'claimantul nu mai are jobul asta', claimant: r.claimant, job: r.jobId, jobCurent: agents.jobId[slot]!, targetId: r.targetId })
+      }
+      if (existaTinta && !existaTinta(r.targetId, r.layer)) {
+        return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'tinta nu exista', claimant: r.claimant, job: r.jobId, targetId: r.targetId, layer: r.layer })
       }
     }
     if (claimanti.size > maxClaimants) {

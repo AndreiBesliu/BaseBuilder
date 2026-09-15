@@ -6,6 +6,7 @@ import {
   dumpRezervari,
   elibereaza,
   elibereazaTinta,
+  elibereazaUna,
   poateRezerva,
   rezervaToate,
   rezervariPentru,
@@ -223,4 +224,41 @@ test('dumpRezervari e canonic: aceeasi multime, scrisa in alta ordine, da acelas
   assert.ok(rezervaToate(doi, 1, 10, [cerere(1000, { maxClaimants: 3, maxCount: 3 })]).ok)
   assert.equal(dumpRezervari(unu), dumpRezervari(doi))
   assert.ok(dumpRezervari(unu).length > 0)
+})
+
+test('elibereazaUna scoate DOAR rezervarea de pe (tinta, strat) a perechii; celelalte ale aceluiasi job raman', () => {
+  // Caratul consuma sursa la ridicare si tine destinatia pana la depunere. Cu
+  // `elibereaza` pe pereche, ridicarea ar fi scos si destinatia.
+  const s = createReservations()
+  const sursa = cerere(500, { layer: Strat.CARAT, count: 20, maxCount: 20 })
+  const dest = cerere(600, { layer: Strat.LUCRU, count: 20, maxCount: 75 })
+  assert.ok(rezervaToate(s, 1, 10, [sursa, dest]).ok)
+  assert.equal(elibereazaUna(s, 1, 10, 500, Strat.CARAT), 1)
+  assert.equal(s.total, 1)
+  assert.equal(rezervariPentru(s, 500, Strat.CARAT).length, 0)
+  assert.equal(rezervariPentru(s, 600, Strat.LUCRU).length, 1)
+  // A doua oara nu mai e nimic; alt claimant nu poate elibera ce nu e al lui.
+  assert.equal(elibereazaUna(s, 1, 10, 500, Strat.CARAT), 0)
+  assert.equal(elibereazaUna(s, 2, 10, 600, Strat.LUCRU), 0)
+  assert.equal(s.total, 1)
+})
+
+test('INVARIANT: clauza „tinta exista" prinde o rezervare pe un id mort, si nu se declanseaza fara verificator', () => {
+  const s = createReservations()
+  const agents = makeAgentStore(4)
+  agents.count = 1
+  agents.id[0] = 1
+  agents.alive[0] = 1
+  agents.jobKind[0] = 1
+  agents.jobId[0] = 10
+  assert.ok(rezervaToate(s, 1, 10, [cerere(700)]).ok)
+  assert.ok(verificaRezervari(s, agents).ok)
+  assert.ok(verificaRezervari(s, agents, () => true).ok)
+  const out = verificaRezervari(s, agents, (id) => id !== 700)
+  assert.equal(out.ok, false)
+  if (!out.ok) {
+    assert.equal(out.reason, Reason.INVARIANT_INCALCAT)
+    assert.equal(out.params.motiv, 'tinta nu exista')
+    assert.equal(out.params.targetId, 700)
+  }
 })

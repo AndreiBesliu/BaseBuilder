@@ -111,6 +111,11 @@ export function hashWorld(w: World): string {
   h.ints(a.jobWorkY, a.count)
   h.ints(a.jobWorkZ, a.count)
   h.bytes(a.jobIncercari, a.count)
+  h.ints(a.jobDest, a.count)
+  h.ints(a.jobCantitate, a.count)
+  h.bytes(a.jobEfect, a.count)
+  h.bytes(a.caraKind, a.count)
+  h.ints(a.caraCantitate, a.count)
   h.ints(a.evitaTinta, a.count * a.evitaSloturi)
   h.ints(a.evitaPanaLa, a.count * a.evitaSloturi)
   h.ints(a.scanLaTick, a.count)
@@ -134,6 +139,35 @@ export function hashWorld(w: World): string {
   h.bytes(d.prioritate, d.count)
   h.bytes(d.alive, d.count)
   h.ints(d.reincercaLaTick, d.count)
+
+  // Itemele, in ordinea slotului. Racirea e PERSISTED (influenteaza plafonul
+  // de evaluari); `ultimulMotiv` si indexul de zone nu intra.
+  const it = w.iteme
+  h.u32(it.count)
+  h.ints(it.id, it.count)
+  h.bytes(it.kind, it.count)
+  h.ints(it.wx, it.count)
+  h.ints(it.wy, it.count)
+  h.ints(it.z, it.count)
+  h.ints(it.cantitate, it.count)
+  h.bytes(it.alive, it.count)
+  h.ints(it.reincercaLaTick, it.count)
+
+  // Zonele si celulele lor.
+  const z = w.zone
+  h.u32(z.count)
+  h.ints(z.id, z.count)
+  h.bytes(z.kind, z.count)
+  h.bytes(z.prioritate, z.count)
+  h.bytes(z.alive, z.count)
+  const zc = z.celule
+  h.u32(zc.count)
+  h.ints(zc.id, zc.count)
+  h.ints(zc.zonaId, zc.count)
+  h.ints(zc.wx, zc.count)
+  h.ints(zc.wy, zc.count)
+  h.ints(zc.z, zc.count)
+  h.bytes(zc.alive, zc.count)
 
   // Drumurile: numai coada ramasa a fiecarui agent viu, in ordinea slotului.
   const p = w.paths

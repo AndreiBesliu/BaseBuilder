@@ -57,7 +57,7 @@ import type { Rules } from './content.ts'
 import { nextInt } from './rng.ts'
 import type { RngState } from './rng.ts'
 import type { AgentStore, World } from './state.ts'
-import { Faction, MM_PER_CELL, PasJob } from './state.ts'
+import { Faction, MM_PER_CELL, pasDeMers } from './state.ts'
 import { blockKey, blockOfCell, canStep, ensureArea, isWalkable, NO_REGION, rebuildDirty, regionAt } from './regions.ts'
 import { cellKey, findPath, pathLength } from './path.ts'
 import type { Ocupare } from './path.ts'
@@ -303,12 +303,14 @@ export function stepAgents(w: World, rules: Rules): void {
       cautaJob(w, rules, i)
     }
     if (a.jobKind[i] !== 0) {
-      if (a.jobStep[i] === PasJob.LUCREAZA) {
+      if (!pasDeMers(a.jobStep[i]!)) {
         lucreaza(w, rules, i)
         continue
       }
-      // MERGE: tinta trebuie sa fie celula de lucru. `dezgroapa` o poate fi sters.
+      // Un pas de mers: tinta trebuie sa fie celula-tinta a pasului (locul de
+      // lucru, mormanul, celula de depozit). `dezgroapa` o poate fi sters.
       if (a.hasGoal[i] === 0) tintesteLocDeLucru(w, i)
+      w.ratiune.tickuriPeDrum++
     } else if (a.hasGoal[i] === 0) {
       // 2b. Fara job si fara tinta: hoinareste. Starea Idle trebuie sa fie
       //     VIZIBILA (research), nu un pion intepenit — si un tick pierdut e mai
@@ -322,8 +324,9 @@ export function stepAgents(w: World, rules: Rules): void {
       a.hasGoal[i] = 0
       clearPath(p, i)
       if (a.jobKind[i] !== 0) {
-        // La locul de lucru: de aici munceste, de la tickul urmator.
-        a.jobStep[i] = PasJob.LUCREAZA
+        // La tinta pasului: de aici se opreste si munceste (sapa, ridica,
+        // lasa), de la tickul urmator. Ambele masini alterneaza mers / oprire.
+        a.jobStep[i] = a.jobStep[i]! + 1
       } else {
         raport.sosiri++
       }

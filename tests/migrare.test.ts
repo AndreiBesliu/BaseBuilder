@@ -135,3 +135,71 @@ test('migrarea e idempotenta: save-ul rescris de codul nou se reincarca identic'
   const env = JSON.parse(encode(unu.value)) as { schema: number }
   assert.equal(env.schema, SCHEMA_VERSION)
 })
+
+// --- schema 3 -> 4 ---------------------------------------------------------
+
+const SCHEMA3 = readFileSync(new URL('./fixtures/save-schema3.json', import.meta.url), 'utf8')
+
+test('fixtura de schema 3 e chiar de schema 3: joburi in curs, prioPersonala cu O categorie, fara iteme si fara zone', () => {
+  const env = JSON.parse(SCHEMA3) as { schema: number; data: { agents: { count: number; jobKind: number[]; prioPersonala: number[]; categorii?: number }; iteme?: unknown; zone?: unknown } }
+  assert.equal(env.schema, 3)
+  assert.ok(env.data.agents.jobKind.some((k) => k !== 0), 'fixtura n-are niciun job in curs')
+  assert.equal(env.data.agents.prioPersonala.length, env.data.agents.count, 'fixtura de schema 3 trebuie sa aiba o singura categorie per pion')
+  assert.equal(env.data.agents.categorii, undefined)
+  assert.equal(env.data.iteme, undefined)
+  assert.equal(env.data.zone, undefined)
+  assert.ok(SCHEMA_VERSION > 3)
+})
+
+test('migrarea 3 -> 4: joburile de sapat si rezervarile se pastreaza, prioPersonala se largeste cu implicitul pentru CARA, itemele si zonele pornesc goale', () => {
+  const out = decode(SCHEMA3)
+  assert.ok(out.ok, `refuzat: ${JSON.stringify(out)}`)
+  const w = out.value
+  assert.equal(w.schema, SCHEMA_VERSION)
+  assert.equal(w.tick, 65)
+  assert.equal(w.agents.count, 3)
+  let cuJob = 0
+  for (let i = 0; i < w.agents.count; i++) if (w.agents.jobKind[i] !== 0) cuJob++
+  assert.equal(cuJob, 3)
+  assert.equal(w.rezervari.total, 3)
+  assert.equal(w.rezervari.anulateLaIncarcare, 0)
+  assert.equal(w.iteme.count, 0)
+  assert.equal(w.zone.count, 0)
+  assert.equal(w.zone.celule.count, 0)
+  const raw = JSON.parse(SCHEMA3) as { data: { agents: { prioPersonala: number[] } } }
+  for (let i = 0; i < w.agents.count; i++) {
+    assert.equal(w.agents.prioPersonala[i * CATEGORII + 0], raw.data.agents.prioPersonala[i])
+    assert.equal(w.agents.prioPersonala[i * CATEGORII + 1], DEFAULT_RULES.personalPriorityDefault)
+    assert.equal(w.agents.caraCantitate[i], 0)
+    assert.equal(w.agents.jobDest[i], 0)
+    assert.equal(w.agents.jobCantitate[i], 0)
+    assert.equal(w.agents.jobEfect[i], 0)
+  }
+  // Si lumea merge mai departe: joburile se termina si sapatul produce mormane.
+  advance(w, 400)
+  assert.equal(w.desemnari.vii, 0, 'joburile din fixtura nu s-au terminat dupa migrare')
+  assert.ok(w.iteme.vii > 0, 'sapatul de dupa migrare n-a produs nimic')
+})
+
+test('migrarea 3 -> 4 e idempotenta si determinista: rescris si reincarcat, acelasi hash; doua incarcari evolueaza identic', () => {
+  const unu = decode(SCHEMA3)
+  assert.ok(unu.ok)
+  const doi = decode(encode(unu.value))
+  assert.ok(doi.ok)
+  assert.equal(hashWorld(doi.value), hashWorld(unu.value))
+  const a = decode(SCHEMA3)
+  const b = decode(SCHEMA3)
+  assert.ok(a.ok && b.ok)
+  advance(a.value, 300)
+  advance(b.value, 300)
+  assert.equal(hashWorld(a.value), hashWorld(b.value))
+})
+
+test('un save de schema 4 cu prioPersonala de lungime gresita fata de `categorii` e refuzat', () => {
+  const unu = decode(SCHEMA3)
+  assert.ok(unu.ok)
+  const raw = JSON.parse(encode(unu.value)) as { data: { agents: { prioPersonala: number[] } } }
+  raw.data.agents.prioPersonala.push(1)
+  const out = decode(JSON.stringify(raw))
+  assert.equal(out.ok, false)
+})

@@ -40,6 +40,8 @@ export const Reason = {
   DEJA_DESEMNATA: 'DEJA_DESEMNATA',
   /** O verificare de integritate a picat. Nu e un refuz de joc, e un defect gasit la timp. */
   INVARIANT_INCALCAT: 'INVARIANT_INCALCAT',
+  /** N-are unde sa fie dus: nicio zona pictata care sa primeasca felul asta, sau toate pline. Actionabil: picteaza / mareste. */
+  FARA_DEPOZIT: 'FARA_DEPOZIT',
 } as const
 
 export type ReasonCode = (typeof Reason)[keyof typeof Reason]
@@ -70,6 +72,7 @@ export const MOTIVE: readonly ReasonCode[] = [
   Reason.PREA_DEPARTE,
   Reason.DEJA_DESEMNATA,
   Reason.INVARIANT_INCALCAT,
+  Reason.FARA_DEPOZIT,
 ]
 
 /** Codul (1-based) al unei cauze. 0 = niciuna. */

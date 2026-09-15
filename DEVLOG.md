@@ -1677,3 +1677,70 @@ Două au trecut la prima rulare și au cerut fixturi mai bune: `jobIncercari` ne
 cât jobul TRĂIEȘTE, iar fixtura salva după ce murise — acum roundtrip-ul se face în trei momente,
 fiecare cu câmpurile lui nenule) și „același claimant" (cazul din store, nu din tranzacție, n-avea
 aserție).
+
+---
+
+## Task Started — S16-19, tăietura 2: iteme, cărat, depozite pictate
+
+**Prompt:** „continua" (reluat după limita de sesiune: „I hit my usage limit while you were working,
+but it has reset now. Please continue from where you left off.")
+**Model:** Claude Fable 5.1 · panoul de design cu 5 lentile (1,53 M tokeni, 56 de constatări), apoi
+implementarea, testele și mutațiile de mine.
+
+### Ce a spus panoul despre designul v1, și ce am schimbat înainte de cod
+
+Toate cele cinci lentile au dat același verdict — designul NU stătea — și aceeași rădăcină:
+**cantitatea și locul mărfii erau tratate ca proprietăți ale itemului sau ale celulei, nu ca stare a
+jobului/pionului, și lipsea o singură funcție de depunere cu căutare în ordine fixă.** Cele 56 de
+constatări se contopesc în opt schimbări, toate făcute în v2 înainte de prima linie de cod:
+
+| v1 spunea | ce ar fi ieșit (măsurat de panou pe cod) | v2 |
+|---|---|---|
+| `cereriPentru(w, kind, jobTarget, jobDest)`, `count = min(cantitate, …)`, „pură în stare" | NU e pură: mormanul crește prin contopire între rezervare și save, sursa moare la ridicare, `elibereaza` pe pereche scoate și destinația. Un save luat între RIDICA și LASA se încarcă cu jobul anulat și 20 de piatră în mână fără job → dispar la următorul RIDICA; `1000 + save + load + 1000 ≠ 2000` | `jobCantitate` PERSISTED (înghețat la start), `cereriPentru` citește doar tuplul persistat și pasul (sursa doar până la RIDICA), `elibereazaUna` în rezervari.ts, `verificaRezervari` cu clauza „ținta există". M5 probat în cei patru pași |
+| „se lasă la picioare" | nedefinit pe o celulă cu morman de alt fel sau plin (cazul comun: pionul traversează depozitul); trei implementări posibile, toate greșite — două mormane pe o celulă (save-ul nu se mai încarcă), marfă dispărută, sau căutare fără plafon | **o singură rutină `asazaItem`** pentru TOATE depunerile (yield, la picioare, LASA, `lasaItem`, căderea la editarea terenului): ordine fixă, două treceri (întâi celulele fără podea desemnată), contopire, restul pe următoarea celulă, pierderea NUMĂRATĂ în `ratiune.itemePierdute` (zăvor per lume, asertat 0) |
+| „un item zace MEREU pe o celulă calcabilă" | afirmat, neîntreținut: al doilea strat al carierei lasă tot primul strat în aer; un tunel de 2 m pierde jumătate din yield în orice ordine; `fill` îngroapă mormane | cârlig în `sapaVoxel` (mormanul de deasupra CADE prin `asazaItem`, cu id-ul păstrat), `fill` refuză peste morman și peste celula căreia i-ar lua headroom-ul; invariantul asertat la fiecare 100 de tickuri în acceptanță |
+| trecerea ieftină O(iteme vii); margine „prio maximă cu celule libere", un număr | K05 în forma pură: 3.000 de stive depozitate = 4.000 de vizite/tick pentru zero muncă; un depozit bun plin de PĂMÂNT trimitea toată PIATRA din depozitul slab la evaluări scumpe, pe viață | index DERIVED sub steag murdar (zone.ts): `libere` per zonă, `acceptante[zonă][fel]`, `maxPrioLibera[fel]`, lista `deMutat`; trecerea ieftină iterează DOAR `deMutat` — colonia cu totul depozitat costă 0 vizite (test pe contor) |
+| căutarea destinației „în ordinea (prio, distanță), plafonată la 512 celule" | ori sortare O(Z log Z) per candidat, ori plafon pe sloturi care dă FARA_DEPOZIT fals cu 388 de celule libere în fundul depozitului | doar `libere` per zonă, plafon pe celule LIBERE examinate, cea mai apropiată din prima zonă strict mai bună; test: primele celule pline, plafon 4 ⇒ tot găsește |
+| validare la pictare doar `isWalkable` | depozit pictat în altă direcție decât cariera = INACCESIBIL pe veci, cu drum real (exact defectul închis pentru desemnări cu o zi înainte) | `picteazaZona` cheamă `ensureArea` (memoizat), coridor item→celulă în trecerea scumpă; test cu depozit la 5 blocuri în direcția opusă |
+| răcirea pe pereche „cu id-ul itemului" | id-ul moare la ridicare; mormanul lăsat jos e item nou → ridică/lasă la nesfârșit, 3 A\*-uri eșuate pe ciclu | răcirea se scrie pe ce EXISTĂ după refuz: zona (id de entitate — celulele de zonă au id tocmai ca să încapă în Int32) și mormanul rezultat; test: ≤ `jobMaxIncercari` refuzuri per fereastră de `jobRetryTicks`, `nextId` stabil |
+| `picteazaZona {wx, wy, z}` celulă cu celulă; `CATEGORII 1→2` „are deja dimensiunea"; schema 3 „nouă" | 900 de comenzi și 900 de zone de o celulă; TOATE save-urile de azi refuzate pe lungimea lui `prioPersonala`; schema 3 exista deja cu alt sens | dreptunghi = o comandă, o zonă; schema **4**, `MIGRATIONS[3]` cu `agents.categorii` (pasul vechi) lărgit la citire; fixtura golden de schema 3 capturată la `7be843c` ÎNAINTE de orice schimbare |
+
+Plus: `digYield` ca **tabel** în content (chei = toate materialele solide, IARBA inclusiv — altfel
+prima săpătură a jucătorului producea un item de 0 bucăți cărat la nesfârșit), validat la
+`parseRules` (primul câmp imbricat din content; loader-ul a primit un caz, nu un sistem);
+`itemMaxClaimants` scos (nu lega niciodată) și înlocuit cu `haulCarryMax < itemStackMax`, care leagă
+(test: 75 → 50 + 25); `jobEfect` separat de `jobProgres` (zăvorul „fără progres" nu se trage fals
+pe un INCOMPLET după ridicare); exclusivitatea (3) ca proprietate a mulțimii; o singură listă de
+candidați din ambele categorii, sortată pe margine (nu „întâi săpatul") — cu testul care arată că
+altfel cariera de 900 ținea depozitul gol; `tickuriPeDrum`/`tickuriDeLucru` ca zăvoare, pentru
+pragul de batching; SAPA/CARA alternează mers/oprire cu aceeași paritate a pasului.
+
+### Ce a ieșit
+
+- **213 → 246 de teste** (11 iteme, 17 cărat, +2 rezervări, +4 migrare). Fiecare gardă nouă are
+  mutația ei (rundă în curs, mai jos).
+- **Cariera + depozit** (12 pioni, 900 de celule, depozit de 144): 405 joburi în 6.000 de tickuri,
+  188 depuneri, `itemePierdute = 0`, toate itemele pe celule calcabile la fiecare 100 de tickuri,
+  `verificaRezervari` cu existență verde, ~100 µs/tick. **Raportul drum/lucru: 4,7** — pionii merg
+  de aproape cinci ori mai mult decât muncesc. Ăsta e semnalul pentru batching (pragul din design
+  era 40%); nu se face acum, dar acum se măsoară.
+- Cariera fără depozit rămâne la 900 săpate / 0 anulate; mormanele de pe jos fără zonă costă 0
+  vizite per scanare (nu sunt în `deMutat`).
+- Scenariul standard: 68 → ~150 µs/tick (pionii cară acum spre depozitele de la fiecare sit; de
+  profilat). Hash `e87ed5e2` → `431d0b5b`.
+- Overlay J: cuburi mici pentru mormane (înălțimea = cât e de plin, culoarea = cauza), pătrate verzi
+  pentru celulele de depozit (mai luminoase când sunt pline, albastre când vine cineva), linie spre
+  ținta oricărui pas de mers, pion arămiu = cară ceva; **Z+click** de două ori = depozit, **X+click** =
+  șterge; HUD: mormane, depozit, „NIMENI NU CARĂ".
+
+### Capcane prinse pe drum
+
+- `DEFAULT_RULES.digYield` e tabloul deja parsat, iar `parseRules({...DEFAULT_RULES})` e un test
+  existent: loader-ul acceptă ambele forme și le validează cu aceleași reguli.
+- Fixtura M5 „în patru pași" pe o singură cronologie rata pașii de după primul roundtrip (care
+  consumă 200 de tickuri): fiecare moment pe o pereche PROASPĂTĂ de lumi.
+- Un `node -e` cu șabloane cu backtick într-un șir bash cu ghilimele duble a lăsat o linie goală în
+  `viewer/main.ts` (bash a executat `${...}` ca substituție de comandă). A opta formă a capcanei de
+  escaping; scris în memorie.
+- Harness-ul de mutații restaurează prin `git checkout`: cu arborele necomis, ar fi șters
+  implementarea. Deci: commit ÎNTÂI, mutații după.

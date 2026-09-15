@@ -28,6 +28,7 @@ import { createRegionOverlay, rebuildRegionOverlay } from './overlay-regions.ts'
 import { createAmprentaOverlay, FORME, rebuildAmprentaOverlay } from './overlay-amprenta.ts'
 import { createJobOverlay, rebuildJobOverlay, rezumatJoburi } from './overlay-joburi.ts'
 import { desemnareLaCelula } from '../src/sim/desemnari.ts'
+import { celulaDeZonaLa } from '../src/sim/zone.ts'
 import { decodeCell } from '../src/sim/path.ts'
 import { createDensePanel, densePanelReport, PANEL_HZ, tickDensePanel } from './panel-dens.ts'
 import { rebuildDirty } from '../src/sim/regions.ts'
@@ -589,6 +590,13 @@ const pointer = new THREE.Vector2()
 // apasare si eliberare — adica majoritatea clickurilor facute cu mana, si toate
 // cele facute de un harness de automatizare.
 const DRAG_PX = 4
+// Tastele tinute apasate in timpul unui click: Z picteaza un depozit (doua
+// clickuri = doua colturi), X sterge depozitul de sub click.
+let tastaZ = false
+let tastaX = false
+let coltZona: { wx: number; wy: number; z: number } | null = null
+window.addEventListener('keydown', (ev) => { if (ev.key === 'z' || ev.key === 'Z') tastaZ = true; if (ev.key === 'x' || ev.key === 'X') tastaX = true })
+window.addEventListener('keyup', (ev) => { if (ev.key === 'z' || ev.key === 'Z') tastaZ = false; if (ev.key === 'x' || ev.key === 'X') tastaX = false })
 let downX = 0
 let downY = 0
 let moved = 0
@@ -634,7 +642,21 @@ renderer.domElement.addEventListener('click', (ev) => {
   // de debug, si ce chema scenariul de gate S-DIG). Ctrl+click = retrage
   // desemnarea de pe celula. Shift+click = zideste, ca inainte.
   let out
-  if (ev.shiftKey) {
+  if (tastaZ) {
+    // Depozitul se picteaza pe celula CALCABILA de deasupra solului atins.
+    if (!coltZona) {
+      coltZona = { wx, wy, z: z + 1 }
+      el('spot').textContent = `depozit: coltul 1 la ${wx},${wy} — click cu Z pe coltul 2`
+      return
+    }
+    out = applyCommand(world, { kind: 'picteazaZona', x0: coltZona.wx, y0: coltZona.wy, x1: wx, y1: wy, z: coltZona.z })
+    coltZona = null
+  } else if (tastaX) {
+    const cs = celulaDeZonaLa(world.zone, wx, wy, z + 1)
+    out = cs === -1
+      ? applyCommand(world, { kind: 'stergeZona', id: -1 })
+      : applyCommand(world, { kind: 'stergeZona', id: world.zone.celule.zonaId[cs]! })
+  } else if (ev.shiftKey) {
     out = applyCommand(world, { kind: 'fill', wx, wy, z, material: Material.PIATRA_CONSTRUITA })
   } else if (ev.altKey) {
     out = applyCommand(world, { kind: 'dig', wx, wy, z })
@@ -1090,9 +1112,11 @@ function stepFrame(ts: number): void {
       const r = rezumatJoburi(world)
       const d = world.desemnari.vii
       const o = jobOverlay.visible ? ` · liber ${jobOverlay.desemnari - jobOverlay.rezervate - jobOverlay.faraLoc - jobOverlay.componente - jobOverlay.altRefuz} rez ${jobOverlay.rezervate} fara-loc ${jobOverlay.faraLoc} rupt ${jobOverlay.componente}` : ''
-      el('jobs').textContent = `${d} desemnari · idle ${r.idle} merg ${r.merg} sapa ${r.lucreaza}${o}`
-      el('jobs').className = r.faraMuncitori ? 'warn' : ''
+      const m = jobOverlay.visible ? ` · mormane ${jobOverlay.iteme} (rez ${jobOverlay.itemeRezervate} fara-depozit ${jobOverlay.itemeFaraDepozit} rupt ${jobOverlay.itemeInaccesibile}) · depozit ${jobOverlay.celuleOcupate}/${jobOverlay.celuleDepozit}` : ` · mormane ${world.iteme.vii} · depozit ${world.zone.celule.vii} cel.`
+      el('jobs').textContent = `${d} desemnari · idle ${r.idle} merg ${r.merg} lucreaza ${r.lucreaza} cara ${r.cara}${o}${m}`
+      el('jobs').className = r.faraMuncitori || r.faraCarausi ? 'warn' : ''
       if (r.faraMuncitori) el('jobs').textContent += ' · NIMENI NU SAPA'
+      if (r.faraCarausi) el('jobs').textContent += ' · NIMENI NU CARA'
     }
     if (probe.invalid) {
       el('spot').textContent = `INVALID · ${probe.invalid}`

@@ -97,3 +97,24 @@ o cerere nu e luată. Dacă trebuie să ghicești, spune-mi ce anume ai vrut să
 
 **De ce nu pot eu.** E lizibilitate, nu corectitudine: corectitudinea o acoperă 213 teste.
 Research-ul spune că genul se câștigă în lizibilitatea a 200 de stări simultane; aici sunt primele.
+
+---
+
+## 7. Mormane și depozite — se vede unde se duce marfa?
+
+**Ce te uiți.** Viewerul, tasta **J**. Dă click pe teren de câteva ori (cereri de săpat), apoi ține
+**Z** apăsat și dă click de două ori, pe două colțuri ale unui dreptunghi de teren plat: ăla e
+depozitul (pătrate verzi pe podea). Fiecare voxel săpat lasă un morman (un cub mic; cu cât e mai
+înalt, cu atât e mai plin). Pionii arămii cară ceva; linia albă arată spre morman sau spre celula
+de depozit. Pătratul devine mai luminos când se umple și albastru cât timp vine cineva spre el.
+**X**+click pe depozit îl șterge (cine ducea ceva acolo lasă marfa la picioare).
+
+**Cum arată bine.** Vezi mormanele apărând lângă săpături, pionii plecând cu ele spre depozit și
+depozitul umplându-se dinspre partea apropiată de carieră. Un morman roșu = n-are unde (nu există
+depozit sau e plin); violet = are unde, dar nu se ajunge. Dacă vezi un morman care stă roșu deși
+depozitul are loc, sau un pion care ridică și lasă același morman la nesfârșit, aia e ce vreau să știu.
+
+**De ce nu pot eu.** Corectitudinea o acoperă 246 de teste (marfa nu dispare, nimic nu se mută între
+depozite egale, drumurile blocate nu produc bucle). Ce nu pot judeca e dacă se CITEȘTE — și dacă
+ritmul (pionii merg de ~5 ori mai mult decât muncesc, măsurat) pare „joc" sau pare defect. De
+răspunsul ăsta depinde dacă batching-ul (mai multe mormane pe drum) intră acum sau mai târziu.

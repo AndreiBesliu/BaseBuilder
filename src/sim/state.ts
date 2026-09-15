@@ -23,6 +23,8 @@ import type { PathStore } from './drumuri.ts'
 import type { DesignationStore } from './desemnari.ts'
 import type { ReservationStore } from './rezervari.ts'
 import type { RatiuneStore } from './joburi.ts'
+import type { ItemStore } from './iteme.ts'
+import type { ZoneStore } from './zone.ts'
 
 /**
  * Versiunea schemei de stare. Creste la ORICE camp nou. Vezi save.ts.
@@ -31,8 +33,10 @@ import type { RatiuneStore } from './joburi.ts'
  *   2 — S16-19: desemnari, joburi pe agenti, prioritati personale
  *   3 — S16-19 dupa recenzie: racirea pe pereche ca MULTIME, scanarea imediata
  *       dupa un job, blocurile murdare persistate
+ *   4 — S16-19 taietura 2: iteme, zone pictate, joburi de carat (a doua
+ *       categorie, deci `prioPersonala` isi schimba pasul)
  */
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 /**
  * Categoriile de munca. Lista de STRUCTURA (ce feluri de munca exista), nu numar
@@ -41,16 +45,58 @@ export const SCHEMA_VERSION = 3
  */
 export const Categorie = {
   SAPA: 0,
+  CARA: 1,
 } as const
 export type CategorieId = (typeof Categorie)[keyof typeof Categorie]
-export const CATEGORII = 1
+export const CATEGORII = 2
 
-/** Pasii unui job. Un job e o masina de stare liniara, nu un arbore. */
+/**
+ * Felul jobului curent al unui agent. 0 = fara job. Numerotarea e STRUCTURA si
+ * intra in save: SAPA e `Desemnare.SAPA + 1`, cum era din taietura 1.
+ */
+export const FelJob = {
+  NICIUNUL: 0,
+  SAPA: 1,
+  CARA: 2,
+} as const
+export type FelJobId = (typeof FelJob)[keyof typeof FelJob]
+
+/** Pasii unui job de sapat. Un job e o masina de stare liniara, nu un arbore. */
 export const PasJob = {
   MERGE: 0,
   LUCREAZA: 1,
 } as const
 export type PasJobId = (typeof PasJob)[keyof typeof PasJob]
+
+/** Pasii unui job de carat: doua drumuri, doua opriri. */
+export const PasCara = {
+  MERGE_SURSA: 0,
+  RIDICA: 1,
+  MERGE_DEST: 2,
+  LASA: 3,
+} as const
+export type PasCaraId = (typeof PasCara)[keyof typeof PasCara]
+
+/**
+ * E pasul unul de MERS (tinta e `jobWork*`) sau unul de oprire (se munceste pe
+ * loc)? Ambele masini de stare alterneaza mers/oprire, pornind cu mers, deci
+ * paritatea pasului raspunde pentru amandoua; sosirea la tinta face `pas + 1`.
+ */
+export function pasDeMers(step: number): boolean {
+  return (step & 1) === 0
+}
+
+/**
+ * Felurile de iteme. Lista de STRUCTURA; ce da fiecare material la sapat e in
+ * content (`digYield`), validat contra listei asteia.
+ */
+export const Item = {
+  PIATRA: 0,
+  PAMANT: 1,
+  LEMN: 2,
+} as const
+export type ItemId = (typeof Item)[keyof typeof Item]
+export const ITEME = 3
 
 /** Un milimetru e unitatea de baza. O celula de 1 m = 1000. */
 export const MM_PER_CELL = 1000
@@ -119,20 +165,21 @@ export interface AgentStore {
   // Intentia lui M5 — un save inconsistent nu deadlock-uieste tacut — se
   // pastreaza in `reconstruiesteRezervari`, care anuleaza CU RAPORT ce nu se
   // poate re-rezerva.
-  /** 0 = fara job; altfel felul (vezi `Desemnare` din desemnari.ts, +1). */
+  /** `FelJob`. 0 = fara job. */
   jobKind: Uint8Array
   /** Identitatea INSTANTEI de job, din `w.nextId`. E componenta `jobId` din tuplul de rezervare. */
   jobId: Int32Array
-  /** Id-ul tintei (o desemnare). */
+  /** Id-ul tintei: o desemnare (SAPA) sau itemul-sursa (CARA). */
   jobTarget: Int32Array
-  /** `PasJob`. */
+  /** `PasJob` sau `PasCara`, dupa fel. */
   jobStep: Uint8Array
-  /** Unitati de munca acumulate in pasul LUCREAZA. */
+  /** Unitati de munca acumulate in pasul CURENT de oprire. Se reseteaza la fiecare tranzitie. */
   jobProgres: Int32Array
   /**
-   * Celula de lucru aleasa la scanare. Se persista SEPARAT de `goal*`: cautarea
-   * ei nu are raspuns unic in timp (terenul se schimba), deci dupa incarcare
-   * agentul ar putea alege alta — iar `goal*` se goleste la sosire.
+   * Celula spre care merge in pasul curent de mers: locul de lucru (SAPA), celula
+   * itemului si apoi celula de depunere (CARA). Se persista SEPARAT de `goal*`:
+   * cautarea ei nu are raspuns unic in timp (terenul se schimba), deci dupa
+   * incarcare agentul ar putea alege alta — iar `goal*` se goleste la sosire.
    */
   jobWorkX: Int32Array
   jobWorkY: Int32Array
@@ -143,6 +190,30 @@ export interface AgentStore {
    * plafon, un drum mereu peste buget parca pionul pe viata cu tinta rezervata.
    */
   jobIncercari: Uint8Array
+  /**
+   * CARA: id-ul CELULEI DE ZONA in care se depune (0 = niciuna). E a doua tinta a
+   * jobului si a doua rezervare din tuplu; o celula de zona are id de entitate
+   * tocmai ca sa incapa aici si in `evitaTinta` (o cheie de celula n-ar incapea
+   * intr-un Int32).
+   */
+  jobDest: Int32Array
+  /**
+   * CARA: cat s-a REZERVAT din morman, inghetat la start. Panoul a aratat de ce
+   * nu se poate citi din `cantitate`: mormanul creste prin contopire intre
+   * rezervare si save, iar la incarcare `cereriPentru` ar re-rezerva alta
+   * cantitate — alta lume, alt hash, si marfa care dispare din mana.
+   */
+  jobCantitate: Int32Array
+  /**
+   * 1 dupa ce jobul a PRODUS un efect in lume (a ridicat marfa). Zavorul
+   * `joburiFaraProgres` citeste asta, nu `jobProgres`, fiindca `jobProgres` se
+   * reseteaza la fiecare pas si un INCOMPLET pe drumul spre depozit ar parea „fara
+   * nicio munca" desi marfa e in mana.
+   */
+  jobEfect: Uint8Array
+  /** Ce are in mana: felul si cantitatea. Un pion FARA job are `caraCantitate = 0` (invariant). */
+  caraKind: Uint8Array
+  caraCantitate: Int32Array
   /**
    * Racirea pe PERECHEA (pion, tinta): dupa ce pionul a renuntat la o tinta din
    * cauze care tin de EL (drumul lui e blocat de un ostil, prea scump pentru el),
@@ -156,6 +227,8 @@ export interface AgentStore {
    * munca — exact defectul „pion parcat repetand cea mai scumpa cautare" pe care
    * plafonul de incercari trebuia sa-l inchida. Plafonul il mutase, nu il inchisese.
    * Evictia e a celei mai vechi (tickul de expirare cel mai mic). 0 = slot liber.
+   *
+   * Tinta poate fi o desemnare, un item sau o ZONA (id-uri de entitate, toate).
    */
   evitaSloturi: number
   evitaTinta: Int32Array
@@ -207,8 +280,12 @@ export interface World {
   regions: RegionStore
   /** PERSISTED — drumurile in curs. Un A* nu are raspuns unic; vezi `agents.ts`. */
   paths: PathStore
-  /** PERSISTED — ce a cerut jucatorul sa se faca. Tintele joburilor. */
+  /** PERSISTED — ce a cerut jucatorul sa se faca. Tintele joburilor de sapat. */
   desemnari: DesignationStore
+  /** PERSISTED — mormanele de pe jos si din depozite. Tintele joburilor de carat. */
+  iteme: ItemStore
+  /** PERSISTED — zonele pictate si celulele lor; indexul lor e DERIVED. */
+  zone: ZoneStore
   /**
    * DERIVED din joburile agentilor. Se reconstruieste la incarcare, in ordinea
    * slotului; ce nu se poate reconstrui se anuleaza cu raport. Vezi rezervari.ts.
@@ -242,6 +319,11 @@ export function makeAgentStore(capacity: number, prioPersonalaImplicita = 1, evi
     jobWorkY: new Int32Array(capacity),
     jobWorkZ: new Int32Array(capacity),
     jobIncercari: new Uint8Array(capacity),
+    jobDest: new Int32Array(capacity),
+    jobCantitate: new Int32Array(capacity),
+    jobEfect: new Uint8Array(capacity),
+    caraKind: new Uint8Array(capacity),
+    caraCantitate: new Int32Array(capacity),
     evitaSloturi,
     evitaTinta: new Int32Array(capacity * evitaSloturi),
     evitaPanaLa: new Int32Array(capacity * evitaSloturi),

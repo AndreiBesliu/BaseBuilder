@@ -28,6 +28,10 @@ import { makeDesignationStore, reindexeazaDesemnari } from './desemnari.ts'
 import type { DesignationStore } from './desemnari.ts'
 import { createReservations } from './rezervari.ts'
 import { makeRatiuneStore, reconstruiesteRezervari } from './joburi.ts'
+import { makeItemStore, reindexeazaIteme } from './iteme.ts'
+import type { ItemStore } from './iteme.ts'
+import { makeZoneStore, reindexeazaZone } from './zone.ts'
+import type { ZoneStore } from './zone.ts'
 
 /** Creste cand se schimba FORMATUL de fisier, independent de schema de stare. */
 export const SAVE_BUILD = 1
@@ -44,6 +48,9 @@ export function encode(w: World): string {
   const a = w.agents
   const rng: Record<string, RngState> = {}
   for (const name of RNG_STREAMS) rng[name] = w.rng[name]
+  const it = w.iteme
+  const z = w.zone
+  const zc = w.zone.celule
 
   const env: Envelope = {
     game: 'kinstead',
@@ -130,10 +137,18 @@ export function encode(w: World): string {
         jobWorkY: Array.from(a.jobWorkY.subarray(0, a.count)),
         jobWorkZ: Array.from(a.jobWorkZ.subarray(0, a.count)),
         jobIncercari: Array.from(a.jobIncercari.subarray(0, a.count)),
+        jobDest: Array.from(a.jobDest.subarray(0, a.count)),
+        jobCantitate: Array.from(a.jobCantitate.subarray(0, a.count)),
+        jobEfect: Array.from(a.jobEfect.subarray(0, a.count)),
+        caraKind: Array.from(a.caraKind.subarray(0, a.count)),
+        caraCantitate: Array.from(a.caraCantitate.subarray(0, a.count)),
         evitaSloturi: a.evitaSloturi,
         evitaTinta: Array.from(a.evitaTinta.subarray(0, a.count * a.evitaSloturi)),
         evitaPanaLa: Array.from(a.evitaPanaLa.subarray(0, a.count * a.evitaSloturi)),
         scanLaTick: Array.from(a.scanLaTick.subarray(0, a.count)),
+        // Pasul lui `prioPersonala` se scrie explicit: cand apare o categorie
+        // noua, `decode` largeste tabloul in loc sa refuze fiecare save existent.
+        categorii: CATEGORII,
         prioPersonala: Array.from(a.prioPersonala.subarray(0, a.count * CATEGORII)),
       },
       // Desemnarile: ce a cerut jucatorul. `ultimulMotiv` e TRANSIENT si nu
@@ -151,10 +166,46 @@ export function encode(w: World): string {
         alive: Array.from(w.desemnari.alive.subarray(0, w.desemnari.count)),
         reincercaLaTick: Array.from(w.desemnari.reincercaLaTick.subarray(0, w.desemnari.count)),
       },
+      // Itemele: mormanele, cu racirea lor (PERSISTED din acelasi motiv ca la
+      // desemnari — influenteaza plafonul de evaluari). Indexul e DERIVED.
+      iteme: {
+        count: it.count,
+        capacity: it.capacity,
+        id: Array.from(it.id.subarray(0, it.count)),
+        kind: Array.from(it.kind.subarray(0, it.count)),
+        wx: Array.from(it.wx.subarray(0, it.count)),
+        wy: Array.from(it.wy.subarray(0, it.count)),
+        z: Array.from(it.z.subarray(0, it.count)),
+        cantitate: Array.from(it.cantitate.subarray(0, it.count)),
+        alive: Array.from(it.alive.subarray(0, it.count)),
+        reincercaLaTick: Array.from(it.reincercaLaTick.subarray(0, it.count)),
+      },
+      // Zonele si celulele lor. Indexul (libere, acceptante, deMutat) e DERIVED
+      // si porneste murdar la incarcare.
+      zone: {
+        count: z.count,
+        capacity: z.capacity,
+        id: Array.from(z.id.subarray(0, z.count)),
+        kind: Array.from(z.kind.subarray(0, z.count)),
+        prioritate: Array.from(z.prioritate.subarray(0, z.count)),
+        alive: Array.from(z.alive.subarray(0, z.count)),
+        celule: {
+          count: zc.count,
+          capacity: zc.capacity,
+          id: Array.from(zc.id.subarray(0, zc.count)),
+          zonaId: Array.from(zc.zonaId.subarray(0, zc.count)),
+          wx: Array.from(zc.wx.subarray(0, zc.count)),
+          wy: Array.from(zc.wy.subarray(0, zc.count)),
+          z: Array.from(zc.z.subarray(0, zc.count)),
+          alive: Array.from(zc.alive.subarray(0, zc.count)),
+        },
+      },
     },
   }
   return JSON.stringify(env)
 }
+
+const STORE_GOL = { count: 0, capacity: 0, id: [], kind: [], wx: [], wy: [], z: [], alive: [] }
 
 /**
  * Lantul de migrari. O intrare per treapta de schema. Fiecare e idempotenta si
@@ -168,7 +219,7 @@ const MIGRATIONS: Record<number, (data: Record<string, unknown>) => Record<strin
   // completeaza la citire cu „fara job", iar prioritatile personale cu
   // implicitul din content — exact starea in care ar fi fost lumea daca jobul
   // ar fi existat de la inceput si nimeni n-ar fi cerut nimic.
-  1: (d) => ({ ...d, desemnari: d.desemnari ?? { count: 0, capacity: 0, id: [], kind: [], wx: [], wy: [], z: [], prioritate: [], alive: [], reincercaLaTick: [] } }),
+  1: (d) => ({ ...d, desemnari: d.desemnari ?? { ...STORE_GOL, prioritate: [], reincercaLaTick: [] } }),
   // 2 -> 3 (recenzia S16-19): racirea pe pereche devine multime (`evitaTinta`/
   // `evitaPanaLa`, K sloturi per pion) in locul scalarului `tintaRefuzata`/
   // `refuzPanaLa`; apare `scanLaTick`; blocurile murdare se salveaza. Vechea
@@ -177,6 +228,31 @@ const MIGRATIONS: Record<number, (data: Record<string, unknown>) => Record<strin
   2: (d) => {
     const r = (d.regiuni as Record<string, unknown> | undefined) ?? {}
     return { ...d, regiuni: { ...r, murdare: r.murdare ?? [] } }
+  },
+  // 3 -> 4 (S16-19, taietura 2): iteme, zone, carat. Un save de schema 3 n-are
+  // niciun morman si nicio zona (nu existau), deci stores goale; pionii n-au
+  // nimic in mana si niciun job de carat (`jobDest`, `jobCantitate`, `jobEfect`,
+  // `cara*` zero). `prioPersonala` avea o singura categorie: se declara pasul
+  // vechi (`categorii: 1`), iar `decode` il largeste la CATEGORII cu implicitul
+  // din content — altfel fiecare save de schema 3 ar fi refuzat pe lungime.
+  3: (d) => {
+    const a = (d.agents as Record<string, unknown> | undefined) ?? {}
+    const n = (a.count as number | undefined) ?? 0
+    const zero = (): number[] => new Array<number>(n).fill(0)
+    return {
+      ...d,
+      agents: {
+        ...a,
+        categorii: a.categorii ?? 1,
+        jobDest: a.jobDest ?? zero(),
+        jobCantitate: a.jobCantitate ?? zero(),
+        jobEfect: a.jobEfect ?? zero(),
+        caraKind: a.caraKind ?? zero(),
+        caraCantitate: a.caraCantitate ?? zero(),
+      },
+      iteme: d.iteme ?? { ...STORE_GOL, cantitate: [], reincercaLaTick: [] },
+      zone: d.zone ?? { ...STORE_GOL, prioritate: [], celule: { ...STORE_GOL, zonaId: [] } },
+    }
   },
 }
 
@@ -256,16 +332,12 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
   if (agentsRaw.hasGoal) agents.hasGoal.set(agentsRaw.hasGoal as number[])
   if (agentsRaw.progresMm) agents.progresMm.set(agentsRaw.progresMm as number[])
   // Save-urile de schema 1 n-au job: campurile raman la zero, adica „fara job".
-  if (agentsRaw.jobKind) agents.jobKind.set(agentsRaw.jobKind as number[])
-  if (agentsRaw.jobId) agents.jobId.set(agentsRaw.jobId as number[])
-  if (agentsRaw.jobTarget) agents.jobTarget.set(agentsRaw.jobTarget as number[])
-  if (agentsRaw.jobStep) agents.jobStep.set(agentsRaw.jobStep as number[])
-  if (agentsRaw.jobProgres) agents.jobProgres.set(agentsRaw.jobProgres as number[])
-  if (agentsRaw.jobWorkX) agents.jobWorkX.set(agentsRaw.jobWorkX as number[])
-  if (agentsRaw.jobWorkY) agents.jobWorkY.set(agentsRaw.jobWorkY as number[])
-  if (agentsRaw.jobWorkZ) agents.jobWorkZ.set(agentsRaw.jobWorkZ as number[])
-  if (agentsRaw.jobIncercari) agents.jobIncercari.set(agentsRaw.jobIncercari as number[])
-  if (agentsRaw.scanLaTick) agents.scanLaTick.set(agentsRaw.scanLaTick as number[])
+  for (const camp of ['jobKind', 'jobId', 'jobTarget', 'jobStep', 'jobProgres', 'jobWorkX', 'jobWorkY', 'jobWorkZ', 'jobIncercari', 'jobDest', 'jobCantitate', 'jobEfect', 'caraKind', 'caraCantitate', 'scanLaTick'] as const) {
+    const v = agentsRaw[camp] as number[] | undefined
+    if (!v) continue
+    if (v.length !== count) return refuse(Reason.VALOARE_INVALIDA, { camp: `agents.${camp}`, lungime: v.length, asteptat: count })
+    agents[camp].set(v)
+  }
   if (agentsRaw.evitaTinta && agentsRaw.evitaPanaLa) {
     const k = agentsRaw.evitaSloturi as number
     const t = agentsRaw.evitaTinta as number[]
@@ -293,11 +365,18 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
     }
   }
   if (agentsRaw.prioPersonala) {
+    // Pasul din save (`categorii`) poate fi mai mic decat cel din cod: o categorie
+    // noua primeste implicitul din content pe fiecare pion. Acelasi tipar ca la
+    // `evitaSloturi`.
+    const k = (agentsRaw.categorii as number | undefined) ?? 1
     const pp = agentsRaw.prioPersonala as number[]
-    if (pp.length !== count * CATEGORII) {
-      return refuse(Reason.VALOARE_INVALIDA, { camp: 'agents.prioPersonala', lungime: pp.length, asteptat: count * CATEGORII })
+    if (!Number.isInteger(k) || k < 1 || pp.length !== count * k) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: 'agents.prioPersonala', lungime: pp.length, asteptat: count * k })
     }
-    agents.prioPersonala.set(pp)
+    const kk = Math.min(k, CATEGORII)
+    for (let i = 0; i < count; i++) {
+      for (let c = 0; c < kk; c++) agents.prioPersonala[i * CATEGORII + c] = pp[i * k + c]!
+    }
   }
 
   // Identitati unice — un save corupt sau editat manual nu are voie sa treaca tacut.
@@ -356,6 +435,10 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
 
   const desemnari = incarcaDesemnari(data.desemnari, rules)
   if (!desemnari.ok) return desemnari
+  const iteme = incarcaIteme(data.iteme, rules)
+  if (!iteme.ok) return iteme
+  const zone = incarcaZone(data.zone, rules)
+  if (!zone.ok) return zone
 
   const w: World = {
     schema: SCHEMA_VERSION,
@@ -372,31 +455,52 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
     bounds: { w: WORLD_CELLS * MM_PER_CELL, h: WORLD_CELLS * MM_PER_CELL },
     terrain,
     desemnari: desemnari.value,
+    iteme: iteme.value,
+    zone: zone.value,
     rezervari: createReservations(),
     ratiune: makeRatiuneStore(capacity),
   }
   // Rezervarile sunt DERIVED din joburi. Ce nu se poate reconstrui e un save
   // inconsistent: jobul se anuleaza si se numara, nu se lasa tacut.
-  reconstruiesteRezervari(w)
+  reconstruiesteRezervari(w, rules)
   return accept(w)
 }
 
+/** Citeste un tablou de store SoA: obligatoriu, de lungime `count`. */
+function citesteCampuri<K extends string>(
+  r: Record<string, number[] | number | unknown>,
+  prefix: string,
+  count: number,
+  campuri: readonly K[],
+  tinta: Record<K, Int32Array | Uint8Array>,
+): Outcome<void> {
+  for (const camp of campuri) {
+    const v = r[camp] as number[] | undefined
+    if (!v) return refuse(Reason.LIPSA_MATERIAL, { camp: `${prefix}.${camp}` })
+    if (v.length !== count) return refuse(Reason.VALOARE_INVALIDA, { camp: `${prefix}.${camp}`, lungime: v.length, asteptat: count })
+    tinta[camp].set(v)
+  }
+  return accept()
+}
+
+function citesteCount(r: Record<string, unknown>, prefix: string, capacity: number): Outcome<number> {
+  const count = r.count as number
+  if (!Number.isInteger(count) || count < 0 || count > capacity) {
+    return refuse(Reason.CAPACITATE_DEPASITA, { camp: `${prefix}.count`, valoare: String(count), maxim: capacity })
+  }
+  return accept(count)
+}
+
 function incarcaDesemnari(raw: unknown, rules: Rules): Outcome<DesignationStore> {
-  const r = raw as Record<string, number[] | number> | undefined
+  const r = raw as Record<string, unknown> | undefined
   const d = makeDesignationStore(rules.designationCapacity)
   if (!r) return accept(d)
-  const count = r.count as number
-  if (!Number.isInteger(count) || count < 0 || count > d.capacity) {
-    return refuse(Reason.CAPACITATE_DEPASITA, { camp: 'desemnari.count', valoare: String(count), maxim: d.capacity })
-  }
-  d.count = count
-  for (const camp of ['id', 'kind', 'wx', 'wy', 'z', 'prioritate', 'alive', 'reincercaLaTick'] as const) {
-    const v = r[camp] as number[] | undefined
-    if (!v) return refuse(Reason.LIPSA_MATERIAL, { camp: `desemnari.${camp}` })
-    if (v.length !== count) return refuse(Reason.VALOARE_INVALIDA, { camp: `desemnari.${camp}`, lungime: v.length, asteptat: count })
-    d[camp].set(v)
-  }
-  for (let i = 0; i < count; i++) {
+  const count = citesteCount(r, 'desemnari', d.capacity)
+  if (!count.ok) return count
+  d.count = count.value
+  const c = citesteCampuri(r, 'desemnari', d.count, ['id', 'kind', 'wx', 'wy', 'z', 'prioritate', 'alive', 'reincercaLaTick'] as const, d)
+  if (!c.ok) return c
+  for (let i = 0; i < d.count; i++) {
     if (d.alive[i] === 0) continue
     const p = d.prioritate[i]!
     if (p < 1 || p > rules.designationPriorityLevels) {
@@ -406,6 +510,41 @@ function incarcaDesemnari(raw: unknown, rules: Rules): Outcome<DesignationStore>
   const idx = reindexeazaDesemnari(d)
   if (!idx.ok) return idx
   return accept(d)
+}
+
+function incarcaIteme(raw: unknown, rules: Rules): Outcome<ItemStore> {
+  const r = raw as Record<string, unknown> | undefined
+  const s = makeItemStore(rules.itemCapacity)
+  if (!r) return refuse(Reason.LIPSA_MATERIAL, { camp: 'iteme' })
+  const count = citesteCount(r, 'iteme', s.capacity)
+  if (!count.ok) return count
+  s.count = count.value
+  const c = citesteCampuri(r, 'iteme', s.count, ['id', 'kind', 'wx', 'wy', 'z', 'cantitate', 'alive', 'reincercaLaTick'] as const, s)
+  if (!c.ok) return c
+  const idx = reindexeazaIteme(s, rules)
+  if (!idx.ok) return idx
+  return accept(s)
+}
+
+function incarcaZone(raw: unknown, rules: Rules): Outcome<ZoneStore> {
+  const r = raw as Record<string, unknown> | undefined
+  const s = makeZoneStore(rules.zoneCapacity, rules.zoneCellCapacity)
+  if (!r) return refuse(Reason.LIPSA_MATERIAL, { camp: 'zone' })
+  const count = citesteCount(r, 'zone', s.capacity)
+  if (!count.ok) return count
+  s.count = count.value
+  const c = citesteCampuri(r, 'zone', s.count, ['id', 'kind', 'prioritate', 'alive'] as const, s)
+  if (!c.ok) return c
+  const cr = r.celule as Record<string, unknown> | undefined
+  if (!cr) return refuse(Reason.LIPSA_MATERIAL, { camp: 'zone.celule' })
+  const ccount = citesteCount(cr, 'zone.celule', s.celule.capacity)
+  if (!ccount.ok) return ccount
+  s.celule.count = ccount.value
+  const cc = citesteCampuri(cr, 'zone.celule', s.celule.count, ['id', 'zonaId', 'wx', 'wy', 'z', 'alive'] as const, s.celule)
+  if (!cc.ok) return cc
+  const idx = reindexeazaZone(s, rules)
+  if (!idx.ok) return idx
+  return accept(s)
 }
 
 interface SavedTerrain {

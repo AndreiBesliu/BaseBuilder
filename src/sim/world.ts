@@ -21,6 +21,8 @@ import { makePathStore } from './drumuri.ts'
 import { makeDesignationStore } from './desemnari.ts'
 import { createReservations } from './rezervari.ts'
 import { makeRatiuneStore } from './joburi.ts'
+import { makeItemStore } from './iteme.ts'
+import { makeZoneStore } from './zone.ts'
 
 /**
  * Creeaza o lume. NU incarca teren: `createTerrain` aloca doar structura goala,
@@ -53,6 +55,8 @@ export function createWorld(seed: number, rules: Rules = DEFAULT_RULES): World {
     regions: createRegions(),
     paths: makePathStore(rules.agentCapacity, rules.maxPathCells),
     desemnari: makeDesignationStore(rules.designationCapacity),
+    iteme: makeItemStore(rules.itemCapacity),
+    zone: makeZoneStore(rules.zoneCapacity, rules.zoneCellCapacity),
     rezervari: createReservations(),
     ratiune: makeRatiuneStore(rules.agentCapacity),
   }
