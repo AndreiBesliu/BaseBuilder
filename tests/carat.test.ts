@@ -729,20 +729,13 @@ test('o zona EVITATA de un pion nu produce racire pe ITEM: cauza e a perechii, n
   const a = patratPlat(w, sit, 2, 6, 40)
   assert.ok(a)
   const zonaA = picteaza(w, a.x0, a.y0, 2, 5)
-  // Zona B: are celule NEPLINE (deci intra la `zoneCuLoc`), dar niciuna cu loc
-  // pentru cantitatea carata — cate 74 din 75.
-  let b: ReturnType<typeof patratPlat> = null
-  for (let d = 6; d <= 60 && !b; d++) {
-    const c = patratPlat(w, { wx: sit.wx, wy: sit.wy + 3, g: sit.g }, 2, d, d)
-    if (c && (Math.abs(c.x0 - a.x0) > 3 || Math.abs(c.y0 - a.y0) > 3)) b = c
-  }
-  assert.ok(b, 'fixtura: niciun al doilea patrat plat')
+  // Zona B: GOALA (deci trece si poarta pe „incape cat car?", si intra la
+  // `zoneCuLoc`), dar dincolo de raza de cautare a destinatiei, deci nicio celula
+  // a ei nu poate fi aleasa. Varianta cu celule la 74/75 a incetat sa exercite
+  // cazul cand poarta a inceput sa ceara loc pentru cantitatea carata.
+  const b = patratPlat(w, sit, 2, R.haulDestRadiusCells + 8, R.haulDestRadiusCells + 40)
+  assert.ok(b, 'fixtura: niciun al doilea patrat plat dincolo de raza')
   picteaza(w, b.x0, b.y0, 2, 4)
-  for (let dx = 0; dx < 2; dx++) {
-    for (let dy = 0; dy < 2; dy++) {
-      assert.ok(applyCommand(w, { kind: 'lasaItem', fel: Item.PIATRA, cantitate: R.itemStackMax - 1, wx: b.x0 + dx, wy: b.y0 + dy, z: b.g + 1 }, R).ok)
-    }
-  }
   const id = lasaItem(w, Item.PIATRA, 20, cx + 2, cy)
   // Pionul evita zona A — singura cu loc REAL. B ramane numarata la „zone cu loc",
   // dar nicio celula a ei nu primeste 20. Cauza e deci a PERECHII, nu a marfii.
