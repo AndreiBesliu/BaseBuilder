@@ -101,7 +101,7 @@ import type { DesignationStore } from './desemnari.ts'
 import type { Cerere } from './rezervari.ts'
 import { elibereaza, elibereazaTinta, elibereazaUna, poateRezerva, rezervaToate, Strat } from './rezervari.ts'
 import { asazaItem, creeazaItem, DetaliuItem, iaDinItem, itemLaCelula, locPeCelula, slotItem, stergeItem } from './iteme.ts'
-import { indexZone, marcheazaZoneMurdare, prioritateaLocului, slotCelulaDeZona, slotZona } from './zone.ts'
+import { celulaDeZonaLa, indexZone, marcheazaZoneMurdare, prioritateaLocului, slotCelulaDeZona, slotZona, stergeCelulaDeZona } from './zone.ts'
 
 // ---------------------------------------------------------------------------
 // ratiunea — TRANSIENT
@@ -516,7 +516,12 @@ function racireDesemnare(w: World, rules: Rules): number {
 }
 
 function racireItem(w: World, rules: Rules): number {
-  return racireTinta(w.iteme.vii, rules)
+  // Populatia care conteaza e cea SCANATA, nu toate mormanele din lume.
+  // Justificarea ferestrei („sa acopere toate tintele inainte sa expire primele")
+  // e corecta la desemnari, unde fiecare desemnare vie e candidat. La iteme nu:
+  // `deMutat` exclude tot ce sta deja la locul lui. Cu 3000 de mormane depozitate
+  // si unul singur de carat, fereastra iesea 390 de tickuri in loc de 100.
+  return racireTinta(indexZone(w, rules).deMutat.length, rules)
 }
 
 /** Memoreaza un refuz pe un item: racire (proprietate a lui) si cauza. */
@@ -578,23 +583,31 @@ export function cautaDestinatie(
   for (const zs of ix.zoneOrdonate) {
     const prio = s.prioritate[zs]!
     if (prio <= prioLoc) break
-    if (ix.acceptante[zs * ITEME + kind] === 0) continue
+    // Poarta ieftina intreaba „incape CAT car?", nu „e vreun loc?": altfel un
+    // depozit cu toate celulele la 74/75 trimitea fiecare candidat la o parcurgere
+    // completa a listei lui de celule libere, la fiecare scanare, pe veci.
+    if (ix.maxLocLiber[zs * ITEME + kind]! < cant) continue
     zoneCuLoc++
     if (esteEvitata(w, slot, s.id[zs]!)) { evitate++; continue }
     let best = -1
     let bestDist = 0
     let bestKey = 0
-    let examinate = 0
+    // Plafonul numara INTRARI parcurse, nu potriviri. Prima versiune il
+    // incrementa dupa filtrele de raza si de loc, deci nu lega niciodata: cu un
+    // depozit de celule nepline-dar-prea-pline bucla mergea pana la capatul
+    // listei, si `evaluariDestinatie` raporta ~0 exact in cazul care costa cel
+    // mai mult. Un plafon care nu se incrementeaza nu e un plafon.
+    let vizitate = 0
     for (const cs of ix.libere[zs]!) {
-      if (examinate >= rules.haulDestMaxCells) break
+      if (vizitate >= rules.haulDestMaxCells) break
+      vizitate++
+      raport.evaluariDestinatie++
       const cx = c.wx[cs]!
       const cy = c.wy[cs]!
       const cz = c.z[cs]!
       const dist = Math.abs(cx - fx) + Math.abs(cy - fy) + Math.abs(cz - fz)
       if (dist > rules.haulDestRadiusCells) continue
       if (locPeCelula(w, rules, kind, cx, cy, cz) < cant) continue
-      examinate++
-      raport.evaluariDestinatie++
       // Aici NU se intinde niciun coridor de acoperire.
       //
       // Prima versiune intindea unul (marfa → celula de depozit) „o data per
@@ -1527,6 +1540,21 @@ function mutaItem(w: World, rules: Rules, is: number, wx: number, wy: number, z:
  * sapat de jucator. Refuza `CAPACITATE_DEPASITA` cand nu mai incape niciun
  * morman in lume — voxelul ramane, marfa nu se pierde.
  */
+/**
+ * Celulele de zona de pe coloana (wx, wy), intre `zDeLa` si headroom-ul de sub
+ * ea, care nu mai sunt calcabile dupa o editare de teren: se retrag, intrerupand
+ * carausii care le tineau ca destinatie (marfa le ajunge la picioare).
+ */
+export function retrageCeluleDeZonaNecalcabile(w: World, rules: Rules, wx: number, wy: number, zDeLa: number): void {
+  for (let h = 0; h <= rules.agentHeadroomM; h++) {
+    const cs = celulaDeZonaLa(w.zone, wx, wy, zDeLa - h)
+    if (cs === -1) continue
+    if (isWalkable(w.terrain, wx, wy, zDeLa - h, rules)) continue
+    anuleazaCelulaDeZona(w, rules, cs)
+    stergeCelulaDeZona(w.zone, cs)
+  }
+}
+
 export function sapaVoxel(w: World, wx: number, wy: number, z: number, rules: Rules): Outcome<void> {
   if (w.iteme.vii >= w.iteme.capacity) {
     return refuse(Reason.CAPACITATE_DEPASITA, { camp: 'iteme', capacitate: w.iteme.capacity, motiv: 'nu mai incape niciun morman' })
@@ -1540,6 +1568,11 @@ export function sapaVoxel(w: World, wx: number, wy: number, z: number, rules: Ru
   // singurul fel in care dispare o podea, deci un cârlig acopera tot.
   const sus = itemLaCelula(w.iteme, wx, wy, z + 1)
   if (sus !== -1) mutaItem(w, rules, sus, wx, wy, z)
+  // Si celulele de DEPOZIT isi pierd podeaua la fel. Fara carligul asta ramaneau
+  // vii pentru totdeauna: indexul le numara drept „libere" si tinea
+  // `maxPrioLibera` sus, deci fiecare morman de pe jos ramanea candidat pe veci,
+  // iar cauza afisata („leaga zonele") mintea — jucatorul isi sapase depozitul.
+  retrageCeluleDeZonaNecalcabile(w, rules, wx, wy, z + 1)
   const y = rules.digYield[mat.value]
   if (y && y.cantitate > 0) {
     asazaItem(w, rules, y.fel, y.cantitate, wx, wy, z)
@@ -1662,6 +1695,23 @@ export function reconstruiesteRezervari(w: World, rules: Rules): number {
   w.rezervari.anulateLaIncarcare = anulate
   marcheazaZoneMurdare(w)
   return anulate
+}
+
+/**
+ * Jucatorul a schimbat zonele: racirile scrise pe iteme („n-are unde") nu mai au
+ * premisa, deci se sterg. O trecere O(iteme) pe o COMANDA a jucatorului e ieftina
+ * si ramane determinista (comenzile sunt in log). Fara asta, marfa statea pe loc
+ * pana la ~390 de tickuri dupa ce jucatorul picta depozitul de langa ea.
+ *
+ * Nu se face din `indexZone`: acolo ar face un camp PERSISTED sa depinda de cate
+ * ori s-a intamplat sa ruleze reconstructia lenesa, iar lumea continua si cea
+ * incarcata n-o ruleaza de acelasi numar de ori.
+ */
+export function uitaRacirileDeMarfa(w: World): void {
+  const it = w.iteme
+  for (let i = 0; i < it.count; i++) {
+    if (it.alive[i] === 1) it.reincercaLaTick[i] = 0
+  }
 }
 
 /** Exista tinta unei rezervari? Pentru `verificaRezervari` (clauza 5), in teste si acceptanta. */

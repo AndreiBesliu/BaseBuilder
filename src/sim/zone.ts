@@ -61,6 +61,13 @@ export interface IndexZone {
   readonly libere: number[][]
   /** `slotZona * ITEME + fel`: cate celule libere ar primi felul (goale, sau acelasi fel cu loc). */
   acceptante: Int32Array
+  /**
+   * `slotZona * ITEME + fel`: cel mai mare loc liber de pe o celula a zonei,
+   * pentru felul asta. Poarta ieftina intreaba „incape CAT car?", nu doar „e
+   * loc?": un depozit cu 400 de celule la 74/75 trecea poarta si trimitea la
+   * evaluare scumpa candidati care picau mereu, furand plafonul de la sapat.
+   */
+  maxLocLiber: Int32Array
   /** Per fel: prioritatea maxima a unei zone cu cel putin o celula acceptanta; 0 = niciuna. */
   readonly maxPrioLibera: Int32Array
   /** Sloturile zonelor vii, in ordinea (prioritate desc, id asc). */
@@ -71,6 +78,16 @@ export interface IndexZone {
   peJosFaraDepozit: number
   /** Cate reconstructii s-au facut de la pornire. Pentru masuratori. */
   reconstructii: number
+  /**
+   * Cati PASI au costat reconstructiile de la pornire: o celula de zona sau un
+   * slot de item atins = un pas. Numarul de reconstructii nu spune nimic despre
+   * cost — o reconstructie peste 3000 de mormane costa de 60 de ori cat una peste
+   * 50. Masurat: ~57 ns/celula si ~38 ns/morman, deci la tinta din DESIGN §10
+   * (3000 de stive, 4096 de celule) o reconstructie e ~380 µs. Garda din
+   * acceptanta se uita la pasi/tick; cand cifra din joc va cere, indexul devine
+   * incremental (si atunci „DERIVED care poate ramane stale" trebuie re-probat).
+   */
+  pasi: number
 }
 
 export interface ZoneStore {
@@ -113,11 +130,13 @@ export function makeZoneStore(capacity: number, cellCapacity: number): ZoneStore
       murdar: true,
       libere: [],
       acceptante: new Int32Array(capacity * ITEME),
+      maxLocLiber: new Int32Array(capacity * ITEME),
       maxPrioLibera: new Int32Array(ITEME),
       zoneOrdonate: [],
       deMutat: [],
       peJosFaraDepozit: 0,
       reconstructii: 0,
+      pasi: 0,
     },
   }
 }
@@ -270,6 +289,15 @@ export function reindexeazaZone(s: ZoneStore, rules: Rules): Outcome<void> {
  * strict mai buna decat locul lor. Un item rezervat ca sursa ramane in lista;
  * scannerul il respinge ieftin cu `poateRezerva`.
  */
+/** Exista o zona strict mai buna decat `prioLoc` cu loc pentru `cant` din felul `kind`? */
+function incapeUndeva(s: ZoneStore, ix: IndexZone, kind: number, cant: number, prioLoc: number): boolean {
+  for (const zs of ix.zoneOrdonate) {
+    if (s.prioritate[zs]! <= prioLoc) return false
+    if (ix.maxLocLiber[zs * ITEME + kind]! >= cant) return true
+  }
+  return false
+}
+
 export function indexZone(w: World, rules: Rules): IndexZone {
   const s = w.zone
   const ix = s.index
@@ -283,7 +311,9 @@ export function indexZone(w: World, rules: Rules): IndexZone {
   ix.zoneOrdonate.sort((a, b) => s.prioritate[b]! - s.prioritate[a]! || s.id[a]! - s.id[b]!)
 
   if (ix.acceptante.length < s.count * ITEME) ix.acceptante = new Int32Array(s.capacity * ITEME)
+  if (ix.maxLocLiber.length < s.count * ITEME) ix.maxLocLiber = new Int32Array(s.capacity * ITEME)
   ix.acceptante.fill(0)
+  ix.maxLocLiber.fill(0)
   ix.maxPrioLibera.fill(0)
   for (let i = 0; i < s.count; i++) {
     if (!ix.libere[i]) ix.libere[i] = []
@@ -292,6 +322,7 @@ export function indexZone(w: World, rules: Rules): IndexZone {
 
   const c = s.celule
   const it = w.iteme
+  ix.pasi += c.count + it.count
   for (let cs = 0; cs < c.count; cs++) {
     if (c.alive[cs] === 0) continue
     const zs = slotZona(s, c.zonaId[cs]!)
@@ -300,10 +331,16 @@ export function indexZone(w: World, rules: Rules): IndexZone {
     const item = it.laCelula.get(cellKey(c.wx[cs]!, c.wy[cs]!, c.z[cs]!))
     if (item === undefined) {
       ix.libere[zs]!.push(cs)
-      for (let k = 0; k < ITEME; k++) ix.acceptante[zs * ITEME + k]!++
+      for (let k = 0; k < ITEME; k++) {
+        ix.acceptante[zs * ITEME + k]!++
+        if (rules.itemStackMax > ix.maxLocLiber[zs * ITEME + k]!) ix.maxLocLiber[zs * ITEME + k] = rules.itemStackMax
+      }
     } else if (it.cantitate[item]! < rules.itemStackMax) {
+      const k = it.kind[item]!
+      const loc = rules.itemStackMax - it.cantitate[item]!
       ix.libere[zs]!.push(cs)
-      ix.acceptante[zs * ITEME + it.kind[item]!]!++
+      ix.acceptante[zs * ITEME + k]!++
+      if (loc > ix.maxLocLiber[zs * ITEME + k]!) ix.maxLocLiber[zs * ITEME + k] = loc
     }
   }
   for (const zs of ix.zoneOrdonate) {
@@ -317,7 +354,8 @@ export function indexZone(w: World, rules: Rules): IndexZone {
   for (let i = 0; i < it.count; i++) {
     if (it.alive[i] === 0) continue
     const prioLoc = prioritateaLocului(s, it.wx[i]!, it.wy[i]!, it.z[i]!)
-    if (ix.maxPrioLibera[it.kind[i]!]! > prioLoc) {
+    const cant = Math.min(it.cantitate[i]!, rules.haulCarryMax)
+    if (ix.maxPrioLibera[it.kind[i]!]! > prioLoc && incapeUndeva(s, ix, it.kind[i]!, cant, prioLoc)) {
       ix.deMutat.push(i)
     } else if (prioLoc === 0) {
       // Pe jos si n-are unde. Cauza e TRANSIENT si se scrie aici, ca sa fie

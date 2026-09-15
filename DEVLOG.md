@@ -1827,3 +1827,55 @@ celulă mai încolo, și testul existent de BUGET_DEPASIT a prins imediat prima 
 | acceptanța probează CONSERVAREA, în unități | linia care trebuia s-o facă era moartă (`void sapate`, apoi doar „totalul e nenul"). `itemeProduse` numără MORMANE și nu se poate aduna; acum există `unitatiProduse`, și aserția e `în lume + pierdut === produs`. Mutația pe care recenzia a dat-o ca trecând verde („−1 la fiecare depunere") o face roșie |
 
 Șase gărzi noi, fiecare cu mutația ei. 249 → 255 de teste.
+
+### Tranșa de cost: ce a rămas din K05 după recenzie
+
+Lentila de K05 a dat cinci constatări de cost. Le-am luat pe măsurătoare, nu pe descriere.
+
+**Poarta ieftină întreba „e vreun loc?", nu „încape CÂT car?".** Un depozit cu toate celulele la
+74/75 e „nepline", deci trecea poarta: fiecare morman de pe jos intra în `deMutat`, era sortat,
+evaluat scump, iar `cautaDestinatie` parcurgea toată lista lui de celule libere — la fiecare scanare
+a fiecărui pion, cu zero marfă mutată. Indexul ține acum și `maxLocLiber[zonă][fel]` (cel mai mare loc
+liber de pe o celulă), iar poarta compară cu cât s-ar căra. Testul: depozit 4×4 la 74/75 ⇒ zero
+vizite, zero evaluări scumpe, zero celule parcurse.
+
+**Plafonul `haulDestMaxCells` nu lega niciodată.** Se incrementa DUPĂ filtrele de rază și de loc,
+deci bucla mergea până la capătul listei, iar `evaluariDestinatie` raporta ~0 exact în cazul care
+costa cel mai mult — instrumentul mințea. Acum numără INTRARI parcurse. Cifra din acceptanță a urcat
+de la 146.675 la 159.871 pentru aceeași muncă: diferența e ce nu se vedea înainte.
+
+**Reconstrucția indexului e Θ(celule + iteme), și asta rămâne.** Măsurat direct pe mecanism, la
+scara care contează:
+
+| mormane vii | µs / reconstrucție |
+|---|---|
+| 0 | 20,9 |
+| 500 | 29,6 |
+| 1500 | 94,9 |
+| 3000 | 135,4 |
+
+Adică ~57 ns/celulă și ~38 ns/morman. La ținta din DESIGN §10 (3000 de stive, 4096 de celule) o
+reconstrucție ar fi ~380 µs, iar cu ~1,3 reconstrucții pe tick, ~0,5 ms/tick — 6% din bugetul intern
+de 8 ms, și crește cu vechimea. **Nu am făcut indexul incremental.** Motivul e chiar constatarea
+panoului de design care a produs forma actuală: „un DERIVED care poate rămâne stale nu e DERIVED" —
+întreținerea incrementală cere cârlige în toate locurile care schimbă ocuparea unei celule, adică
+exact lista pe care o uiți. Ce am făcut în schimb: garda din acceptanță nu mai numără RECONSTRUCȚII
+(un număr care nu spune nimic despre cost), ci **pași** — celule și sloturi atinse. Azi: 12 pași/tick,
+prag 200. Când cifra din joc o va cere, refacerea incrementală are acum și măsurătoarea, și pragul
+care o declanșează.
+
+**Și două găuri de corectitudine din aceeași lentilă:**
+
+- O celulă de depozit căreia i se sapă podeaua (sau peste care se zidește) rămânea vie pentru
+  totdeauna: indexul o număra „liberă", ținea `maxPrioLibera` sus, deci fiecare morman de pe jos
+  rămânea candidat pe veci, iar cauza afișată mințea („leagă zonele") pentru un depozit pe care
+  jucătorul tocmai și-l săpase. Acum se retrage, prin același cârlig ca mormanele.
+- Răcirea pe marfă se deriva din `iteme.vii` — populație care include tot ce stă liniștit în depozit.
+  Justificarea ferestrei („să acopere toate țintele înainte să expire primele") e corectă la
+  desemnări, unde fiecare desemnare vie e candidat; la iteme nu. Cu 3000 de mormane depozitate și
+  unul de cărat, fereastra ieșea 390 de tickuri în loc de 100. Acum se derivă din câți candidați sunt.
+  Și o comandă de zonă șterge răcirile: premisa oricărui „n-are unde" tocmai s-a schimbat, iar fără
+  asta marfa stătea pe loc sute de tickuri după ce jucătorul picta depozitul de lângă ea.
+
+**Măsurat după toată tranșa:** scenariul standard **74 µs/tick** (tăietura 1: 68), carieră+depozit 89
+µs/tick, 261 de teste.

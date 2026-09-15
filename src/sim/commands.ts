@@ -23,7 +23,7 @@ import { isWalkable, markDirty } from './regions.ts'
 import { isSolid, type MaterialId } from './terrain/chunk.ts'
 import { CHUNK_GRID, fill, inWorld, materialAt, setFocus, voxelRangeM, WORLD_CELLS } from './terrain/terrain.ts'
 import { adaugaDesemnare, Desemnare, slotDesemnare } from './desemnari.ts'
-import { acoperaDesemnarea, anuleazaCelulaDeZona, anuleazaDesemnare, sapaManual, Sfarsit, terminaJob, uitaTintele } from './joburi.ts'
+import { acoperaDesemnarea, anuleazaCelulaDeZona, anuleazaDesemnare, retrageCeluleDeZonaNecalcabile, sapaManual, Sfarsit, terminaJob, uitaRacirileDeMarfa, uitaTintele } from './joburi.ts'
 import { asazaItem, itemLaCelula } from './iteme.ts'
 import { adaugaCelulaDeZona, celulaDeZonaLa, creeazaZona, marcheazaZoneMurdare, slotZona, stergeCelulaDeZona, stergeZona, Zona } from './zone.ts'
 
@@ -231,6 +231,8 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       const out = fill(w.terrain, cmd.wx, cmd.wy, cmd.z, cmd.material)
       if (!out.ok) return out
       markDirty(w.regions, cmd.wx, cmd.wy, cmd.z, rules)
+      // Zidul ia podeaua celulei de deasupra si headroom-ul celor de dedesubt.
+      retrageCeluleDeZonaNecalcabile(w, rules, cmd.wx, cmd.wy, cmd.z + 1)
       return accept(0)
     }
 
@@ -350,6 +352,8 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       }
       void sarite
       void adaugate
+      // Premisa oricarui „n-are unde" tocmai s-a schimbat.
+      uitaRacirileDeMarfa(w)
       return accept(zonaId)
     }
 
@@ -363,6 +367,7 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
         stergeCelulaDeZona(w.zone, i)
       }
       stergeZona(w.zone, zs)
+      uitaRacirileDeMarfa(w)
       return accept(cmd.id)
     }
 
@@ -374,6 +379,7 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       }
       w.zone.prioritate[zs] = cmd.prioritate
       marcheazaZoneMurdare(w)
+      uitaRacirileDeMarfa(w)
       return accept(cmd.id)
     }
 

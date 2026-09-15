@@ -388,15 +388,20 @@ test('M5 in cei PATRU pasi ai caratului, plus item cu racire nenula si zona cu p
   // Un singur pion, un depozit de LEMN cu loc doar pentru 5 si un morman de 40
   // LEMN pe jos: trece poarta ieftina (are loc ≥ 1), cade la cea scumpa (n-are
   // loc pentru 40) → FARA_DEPOZIT memorat pe item, cu racire PERSISTED.
+  // Un morman langa pion si un depozit cu loc, dar DINCOLO de raza de cautare a
+  // destinatiei: zona trece poarta ieftina (are loc pentru cat s-ar cara), deci
+  // se plateste o evaluare scumpa, dar nicio celula nu e in raza → „n-are unde",
+  // memorat pe ITEM cu racire PERSISTED. (Varianta veche — depozit cu loc doar
+  // pentru 5 dintr-un morman de 40 — nu mai ajunge la evaluarea scumpa de cand
+  // poarta intreaba „incape CAT car?", ceea ce e tocmai ce voiam.)
   const racire = (): World => {
-    const { w } = laSit(617, 1)
+    const { w, sit } = laSit(617, 1)
     const cx = cellOf(w.agents.x[0]!)
     const cy = cellOf(w.agents.y[0]!)
     lasaItem(w, Item.LEMN, 40, cx + 2, cy)
-    const p2 = patratPlat(w, { wx: cx, wy: cy, g: w.agents.z[0]! - 1 }, 1, 6, 30)
-    assert.ok(p2)
-    picteaza(w, p2.x0, p2.y0, 1, 2)
-    lasaItem(w, Item.LEMN, R.itemStackMax - 5, p2.x0, p2.y0)
+    const departe = patratPlat(w, sit, 1, R.haulDestRadiusCells + 8, R.haulDestRadiusCells + 40)
+    assert.ok(departe, 'fixtura: niciun loc de depozit dincolo de raza de destinatie')
+    picteaza(w, departe.x0, departe.y0, 1, 5)
     return w
   }
   // Fiecare moment pe o pereche PROASPATA de lumi: momentele nu sunt ordonate in
@@ -618,8 +623,14 @@ test('ACCEPTANTA: 12 pioni, cariera de 900 de celule + depozit de 20x20, 6000 de
   assert.ok(inDepozit.iteme <= celuleDepozit)
   // Niciun refuz de componenta pe iteme: coridoarele si acoperirea de la pictare tin.
   const raportPion = w.ratiune.tickuriDeLucru > 0 ? w.ratiune.tickuriPeDrum / w.ratiune.tickuriDeLucru : 0
-  console.log(`  cariera + depozit (${celuleDepozit} celule): ${t.joburiTerminate} joburi, ${t.itemeMutate} depuneri, ${w.iteme.vii} mormane vii (${inDepozit.iteme} in depozit), ${t.candidatiExaminati} evaluari scumpe, ${t.evaluariDestinatie} celule de destinatie examinate, ${w.zone.index.reconstructii} reconstructii de index, drum/lucru ${raportPion.toFixed(2)}, ${(ms / 6000 * 1000).toFixed(0)} µs/tick`)
+  console.log(`  cariera + depozit (${celuleDepozit} celule): ${t.joburiTerminate} joburi, ${t.itemeMutate} depuneri, ${w.iteme.vii} mormane vii (${inDepozit.iteme} in depozit), ${t.candidatiExaminati} evaluari scumpe, ${t.evaluariDestinatie} celule de destinatie examinate, ${w.zone.index.reconstructii} reconstructii de index (${(w.zone.index.pasi / 6000).toFixed(0)} pasi/tick), drum/lucru ${raportPion.toFixed(2)}, ${(ms / 6000 * 1000).toFixed(0)} µs/tick`)
+  // Garda pe COST, nu pe frecventa: numarul de reconstructii nu spune nimic —
+  // una peste 3000 de mormane costa de 60 de ori cat una peste 50.  numara
+  // celulele si sloturile atinse. Masurat ~57 ns/celula si ~38 ns/morman, deci
+  // pragul de mai jos e si un buget de timp: 200 de pasi/tick ≈ 10 µs/tick.
+  const pasiPeTick = w.zone.index.pasi / 6000
   assert.ok(w.zone.index.reconstructii < 6000 * 2, 'indexul se reconstruieste de mai multe ori pe tick')
+  assert.ok(pasiPeTick < 200, `reconstructia indexului costa ${pasiPeTick.toFixed(0)} pasi/tick`)
 })
 
 // ---------------------------------------------------------------------------
@@ -804,4 +815,141 @@ test('la incarcare, marfa se lasa la picioare DUPA ce toate rezervarile exista: 
   assert.equal(peZ, -1, 'marfa a fost lasata pe celula rezervata de alt pion')
   assert.ok(locPeCelula(lw, R, Item.PIATRA, px, py, pz) >= 50, 'celula rezervata n-are loc pentru ce a promis pionul 1')
   assert.ok(verificaRezervari(lw.rezervari, lw.agents, existaTinta(lw)).ok)
+})
+
+test('poarta ieftina intreaba „incape CAT car?": un depozit cu toate celulele la 74/75 nu trimite pe nimeni la evaluare scumpa', () => {
+  // Cu poarta pe „e vreun loc?", fiecare morman de pe jos intra in `deMutat`, e
+  // sortat si evaluat scump, iar `cautaDestinatie` parcurgea toata lista de
+  // celule libere ale zonei — la fiecare scanare a fiecarui pion, pe veci, cu
+  // zero marfa mutata. Costul creste cu marimea depozitului: K05.
+  const { w, sit } = laSit(627, 1)
+  const cx = cellOf(w.agents.x[0]!)
+  const cy = cellOf(w.agents.y[0]!)
+  const p = patratPlat(w, sit, 4, 6, 40)
+  assert.ok(p, 'fixtura: niciun patrat plat de 4')
+  const zona = picteaza(w, p.x0, p.y0, 4, 5)
+  for (let dx = 0; dx < 4; dx++) {
+    for (let dy = 0; dy < 4; dy++) {
+      assert.ok(applyCommand(w, { kind: 'lasaItem', fel: Item.PIATRA, cantitate: R.itemStackMax - 1, wx: p.x0 + dx, wy: p.y0 + dy, z: p.g + 1 }, R).ok)
+    }
+  }
+  lasaItem(w, Item.PIATRA, 20, cx + 2, cy)
+  const ix = indexZone(w, R)
+  assert.ok(ix.acceptante[0 * ITEME + Item.PIATRA]! > 0, 'fixtura: celulele nu mai sunt „nepline", deci poarta veche n-ar fi trecut oricum')
+  assert.equal(ix.maxLocLiber[0 * ITEME + Item.PIATRA], 1)
+  const t = ruleaza(w, 2 * R.jobRescanTicks + 2)
+  assert.ok(t.scanari > 0, 'fixtura: nimeni n-a scanat')
+  assert.equal(t.vizite, 0, 'marfa a intrat in trecerea ieftina desi nu incape nicaieri')
+  assert.equal(t.candidatiExaminati, 0, 's-a platit o evaluare scumpa pentru un depozit in care nu incape')
+  assert.equal(t.evaluariDestinatie, 0, 's-au parcurs celule de depozit degeaba')
+  assert.equal(itemeInZona(w, zona).iteme, 16)
+})
+
+test('plafonul de destinatie numara INTRARI parcurse, nu potriviri: leaga si cand nicio celula nu trece filtrele', () => {
+  // Cu incrementul dupa filtre, plafonul nu lega niciodata (bucla mergea pana la
+  // capatul listei) si contorul raporta ~0 exact in cazul care costa cel mai mult.
+  const reguli = { ...R, haulDestMaxCells: 4 }
+  const { w, sit } = laSit(628, 1, [], reguli)
+  const cx = cellOf(w.agents.x[0]!)
+  const cy = cellOf(w.agents.y[0]!)
+  // Depozit GOL (deci trece poarta pe „incape cat car"), dar dincolo de raza de
+  // cautare a destinatiei: fiecare celula pica pe filtrul de distanta.
+  const departe = patratPlat(w, sit, 4, reguli.haulDestRadiusCells + 8, reguli.haulDestRadiusCells + 40)
+  assert.ok(departe, 'fixtura: niciun patrat plat dincolo de raza')
+  picteaza(w, departe.x0, departe.y0, 4, 5, reguli)
+  assert.equal(w.zone.celule.vii, 16)
+  lasaItem(w, Item.PIATRA, 20, cx + 2, cy, reguli)
+  const t = ruleaza(w, reguli.jobRescanTicks + 2, reguli)
+  assert.ok(t.candidatiExaminati >= 1, 'fixtura: nicio evaluare scumpa, deci testul nu exercita bucla')
+  assert.ok(t.evaluariDestinatie >= 1, 'contorul de celule de destinatie nu numara nimic: masuratoarea minte')
+  assert.ok(
+    t.evaluariDestinatie <= reguli.haulDestMaxCells * t.candidatiExaminati,
+    `${t.evaluariDestinatie} celule parcurse la ${t.candidatiExaminati} evaluari, plafonul e ${reguli.haulDestMaxCells}`,
+  )
+})
+
+test('o celula de depozit careia i se sapa podeaua se RETRAGE: nu mai tine indexul sus si nu mai minte cu „leaga zonele"', () => {
+  // Fara carlig, celula ramanea alive pentru totdeauna: indexul o numara
+  // „libera", `maxPrioLibera` ramanea sus, deci fiecare morman de pe jos ramanea
+  // candidat la fiecare scanare a fiecarui pion (K05), iar cauza afisata mintea.
+  const { w, sit } = laSit(629, 1)
+  const p = patratPlat(w, sit, 2, 6, 40)
+  assert.ok(p, 'fixtura: niciun patrat plat')
+  const zona = picteaza(w, p.x0, p.y0, 2, 5)
+  assert.equal(w.zone.celule.vii, 4)
+  assert.ok(indexZone(w, R).maxPrioLibera[Item.PIATRA]! >= 5)
+
+  // Se sapa voxelul de SUB o celula de depozit.
+  assert.ok(applyCommand(w, { kind: 'dig', wx: p.x0, wy: p.y0, z: p.g }, R).ok)
+  assert.equal(celulaDeZonaLa(w.zone, p.x0, p.y0, p.g + 1), -1, 'celula de depozit a ramas vie desi n-are podea')
+  assert.equal(w.zone.celule.vii, 3)
+  // Si zidirea peste o celula de depozit o retrage la fel.
+  assert.ok(applyCommand(w, { kind: 'fill', wx: p.x0 + 1, wy: p.y0, z: p.g + 1, material: Material.PIATRA_CONSTRUITA }, R).ok)
+  assert.equal(celulaDeZonaLa(w.zone, p.x0 + 1, p.y0, p.g + 1), -1, 'celula zidita a ramas vie')
+  assert.equal(w.zone.celule.vii, 2)
+  void zona
+})
+
+test('o comanda de zona sterge racirile de pe marfa: un depozit pictat langa un morman refuzat nu-l lasa sa astepte racirea', () => {
+  const { w, sit } = laSit(630, 1)
+  const cx = cellOf(w.agents.x[0]!)
+  const cy = cellOf(w.agents.y[0]!)
+  const id = lasaItem(w, Item.PIATRA, 20, cx + 2, cy)
+  // Un depozit cu loc, dar dincolo de raza: marfa primeste racire pe ea.
+  const departe = patratPlat(w, sit, 1, R.haulDestRadiusCells + 8, R.haulDestRadiusCells + 40)
+  assert.ok(departe, 'fixtura: niciun loc dincolo de raza')
+  picteaza(w, departe.x0, departe.y0, 1, 5)
+  ruleaza(w, 2 * R.jobRescanTicks + 2)
+  const is = slotItem(w.iteme, id)
+  assert.notEqual(is, -1)
+  assert.ok(w.iteme.reincercaLaTick[is]! > w.tick, 'fixtura: marfa n-a primit nicio racire')
+
+  // Jucatorul picteaza un depozit chiar langa marfa: premisa refuzului a disparut.
+  const aproape = patratPlat(w, sit, 1, 4, 20)
+  assert.ok(aproape)
+  picteaza(w, aproape.x0, aproape.y0, 1, 5)
+  assert.equal(w.iteme.reincercaLaTick[is], 0, 'racirea a supravietuit comenzii care i-a sters premisa')
+})
+
+test('racirea pe marfa se deriva din cati CANDIDATI sunt, nu din cate mormane exista in lume', () => {
+  // Justificarea ferestrei („sa acopere toate tintele inainte sa expire primele")
+  // e corecta la desemnari, unde fiecare desemnare vie e candidat. La iteme nu:
+  // `deMutat` exclude tot ce sta deja la locul lui. Cu plafonul de candidati mic,
+  // cele doua formule dau numere clar diferite, deci aserția leaga.
+  const reguli = { ...R, jobScanMaxCandidates: 4 }
+  const { w, sit } = laSit(631, 1, [], reguli)
+  const cx = cellOf(w.agents.x[0]!)
+  const cy = cellOf(w.agents.y[0]!)
+  // Depozit langa sit, UMPLUT la refuz: mormanele din el sunt la odihna.
+  let p: ReturnType<typeof patratPlat> = null
+  let latura = 5
+  while (!p && latura >= 3) { p = patratPlat(w, sit, latura, 4, 40); if (!p) latura-- }
+  assert.ok(p, 'fixtura: niciun patrat plat pentru depozitul de odihna')
+  picteaza(w, p.x0, p.y0, latura, 5, reguli)
+  for (let i = 0; i < w.zone.celule.count; i++) {
+    assert.ok(applyCommand(w, { kind: 'lasaItem', fel: Item.PIATRA, cantitate: R.itemStackMax, wx: w.zone.celule.wx[i]!, wy: w.zone.celule.wy[i]!, z: w.zone.celule.z[i]! }, reguli).ok)
+  }
+  const laOdihna = w.iteme.vii
+  assert.ok(laOdihna >= 9, `fixtura: doar ${laOdihna} mormane la odihna`)
+  // Un depozit cu loc, dar dincolo de raza de cautare: marfa de pe jos primeste
+  // racire pe ea, si e SINGURUL candidat.
+  const departe = patratPlat(w, sit, 1, reguli.haulDestRadiusCells + 8, reguli.haulDestRadiusCells + 40)
+  assert.ok(departe, 'fixtura: niciun loc dincolo de raza')
+  picteaza(w, departe.x0, departe.y0, 1, 5, reguli)
+  const id = lasaItem(w, Item.PIATRA, 20, cx + 2, cy, reguli)
+
+  const ix = indexZone(w, reguli)
+  assert.equal(ix.deMutat.length, 1, `${ix.deMutat.length} candidati: fixtura nu izoleaza formula`)
+  const n = panaCand(w, 4 * reguli.jobRescanTicks, (w) => {
+    const is = slotItem(w.iteme, id)
+    return is !== -1 && w.iteme.reincercaLaTick[is]! > w.tick
+  }, reguli)
+  assert.ok(n >= 0, 'marfa n-a primit nicio racire')
+  const is = slotItem(w.iteme, id)
+  const fereastra = w.iteme.reincercaLaTick[is]! - w.tick
+  const dinCandidati = Math.max(reguli.jobInfeasibleRetryTicks, reguli.jobRescanTicks * (Math.ceil(1 / reguli.jobScanMaxCandidates) + 1))
+  const dinToate = Math.max(reguli.jobInfeasibleRetryTicks, reguli.jobRescanTicks * (Math.ceil((laOdihna + 1) / reguli.jobScanMaxCandidates) + 1))
+  assert.notEqual(dinCandidati, dinToate, 'fixtura: cele doua formule dau acelasi numar, deci testul e vid')
+  // Se observa cu un tick dupa scriere, deci fereastra masurata e cu 1-2 mai mica.
+  assert.ok(fereastra <= dinCandidati && fereastra >= dinCandidati - 3, `fereastra ${fereastra} nu e cea derivata din candidati (${dinCandidati}); din toate mormanele ar fi ${dinToate}`)
 })
