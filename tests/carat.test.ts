@@ -707,20 +707,36 @@ test('o zona EVITATA de un pion nu produce racire pe ITEM: cauza e a perechii, n
   // Doua depozite: A (evitat de pionul care intreaba) si B, cu loc. Prima
   // versiune cerea ca TOATE zonele cu loc sa fie evitate ca sa scrie racirea pe
   // pereche; cu B in peisaj scria pe ITEM — si ascundea marfa de toata colonia.
+  // Fixtura are nevoie de DOUA zone, altfel nu exercita nimic: cu una singura,
+  // `evitate === zoneCuLoc` e adevarat si conditia veche se comporta identic.
+  // (Prima versiune a testului avea o zona — vida pentru mutatia asta.)
   const { w, sit } = laSit(625, 1)
   const cx = cellOf(w.agents.x[0]!)
   const cy = cellOf(w.agents.y[0]!)
   const a = patratPlat(w, sit, 2, 6, 40)
   assert.ok(a)
   const zonaA = picteaza(w, a.x0, a.y0, 2, 5)
+  // Zona B: are celule NEPLINE (deci intra la `zoneCuLoc`), dar niciuna cu loc
+  // pentru cantitatea carata — cate 74 din 75.
+  let b: ReturnType<typeof patratPlat> = null
+  for (let d = 6; d <= 60 && !b; d++) {
+    const c = patratPlat(w, { wx: sit.wx, wy: sit.wy + 3, g: sit.g }, 2, d, d)
+    if (c && (Math.abs(c.x0 - a.x0) > 3 || Math.abs(c.y0 - a.y0) > 3)) b = c
+  }
+  assert.ok(b, 'fixtura: niciun al doilea patrat plat')
+  picteaza(w, b.x0, b.y0, 2, 4)
+  for (let dx = 0; dx < 2; dx++) {
+    for (let dy = 0; dy < 2; dy++) {
+      assert.ok(applyCommand(w, { kind: 'lasaItem', fel: Item.PIATRA, cantitate: R.itemStackMax - 1, wx: b.x0 + dx, wy: b.y0 + dy, z: b.g + 1 }, R).ok)
+    }
+  }
   const id = lasaItem(w, Item.PIATRA, 20, cx + 2, cy)
-  const is0 = slotItem(w.iteme, id)
-  assert.notEqual(is0, -1)
-  // Pionul evita zona A: singura cu loc. Cauza e a PERECHII.
+  // Pionul evita zona A — singura cu loc REAL. B ramane numarata la „zone cu loc",
+  // dar nicio celula a ei nu primeste 20. Cauza e deci a PERECHII, nu a marfii.
   evitaTinta(w, 0, zonaA, w.tick + 10000)
   ruleaza(w, 2 * R.jobRescanTicks + 2)
   const is = slotItem(w.iteme, id)
-  assert.notEqual(is, -1, 'marfa a fost carata desi zona era evitata')
+  assert.notEqual(is, -1, 'marfa a fost carata desi singura zona cu loc era evitata')
   assert.equal(w.iteme.reincercaLaTick[is], 0, 'racirea unei cauze de PERECHE a ajuns pe item')
   assert.ok(esteEvitata(w, 0, id), 'pionul n-a luat racirea pe el')
 })
