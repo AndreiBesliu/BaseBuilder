@@ -644,6 +644,51 @@ test('un save cu doua desemnari vii pe aceeasi celula e refuzat, nu „ultima ca
   if (!out.ok) assert.equal(out.reason, Reason.DEJA_DESEMNATA)
 })
 
+test('hash-ul vede jobul, incercarile, racirea pe pereche, prioritatea personala si desemnarile', () => {
+  // Fiecare camp PERSISTED nou intra in hash. Un camp uitat ar face ca doua lumi
+  // care diverg in el sa para identice — exact cum drumurile nehashuite ascundeau
+  // divergenta pana se vedea in pozitii.
+  const { w } = laSit(305, 1)
+  const cx = cellOf(w.agents.x[0]!)
+  const cy = cellOf(w.agents.y[0]!)
+  desemneaza(w, cx + 2, cy)
+  const n = panaCand(w, 200, (w) => w.agents.jobStep[0] === PasJob.LUCREAZA)
+  assert.ok(n >= 0)
+  const h0 = hashWorld(w)
+  // Fiecare proba porneste dintr-o COPIE proaspata (decode), ca mutatiile sa nu
+  // se adune si ca storeurile atinse sa fie mereu cele ale lumii probate.
+  const salvat = encode(w)
+  const probe: [string, (w: World) => void][] = [
+    ['jobProgres', (w) => { w.agents.jobProgres[0] = w.agents.jobProgres[0]! + 1 }],
+    ['jobKind', (w) => { w.agents.jobKind[0] = 0 }],
+    ['jobId', (w) => { w.agents.jobId[0] = w.agents.jobId[0]! + 1 }],
+    ['jobTarget', (w) => { w.agents.jobTarget[0] = w.agents.jobTarget[0]! + 1 }],
+    ['jobStep', (w) => { w.agents.jobStep[0] = PasJob.MERGE }],
+    ['jobWorkX', (w) => { w.agents.jobWorkX[0] = w.agents.jobWorkX[0]! + 1 }],
+    ['jobIncercari', (w) => { w.agents.jobIncercari[0] = 1 }],
+    ['tintaRefuzata', (w) => { w.agents.tintaRefuzata[0] = 7 }],
+    ['refuzPanaLa', (w) => { w.agents.refuzPanaLa[0] = 7 }],
+    ['prioPersonala', (w) => { w.agents.prioPersonala[0] = 2 }],
+    ['desemnari.prioritate', (w) => { w.desemnari.prioritate[0] = 5 }],
+    ['desemnari.reincercaLaTick', (w) => { w.desemnari.reincercaLaTick[0] = 99 }],
+    ['desemnari.alive', (w) => { w.desemnari.alive[0] = 0 }],
+    ['desemnari.z', (w) => { w.desemnari.z[0] = w.desemnari.z[0]! - 1 }],
+  ]
+  for (const [nume, muta] of probe) {
+    const copie = decode(salvat)
+    assert.ok(copie.ok)
+    assert.equal(hashWorld(copie.value), h0, 'fixtura: copia nu are hash-ul originalului')
+    muta(copie.value)
+    assert.notEqual(hashWorld(copie.value), h0, `hash-ul nu vede ${nume}`)
+  }
+  // Si ce e TRANSIENT nu intra: cauza memorata pe desemnare.
+  const copie = decode(salvat)
+  assert.ok(copie.ok)
+  copie.value.desemnari.ultimulMotiv[0] = 3
+  copie.value.ratiune.motivFinal[0] = 3
+  assert.equal(hashWorld(copie.value), h0, 'un camp TRANSIENT a intrat in hash')
+})
+
 // ---------------------------------------------------------------------------
 // content
 // ---------------------------------------------------------------------------

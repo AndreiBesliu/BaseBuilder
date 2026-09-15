@@ -1584,3 +1584,16 @@ K01 o anunță. Se rămâne cu ochii pe ea.
 
 192 de teste verzi, CI verde. Următoarea tăietură: **iteme, cărat, depozite** — `Strat.CARAT` e
 deja rezervat, `count`/`maxCount` din tuplu așteaptă mormanele.
+
+### Mutațiile
+
+Șaisprezece, fiecare cu testul care o prinde: `killAgent` fără eliberare · locul de lucru pe o
+desemnare · refuzul „fără loc" nememorat · plafonul de încercări scos · răcirea pe țintă în loc de
+pereche · fără `rebuildDirty` la sfârșit de tick · reconstruirea care nu sare peste morți · scanare la
+fiecare tick · tranzacția care scrie înainte să verifice · scorul inversat · locul de lucru nerefăcut ·
+spawn fără reset de prioritate · jobul nesalvat · progresul nehashuit · duplicate la load · invariantul
+de acoperire scos. **Toate prinse**, cu arborele restaurat prin git și verificat cu `git diff --quiet`.
+
+Prima rulare a scriptului a dat „7 controale invalide" — nu fiindcă gărzile lipseau, ci fiindcă primul
+`git checkout` al unui fișier îl rescrie cu CRLF, iar tiparele mele aveau LF. Capcana din memorie,
+încă o dată; scriptul își adaptează acum tiparele la terminatorul fișierului.
