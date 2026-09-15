@@ -995,30 +995,54 @@ test('M5 cu TOATE campurile noi nenule la save: incercari, raciri pe pereche, ra
   }
   const continuu = construieste()
   const intrerupt = construieste()
-  // Pana cand campurile chiar sunt nenule.
-  let gata = false
-  for (let t = 0; t < 400 && !gata; t++) {
-    tick(continuu, reguli)
-    tick(intrerupt, reguli)
-    const a = intrerupt.agents
-    const d = intrerupt.desemnari
+  // Doua momente de save, fiindca nu pot fi toate nenule deodata: `jobIncercari`
+  // e nenul cat jobul TRAIESTE si se reincearca; racirea pe pereche apare abia
+  // dupa ce jobul a murit.
+  const roundtrip = (cand: (w: World) => boolean, nume: string): void => {
+    let gata = false
+    for (let t = 0; t < 400 && !gata; t++) {
+      tick(continuu, reguli)
+      tick(intrerupt, reguli)
+      gata = cand(intrerupt)
+    }
+    assert.ok(gata, `fixtura: ${nume} n-a devenit nenul`)
+    const loaded = decode(encode(intrerupt))
+    assert.ok(loaded.ok, JSON.stringify(loaded))
+    assert.equal(hashWorld(loaded.value), hashWorld(intrerupt), `${nume}: hash diferit la incarcare`)
+    for (let t = 0; t < 200; t++) {
+      tick(continuu, reguli)
+      tick(loaded.value, reguli)
+      tick(intrerupt, reguli)
+    }
+    assert.equal(hashWorld(loaded.value), hashWorld(continuu), `${nume}: divergenta dupa incarcare`)
+  }
+  roundtrip((w) => {
+    let da = false
+    for (let i = 0; i < w.agents.count; i++) if (w.agents.jobIncercari[i]! > 0) da = true
+    return da
+  }, 'jobIncercari')
+  roundtrip((w) => {
+    const a = w.agents
+    const d = w.desemnari
     let racirePereche = false
-    for (let i = 0; i < a.count * a.evitaSloturi; i++) if (a.evitaPanaLa[i]! > intrerupt.tick) racirePereche = true
+    for (let i = 0; i < a.count * a.evitaSloturi; i++) if (a.evitaPanaLa[i]! > w.tick) racirePereche = true
     let racireTinta = false
-    for (let i = 0; i < d.count; i++) if (d.reincercaLaTick[i]! > intrerupt.tick) racireTinta = true
+    for (let i = 0; i < d.count; i++) if (d.reincercaLaTick[i]! > w.tick) racireTinta = true
+    return racirePereche && racireTinta
+  }, 'racirile')
+  // Scanarea programata e nenula exact un tick dupa ce se incheie un job: se
+  // mai da o desemnare fezabila (identic in ambele lumi) si se prinde momentul.
+  const cx = cellOf(intrerupt.agents.x[0]!)
+  const cy = cellOf(intrerupt.agents.y[0]!)
+  const g = solid(intrerupt, cx + 4, cy + 1)
+  assert.notEqual(g, null)
+  assert.ok(applyCommand(continuu, { kind: 'desemneaza', wx: cx + 4, wy: cy + 1, z: g!, prioritate: 4 }, reguli).ok)
+  assert.ok(applyCommand(intrerupt, { kind: 'desemneaza', wx: cx + 4, wy: cy + 1, z: g!, prioritate: 4 }, reguli).ok)
+  roundtrip((w) => {
     let scanare = false
-    for (let i = 0; i < a.count; i++) if (a.scanLaTick[i]! >= intrerupt.tick) scanare = true
-    gata = racirePereche && racireTinta && scanare
-  }
-  assert.ok(gata, 'fixtura: campurile n-au devenit toate nenule')
-  const loaded = decode(encode(intrerupt))
-  assert.ok(loaded.ok, JSON.stringify(loaded))
-  assert.equal(hashWorld(loaded.value), hashWorld(intrerupt))
-  for (let t = 0; t < 400; t++) {
-    tick(continuu, reguli)
-    tick(loaded.value, reguli)
-  }
-  assert.equal(hashWorld(loaded.value), hashWorld(continuu))
+    for (let i = 0; i < w.agents.count; i++) if (w.agents.scanLaTick[i]! >= w.tick) scanare = true
+    return scanare
+  }, 'scanarea programata')
 })
 
 test('un job orfan intr-un save editat e anulat la incarcare, cu raport, nu lasat tacut', () => {

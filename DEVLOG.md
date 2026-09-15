@@ -1662,3 +1662,18 @@ nimic. Toate au acum testul lor: pe raport (nu pe stare la un moment), cu perech
 
 213 teste verzi, CI verde. Următoarea tăietură rămâne **iteme, cărat, depozite** (design în
 scratchpad, de trecut prin panou).
+
+### Mutațiile, a doua rundă
+
+Douăzeci, pe gărzile adăugate după recenzie — blocurile murdare nesalvate, răcirea pe pereche
+redevenită scalar, coridorul scos, locul de lucru orb la componentă, poarta de facțiune scoasă,
+scanarea de după job scoasă, `COMPONENTE_DIFERITE` nememorat, fereastra de răcire fixă, ostilul pe
+celula de lucru fără alternativă, `materialAt` sub bază, refacerea locului în LUCREAZA scoasă,
+sortarea pe margine înlocuită cu ordinea id-ului, prioritatea 0 ignorată, `PREA_DEPARTE` scos,
+rangul cauzelor inversat, `jobIncercari` nesalvat, decalajul scos, clauza `maxClaimants` din
+`verifica` scoasă, „același claimant ocupă loc nou", duplicatele de id la load. **Toate prinse.**
+
+Două au trecut la prima rulare și au cerut fixturi mai bune: `jobIncercari` nesalvat (câmpul e nenul
+cât jobul TRĂIEȘTE, iar fixtura salva după ce murise — acum roundtrip-ul se face în trei momente,
+fiecare cu câmpurile lui nenule) și „același claimant" (cazul din store, nu din tranzacție, n-avea
+aserție).

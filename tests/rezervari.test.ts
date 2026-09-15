@@ -198,10 +198,14 @@ test('INVARIANT: si celelalte trei clauze au proba negativa — prea multi claim
 test('acelasi claimant nu ocupa un loc NOU: doua ridicari ale aceluiasi job dintr-un morman cu un singur loc trec', () => {
   // Taietura 2 (mormanele) e exact cazul; API-ul se scrie o singura data.
   const s = createReservations()
-  const ia = (cat: number): Cerere => cerere(1100, { count: cat, maxCount: 2, maxClaimants: 1 })
+  const ia = (cat: number): Cerere => cerere(1100, { count: cat, maxCount: 3, maxClaimants: 1 })
+  // In aceeasi tranzactie...
   assert.ok(rezervaToate(s, 1, 10, [ia(1), ia(1)]).ok, 'aceeasi pereche (claimant, job) a fost numarata de doua ori')
   assert.equal(s.total, 2)
-  const altul = rezervaToate(s, 2, 11, [cerere(1100, { count: 1, maxCount: 3, maxClaimants: 1 })])
+  // ...si intr-o tranzactie ULTERIOARA a aceluiasi claimant: locul e deja al lui.
+  assert.ok(rezervaToate(s, 1, 12, [ia(1)]).ok, 'claimantul care tine deja tinta a fost numarat ca al doilea')
+  assert.equal(s.total, 3)
+  const altul = rezervaToate(s, 2, 11, [cerere(1100, { count: 1, maxCount: 9, maxClaimants: 1 })])
   assert.equal(altul.ok, false)
   if (!altul.ok) assert.equal(altul.params.de, 1)
 })
