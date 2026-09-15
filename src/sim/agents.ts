@@ -63,7 +63,7 @@ import { cellKey, findPath, pathLength } from './path.ts'
 import type { Ocupare } from './path.ts'
 import { Reason } from './result.ts'
 import { cellOf, centerMm, clearPath } from './drumuri.ts'
-import { cautaJob, drumRefuzat, lucreaza, resetJobReport, Sfarsit, terminaJob, tintesteLocDeLucru } from './joburi.ts'
+import { cautaJob, drumRefuzat, lucreaza, resetJobReport, scurgeNevoile, Sfarsit, terminaJob, tintesteLocDeLucru, verificaNevoi } from './joburi.ts'
 
 // Drumurile si aritmetica de celule stau in `drumuri.ts` (ca `joburi.ts` sa le
 // poata folosi fara un ciclu de import). Re-exportate de aici pentru cine le
@@ -179,9 +179,11 @@ export interface AgentTickReport {
   incercariTinta: number
   /** Cea mai lunga serie de incercari a unui singur agent. Nu are voie sa treaca de plafon. */
   maxIncercariUnAgent: number
+  /** Cati pioni sunt ocupati cu o nevoie (mananca, dorm, sau tocmai au pornit-o). */
+  ocupatiCuNevoi: number
 }
 
-const raport: AgentTickReport = { replans: 0, refuzuri: 0, blocatiDeOstili: 0, sosiri: 0, ingropati: 0, incercariTinta: 0, maxIncercariUnAgent: 0 }
+const raport: AgentTickReport = { replans: 0, refuzuri: 0, blocatiDeOstili: 0, sosiri: 0, ingropati: 0, incercariTinta: 0, maxIncercariUnAgent: 0, ocupatiCuNevoi: 0 }
 
 /** Ultimul raport de tick. TRANSIENT, pentru overlay si pentru teste. */
 export function lastAgentReport(): AgentTickReport {
@@ -192,13 +194,13 @@ export function stepAgents(w: World, rules: Rules): void {
   const a = w.agents
   const p = w.paths
   const rng = w.rng.agents
-  raport.replans = 0
-  raport.refuzuri = 0
-  raport.blocatiDeOstili = 0
-  raport.sosiri = 0
-  raport.ingropati = 0
-  raport.incercariTinta = 0
-  raport.maxIncercariUnAgent = 0
+  // STRUCTURAL, ca la raportul de joburi: lista explicita e exact lista pe care
+  // o uiti cand adaugi un camp, iar un contor de tick care nu se reseteaza nu da
+  // erori, da cifre.
+  //
+  // determinism-ok: toate cheile primesc aceeasi valoare, deci ordinea nu poate
+  // schimba rezultatul.
+  for (const k of (Object.keys(raport) as (keyof AgentTickReport)[]).sort()) raport[k] = 0
   resetJobReport()
 
   // 1. Acoperirea de regiuni, ca functie de pozitiile PERSISTATE ale agentilor.
@@ -302,6 +304,28 @@ export function stepAgents(w: World, rules: Rules): void {
     //
     //    Doar ASEZAREA cere de lucru. Un jefuitor nu sapa pentru jucator:
     //    DESIGN §5.5 il pune sub un Commander AI, nu la tabla de joburi.
+    // 1b. Nevoile. DOUA ceasuri, si nu din risipa: scurgerea e rara (decalata pe
+    //     id, ca scanarea), dar VERIFICAREA pragurilor e la fiecare tick.
+    //
+    //     Pe ticul de nevoie, poarta n-ar prinde aproape nimic: un pion termina
+    //     un job la tickul 1001 cu foamea sub prag, dar 1001 nu e ticul LUI, deci
+    //     ia alt job de 40 de tickuri; iar cand vine ticul, ARE job si foamea e
+    //     inca peste pragul critic. „Liber SI pe tic de nevoie" e o coincidenta
+    //     de ~1 la 250 — deci „prefera" n-ar exista practic, si tot jocul s-ar
+    //     muta pe calea cu intreruperi.
+    //
+    //     Nevoile NU trec prin sistemul de prioritati (research: in ONI le
+    //     ocolesc cu totul). Sunt un PRAG, nu un scor care concureaza cu munca —
+    //     verificat si in sursa decompilata a RimWorld: comparatia e cu o
+    //     constanta, nu cu utilitatea jobului.
+    if (a.faction[i] === Faction.ASEZARE) {
+      if ((w.tick + a.id[i]!) % rules.nevoiTicks === 0) scurgeNevoile(w, rules, i)
+      if (verificaNevoi(w, rules, i)) {
+        // Are (sau tocmai a luat) un job de nevoie: nu mai cere de lucru in
+        // tickul asta. Executia lui merge pe aceeasi cale ca oricare alt job.
+        raport.ocupatiCuNevoi++
+      }
+    }
     if (
       a.jobKind[i] === 0 &&
       a.faction[i] === Faction.ASEZARE &&

@@ -35,8 +35,9 @@ import type { ZoneStore } from './zone.ts'
  *       dupa un job, blocurile murdare persistate
  *   4 — S16-19 taietura 2: iteme, zone pictate, joburi de carat (a doua
  *       categorie, deci `prioPersonala` isi schimba pasul)
+ *   5 — S16-19 taietura 3: nevoi (foame, odihna) si racirea lor
  */
-export const SCHEMA_VERSION = 4
+export const SCHEMA_VERSION = 5
 
 /**
  * Categoriile de munca. Lista de STRUCTURA (ce feluri de munca exista), nu numar
@@ -58,8 +59,34 @@ export const FelJob = {
   NICIUNUL: 0,
   SAPA: 1,
   CARA: 2,
+  MANANCA: 3,
+  DOARME: 4,
 } as const
 export type FelJobId = (typeof FelJob)[keyof typeof FelJob]
+
+/**
+ * Nevoile, ca TABEL indexat — nu campuri separate.
+ *
+ * Lista de STRUCTURA. Fiecare nevoie are o coloana in `nevoi` si un rand in
+ * `rules.nevoi`; cine o satisface e `DRIVERE[nevoiSpec[n].felJob]`. Asta e ce
+ * face adevarata propozitia „o nevoie noua e un rand de tabel".
+ */
+export const Nevoie = {
+  FOAME: 0,
+  ODIHNA: 1,
+} as const
+export type NevoieId = (typeof Nevoie)[keyof typeof Nevoie]
+export const NEVOI = 2
+
+/**
+ * Pasii unui job de nevoie: un drum, o oprire. Aceeasi paritate ca la celelalte
+ * doua masini de stare, deci `pasDeMers` raspunde si pentru ele.
+ */
+export const PasNevoie = {
+  MERGE: 0,
+  CONSUMA: 1,
+} as const
+export type PasNevoieId = (typeof PasNevoie)[keyof typeof PasNevoie]
 
 /** Pasii unui job de sapat. Un job e o masina de stare liniara, nu un arbore. */
 export const PasJob = {
@@ -94,9 +121,10 @@ export const Item = {
   PIATRA: 0,
   PAMANT: 1,
   LEMN: 2,
+  HRANA: 3,
 } as const
 export type ItemId = (typeof Item)[keyof typeof Item]
-export const ITEME = 3
+export const ITEME = 4
 
 /** Un milimetru e unitatea de baza. O celula de 1 m = 1000. */
 export const MM_PER_CELL = 1000
@@ -215,6 +243,15 @@ export interface AgentStore {
   caraKind: Uint8Array
   caraCantitate: Int32Array
   /**
+   * MANANCA: cat a consumat deja din rezervare. E un camp PROPRIU, si nu o
+   * scadere din `jobCantitate`, tocmai fiindca `jobCantitate` e ce se REZERVA:
+   * daca ar scadea, lumea continua ar tine rezervarea initiala iar cea incarcata
+   * ar re-rezerva doar restul — doua stari de rezervare diferite pentru aceeasi
+   * lume, adica exact divergenta continuu/incarcat pe care o inchide „cererile
+   * se calculeaza din tuplul PERSISTAT".
+   */
+  jobConsumat: Int32Array
+  /**
    * Racirea pe PERECHEA (pion, tinta): dupa ce pionul a renuntat la o tinta din
    * cauze care tin de EL (drumul lui e blocat de un ostil, prea scump pentru el),
    * n-o reia pana la tickul pereche. Pe tinta nu se scrie nimic — altcineva, din
@@ -246,6 +283,47 @@ export interface AgentStore {
    * pur si simplu toata lumea la valoarea implicita din content.
    */
   prioPersonala: Uint8Array
+
+  // --- nevoile (S16-19, taietura 3). Toate PERSISTED. ---
+  /**
+   * Cat de satula e fiecare nevoie, `slot * NEVOI + nevoie`, in miimi, 0..nevoieMax.
+   * MARE = bine. Scade cu `nevoiSpec[n].scurgere` la ticul de nevoie al pionului.
+   *
+   * ZERO NU E VALOARE NEUTRA. Tabloul se UMPLE la creare si se rescrie la
+   * nastere — panoul a aratat ca altfel o lume NOUA porneste cu toti pionii sub
+   * pragul critic, iar primul inlocuitor al unui slot mort il mosteneste flamand.
+   * Un defect care nu apare in nicio rulare scurta, fiindca cere ca un slot sa fi
+   * murit intai.
+   */
+  nevoi: Int32Array
+  /**
+   * Racirea pe perechea (pion, NEVOIE), `slot * NEVOI + nevoie`: pana la tickul
+   * asta, nevoia nu se mai cauta, si pionul cade inapoi pe scanarea de munca.
+   *
+   * Exista fiindca „sub pragul critic" nu garanteaza ca se poate face ceva: fara
+   * mancare in toata asezarea, un pion infometat ar intrerupe jobul la fiecare
+   * verificare, ar cauta, n-ar gasi, si ar relua — la nesfarsit, fara ca vreun
+   * zavor sa vada ceva (`Sfarsit.INTRERUPT` nu atinge `joburiFaraProgres`).
+   * Nu intrerupi ca sa nu faci nimic.
+   */
+  nevoieReincercaLaTick: Int32Array
+}
+
+/**
+ * Cu cat porneste nevoia `n` a pionului cu id-ul dat — DEFAZAT, determinist.
+ *
+ * Decalajul `(tick + id) % nevoiTicks` muta doar MOMENTUL scaderii, nu FAZA
+ * ciclului. Cu toti pornind plini si cu aceeasi scurgere, toata colonia trece
+ * pragul intr-o fereastra de cateva sute de tickuri dintr-un ciclu de zeci de
+ * mii, iar fiecare masa adauga exact aceeasi cantitate — deci valul nu se sparge
+ * niciodata. Jucatorul ar vedea productia ca dinte de ferastrau si colonia
+ * stingandu-se dintr-un singur pas.
+ *
+ * Fara RNG: e o functie pura de `id`, deci nu consuma din niciun flux si da
+ * acelasi rezultat in lumea continua, in cea incarcata si in migrare.
+ */
+export function nevoiaInitiala(id: number, nevoie: number, nevoieMax: number, fazaPas: number, fazaSpan: number): number {
+  return nevoieMax - (Math.abs(id * fazaPas + nevoie * 311) % fazaSpan)
 }
 
 export interface World {
@@ -295,7 +373,7 @@ export interface World {
   ratiune: RatiuneStore
 }
 
-export function makeAgentStore(capacity: number, prioPersonalaImplicita = 1, evitaSloturi = 4): AgentStore {
+export function makeAgentStore(capacity: number, prioPersonalaImplicita = 1, evitaSloturi = 4, nevoieMax = 1000): AgentStore {
   return {
     count: 0,
     capacity,
@@ -324,11 +402,16 @@ export function makeAgentStore(capacity: number, prioPersonalaImplicita = 1, evi
     jobEfect: new Uint8Array(capacity),
     caraKind: new Uint8Array(capacity),
     caraCantitate: new Int32Array(capacity),
+    jobConsumat: new Int32Array(capacity),
     evitaSloturi,
     evitaTinta: new Int32Array(capacity * evitaSloturi),
     evitaPanaLa: new Int32Array(capacity * evitaSloturi),
     scanLaTick: new Int32Array(capacity),
     prioPersonala: new Uint8Array(capacity * CATEGORII).fill(prioPersonalaImplicita),
+    // UMPLUT, nu zero: vezi comentariul campului. Faza pe id o scrie
+    // `spawnAgent`, care e singurul loc unde id-ul exista.
+    nevoi: new Int32Array(capacity * NEVOI).fill(nevoieMax),
+    nevoieReincercaLaTick: new Int32Array(capacity * NEVOI),
   }
 }
 

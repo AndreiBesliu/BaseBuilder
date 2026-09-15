@@ -11,7 +11,7 @@
  */
 
 import type { World } from './state.ts'
-import { CATEGORII, RNG_STREAMS } from './state.ts'
+import { CATEGORII, NEVOI, RNG_STREAMS } from './state.ts'
 import { runCount } from './terrain/chunk.ts'
 
 const FNV_OFFSET = 0x811c9dc5
@@ -116,6 +116,12 @@ export function hashWorld(w: World): string {
   h.bytes(a.jobEfect, a.count)
   h.bytes(a.caraKind, a.count)
   h.ints(a.caraCantitate, a.count)
+  h.ints(a.jobConsumat, a.count)
+  // Nevoile si racirea lor: PERSISTED, deci in hash. Fara ele, o divergenta de
+  // foame ar sta ascunsa pana schimba ce job ia cineva — adica tickuri mai
+  // tarziu, si fara sa se stie de unde a venit.
+  h.ints(a.nevoi, a.count * NEVOI)
+  h.ints(a.nevoieReincercaLaTick, a.count * NEVOI)
   h.ints(a.evitaTinta, a.count * a.evitaSloturi)
   h.ints(a.evitaPanaLa, a.count * a.evitaSloturi)
   h.ints(a.scanLaTick, a.count)

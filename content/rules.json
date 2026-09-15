@@ -42,6 +42,22 @@
   "zoneCellCapacity": 4096,
   "zonePriorityLevels": 5,
   "zonePriorityDefault": 3,
+  "nevoieMax": 1000,
+  "nevoiTicks": 250,
+  "nevoieFazaPas": 137,
+  "nevoieFazaSpan": 600,
+  "nevoieRetryTicks": 500,
+  "nevoieScanRadiusCells": 96,
+  "nevoieScanMaxCandidates": 64,
+  "portieMancare": 20,
+  "mancatTicks": 60,
+  "mancatoriPeMorman": 2,
+  "odihnaPeTicDeNevoie": 60,
+  "nevoi": {
+    "FOAME": { "scurgere": 6, "prag": 400, "pragCritic": 150 },
+    "ODIHNA": { "scurgere": 4, "prag": 400, "pragCritic": 150 }
+  },
+  "nutritie": { "PIATRA": 0, "PAMANT": 0, "LEMN": 0, "HRANA": 15 },
   "digYield": {
     "ROCA": { "fel": "PIATRA", "cantitate": 20 },
     "PAMANT": { "fel": "PAMANT", "cantitate": 10 },

@@ -14,12 +14,25 @@ import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import { REGION_SIZE } from './regions.ts'
 import { isSolid, Material } from './terrain/chunk.ts'
-import { Item, ITEME } from './state.ts'
+import { Item, ITEME, Nevoie, NEVOI } from './state.ts'
 
 /** Ce lasa in urma un voxel sapat: felul de item si cate unitati. `cantitate` 0 = nimic (aer, apa). */
 export interface DigYield {
   readonly fel: number
   readonly cantitate: number
+}
+
+/**
+ * Randul de tabel al unei nevoi. Cat scade la ticul de nevoie, sub ce valoare
+ * pionul PREFERA sa si-o rezolve, si sub ce valoare ISI INTRERUPE jobul.
+ */
+export interface SpecNevoie {
+  /** Cat scade la fiecare tic de nevoie, in miimi. */
+  readonly scurgere: number
+  /** Sub atat, pionul prefera sa si-o rezolve — dar nu intrerupe nimic. */
+  readonly prag: number
+  /** Sub atat, pionul isi intrerupe jobul in curs. Strict sub `prag`. */
+  readonly pragCritic: number
 }
 
 export interface Rules {
@@ -127,12 +140,59 @@ export interface Rules {
    * care pionii le-ar „cara" la nesfarsit.
    */
   readonly digYield: readonly DigYield[]
+
+  // --- nevoi (S16-19, taietura 3) ---
+  //
+  // Aritmetica e scrisa langa fiecare numar, si nu din politete: panoul a aratat
+  // ca jumatate din constatarile critice ies exact din faptul ca nu era scrisa
+  // nicaieri. La 20 de tickuri pe secunda, un ciclu de foame de 41.700 de
+  // tickuri e ~35 de minute de joc.
+  /** Valoarea „satul" a oricarei nevoi. Scara e comuna tuturor: miimi. */
+  readonly nevoieMax: number
+  /** La cate tickuri se scurg nevoile. Decalat pe id, ca scanarea de joburi. */
+  readonly nevoiTicks: number
+  /**
+   * Defazarea initiala: nevoia pionului `id` porneste la
+   * `nevoieMax − (id * fazaPas + nevoie * 311) % fazaSpan`. Vezi `nevoiaInitiala`.
+   * `fazaSpan` trebuie sa lase valoarea PESTE prag — altfel pionii s-ar naste
+   * deja flamanzi, ceea ce e alta forma a aceleiasi greseli ca zero-ul.
+   */
+  readonly nevoieFazaPas: number
+  readonly nevoieFazaSpan: number
+  /** Cate tickuri asteapta un pion inainte sa reincerce o nevoie pe care N-A putut s-o rezolve. */
+  readonly nevoieRetryTicks: number
+  /** Cat de departe isi cauta un pion mancare sau pat, in celule (Manhattan). */
+  readonly nevoieScanRadiusCells: number
+  /** Cate intrari PARCURGE cel mult o cautare de nevoie. Plafon pe intrari, nu pe potriviri. */
+  readonly nevoieScanMaxCandidates: number
+  /** Cate unitati mananca un pion dintr-o data. Sub `itemStackMax`. */
+  readonly portieMancare: number
+  /** Cate tickuri ii ia o portie. La 20 Hz, 60 = 3 secunde; o masa intreaga ~3 portii. */
+  readonly mancatTicks: number
+  /** Cati pioni pot manca deodata din acelasi morman. */
+  readonly mancatoriPeMorman: number
+  /**
+   * Cat se reface ODIHNA la un tic de nevoie petrecut dormind. Calibrat pe CICLU,
+   * nu pe tick: cu 40 pe tick (v1), somnul dura 25 de tickuri = 1,25 secunde, mai
+   * putin decat drumul pana la pat — si tot aparatul zonei de dormit ar fi fost
+   * continut mort.
+   */
+  readonly odihnaPeTicDeNevoie: number
+  /** Randul de tabel al fiecarei nevoi, indexat cu `Nevoie`. */
+  readonly nevoi: readonly SpecNevoie[]
+  /**
+   * Cata foame astampara O UNITATE din fiecare fel de item, indexat cu `Item`.
+   * 0 = necomestibil. PE UNITATE, nu pe morman: cu nutritie per morman, restul de
+   * 15 dintr-o stiva de 75 ar hrani cat o portie intreaga — hrana din nimic, si
+   * un numar pe care jucatorul nu-l poate traduce in mese.
+   */
+  readonly nutritie: readonly number[]
 }
 
 type FieldSpec = { min: number; max: number }
 
-/** Campurile NUMERICE. `digYield` e singurul camp imbricat si se valideaza separat. */
-const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield'>, FieldSpec> = {
+/** Campurile NUMERICE. `digYield`, `nevoi` si `nutritie` sunt tabele si se valideaza separat. */
+const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield' | 'nevoi' | 'nutritie'>, FieldSpec> = {
   agentCapacity: { min: 1, max: 100000 },
   agentStepMm: { min: 1, max: 100000 },
   ticksPerSecond: { min: 1, max: 240 },
@@ -176,6 +236,17 @@ const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield'>, FieldSpec> = {
   zoneCellCapacity: { min: 1, max: 1000000 },
   zonePriorityLevels: { min: 1, max: 9 },
   zonePriorityDefault: { min: 1, max: 9 },
+  nevoieMax: { min: 1, max: 1000000 },
+  nevoiTicks: { min: 1, max: 1000000 },
+  nevoieFazaPas: { min: 1, max: 1000000 },
+  nevoieFazaSpan: { min: 1, max: 1000000 },
+  nevoieRetryTicks: { min: 0, max: 1000000 },
+  nevoieScanRadiusCells: { min: 1, max: 4096 },
+  nevoieScanMaxCandidates: { min: 1, max: 100000 },
+  portieMancare: { min: 1, max: 1000000 },
+  mancatTicks: { min: 1, max: 1000000 },
+  mancatoriPeMorman: { min: 1, max: 64 },
+  odihnaPeTicDeNevoie: { min: 1, max: 1000000 },
 }
 
 /** Numele materialelor si ale felurilor de item, pentru fisierul de reguli. Liste ORDONATE, nu `Object.keys`. */
@@ -192,8 +263,97 @@ const NUME_ITEME: readonly (readonly [string, number])[] = [
   ['PIATRA', Item.PIATRA],
   ['PAMANT', Item.PAMANT],
   ['LEMN', Item.LEMN],
+  ['HRANA', Item.HRANA],
+]
+const NUME_NEVOI: readonly (readonly [string, number])[] = [
+  ['FOAME', Nevoie.FOAME],
+  ['ODIHNA', Nevoie.ODIHNA],
 ]
 const MAX_YIELD = 10000
+
+/**
+ * Tabelul `nevoi` din fisier → tablou indexat cu `Nevoie`. Fiecare nevoie
+ * trebuie sa aiba o intrare: una lipsa ar insemna o nevoie care nu scade
+ * niciodata, adica un sistem intreg mort in tacere.
+ *
+ * Accepta si forma deja parsata (tablou), ca `DEFAULT_RULES`, cu aceleasi reguli.
+ */
+function parseNevoi(raw: unknown, nevoieMax: number): Outcome<SpecNevoie[]> {
+  if (Array.isArray(raw)) {
+    if (raw.length !== NUME_NEVOI.length) return refuse(Reason.VALOARE_INVALIDA, { camp: 'nevoi', lungime: raw.length, asteptat: NUME_NEVOI.length })
+    const obj: Record<string, unknown> = {}
+    for (const [nume, id] of NUME_NEVOI) obj[nume] = raw[id]
+    raw = obj
+  }
+  if (typeof raw !== 'object' || raw === null) {
+    return refuse(Reason.LIPSA_MATERIAL, { camp: 'nevoi', asteptat: 'obiect', primit: typeof raw })
+  }
+  const obj = raw as Record<string, unknown>
+  const cunoscute = NUME_NEVOI.map(([n]) => n)
+  for (const key of Object.keys(obj).sort()) {
+    if (!cunoscute.includes(key)) return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: `nevoi.${key}`, cunoscute: cunoscute.join(', ') })
+  }
+  const out: SpecNevoie[] = []
+  for (const [nume] of NUME_NEVOI) {
+    const v = obj[nume]
+    if (typeof v !== 'object' || v === null) return refuse(Reason.LIPSA_MATERIAL, { camp: `nevoi.${nume}`, asteptat: 'obiect' })
+    const e = v as Record<string, unknown>
+    for (const key of Object.keys(e).sort()) {
+      if (key !== 'scurgere' && key !== 'prag' && key !== 'pragCritic') {
+        return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: `nevoi.${nume}.${key}`, cunoscute: 'scurgere, prag, pragCritic' })
+      }
+    }
+    const spec: Record<string, number> = {}
+    for (const key of ['scurgere', 'prag', 'pragCritic'] as const) {
+      const n = e[key]
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < 0) {
+        return refuse(Reason.VALOARE_INVALIDA, { camp: `nevoi.${nume}.${key}`, asteptat: 'intreg >= 0', primit: String(n) })
+      }
+      spec[key] = n
+    }
+    // Ordinea pragurilor e o LEGE, nu o preferinta: cu `pragCritic >= prag`,
+    // „prefera" n-ar mai exista ca stare distincta si totul s-ar juca pe calea
+    // cu intreruperi. Cu `prag > nevoieMax`, pionul ar fi infometat din nastere.
+    if (!(spec.pragCritic! < spec.prag!)) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `nevoi.${nume}.pragCritic`, motiv: 'pragul critic trebuie sa fie STRICT sub prag', pragCritic: spec.pragCritic!, prag: spec.prag! })
+    }
+    if (spec.prag! > nevoieMax) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `nevoi.${nume}.prag`, valoare: spec.prag!, max: nevoieMax })
+    }
+    if (spec.scurgere! < 1) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `nevoi.${nume}.scurgere`, motiv: 'o nevoie care nu scade niciodata e un sistem mort', valoare: spec.scurgere! })
+    }
+    out.push({ scurgere: spec.scurgere!, prag: spec.prag!, pragCritic: spec.pragCritic! })
+  }
+  return accept(out)
+}
+
+/** Tabelul `nutritie` din fisier → tablou indexat cu `Item`. Fiecare fel trebuie sa aiba o intrare. */
+function parseNutritie(raw: unknown): Outcome<number[]> {
+  if (Array.isArray(raw)) {
+    if (raw.length !== NUME_ITEME.length) return refuse(Reason.VALOARE_INVALIDA, { camp: 'nutritie', lungime: raw.length, asteptat: NUME_ITEME.length })
+    const obj: Record<string, unknown> = {}
+    for (const [nume, id] of NUME_ITEME) obj[nume] = raw[id]
+    raw = obj
+  }
+  if (typeof raw !== 'object' || raw === null) {
+    return refuse(Reason.LIPSA_MATERIAL, { camp: 'nutritie', asteptat: 'obiect', primit: typeof raw })
+  }
+  const obj = raw as Record<string, unknown>
+  const cunoscute = NUME_ITEME.map(([n]) => n)
+  for (const key of Object.keys(obj).sort()) {
+    if (!cunoscute.includes(key)) return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: `nutritie.${key}`, cunoscute: cunoscute.join(', ') })
+  }
+  const out: number[] = []
+  for (const [nume] of NUME_ITEME) {
+    const v = obj[nume]
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > MAX_YIELD) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `nutritie.${nume}`, asteptat: `intreg intre 0 si ${MAX_YIELD}`, primit: String(v) })
+    }
+    out.push(v)
+  }
+  return accept(out)
+}
 
 /**
  * Tabelul `digYield` din fisier → tablou indexat cu `MaterialId`. Fiecare
@@ -260,13 +420,13 @@ export function parseRules(raw: unknown): Outcome<Rules> {
   // garantata de spec si nu depinde de starea rularii.
   const known = Object.keys(RULES_SPEC)
   for (const key of Object.keys(obj).sort()) {
-    if (key === 'digYield') continue
+    if (key === 'digYield' || key === 'nevoi' || key === 'nutritie') continue
     if (!known.includes(key)) {
-      return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: key, cunoscute: [...known, 'digYield'].join(', ') })
+      return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: key, cunoscute: [...known, 'digYield', 'nevoi', 'nutritie'].join(', ') })
     }
   }
 
-  const out: Record<string, number | readonly DigYield[]> = {}
+  const out: Record<string, number | readonly DigYield[] | readonly SpecNevoie[] | readonly number[]> = {}
   for (const key of known) {
     const spec = RULES_SPEC[key as keyof typeof RULES_SPEC]
     const v = obj[key]
@@ -285,6 +445,14 @@ export function parseRules(raw: unknown): Outcome<Rules> {
   const yieldOut = parseDigYield(obj.digYield)
   if (!yieldOut.ok) return yieldOut
   out.digYield = yieldOut.value
+  if (obj.nevoi === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'nevoi' })
+  const nevoiOut = parseNevoi(obj.nevoi, out.nevoieMax as number)
+  if (!nevoiOut.ok) return nevoiOut
+  out.nevoi = nevoiOut.value
+  if (obj.nutritie === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'nutritie' })
+  const nutritieOut = parseNutritie(obj.nutritie)
+  if (!nutritieOut.ok) return nutritieOut
+  out.nutritie = nutritieOut.value
   const r = out as unknown as Rules
 
   // Invarianti INTRE campuri. Fiecare e o lege de care depinde corectitudinea,
@@ -351,7 +519,53 @@ export function parseRules(raw: unknown): Outcome<Rules> {
       return refuse(Reason.VALOARE_INVALIDA, { camp: 'digYield', motiv: 'un voxel nu poate da mai mult decat incape intr-un morman', valoare: y.cantitate, max: r.itemStackMax })
     }
   }
-  void ITEME
+  // O portie trebuie sa incapa intr-un morman, altfel n-ar lega niciodata —
+  // acelasi argument ca la `haulCarryMax`.
+  if (r.portieMancare > r.itemStackMax) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'portieMancare', valoare: r.portieMancare, max: r.itemStackMax })
+  }
+  // Cel putin un fel COMESTIBIL. Un tabel de nutritie cu toate zero trece
+  // fiecare validare de camp si produce o lume in care foamea nu se poate
+  // satisface niciodata: pionii ar cauta, n-ar gasi, si ar muri de foame in
+  // tacere — cu toate regulile „valide".
+  if (r.nutritie.length !== ITEME) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'nutritie', lungime: r.nutritie.length, asteptat: ITEME })
+  }
+  if (!r.nutritie.some((n) => n > 0)) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'nutritie', motiv: 'niciun fel de item nu e comestibil' })
+  }
+  if (r.nevoi.length !== NEVOI) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'nevoi', lungime: r.nevoi.length, asteptat: NEVOI })
+  }
+  // Defazarea initiala nu are voie sa nasca pioni sub prag: `nevoiaInitiala`
+  // intoarce cel putin `nevoieMax − (fazaSpan − 1)`. Fara invariantul asta,
+  // o valoare prea mare a lui `fazaSpan` e alta forma a greselii cu zero-ul —
+  // colonia porneste flamanda, si nimic nu spune de ce.
+  const celMaiJos = r.nevoieMax - (r.nevoieFazaSpan - 1)
+  for (let n = 0; n < r.nevoi.length; n++) {
+    if (celMaiJos <= r.nevoi[n]!.prag) {
+      return refuse(Reason.VALOARE_INVALIDA, {
+        camp: 'nevoieFazaSpan',
+        motiv: 'defazarea initiala ar naste pioni deja sub prag',
+        nevoie: NUME_NEVOI[n]![0],
+        celMaiJos,
+        prag: r.nevoi[n]!.prag,
+        max: r.nevoieMax - r.nevoi[n]!.prag,
+      })
+    }
+  }
+  // Acelasi invariant de acoperire ca la desemnari si la carat, pentru lantul
+  // pion → mancare / pat. Fara el, singurul leac ar fi un coridor intins la
+  // fiecare cautare — adica K05 pe a treia usa.
+  const blocuriDeNevoie = Math.ceil(r.nevoieScanRadiusCells / REGION_SIZE)
+  if (r.agentRegionRadiusBlocks + r.jobRegionRadiusBlocks + 2 < blocuriDeNevoie) {
+    return refuse(Reason.VALOARE_INVALIDA, {
+      camp: 'nevoieScanRadiusCells',
+      motiv: 'discul pionului si al tintei de nevoie nu se ating pe toata raza de cautare',
+      valoare: r.nevoieScanRadiusCells,
+      maxim: (r.agentRegionRadiusBlocks + r.jobRegionRadiusBlocks + 2) * REGION_SIZE,
+    })
+  }
 
   return accept(r)
 }
@@ -411,4 +625,31 @@ export const DEFAULT_RULES: Rules = {
     { fel: Item.LEMN, cantitate: 5 },
     { fel: Item.PIATRA, cantitate: 20 },
   ],
+  // Nevoile. La 20 Hz: FOAME scade 6 la 250 de tickuri, deci 1000/6 × 250 =
+  // ~41.700 de tickuri ≈ 35 de minute de la satul la zero; prefera sa manance la
+  // ~21 de minute (400), intrerupe la ~29 (150). ODIHNA scade 4, deci ~52 de
+  // minute. Somnul reface 60 pe tic de nevoie: de la 150 la 1000 sunt ~15 tici =
+  // 3750 de tickuri ≈ 3 minute.
+  nevoieMax: 1000,
+  nevoiTicks: 250,
+  // 137 e prim si nu divide 600, deci id-urile consecutive se imprastie pe tot
+  // spanul. 600 lasa nevoia initiala in 401..1000, adica peste pragul de 400.
+  nevoieFazaPas: 137,
+  nevoieFazaSpan: 600,
+  nevoieRetryTicks: 500,
+  nevoieScanRadiusCells: 96,
+  nevoieScanMaxCandidates: 64,
+  portieMancare: 20,
+  mancatTicks: 60,
+  mancatoriPeMorman: 2,
+  odihnaPeTicDeNevoie: 60,
+  // Indexat cu `Nevoie`: FOAME, ODIHNA.
+  nevoi: [
+    { scurgere: 6, prag: 400, pragCritic: 150 },
+    { scurgere: 4, prag: 400, pragCritic: 150 },
+  ],
+  // Indexat cu `Item`: PIATRA, PAMANT, LEMN, HRANA. O unitate de hrana da 15,
+  // deci o portie de 20 da 300 si un morman plin (75) da 1125 — un pion si un
+  // sfert, de la zero la satul.
+  nutritie: [0, 0, 0, 15],
 }

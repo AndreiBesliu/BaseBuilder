@@ -15,7 +15,7 @@
 import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import type { World, FactionId } from './state.ts'
-import { CATEGORII, ITEME, slotOf } from './state.ts'
+import { CATEGORII, ITEME, NEVOI, nevoiaInitiala, slotOf } from './state.ts'
 import { cellOf, clearPath } from './drumuri.ts'
 import type { Rules } from './content.ts'
 import { DEFAULT_RULES } from './content.ts'
@@ -137,7 +137,21 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       a.jobEfect[slot] = 0
       a.caraKind[slot] = 0
       a.caraCantitate[slot] = 0
+      a.jobConsumat[slot] = 0
       a.scanLaTick[slot] = 0
+      // Nevoile, DEFAZAT pe id — si asta e singurul loc unde id-ul exista.
+      //
+      // Doua greseli inchise aici deodata. Zero ar naste fiecare pion sub pragul
+      // critic (si un slot reutilizat ar mosteni foamea mortului, defect care nu
+      // apare in nicio rulare scurta fiindca cere ca un slot sa fi murit intai).
+      // Iar `nevoieMax` pentru toti i-ar porni in acelasi punct al ciclului: toata
+      // colonia ar flamanzi in aceeasi fereastra, fiecare masa ar adauga exact
+      // cat celorlalti, si valul nu s-ar sparge niciodata — productia ca dinte de
+      // ferastrau, si colonia stinsa dintr-un singur pas.
+      for (let n = 0; n < NEVOI; n++) {
+        a.nevoi[slot * NEVOI + n] = nevoiaInitiala(id, n, rules.nevoieMax, rules.nevoieFazaPas, rules.nevoieFazaSpan)
+        a.nevoieReincercaLaTick[slot * NEVOI + n] = 0
+      }
       uitaTintele(w, slot)
       for (let c = 0; c < CATEGORII; c++) a.prioPersonala[slot * CATEGORII + c] = rules.personalPriorityDefault
       clearPath(w.paths, slot)

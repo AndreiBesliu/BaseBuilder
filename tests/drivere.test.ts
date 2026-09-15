@@ -13,7 +13,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { applyCommand } from '../src/sim/commands.ts'
-import { FelJob, Item } from '../src/sim/state.ts'
+import { FelJob, Item, ITEME } from '../src/sim/state.ts'
 import { cellOf } from '../src/sim/drumuri.ts'
 import { Reason, codMotiv } from '../src/sim/result.ts'
 import { indexZone, prioritateaLocului, Zona, celulaDeZonaLa } from '../src/sim/zone.ts'
@@ -93,10 +93,10 @@ test('celulele unui dormitor NU intra in indexul de depozitare', () => {
   const ix = indexZone(w, R)
   assert.equal(ix.depoziteOrdonate.length, 0, 'un dormitor nu e depozit')
   assert.equal(ix.paturiLibere.length, 4, 'dar celulele lui sunt paturi libere')
-  assert.deepEqual([...ix.maxPrioLibera], [0, 0, 0], 'si nicio prioritate de depozitare nu creste')
-  for (let k = 0; k < 3; k++) {
-    assert.equal(ix.acceptante[0 * 3 + k], 0, `felul ${k} nu e acceptat intr-un dormitor`)
-    assert.equal(ix.maxLocLiber[0 * 3 + k], 0)
+  assert.deepEqual([...ix.maxPrioLibera], new Array<number>(ITEME).fill(0), 'si nicio prioritate de depozitare nu creste')
+  for (let k = 0; k < ITEME; k++) {
+    assert.equal(ix.acceptante[0 * ITEME + k], 0, `felul ${k} nu e acceptat intr-un dormitor`)
+    assert.equal(ix.maxLocLiber[0 * ITEME + k], 0)
   }
   assert.equal(ix.deMutat.length, 0, 'si mormanul de pe jos nu are unde sa fie mutat')
   assert.equal(ix.peJosFaraDepozit, 1, 'e pe jos si n-are unde: cauza se scrie')

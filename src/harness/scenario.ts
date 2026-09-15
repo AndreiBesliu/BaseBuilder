@@ -18,6 +18,8 @@ import { createTerrain, groundLevelM, materialAt, WORLD_CELLS } from '../sim/ter
 import type { Terrain } from '../sim/terrain/terrain.ts'
 import { isWalkable } from '../sim/regions.ts'
 import type { World } from '../sim/state.ts'
+import { Item } from '../sim/state.ts'
+import { Zona } from '../sim/zone.ts'
 import { advance, createWorld, liveAgentCount, tick } from '../sim/world.ts'
 
 export interface Scenario {
@@ -145,6 +147,10 @@ export function standardScenario(seed: number, ticks: number, agents = 20): Scen
   // n-ar mai fi persistat — toate ar muta hash-ul. Celulele se verifica solide
   // pe terenul temporar, ca scenariul sa ramana fara refuzuri.
   let k = 0
+  // `celulaBuna` cauta in jur, deci doua cereri vecine pot intoarce ACEEASI
+  // celula; a doua comanda ar fi refuzata cu CELULA_OCUPATA. Scenariul trebuie sa
+  // ramana fara refuzuri, altfel nu se mai vede cand apare unul real.
+  const celuleFolosite = new Set<number>()
   for (const s of sites) {
     for (const [dx, dy] of [[2, 0], [-2, 0], [0, 2], [0, -2]] as const) {
       const wx = s.wx + dx
@@ -161,6 +167,35 @@ export function standardScenario(seed: number, ticks: number, agents = 20): Scen
     // valideaza celula cu celula in comanda; ce nu e calcabil se sare.
     const dz = celulaBuna(scratch, s.wx + 4, s.wy + 4)
     if (dz) commands.push({ tick: t + 8, cmd: { kind: 'picteazaZona', x0: s.wx + 4, y0: s.wy + 4, x1: s.wx + 6, y1: s.wy + 6, z: dz.z, prioritate: 1 + (k % 5) } })
+
+    // Mancare si paturi (taietura 3). Fara ele, scenariul asta ar masura o
+    // colonie care moare de foame si care doarme pe jos — iar cifrele de
+    // referinta (hash, µs/tick, raportul drum/lucru) ar descrie starea aia, nu
+    // jocul. Productia de hrana nu exista inca, deci mancarea se pune cu comanda,
+    // exact ca mormanele de depanare.
+    // ANCORAT pe celula pe care `celulaBuna` a validat-o, nu pe cea ceruta: ea
+    // cauta in jur si poate intoarce o vecina, la alta cota. Cu coordonatele
+    // cerute si cota ei, comanda cade pe LOC_NECALCABIL — iar scenariul asta
+    // trebuie sa ramana fara refuzuri, altfel nu se mai vede cand apare unul real.
+    // CAT trebuie, nu cat incape intr-un morman. Aritmetica, pentru rularea de
+    // referinta (100.000 de tickuri, ~32 de pioni ai asezarii): fiecare pierde
+    // `scurgere` la fiecare `nevoiTicks`, deci 6 x 400 = 2400 de foame de om,
+    // adica ~77.000 in total; la 15 pe unitate sunt ~5100 de unitati, ~68 de
+    // mormane pline. Cu un singur morman per sit, colonia manca tot in 25.000 de
+    // tickuri si restul rularii masura o asezare care moare de foame — adica
+    // exact ce nu trebuie sa descrie cifrele de referinta.
+    //
+    // Productia de hrana nu exista inca; pana atunci mancarea se pune cu comanda.
+    for (let m = 0; m < 6; m++) {
+      const hz = celulaBuna(scratch, s.wx - 3 - (m % 3), s.wy + 1 + Math.floor(m / 3))
+      if (!hz) continue
+      const cheie = hz.wx * 100000 + hz.wy
+      if (celuleFolosite.has(cheie)) continue
+      celuleFolosite.add(cheie)
+      commands.push({ tick: t + 9, cmd: { kind: 'lasaItem', fel: Item.HRANA, cantitate: 75, wx: hz.wx, wy: hz.wy, z: hz.z } })
+    }
+    const pz = celulaBuna(scratch, s.wx - 5, s.wy - 5)
+    if (pz) commands.push({ tick: t + 10, cmd: { kind: 'picteazaZona', x0: pz.wx, y0: pz.wy, x1: pz.wx + 1, y1: pz.wy + 1, z: pz.z, prioritate: 3, fel: Zona.DORMIT } })
   }
 
   return { seed, ticks, commands }

@@ -103,6 +103,7 @@ function ruleaza(w: World, ticks: number, rules: Rules = R, laFiecareTick?: (w: 
     scanari: 0, vizite: 0, candidatiExaminati: 0, candidatiTaiati: 0, coridoare: 0, joburiPornite: 0, joburiTerminate: 0, joburiAnulate: 0,
     tickuriDeLucru: 0, locuriDeLucruRefacute: 0, refuzuriDrum: 0, faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0,
     faraDepozit: 0, evaluariDestinatie: 0, itemeProduse: 0, unitatiProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
+    joburiDeNevoie: 0, unitatiMancate: 0, pasiNevoi: 0,
     refuzuriAgenti: 0, maxScanariPeTick: 0,
   }
   for (let i = 0; i < ticks; i++) {
@@ -875,7 +876,18 @@ test('content: discul agentului si al desemnarii trebuie sa se atinga pe toata r
   // si raza de cautare a destinatiei scade: lantul marfa → depozit are propriul
   // invariant, si el se verifica pe discul MIC (al pionului sau al desemnarii).
   assert.equal(parseRules({ ...R, jobRegionRadiusBlocks: 1, jobScanRadiusCells: 80 }).ok, false)
-  assert.ok(parseRules({ ...R, jobRegionRadiusBlocks: 1, jobScanRadiusCells: 80, haulDestRadiusCells: 64 }).ok)
+  assert.equal(parseRules({ ...R, jobRegionRadiusBlocks: 1, jobScanRadiusCells: 80, haulDestRadiusCells: 64 }).ok, false)
+  // Si lantul pion → mancare / pat are propriul invariant, cu propria raza: a
+  // TREIA care trebuie sa coboare ca sa fie configuratia valida din nou.
+  assert.ok(parseRules({ ...R, jobRegionRadiusBlocks: 1, jobScanRadiusCells: 80, haulDestRadiusCells: 64, nevoieScanRadiusCells: 64 }).ok)
+  // Si leaga SINGUR, cu discurile implicite: 96 = 6 blocuri = 2 + 2 + 2.
+  assert.ok(parseRules({ ...R, nevoieScanRadiusCells: 96 }).ok)
+  const nevoiDeparte = parseRules({ ...R, nevoieScanRadiusCells: 112 })
+  assert.equal(nevoiDeparte.ok, false)
+  if (!nevoiDeparte.ok) {
+    assert.equal(nevoiDeparte.reason, Reason.VALOARE_INVALIDA)
+    assert.equal(nevoiDeparte.params.camp, 'nevoieScanRadiusCells')
+  }
   // Si invariantul de carat leaga singur, cu discurile implicite: 96 de celule =
   // 6 blocuri = 2 + 2 + 2, deci un pas peste el trebuie refuzat.
   assert.ok(parseRules({ ...R, haulDestRadiusCells: 96 }).ok)

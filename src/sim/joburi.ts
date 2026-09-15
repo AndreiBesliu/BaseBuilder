@@ -89,7 +89,7 @@ import type { Rules } from './content.ts'
 import type { Outcome, ReasonCode } from './result.ts'
 import { accept, codMotiv, refuse, Reason } from './result.ts'
 import type { FelJobId, World } from './state.ts'
-import { Categorie, CATEGORII, FelJob, ITEME, PasCara, PasJob } from './state.ts'
+import { Categorie, CATEGORII, FelJob, ITEME, Nevoie, NEVOI, PasCara, PasJob, pasDeMers, PasNevoie } from './state.ts'
 import { cellOf, clearPath } from './drumuri.ts'
 import { blockOfCell, ensureArea, find, isWalkable, markDirty, NO_REGION, regionAt, REGION_SIZE } from './regions.ts'
 import type { RegionStore } from './regions.ts'
@@ -155,6 +155,15 @@ export interface RatiuneStore {
   tickuriPeDrum: number
   /** Tickuri-pion petrecute muncind (sapat, ridicat, lasat), pe toata rularea. */
   tickuriDeLucru: number
+  /**
+   * ZAVOR, per lume: de cate ori o nevoie sub pragul critic a intrerupt un job.
+   * Sta aici, nu in raportul de tick, fiindca `Sfarsit.INTRERUPT` nu atinge
+   * `joburiFaraProgres` — deci fara contorul asta, o bucla intrerupe/reia n-ar
+   * fi vazuta de niciun zavor existent.
+   */
+  intreruperiDeNevoie: number
+  /** ZAVOR, per lume: de cate ori o nevoie sub prag N-A putut fi rezolvata si a primit racire. */
+  nevoiNerezolvate: number
 }
 
 export function makeRatiuneStore(capacity: number): RatiuneStore {
@@ -168,6 +177,8 @@ export function makeRatiuneStore(capacity: number): RatiuneStore {
     itemePierdute: 0,
     tickuriPeDrum: 0,
     tickuriDeLucru: 0,
+    intreruperiDeNevoie: 0,
+    nevoiNerezolvate: 0,
   }
 }
 
@@ -212,6 +223,16 @@ export interface JobTickReport {
   itemeMutate: number
   /** De cate ori s-a lasat marfa la picioare (job incheiat cu mana plina). */
   lasateLaPicioare: number
+  /** Cate joburi de NEVOIE au pornit (mancat, dormit). */
+  joburiDeNevoie: number
+  /** Cate unitati de hrana s-au consumat. Cu ea se poate asserta conservarea mancarii. */
+  unitatiMancate: number
+  /**
+   * Cate INTRARI au parcurs cautarile de nevoie. Ca `zone.index.pasi`: numarul de
+   * cautari nu spune nimic despre cost, iar asta e cifra pe care o masoara garda
+   * K05 a taieturii 3.
+   */
+  pasiNevoi: number
 }
 
 const raport: JobTickReport = {
@@ -220,6 +241,7 @@ const raport: JobTickReport = {
   tickuriDeLucru: 0, locuriDeLucruRefacute: 0, refuzuriDrum: 0,
   faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0, faraDepozit: 0,
   evaluariDestinatie: 0, itemeProduse: 0, unitatiProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
+  joburiDeNevoie: 0, unitatiMancate: 0, pasiNevoi: 0,
 }
 
 export function lastJobReport(): JobTickReport {
@@ -228,27 +250,16 @@ export function lastJobReport(): JobTickReport {
 
 /** Se cheama la inceputul fiecarui tick de agenti. */
 export function resetJobReport(): void {
-  raport.scanari = 0
-  raport.vizite = 0
-  raport.candidatiExaminati = 0
-  raport.candidatiTaiati = 0
-  raport.coridoare = 0
-  raport.joburiPornite = 0
-  raport.joburiTerminate = 0
-  raport.joburiAnulate = 0
-  raport.tickuriDeLucru = 0
-  raport.locuriDeLucruRefacute = 0
-  raport.refuzuriDrum = 0
-  raport.faraMuncitor = 0
-  raport.preaDeparte = 0
-  raport.inaccesibil = 0
-  raport.rezervat = 0
-  raport.faraDepozit = 0
-  raport.evaluariDestinatie = 0
-  raport.itemeProduse = 0
-  raport.unitatiProduse = 0
-  raport.itemeMutate = 0
-  raport.lasateLaPicioare = 0
+  // STRUCTURAL, nu camp cu camp. Lista explicita de dinainte a supravietuit trei
+  // taieturi si a cazut la a patra: trei campuri noi (`joburiDeNevoie`,
+  // `unitatiMancate`, `pasiNevoi`) n-au fost adaugate aici, deci se adunau la
+  // infinit. Sonda a raportat 44 de milioane de unitati mancate intr-o lume care
+  // continea 900 — un numar imposibil, dar unul pe care nicio asertiune nu-l
+  // urmarea. Un contor de tick care nu se reseteaza nu da erori, da cifre.
+  //
+  // determinism-ok: toate cheile primesc aceeasi valoare, deci ordinea nu poate
+  // schimba rezultatul; `sort()` e acolo doar ca scanerul sa nu aiba de ghicit.
+  for (const k of (Object.keys(raport) as (keyof JobTickReport)[]).sort()) raport[k] = 0
 }
 
 /**
@@ -1674,6 +1685,349 @@ export function existaTinta(w: World): (targetId: number, layer: number) => bool
 }
 
 // ---------------------------------------------------------------------------
+// nevoile
+// ---------------------------------------------------------------------------
+
+/**
+ * Ce fel de job satisface fiecare nevoie. Indexat cu `Nevoie`.
+ *
+ * Asta e randul de tabel care leaga o nevoie de driverul ei. Impreuna cu
+ * `rules.nevoi[n]` si cu `DRIVERE[fel]`, o nevoie noua chiar e „un rand de
+ * tabel": nimic din motor nu stie ca FOAME se satisface cu mancare.
+ */
+export const FEL_PENTRU_NEVOIE: readonly FelJobId[] = [FelJob.MANANCA, FelJob.DOARME]
+
+/**
+ * MANANCA rezerva pe stratul SAU, nu pe cel de carat. Vezi `Strat`: pe CARAT,
+ * `maxClaimants: 1` al caratului ar da unui singur caraus dreptul pe toata
+ * mancarea coloniei, pe tot drumul lui.
+ */
+export function cereriMananca(rules: Rules, itemId: number, cant: number): readonly Cerere[] {
+  return [{ targetId: itemId, layer: Strat.MANCAT, count: cant, maxCount: rules.itemStackMax, maxClaimants: rules.mancatoriPeMorman }]
+}
+
+/** DOARME tine patul pe stratul de LUCRU, ca destinatia de carat: un pion per celula. */
+export function cereriDoarme(celulaId: number): readonly Cerere[] {
+  // Somnul pe jos (`jobDest === 0`) nu rezerva nimic: nu exista entitate.
+  if (celulaId === 0) return []
+  return [{ targetId: celulaId, layer: Strat.LUCRU, count: 1, maxCount: 1, maxClaimants: 1 }]
+}
+
+/**
+ * Cel mai apropiat morman COMESTIBIL accesibil si rezervabil, sau null.
+ *
+ * Trei plase, aceleasi ca la carat: raza, plafon numarat pe INTRARI PARCURSE (nu
+ * pe potriviri — plafonul pe potriviri nu margineste nimic cand nimic nu se
+ * potriveste), si racirea pe PERECHE. Pe item nu se scrie niciodata racire: ar
+ * ascunde singura masa a asezarii de toata lumea, pentru cauza unui singur pion.
+ */
+function cautaMancare(w: World, rules: Rules, slot: number): { is: number; cant: number } | null {
+  const a = w.agents
+  const it = w.iteme
+  const ax = cellOf(a.x[slot]!)
+  const ay = cellOf(a.y[slot]!)
+  const az = a.z[slot]!
+  const rAgent = regionAt(w.regions, ax, ay, az)
+  if (rAgent === NO_REGION) return null
+  const compAgent = find(w.regions, rAgent)
+  const lipsa = rules.nevoieMax - a.nevoi[slot * NEVOI + Nevoie.FOAME]!
+  const ix = indexZone(w, rules)
+  let best = -1
+  let bestD = 0
+  let bestCant = 0
+  let parcurse = 0
+  for (const i of ix.comestibile) {
+    if (parcurse >= rules.nevoieScanMaxCandidates) { raport.candidatiTaiati++; break }
+    parcurse++
+    raport.pasiNevoi++
+    if (it.alive[i] === 0) continue
+    const d = Math.abs(it.wx[i]! - ax) + Math.abs(it.wy[i]! - ay) + Math.abs(it.z[i]! - az)
+    if (d > rules.nevoieScanRadiusCells) continue
+    if (best !== -1 && d >= bestD) continue
+    if (esteEvitata(w, slot, it.id[i]!)) continue
+    const nut = rules.nutritie[it.kind[i]!]!
+    // Cat ii trebuie, nu cat e acolo: restul mormanului ramane celorlalti.
+    const cant = Math.min(it.cantitate[i]!, Math.ceil(lipsa / nut))
+    if (cant <= 0) continue
+    const r = regionAt(w.regions, it.wx[i]!, it.wy[i]!, it.z[i]!)
+    if (r === NO_REGION || find(w.regions, r) !== compAgent) continue
+    if (!poateRezervaToate(w, a.id[slot]!, cereriMananca(rules, it.id[i]!, cant))) continue
+    best = i
+    bestD = d
+    bestCant = cant
+  }
+  return best === -1 ? null : { is: best, cant: bestCant }
+}
+
+/** Cea mai apropiata celula de dormit libera si accesibila, sau -1 („dorm pe loc"). */
+function cautaPat(w: World, rules: Rules, slot: number): number {
+  const a = w.agents
+  const c = w.zone.celule
+  const ax = cellOf(a.x[slot]!)
+  const ay = cellOf(a.y[slot]!)
+  const az = a.z[slot]!
+  const rAgent = regionAt(w.regions, ax, ay, az)
+  if (rAgent === NO_REGION) return -1
+  const compAgent = find(w.regions, rAgent)
+  const ix = indexZone(w, rules)
+  let best = -1
+  let bestD = 0
+  let parcurse = 0
+  for (const cs of ix.paturiLibere) {
+    if (parcurse >= rules.nevoieScanMaxCandidates) { raport.candidatiTaiati++; break }
+    parcurse++
+    raport.pasiNevoi++
+    const d = Math.abs(c.wx[cs]! - ax) + Math.abs(c.wy[cs]! - ay) + Math.abs(c.z[cs]! - az)
+    if (d > rules.nevoieScanRadiusCells) continue
+    if (best !== -1 && d >= bestD) continue
+    if (esteEvitata(w, slot, c.zonaId[cs]!)) continue
+    const r = regionAt(w.regions, c.wx[cs]!, c.wy[cs]!, c.z[cs]!)
+    if (r === NO_REGION || find(w.regions, r) !== compAgent) continue
+    if (!poateRezervaToate(w, a.id[slot]!, cereriDoarme(c.id[cs]!))) continue
+    best = cs
+    bestD = d
+  }
+  return best
+}
+
+/** Toate cererile trec? Verificarea e a listei INTREGI, ca la `rezervaToate`. */
+function poateRezervaToate(w: World, claimant: number, cereri: readonly Cerere[]): boolean {
+  for (const c of cereri) if (!poateRezerva(w.rezervari, claimant, c).ok) return false
+  return true
+}
+
+function pornesteMananca(w: World, rules: Rules, slot: number, is: number, cant: number): Outcome<void> {
+  const a = w.agents
+  const it = w.iteme
+  const jobId = w.nextId
+  const out = rezervaToate(w.rezervari, a.id[slot]!, jobId, cereriMananca(rules, it.id[is]!, cant))
+  if (!out.ok) return out
+  w.nextId++
+
+  a.jobKind[slot] = FelJob.MANANCA
+  a.jobId[slot] = jobId
+  a.jobTarget[slot] = it.id[is]!
+  a.jobDest[slot] = 0
+  a.jobCantitate[slot] = cant
+  a.jobConsumat[slot] = 0
+  a.jobEfect[slot] = 0
+  a.jobStep[slot] = PasNevoie.MERGE
+  a.jobProgres[slot] = 0
+  a.jobIncercari[slot] = 0
+  a.jobWorkX[slot] = it.wx[is]!
+  a.jobWorkY[slot] = it.wy[is]!
+  a.jobWorkZ[slot] = it.z[is]!
+  tintesteLocDeLucru(w, slot)
+  raport.joburiPornite++
+  raport.joburiDeNevoie++
+  return accept()
+}
+
+/** `cs === -1` inseamna „dorm pe loc": fara pat, fara rezervare, dar tot somn. */
+function pornesteDoarme(w: World, _rules: Rules, slot: number, cs: number): Outcome<void> {
+  const a = w.agents
+  const c = w.zone.celule
+  const jobId = w.nextId
+  const celulaId = cs === -1 ? 0 : c.id[cs]!
+  const out = rezervaToate(w.rezervari, a.id[slot]!, jobId, cereriDoarme(celulaId))
+  if (!out.ok) return out
+  w.nextId++
+
+  a.jobKind[slot] = FelJob.DOARME
+  a.jobId[slot] = jobId
+  a.jobTarget[slot] = 0
+  a.jobDest[slot] = celulaId
+  a.jobCantitate[slot] = 0
+  a.jobConsumat[slot] = 0
+  a.jobEfect[slot] = 0
+  a.jobStep[slot] = PasNevoie.MERGE
+  a.jobProgres[slot] = 0
+  a.jobIncercari[slot] = 0
+  a.jobWorkX[slot] = cs === -1 ? cellOf(a.x[slot]!) : c.wx[cs]!
+  a.jobWorkY[slot] = cs === -1 ? cellOf(a.y[slot]!) : c.wy[cs]!
+  a.jobWorkZ[slot] = cs === -1 ? a.z[slot]! : c.z[cs]!
+  tintesteLocDeLucru(w, slot)
+  if (cs !== -1) marcheazaZoneMurdare(w)
+  raport.joburiPornite++
+  raport.joburiDeNevoie++
+  return accept()
+}
+
+/**
+ * Un tick de mancat. Portie cu portie, dintr-o singura rezervare: un pion la 100
+ * care ar face trei joburi complete ar plati trei scanari, trei rezervari si trei
+ * drumuri, pe o colonie al carei raport drum/lucru e deja 4,7.
+ *
+ * Mancatul NU trece prin productivitate: satisfacerea unei nevoi nu e munca, si
+ * altfel pionul infometat ar manca la 0,5×, adica recuperarea ar incetini exact
+ * cand e nevoie de ea.
+ */
+function mananca(w: World, rules: Rules, slot: number): void {
+  const a = w.agents
+  const it = w.iteme
+  const is = slotItem(it, a.jobTarget[slot]!)
+  if (is === -1) {
+    // Mormanul a disparut (l-a mancat altcineva pana la capat, sau l-a mutat
+    // carligul de teren). Nu e vina nimanui: se incheie si se re-scaneaza.
+    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
+    return
+  }
+  if (!peCelula(w, slot, it.wx[is]!, it.wy[is]!, it.z[is]!)) {
+    if (w.regions.dirty.size > 0) return
+    a.jobWorkX[slot] = it.wx[is]!
+    a.jobWorkY[slot] = it.wy[is]!
+    a.jobWorkZ[slot] = it.z[is]!
+    a.jobStep[slot] = PasNevoie.MERGE
+    tintesteLocDeLucru(w, slot)
+    raport.locuriDeLucruRefacute++
+    return
+  }
+  a.jobProgres[slot] = a.jobProgres[slot]! + 1
+  if (a.jobProgres[slot]! < rules.mancatTicks) return
+  a.jobProgres[slot] = 0
+
+  const ramasDinRezervare = a.jobCantitate[slot]! - a.jobConsumat[slot]!
+  const portie = Math.min(rules.portieMancare, ramasDinRezervare, it.cantitate[is]!)
+  if (portie <= 0) {
+    terminaJob(w, rules, slot, Sfarsit.TERMINAT)
+    return
+  }
+  const fel = it.kind[is]!
+  const luat = iaDinItem(w, rules, is, portie)
+  const baza = slot * NEVOI + Nevoie.FOAME
+  // Nutritia e PE UNITATE: cu ea pe morman, restul de 15 dintr-o stiva de 75 ar
+  // hrani cat o portie intreaga — hrana din nimic.
+  a.nevoi[baza] = Math.min(rules.nevoieMax, a.nevoi[baza]! + luat * rules.nutritie[fel]!)
+  a.jobConsumat[slot] = a.jobConsumat[slot]! + luat
+  a.jobEfect[slot] = 1
+  raport.unitatiMancate += luat
+  if (a.nevoi[baza]! >= rules.nevoieMax || a.jobConsumat[slot]! >= a.jobCantitate[slot]!) {
+    terminaJob(w, rules, slot, Sfarsit.TERMINAT)
+  }
+}
+
+/**
+ * Un tick de dormit. Refacerea se aplica la ticul de NEVOIE (vezi
+ * `scurgeNevoile`), nu aici: calibrata pe tick, cum era in v1, tot somnul dura
+ * 25 de tickuri — mai putin decat drumul pana la pat.
+ */
+function doarme(w: World, rules: Rules, slot: number): void {
+  const a = w.agents
+  const c = w.zone.celule
+  if (a.jobDest[slot] !== 0) {
+    const cs = slotCelulaDeZona(w.zone, a.jobDest[slot]!)
+    if (cs === -1) {
+      // Patul a disparut sub el (zona stearsa). Se incheie — altfel ar dormi pe
+      // o celula inexistenta, fara rezervare, si lumea incarcata ar diverge.
+      terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
+      return
+    }
+    if (!peCelula(w, slot, c.wx[cs]!, c.wy[cs]!, c.z[cs]!)) {
+      if (w.regions.dirty.size > 0) return
+      a.jobWorkX[slot] = c.wx[cs]!
+      a.jobWorkY[slot] = c.wy[cs]!
+      a.jobWorkZ[slot] = c.z[cs]!
+      a.jobStep[slot] = PasNevoie.MERGE
+      tintesteLocDeLucru(w, slot)
+      raport.locuriDeLucruRefacute++
+      return
+    }
+  }
+  a.jobEfect[slot] = 1
+  if (a.nevoi[slot * NEVOI + Nevoie.ODIHNA]! >= rules.nevoieMax) {
+    terminaJob(w, rules, slot, Sfarsit.TERMINAT)
+  }
+}
+
+/**
+ * Scurgerea nevoilor, la ticul de nevoie al pionului. Nevoia pe care jobul
+ * curent chiar o REFACE creste in loc sa scada.
+ */
+export function scurgeNevoile(w: World, rules: Rules, slot: number): void {
+  const a = w.agents
+  const baza = slot * NEVOI
+  for (let n = 0; n < NEVOI; n++) {
+    const spec = rules.nevoi[n]!
+    if (n === Nevoie.ODIHNA && a.jobKind[slot] === FelJob.DOARME && !pasDeMers(a.jobStep[slot]!)) {
+      a.nevoi[baza + n] = Math.min(rules.nevoieMax, a.nevoi[baza + n]! + rules.odihnaPeTicDeNevoie)
+      continue
+    }
+    a.nevoi[baza + n] = Math.max(0, a.nevoi[baza + n]! - spec.scurgere)
+  }
+}
+
+/**
+ * Se poate intrerupe jobul curent?
+ *
+ * Mana plina e singurul caz in care intreruperea poate DISTRUGE marfa
+ * (`asazaItem` poate sa n-aiba unde s-o puna), iar munca ramasa pana la depozit
+ * e marginita prin constructie. Research: pionii TERMINA task-ul curent inainte
+ * sa reciteasca orarul.
+ */
+function poateFiIntrerupt(w: World, slot: number): boolean {
+  const a = w.agents
+  return !(a.jobKind[slot] === FelJob.CARA && a.jobStep[slot]! >= PasCara.MERGE_DEST)
+}
+
+/**
+ * Poarta de nevoi, la FIECARE tick. Intoarce `true` daca pionul e ocupat cu o
+ * nevoie (deci nu cauta de lucru).
+ *
+ * Se cheama in fiecare tick, nu la ticul de nevoie, si asta nu e risipa — sunt
+ * doua citiri de tablou per pion. Pe ticul de nevoie, poarta n-ar prinde aproape
+ * nimic: un pion termina un job la tickul 1001 cu foamea sub prag, dar 1001 nu e
+ * ticul LUI de nevoie, deci ia alt job de 40 de tickuri; iar cand vine ticul,
+ * ARE job si foamea e inca peste pragul critic. Momentul „liber SI pe tic de
+ * nevoie" e o coincidenta de ~1 la 250, deci „prefera" n-ar exista practic si
+ * tot jocul s-ar muta pe calea cu intreruperi.
+ *
+ * `prag` = PREFERA (nu intrerupe nimic), `pragCritic` = INTRERUPE — dar numai
+ * daca are ce face: nu intrerupi ca sa nu faci nimic.
+ */
+export function verificaNevoi(w: World, rules: Rules, slot: number): boolean {
+  const a = w.agents
+  const baza = slot * NEVOI
+  for (let n = 0; n < NEVOI; n++) {
+    const spec = rules.nevoi[n]!
+    const v = a.nevoi[baza + n]!
+    if (v >= spec.prag) continue
+    // Deja o rezolv pe asta: nu ma intrerup pe mine insumi. Fara clauza, un pion
+    // care merge 160 de tickuri spre mancare s-ar auto-intrerupe la fiecare
+    // verificare si n-ar ajunge niciodata la ea.
+    if (a.jobKind[slot] === FEL_PENTRU_NEVOIE[n]) return true
+    if (w.tick < a.nevoieReincercaLaTick[baza + n]!) continue
+    const critic = v < spec.pragCritic
+    const ocupat = a.jobKind[slot] !== 0
+    if (ocupat && (!critic || !poateFiIntrerupt(w, slot))) continue
+
+    // Tinta se cauta ÎNAINTE de intrerupere: altfel un pion fara mancare in toata
+    // asezarea si-ar arunca jobul ca sa constate ca n-are unde sa se duca.
+    let pornit = false
+    if (FEL_PENTRU_NEVOIE[n] === FelJob.MANANCA) {
+      const g = cautaMancare(w, rules, slot)
+      if (g !== null) {
+        if (ocupat) { terminaJob(w, rules, slot, Sfarsit.INTRERUPT); w.ratiune.intreruperiDeNevoie++ }
+        pornit = pornesteMananca(w, rules, slot, g.is, g.cant).ok
+      }
+    } else {
+      // Somnul reuseste mereu: fara pat liber, pionul doarme pe loc.
+      const cs = cautaPat(w, rules, slot)
+      if (ocupat) { terminaJob(w, rules, slot, Sfarsit.INTRERUPT); w.ratiune.intreruperiDeNevoie++ }
+      pornit = pornesteDoarme(w, rules, slot, cs).ok
+    }
+    if (pornit) return true
+
+    // N-are cum s-o rezolve ACUM. Racire pe perechea (pion, nevoie) si inapoi la
+    // munca. Fara ea, un pion sub pragul critic ar intrerupe, ar cauta, n-ar
+    // gasi si ar relua — la nesfarsit, si fara ca vreun zavor sa vada ceva,
+    // fiindca `Sfarsit.INTRERUPT` nu atinge `joburiFaraProgres`.
+    a.nevoieReincercaLaTick[baza + n] = w.tick + rules.nevoieRetryTicks
+    w.ratiune.nevoiNerezolvate++
+  }
+  return false
+}
+
+// ---------------------------------------------------------------------------
 // tabelul de drivere
 // ---------------------------------------------------------------------------
 
@@ -1831,8 +2185,87 @@ const DRIVER_CARA: DriverJob = {
   },
 }
 
+const DRIVER_MANANCA: DriverJob = {
+  fel: FelJob.MANANCA,
+  atingeZone: false,
+  cereri(w, rules, slot) {
+    const a = w.agents
+    // Cantitatea e cea INGHETATA la start, nu `jobCantitate − jobConsumat`:
+    // rezervarea vie nu se micsoreaza pe masura ce mananca, deci nici cea
+    // reconstruita la incarcare n-are voie.
+    return cereriMananca(rules, a.jobTarget[slot]!, a.jobCantitate[slot]!)
+  },
+  tinteVii(w, slot) {
+    const id = w.agents.jobTarget[slot]!
+    return slotItem(w.iteme, id) === -1 ? refuse(Reason.ENTITATE_INEXISTENTA, { id }) : accept()
+  },
+  lucreaza(w, rules, slot) {
+    mananca(w, rules, slot)
+  },
+  incheie(w, rules, slot, motiv, racire) {
+    void rules
+    // Racirea unei nevoi merge pe PERECHE mereu, niciodata pe morman: o racire
+    // pe mormanul de mancare l-ar ascunde de toata colonia pentru sute de
+    // tickuri, pentru o cauza care tine de un singur pion. Exact greseala
+    // platita la taietura 2, reintrata prin a treia tinta.
+    void racire
+    void motiv
+    evitaTinta(w, slot, w.agents.jobTarget[slot]!, w.tick + rules.jobRetryTicks)
+  },
+  refaTinta() {
+    // Mormanul e unde e: nu exista „alta celula" spre care sa te reorientezi.
+    return false
+  },
+}
+
+const DRIVER_DOARME: DriverJob = {
+  fel: FelJob.DOARME,
+  atingeZone: true,
+  cereri(w, _rules, slot) {
+    return cereriDoarme(w.agents.jobDest[slot]!)
+  },
+  tinteVii(w, slot) {
+    const id = w.agents.jobDest[slot]!
+    // `0` = doarme pe loc: n-are tinta, deci n-are cum s-o piarda.
+    if (id === 0) return accept()
+    return slotCelulaDeZona(w.zone, id) === -1 ? refuse(Reason.ENTITATE_INEXISTENTA, { id }) : accept()
+  },
+  lucreaza(w, rules, slot) {
+    doarme(w, rules, slot)
+  },
+  incheie(w, rules, slot, motiv, racire) {
+    void racire
+    void motiv
+    const cs = slotCelulaDeZona(w.zone, w.agents.jobDest[slot]!)
+    if (cs !== -1) evitaTinta(w, slot, w.zone.celule.zonaId[cs]!, w.tick + rules.jobRetryTicks)
+  },
+  refaTinta(w, rules, slot) {
+    // Alt pat liber, daca exista; altfel `false`, si atunci pionul cade pe
+    // „dorm pe loc" la urmatoarea verificare de nevoi.
+    const a = w.agents
+    if (a.jobDest[slot] === 0) return false
+    const cs = cautaPat(w, rules, slot)
+    if (cs === -1) return false
+    const c = w.zone.celule
+    if (c.id[cs] === a.jobDest[slot]) return false
+    if (!poateRezervaToate(w, a.id[slot]!, cereriDoarme(c.id[cs]!))) return false
+    elibereazaUna(w.rezervari, a.id[slot]!, a.jobId[slot]!, a.jobDest[slot]!, Strat.LUCRU)
+    if (!rezervaToate(w.rezervari, a.id[slot]!, a.jobId[slot]!, cereriDoarme(c.id[cs]!)).ok) return false
+    a.jobDest[slot] = c.id[cs]!
+    a.jobWorkX[slot] = c.wx[cs]!
+    a.jobWorkY[slot] = c.wy[cs]!
+    a.jobWorkZ[slot] = c.z[cs]!
+    a.jobStep[slot] = PasNevoie.MERGE
+    a.jobProgres[slot] = 0
+    tintesteLocDeLucru(w, slot)
+    marcheazaZoneMurdare(w)
+    raport.locuriDeLucruRefacute++
+    return true
+  },
+}
+
 /** Indexat pe `FelJob`. `undefined` = fel necunoscut, si atunci se REFUZA. */
-const DRIVERE: readonly (DriverJob | undefined)[] = [undefined, DRIVER_SAPA, DRIVER_CARA]
+const DRIVERE: readonly (DriverJob | undefined)[] = [undefined, DRIVER_SAPA, DRIVER_CARA, DRIVER_MANANCA, DRIVER_DOARME]
 
 /** Driverul unui fel de job, sau `undefined` daca felul nu e cunoscut. */
 export function driverPentru(fel: number): DriverJob | undefined {

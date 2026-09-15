@@ -16,7 +16,7 @@ import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import type { RngState } from './rng.ts'
 import type { AgentStore, RngStreamName, World } from './state.ts'
-import { CATEGORII, makeAgentStore, MM_PER_CELL, RNG_STREAMS, SCHEMA_VERSION } from './state.ts'
+import { CATEGORII, makeAgentStore, MM_PER_CELL, NEVOI, nevoiaInitiala, RNG_STREAMS, SCHEMA_VERSION } from './state.ts'
 import { createRegions, restoreRegions } from './regions.ts'
 import { makePathStore } from './drumuri.ts'
 import type { PathStore } from './drumuri.ts'
@@ -150,6 +150,11 @@ export function encode(w: World): string {
         // noua, `decode` largeste tabloul in loc sa refuze fiecare save existent.
         categorii: CATEGORII,
         prioPersonala: Array.from(a.prioPersonala.subarray(0, a.count * CATEGORII)),
+        // Nevoile. Pasul se scrie EXPLICIT, ca la `prioPersonala`: cand apare o
+        // nevoie noua, `decode` largeste tabloul in loc sa refuze fiecare save.
+        nevoiFeluri: NEVOI,
+        nevoi: Array.from(a.nevoi.subarray(0, a.count * NEVOI)),
+        nevoieReincercaLaTick: Array.from(a.nevoieReincercaLaTick.subarray(0, a.count * NEVOI)),
       },
       // Desemnarile: ce a cerut jucatorul. `ultimulMotiv` e TRANSIENT si nu
       // se scrie; `laCelula` si `vii` sunt DERIVED si se reindexeaza la incarcare.
@@ -235,6 +240,29 @@ const MIGRATIONS: Record<number, (data: Record<string, unknown>) => Record<strin
   // `cara*` zero). `prioPersonala` avea o singura categorie: se declara pasul
   // vechi (`categorii: 1`), iar `decode` il largeste la CATEGORII cu implicitul
   // din content — altfel fiecare save de schema 3 ar fi refuzat pe lungime.
+  // 4 -> 5 (S16-19, taietura 3): nevoile. Un save de schema 4 n-are nicio
+  // coloana de nevoi inregistrata, si asta se spune EXPLICIT: `nevoiFeluri: 0`.
+  //
+  // Zero NU inseamna aici „nevoi la zero" — inseamna „niciuna inregistrata", iar
+  // `decode` le umple DEFAZAT din id. Distinctia e tot ce desparte migrarea asta
+  // de o colonie care se incarca infometata: `0` ca VALOARE ar pune fiecare pion
+  // sub pragul critic, iar `nevoieMax` pentru toti i-ar porni in lockstep.
+  //
+  // Si cititorul de nevoi accepta `k === 0`, spre deosebire de cel de
+  // `prioPersonala`, care refuza `k < 1`: copiat verbatim, ar fi refuzat fiecare
+  // save de schema 4, inclusiv fixtura golden.
+  4: (d) => {
+    const a = (d.agents as Record<string, unknown> | undefined) ?? {}
+    const n = (a.count as number | undefined) ?? 0
+    return {
+      ...d,
+      agents: {
+        ...a,
+        nevoiFeluri: a.nevoiFeluri ?? 0,
+        jobConsumat: a.jobConsumat ?? new Array<number>(n).fill(0),
+      },
+    }
+  },
   3: (d) => {
     const a = (d.agents as Record<string, unknown> | undefined) ?? {}
     const n = (a.count as number | undefined) ?? 0
@@ -316,7 +344,7 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
     return refuse(Reason.CAPACITATE_DEPASITA, { camp: 'agents.count', valoare: String(count), maxim: String(capacity) })
   }
 
-  const agents = makeAgentStore(capacity, rules.personalPriorityDefault, rules.jobAvoidSlots)
+  const agents = makeAgentStore(capacity, rules.personalPriorityDefault, rules.jobAvoidSlots, rules.nevoieMax)
   agents.count = count
   agents.id.set(agentsRaw.id as number[])
   agents.x.set(agentsRaw.x as number[])
@@ -332,7 +360,7 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
   if (agentsRaw.hasGoal) agents.hasGoal.set(agentsRaw.hasGoal as number[])
   if (agentsRaw.progresMm) agents.progresMm.set(agentsRaw.progresMm as number[])
   // Save-urile de schema 1 n-au job: campurile raman la zero, adica „fara job".
-  for (const camp of ['jobKind', 'jobId', 'jobTarget', 'jobStep', 'jobProgres', 'jobWorkX', 'jobWorkY', 'jobWorkZ', 'jobIncercari', 'jobDest', 'jobCantitate', 'jobEfect', 'caraKind', 'caraCantitate', 'scanLaTick'] as const) {
+  for (const camp of ['jobKind', 'jobId', 'jobTarget', 'jobStep', 'jobProgres', 'jobWorkX', 'jobWorkY', 'jobWorkZ', 'jobIncercari', 'jobDest', 'jobCantitate', 'jobEfect', 'caraKind', 'caraCantitate', 'jobConsumat', 'scanLaTick'] as const) {
     const v = agentsRaw[camp] as number[] | undefined
     if (!v) continue
     if (v.length !== count) return refuse(Reason.VALOARE_INVALIDA, { camp: `agents.${camp}`, lungime: v.length, asteptat: count })
@@ -376,6 +404,38 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
     const kk = Math.min(k, CATEGORII)
     for (let i = 0; i < count; i++) {
       for (let c = 0; c < kk; c++) agents.prioPersonala[i * CATEGORII + c] = pp[i * k + c]!
+    }
+  }
+
+  // Nevoile. Acelasi tipar de largire ca `prioPersonala`, cu O DIFERENTA care
+  // conteaza: pasul poate fi ZERO. Un save de schema 4 n-are nicio coloana de
+  // nevoi, iar validatorul lui `prioPersonala` refuza `k < 1` — copiat verbatim,
+  // ar fi refuzat fiecare save de dinaintea taieturii asteia.
+  //
+  // Coloanele care LIPSESC nu se umplu nici cu zero, nici cu maximul: se umplu
+  // DEFAZAT din id. Zero ar incarca o colonie deja sub pragul critic; maximul
+  // i-ar porni pe toti in acelasi punct al ciclului, si atunci toata asezarea ar
+  // flamanzi in aceeasi fereastra, la nesfarsit — valul nu s-ar sparge niciodata.
+  {
+    const k = (agentsRaw.nevoiFeluri as number | undefined) ?? 0
+    if (!Number.isInteger(k) || k < 0 || k > NEVOI) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: 'agents.nevoiFeluri', valoare: k, min: 0, max: NEVOI })
+    }
+    const nv = agentsRaw.nevoi as number[] | undefined
+    const nr = agentsRaw.nevoieReincercaLaTick as number[] | undefined
+    if (k > 0 && (!nv || nv.length !== count * k)) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: 'agents.nevoi', lungime: nv?.length ?? -1, asteptat: count * k })
+    }
+    if (k > 0 && nr && nr.length !== count * k) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: 'agents.nevoieReincercaLaTick', lungime: nr.length, asteptat: count * k })
+    }
+    for (let i = 0; i < count; i++) {
+      for (let n = 0; n < NEVOI; n++) {
+        agents.nevoi[i * NEVOI + n] = n < k
+          ? nv![i * k + n]!
+          : nevoiaInitiala(agents.id[i]!, n, rules.nevoieMax, rules.nevoieFazaPas, rules.nevoieFazaSpan)
+        agents.nevoieReincercaLaTick[i * NEVOI + n] = n < k && nr ? nr[i * k + n]! : 0
+      }
     }
   }
 

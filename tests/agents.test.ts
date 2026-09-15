@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { createWorld, tick } from '../src/sim/world.ts'
-import { Faction } from '../src/sim/state.ts'
+import { Faction, FelJob, NEVOI, pasDeMers } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { cellOf, clearPath, lastAgentReport } from '../src/sim/agents.ts'
 import { Reason } from '../src/sim/result.ts'
@@ -58,6 +58,17 @@ test('ACCEPTANTA: 40 de agenti, 100.000 de tickuri, zero blocaje permanente', ()
 
   const ticksPerCelula = Math.ceil(1000 / R.agentStepMm)
   const PRAG = R.maxPathCells * ticksPerCelula + R.replanCooldownTicks * 4
+  // De la taietura 3, statul pe loc are si un motiv LEGITIM: pionul mananca sau
+  // doarme. Un somn complet dureaza ceil(nevoieMax / odihnaPeTicDeNevoie) tici de
+  // nevoie, deci mii de tickuri — de zeci de ori peste pragul de blocaj, care a
+  // fost calculat cand statul pe loc insemna un singur lucru.
+  //
+  // Garda NU se relaxeaza, se DESPARTE in doua. Tickurile petrecute chiar
+  // consumand nevoia nu intra in masuratoarea de blocaj; in schimb DURATA unui
+  // job de nevoie primeste plafonul ei, calculat din aceleasi reguli. Asa, un
+  // somn care nu s-ar termina niciodata pica la a doua asertiune in loc sa treaca
+  // pe sub prima.
+  const PRAG_NEVOIE = (Math.ceil(R.nevoieMax / R.odihnaPeTicDeNevoie) + 1) * R.nevoiTicks + R.maxPathCells * ticksPerCelula
 
   const ultimaMiscare = new Int32Array(AGENTI)
   const ultimaCelulaX = new Int32Array(AGENTI)
@@ -72,14 +83,39 @@ test('ACCEPTANTA: 40 de agenti, 100.000 de tickuri, zero blocaje permanente', ()
   let sosiri = 0
   let pauzaMaxima = 0
   let agentPauzat = -1
+  // Durata jobului de nevoie in curs, per pion: jobId-ul lui si tickul de start.
+  const nevoieJobId = new Int32Array(AGENTI)
+  const nevoieDeLa = new Int32Array(AGENTI)
+  let nevoieMaxima = 0
+  let agentInNevoie = -1
+  let tickuriDeNevoie = 0
   for (let t = 0; t < TICKURI; t++) {
     tick(w, R)
     sosiri += lastAgentReport().sosiri
     for (let i = 0; i < AGENTI; i++) {
       if (w.agents.alive[i] === 0) continue
+      const fel = w.agents.jobKind[i]!
+      const inNevoie = fel === FelJob.MANANCA || fel === FelJob.DOARME
+      if (inNevoie) {
+        tickuriDeNevoie++
+        if (nevoieJobId[i] !== w.agents.jobId[i]) {
+          nevoieJobId[i] = w.agents.jobId[i]!
+          nevoieDeLa[i] = w.tick
+        }
+        const durata = w.tick - nevoieDeLa[i]!
+        if (durata > nevoieMaxima) { nevoieMaxima = durata; agentInNevoie = i }
+      } else {
+        nevoieJobId[i] = 0
+      }
       const cx = cellOf(w.agents.x[i]!)
       const cy = cellOf(w.agents.y[i]!)
       const cz = w.agents.z[i]!
+      // Cine chiar consuma o nevoie (pasul de OPRIRE al jobului) nu e „nemiscat":
+      // e ocupat. Pe drumul SPRE mancare sau pat se aplica pragul normal.
+      if (inNevoie && !pasDeMers(w.agents.jobStep[i]!)) {
+        ultimaMiscare[i] = w.tick
+        continue
+      }
       if (cx === ultimaCelulaX[i] && cy === ultimaCelulaY[i] && cz === ultimaCelulaZ[i]) {
         const pauza = w.tick - ultimaMiscare[i]!
         if (pauza > pauzaMaxima) { pauzaMaxima = pauza; agentPauzat = i }
@@ -96,6 +132,23 @@ test('ACCEPTANTA: 40 de agenti, 100.000 de tickuri, zero blocaje permanente', ()
   assert.ok(
     pauzaMaxima <= PRAG,
     `agentul ${agentPauzat} a stat nemiscat ${pauzaMaxima} tickuri (prag ${PRAG}) — blocaj permanent`,
+  )
+  // Fixtura n-are mancare si n-are paturi, deci pionii dorm pe jos si foamea
+  // ramane nerezolvata — exact cazul in care o bucla intrerupe/reia ar fi cea mai
+  // probabila. Daca nimeni n-ar ajunge sa doarma, asertiunea de mai jos ar fi
+  // VIDA, deci se cere intai sa existe ce masura.
+  assert.ok(tickuriDeNevoie > 10_000, `doar ${tickuriDeNevoie} tickuri-pion de nevoie: asertiunea de durata n-ar masura nimic`)
+  assert.ok(
+    nevoieMaxima <= PRAG_NEVOIE,
+    `agentul ${agentInNevoie} a stat ${nevoieMaxima} tickuri intr-un singur job de nevoie (prag ${PRAG_NEVOIE})`,
+  )
+  // Si nevoia care NU se poate rezolva nu are voie sa buclese: racirea o tine
+  // departe `nevoieRetryTicks`, deci intr-o rulare de 100.000 de tickuri sunt cel
+  // mult atatea reincercari cate incap, per pion si per nevoie.
+  const maxReincercari = AGENTI * NEVOI * Math.ceil(TICKURI / R.nevoieRetryTicks)
+  assert.ok(
+    w.ratiune.nevoiNerezolvate <= maxReincercari,
+    `${w.ratiune.nevoiNerezolvate} nevoi nerezolvate, peste plafonul de ${maxReincercari} pe care il impune racirea — bucla`,
   )
 })
 

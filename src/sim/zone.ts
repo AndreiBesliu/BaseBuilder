@@ -92,6 +92,20 @@ export interface IndexZone {
   readonly paturiLibere: number[]
   /** Sloturile itemelor care AU unde sa fie mutate (o zona strict mai buna decat locul lor), in ordinea slotului. */
   readonly deMutat: number[]
+  /**
+   * Sloturile mormanelor COMESTIBILE (`nutritie[fel] > 0`), in ordinea slotului.
+   *
+   * Sta aici, si nu intr-o structura proprie, ca sa mosteneasca exact garantia
+   * lui `deMutat`: orice item care apare sau dispare murdareste deja indexul
+   * (`asazaItem` si `iaDinItem` o fac), deci lista nu poate ramane stale fara ca
+   * `deMutat` sa ramana si el. O a doua structura ar fi insemnat a doua lista de
+   * locuri potrivite de tinut minte — exact ce a costat la taietura 2.
+   *
+   * Fara ea, fiecare cautare de mancare ar fi O(toate mormanele): cu 3000 de
+   * mormane de piatra si unul de hrana, un pion flamand ar plati 3000 de pasi ca
+   * sa gaseasca singura masa din asezare.
+   */
+  readonly comestibile: number[]
   /** Cate iteme zac pe jos (nu intr-o zona) fara nicio zona care sa le primeasca. Pentru cauza pe pion. */
   peJosFaraDepozit: number
   /** Cate reconstructii s-au facut de la pornire. Pentru masuratori. */
@@ -153,6 +167,7 @@ export function makeZoneStore(capacity: number, cellCapacity: number): ZoneStore
       depoziteOrdonate: [],
       paturiLibere: [],
       deMutat: [],
+      comestibile: [],
       peJosFaraDepozit: 0,
       reconstructii: 0,
       pasi: 0,
@@ -388,10 +403,14 @@ export function indexZone(w: World, rules: Rules): IndexZone {
   }
 
   ix.deMutat.length = 0
+  ix.comestibile.length = 0
   ix.peJosFaraDepozit = 0
   for (let i = 0; i < it.count; i++) {
     ix.pasi++
     if (it.alive[i] === 0) continue
+    // Comestibilele, in aceeasi trecere: lista mosteneste exact garantia lui
+    // `deMutat`, fara sa ceara un al doilea loc de tinut minte.
+    if (rules.nutritie[it.kind[i]!]! > 0) ix.comestibile.push(i)
     const prioLoc = prioritateaLocului(s, it.wx[i]!, it.wy[i]!, it.z[i]!)
     const cant = Math.min(it.cantitate[i]!, rules.haulCarryMax)
     if (ix.maxPrioLibera[it.kind[i]!]! > prioLoc && incapeUndeva(s, ix, it.kind[i]!, cant, prioLoc)) {
