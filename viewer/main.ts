@@ -27,7 +27,7 @@ import { Ballast, Bisector, checkGuards, clockGranularityMs, FrameProbe, heapMB 
 import { createRegionOverlay, rebuildRegionOverlay } from './overlay-regions.ts'
 import { createAmprentaOverlay, FORME, rebuildAmprentaOverlay } from './overlay-amprenta.ts'
 import { createDensePanel, densePanelReport, PANEL_HZ, tickDensePanel } from './panel-dens.ts'
-import { createRegions, markDirty, rebuildDirty } from '../src/sim/regions.ts'
+import { rebuildDirty } from '../src/sim/regions.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
 import { meshHeightfield } from '../src/render/heightfield.ts'
 import { createAgentLayer, spawnNear, stepSim, updateAgentLayer } from './agenti.ts'
@@ -532,7 +532,14 @@ applySlice()
 // Doua zone cu aceeasi culoare sunt, dupa graf, mutual accesibile. Culori diferite
 // inseamna ca NU exista drum. Un zid care inchide o camera se vede instantaneu.
 
-const regions = createRegions()
+// UN SINGUR store de regiuni: chiar cel pe care merg agentii.
+//
+// Pana acum viewerul isi facea al doilea store, doar pentru overlay. Consecinta e
+// tocmai ce trebuia sa previna K13: overlay-ul arata VERDE exact acolo unde
+// simularea era rupta. Desenai o camera legata frumos, in timp ce agentii vedeau
+// `NO_REGION` in ea, fiindca nimeni nu murdarea storeul LOR. Un admin vizual care
+// se uita la altceva decat sistemul e mai rau decat lipsa lui.
+const regions = world.regions
 const regionOverlay = createRegionOverlay()
 scene.add(regionOverlay.group)
 
@@ -641,8 +648,9 @@ renderer.domElement.addEventListener('click', (ev) => {
   // Deocamdata regiunile sunt o unealta de inspectie, deci asta e corect. Cand vor
   // veni agentii vor cere intretinere permanenta, si ATUNCI reconstructia
   // incrementala devine obligatorie — nu inainte, si nu mai tarziu.
+  // Murdarirea o face acum `applyCommand`; aici ramane doar reconstructia si
+  // redesenarea, si numai cand overlay-ul e vizibil.
   if (regionOverlay.visible) {
-    markDirty(regions, wx, wy, z, DEFAULT_RULES)
     rebuildDirty(world.terrain, regions, DEFAULT_RULES)
     refreshOverlay()
   }

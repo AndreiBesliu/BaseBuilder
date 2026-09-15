@@ -182,8 +182,53 @@ export interface RegionStore {
    * conteaza trece printr-o schimbare de teren, iar aia trece prin `rebuildDirty`,
    * care sterge de aici tot ce a dezlegat.
    */
+  /**
+   * Pentru fiecare regiune, o ANCORA stabila: `blockKey * 256 + indiceCelulaMinima`.
+   *
+   * Id-urile de regiuni vin dintr-un contor global, deci depind de ORDINEA in
+   * care s-au calculat blocurile — adica de istorie. Cat timp cautarea peste
+   * regiuni departaja pe id si isi sorta vecinii pe id, doua lumi cu acelasi
+   * continut dar istorii diferite gaseau coridoare diferite. Ancora depinde numai
+   * de GEOMETRIE: ce bloc, si care e prima celula a componentei in ordinea fixa
+   * de parcurgere a blocului. E aceeasi in orice ordine ar fi fost calculate
+   * blocurile.
+   */
+  /** Se incrementeaza la fiecare reconstructie. Cheie de cache pentru cine acopera. */
+  epoca: number
+  readonly ancora: Map<number, number>
   readonly legate: Set<number>
   readonly dirty: Set<number>
+}
+
+/**
+ * Reconstruieste un store din EXTINDEREA lui, salvata.
+ *
+ * CARE blocuri sunt calculate e istorie — depinde de pe unde au umblat agentii —
+ * iar CONTINUTUL lor e o functie pura de teren. Extinderea e deci PERSISTED si
+ * continutul DERIVED. Cat timp extinderea nu se salva, o lume reincarcata avea un
+ * graf mai sarac decat cea continua, si de acolo alte coridoare si alte drumuri.
+ *
+ * Id-urile de regiuni ies in ALTA ordine decat in lumea continua, fiindca aici
+ * blocurile se calculeaza sortat. Nu conteaza: cautarea peste regiuni departajeaza
+ * pe ANCORA geometrica, nu pe id.
+ */
+export function restoreRegions(
+  t: Terrain,
+  blocuri: readonly number[],
+  legate: readonly number[],
+  rules: Rules,
+): RegionStore {
+  const s = createRegions()
+  for (const key of [...blocuri].sort((a, b) => a - b)) {
+    const { bx, by, z } = decodeBlockKey(key)
+    ensureBlock(t, s, bx, by, z, rules)
+  }
+  for (const key of [...legate].sort((a, b) => a - b)) {
+    const { bx, by, z } = decodeBlockKey(key)
+    linkBlock(t, s, bx, by, z, rules)
+  }
+  relabel(s)
+  return s
 }
 
 export function createRegions(): RegionStore {
@@ -194,6 +239,8 @@ export function createRegions(): RegionStore {
     regionBlock: new Map(),
     component: new Int32Array(0),
     nextId: 0,
+    epoca: 0,
+    ancora: new Map(),
     legate: new Set(),
     dirty: new Set(),
   }
@@ -258,7 +305,11 @@ function relabel(s: RegionStore): void {
 
   // Regiunile vii se CITESC din index, nu se cauta prin celule. Diferenta e intre
   // O(regiuni) si O(celule rezidente) — la discul complet, intre mii si milioane.
-  const vii = [...s.regionBlock.keys()].sort((a, b) => a - b)
+  // Sortarea e pe ANCORA, nu pe id: id-urile vin dintr-un contor global, deci din
+  // ordinea istorica a calculului. Ordinea asta decide ce eticheta primeste
+  // fiecare componenta, iar doua lumi cu acelasi continut trebuie sa primeasca
+  // aceleasi etichete, nu doar o partitie izomorfa.
+  const vii = [...s.regionBlock.keys()].sort((x, y) => (s.ancora.get(x) ?? x) - (s.ancora.get(y) ?? y))
   for (const r of vii) s.component[r] = -2 // exista, inca ne-etichetat
 
   const coada: number[] = []
@@ -310,6 +361,9 @@ function computeBlock(t: Terrain, s: RegionStore, key: number, bx: number, by: n
     if (walk[i] === 0 || cells[i] !== NO_REGION) continue
     const id = s.nextId++
     s.regionBlock.set(id, key)
+    // `i` e prima celula a componentei in ordinea de parcurgere a blocului, deci
+    // cea mai mica din ea: o ancora stabila, independenta de ordinea istorica.
+    s.ancora.set(id, key * 256 + i)
 
     let head = 0
     let tail = 0
@@ -679,7 +733,7 @@ export function rebuildDirty(t: Terrain, s: RegionStore, rules: Rules): number {
     const cells = s.cells.get(key)!
     for (let i = 0; i < BLOCK_CELLS; i++) {
       const r = cells[i]!
-      if (r !== NO_REGION) s.regionBlock.delete(r)
+      if (r !== NO_REGION) { s.regionBlock.delete(r); s.ancora.delete(r) }
     }
     s.cells.delete(key)
     s.legate.delete(key)
@@ -698,5 +752,6 @@ export function rebuildDirty(t: Terrain, s: RegionStore, rules: Rules): number {
   }
 
   relabel(s)
+  s.epoca++
   return murdare.length
 }

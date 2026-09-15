@@ -16,7 +16,10 @@ import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import type { World, FactionId } from './state.ts'
 import { slotOf } from './state.ts'
-import { clearPath } from './agents.ts'
+import { cellOf, clearPath } from './agents.ts'
+import type { Rules } from './content.ts'
+import { DEFAULT_RULES } from './content.ts'
+import { markDirty } from './regions.ts'
 import type { MaterialId } from './terrain/chunk.ts'
 import { CHUNK_GRID, dig, fill, inWorld, setFocus } from './terrain/terrain.ts'
 
@@ -37,7 +40,14 @@ export interface LoggedCommand {
   readonly cmd: Command
 }
 
-export function applyCommand(w: World, cmd: Command): Outcome<number> {
+/**
+ * Singura poarta prin care se schimba lumea.
+ *
+ * `rules` are implicit, ca `tick`. Nu e decor: `markDirty` are nevoie de
+ * `agentHeadroomM` si `maxStepM` ca sa stie cate niveluri atinge o editare, iar
+ * alea sunt continut, nu constante.
+ */
+export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULES): Outcome<number> {
   switch (cmd.kind) {
     case 'spawnAgent': {
       const a = w.agents
@@ -75,6 +85,9 @@ export function applyCommand(w: World, cmd: Command): Outcome<number> {
       a.hasGoal[slot] = 0
       a.progresMm[slot] = 0
       clearPath(w.paths, slot)
+      // Si racirea. Fara asta, un slot reutilizat mostenea racirea mortului si
+      // agentul nou statea degeaba pana la un tick pe care nu l-a trait nimeni.
+      w.paths.nextReplanTick[slot] = 0
       return accept(id)
     }
 
@@ -108,14 +121,43 @@ export function applyCommand(w: World, cmd: Command): Outcome<number> {
       return accept(0)
     }
 
+    // Sapatul si ziditul MURDARESC graful de regiuni.
+    //
+    // Pana acum nu o faceau, si nimeni n-a observat: `markDirty` exista, era bine
+    // scris, si nu era chemat niciodata pe `w.regions`. Singurul apel din tot
+    // proiectul era in viewer, pe un AL DOILEA store, folosit doar de overlay si
+    // doar cand overlay-ul era vizibil. Consecinta: graful pe care merg agentii
+    // nu afla NICIODATA de sapaturile jucatorului. O camera sapata ramanea
+    // `NO_REGION` pe veci, deci nimeni nu tintea in ea; un zid zidit ramanea
+    // marcat ca regiune valida, deci `findPath` pornea A*-uri pe promisiuni false
+    // — exact „FPS-ul scade cand construiesti un zid", pe care stratul de regiuni
+    // exista ca sa-l previna.
     case 'dig': {
       const out = dig(w.terrain, cmd.wx, cmd.wy, cmd.z)
-      return out.ok ? accept(0) : out
+      if (!out.ok) return out
+      markDirty(w.regions, cmd.wx, cmd.wy, cmd.z, rules)
+      return accept(0)
     }
 
     case 'fill': {
+      // Nu se zideste peste un om.
+      //
+      // Alternativa e sa-l ingropi: agentul ramane intr-o celula devenita solida,
+      // poarta din `stepAgents` nu-l mai scoate, iar singurul semnal pe care il
+      // produce e `INACCESIBIL` — un motiv care MINTE, fiindca problema nu e ca
+      // nu exista drum, ci ca pionul e in piatra. Un refuz explicit e si corect,
+      // si lizibil pentru jucator.
+      const a = w.agents
+      for (let i = 0; i < a.count; i++) {
+        if (a.alive[i] === 0) continue
+        if (a.z[i] !== cmd.z) continue
+        if (cellOf(a.x[i]!) !== cmd.wx || cellOf(a.y[i]!) !== cmd.wy) continue
+        return refuse(Reason.CELULA_OCUPATA, { id: a.id[i], wx: cmd.wx, wy: cmd.wy, z: cmd.z })
+      }
       const out = fill(w.terrain, cmd.wx, cmd.wy, cmd.z, cmd.material)
-      return out.ok ? accept(0) : out
+      if (!out.ok) return out
+      markDirty(w.regions, cmd.wx, cmd.wy, cmd.z, rules)
+      return accept(0)
     }
 
     default: {

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { runScenario, standardScenario } from '../src/harness/scenario.ts'
 import { hashWorld } from '../src/sim/hash.ts'
 import { advance, createWorld, liveAgentCount } from '../src/sim/world.ts'
+import { decode, encode } from '../src/sim/save.ts'
+import { find, NO_REGION } from '../src/sim/regions.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { Faction } from '../src/sim/state.ts'
 import { Reason } from '../src/sim/result.ts'
@@ -240,3 +242,86 @@ function peSol(seed: number, cati: number): World {
   }
   return w
 }
+
+/**
+ * Rularea scenariului standard, cu comenzile lui, pornind dintr-o lume data.
+ *
+ * Trebuie sa fie aceeasi functie si pentru rularea continua, si pentru cea de
+ * dupa incarcare — altfel compari doua lucruri diferite. Prima versiune a acestui
+ * harnasament uita sa aplice comenzile lumii INCARCATE si raporta „divergenta"
+ * exact la valorile lui N la care mai existau comenzi dupa tickul N. Harnasamentul
+ * era stricat, nu codul.
+ */
+function ruleazaScenariu(seed: number, agenti: number, tickuri: number, w0?: World): World {
+  const s = standardScenario(seed, Math.max(tickuri, 1), agenti)
+  const coada = [...(s.commands ?? [])]
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => (a.c.tick - b.c.tick) || (a.i - b.i))
+    .map((e) => e.c)
+  const w = w0 ?? createWorld(seed, DEFAULT_RULES)
+  let k = 0
+  while (k < coada.length && coada[k]!.tick < w.tick) k++
+  const tinta = w.tick + tickuri
+  while (w.tick < tinta) {
+    while (k < coada.length && coada[k]!.tick === w.tick) { applyCommand(w, coada[k]!.cmd, DEFAULT_RULES); k++ }
+    advance(w, 1)
+  }
+  return w
+}
+
+test('M5 pe scenariul REAL: N + save + load + N == 2N, cu tot cu comenzi', () => {
+  // Testul din saveload.test.ts foloseste o fixtura simpla si trece si cu doua
+  // mecanisme de determinism scoase. Asta e cel care le prinde, fiindca ruleaza
+  // scenariul standard — cel cu sapaturi, zidiri si agenti raspanditi pe 16 km.
+  //
+  // Cele doua mecanisme, si ce se intampla fara ele, masurat pe 72 de combinatii
+  // de (seed, agenti, N):
+  //   - departajarea pe ANCORA in coridorul de regiuni ... 8 divergente
+  //   - EXTINDEREA acoperirii, salvata .................. divergente pe toate
+  //     configuratiile din testul asta
+  for (const [seed, agenti, N] of [[12345, 40, 500], [777, 40, 250], [12345, 20, 400]] as const) {
+    const continuu = ruleazaScenariu(seed, agenti, 2 * N)
+
+    const intrerupt = ruleazaScenariu(seed, agenti, N)
+    const laSalvare = hashWorld(intrerupt)
+    const incarcat = decode(encode(intrerupt), DEFAULT_RULES)
+    assert.ok(incarcat.ok, 'incarcarea a esuat')
+    assert.equal(hashWorld(incarcat.value), laSalvare, `seed ${seed}: save/load a schimbat starea pe loc`)
+
+    ruleazaScenariu(seed, agenti, N, incarcat.value)
+    assert.equal(
+      hashWorld(incarcat.value), hashWorld(continuu),
+      `seed=${seed} agenti=${agenti} N=${N}: lumea incarcata a luat alt drum decat cea continua`,
+    )
+  }
+})
+
+test('o lume incarcata are ACELASI graf de regiuni ca cea continua', () => {
+  // Invariantul de sub testul de mai sus. Graful e DERIVED, deci nu intra in hash
+  // — ceea ce inseamna ca o divergenta a lui sta ascunsa pana se vede in pozitii,
+  // adica peste cateva tickuri si fara sa se stie de unde a venit.
+  const N = 400
+  const w = ruleazaScenariu(12345, 40, N)
+  const incarcat = decode(encode(w), DEFAULT_RULES)
+  assert.ok(incarcat.ok)
+
+  assert.ok(w.regions.cells.size > 500, `doar ${w.regions.cells.size} blocuri — fixtura e prea saraca`)
+  assert.equal(incarcat.value.regions.cells.size, w.regions.cells.size, 'alt numar de blocuri calculate')
+  assert.equal(incarcat.value.regions.legate.size, w.regions.legate.size, 'alt numar de blocuri legate')
+
+  // Si aceleasi componente, celula cu celula.
+  const amprenta = (s: typeof w.regions): string => {
+    const out: string[] = []
+    for (const key of [...s.keys].sort((a, b) => a - b)) {
+      const cells = s.cells.get(key)!
+      const linie: number[] = []
+      for (let i = 0; i < cells.length; i++) {
+        const r = cells[i]!
+        linie.push(r === NO_REGION ? -1 : find(s, r))
+      }
+      out.push(`${key}:${linie.join(',')}`)
+    }
+    return out.join('\n')
+  }
+  assert.equal(amprenta(incarcat.value.regions), amprenta(w.regions), 'componentele difera dupa incarcare')
+})

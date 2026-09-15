@@ -111,6 +111,15 @@ export function pathLength(p: Path): number {
 export class Coada {
   private f: number[] = []
   private cheie: number[] = []
+  /**
+   * Departajarea, separata de identitate.
+   *
+   * Pentru celule, cheia E pozitia, deci merge ca departajare. Pentru REGIUNI,
+   * cheia e un id venit dintr-un contor global — adica din istorie. Doua lumi cu
+   * acelasi continut si istorii diferite departajau altfel si gaseau coridoare
+   * diferite. Aici se paseaza ancora geometrica a regiunii.
+   */
+  private tie: number[] = []
 
   get size(): number {
     return this.f.length
@@ -119,24 +128,29 @@ export class Coada {
   clear(): void {
     this.f.length = 0
     this.cheie.length = 0
+    this.tie.length = 0
   }
 
   private maiMic(a: number, b: number): boolean {
-    return this.f[a]! < this.f[b]! || (this.f[a]! === this.f[b]! && this.cheie[a]! < this.cheie[b]!)
+    return this.f[a]! < this.f[b]! || (this.f[a]! === this.f[b]! && this.tie[a]! < this.tie[b]!)
   }
 
   private schimba(a: number, b: number): void {
     const tf = this.f[a]!
     const tc = this.cheie[a]!
+    const tt = this.tie[a]!
     this.f[a] = this.f[b]!
     this.cheie[a] = this.cheie[b]!
+    this.tie[a] = this.tie[b]!
     this.f[b] = tf
     this.cheie[b] = tc
+    this.tie[b] = tt
   }
 
-  push(f: number, cheie: number): void {
+  push(f: number, cheie: number, departajare: number = cheie): void {
     this.f.push(f)
     this.cheie.push(cheie)
+    this.tie.push(departajare)
     let i = this.f.length - 1
     while (i > 0) {
       const p = (i - 1) >> 1
@@ -152,6 +166,7 @@ export class Coada {
     this.schimba(0, ultim)
     this.f.pop()
     this.cheie.pop()
+    this.tie.pop()
 
     let i = 0
     for (;;) {
@@ -208,11 +223,18 @@ export function coridorDeRegiuni(s: RegionStore, dinRegiune: number, inRegiune: 
   const tinta = centruRegiune(s, inRegiune)
   if (!tinta) return null
 
+  // Departajarea se face pe ANCORA regiunii, nu pe id. Id-urile vin dintr-un
+  // contor global, deci din ordinea istorica a calculului; ancora depinde numai
+  // de geometrie. Fara asta, doua lumi cu acelasi continut si istorii diferite —
+  // de exemplu una continua si una reincarcata dintr-un save — gasesc coridoare
+  // diferite, si de acolo drumuri diferite si pozitii diferite.
+  const anc = (r: number): number => s.ancora.get(r) ?? r
+
   const g = new Map<number, number>([[dinRegiune, 0]])
   const dinCine = new Map<number, number>()
   const inchise = new Set<number>()
   coadaRegiuni.clear()
-  coadaRegiuni.push(0, dinRegiune)
+  coadaRegiuni.push(0, dinRegiune, anc(dinRegiune))
 
   let atinse = 0
   while (coadaRegiuni.size > 0) {
@@ -236,7 +258,8 @@ export function coridorDeRegiuni(s: RegionStore, dinRegiune: number, inRegiune: 
     const gCur = g.get(cur)!
     // determinism-ok: vecinii se sorteaza explicit inainte de parcurgere, tocmai
     // fiindca `Set` pastreaza ordinea de inserare si aia depinde de istoric.
-    for (const v of [...(s.adj.get(cur) ?? [])].sort((a, b) => a - b)) {
+    // Sortarea e pe ANCORA, din acelasi motiv ca departajarea din coada.
+    for (const v of [...(s.adj.get(cur) ?? [])].sort((x, y) => anc(x) - anc(y))) {
       const c1 = centruRegiune(s, cur)
       const c2 = centruRegiune(s, v)
       const pas = c1 && c2 ? manhattan(c1, c2) : REGION_SIZE
@@ -246,7 +269,7 @@ export function coridorDeRegiuni(s: RegionStore, dinRegiune: number, inRegiune: 
       g.set(v, nou)
       dinCine.set(v, cur)
       const c = centruRegiune(s, v)
-      coadaRegiuni.push(nou + (c ? manhattan(c, tinta) : 0), v)
+      coadaRegiuni.push(nou + (c ? manhattan(c, tinta) : 0), v, anc(v))
     }
   }
   return null

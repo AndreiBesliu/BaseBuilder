@@ -51,7 +51,7 @@ export function runScenario(s: Scenario): RunReport {
   for (let t = 0; t < s.ticks; t++) {
     while (next < queue.length && queue[next]!.tick === w.tick) {
       const entry = queue[next]!
-      const out = applyCommand(w, entry.cmd)
+      const out = applyCommand(w, entry.cmd, rules)
       if (!out.ok) refusals.push(`t=${entry.tick} ${entry.cmd.kind}: ${describe(out)}`)
       next++
     }

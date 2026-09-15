@@ -6,12 +6,42 @@ import { advance, createWorld } from '../src/sim/world.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { Faction, SCHEMA_VERSION } from '../src/sim/state.ts'
 import { Reason } from '../src/sim/result.ts'
+import { groundLevelM, materialAt, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
+import { isSolid } from '../src/sim/terrain/chunk.ts'
 
+/**
+ * Agenti asezati PE SOL.
+ *
+ * Prima versiune ii nastea la `z = 0`, iar solul de sub ei e la zeci de metri
+ * diferenta. Un agent in aer nu ajunge in nicio regiune, deci nu isi alege tinta,
+ * nu cere drum, nu trage din RNG si nu se misca. Masurat pe fixtura veche: dupa
+ * 2000 de tickuri, 0 din 12 agenti se mutasera, 0 trageri din fluxul `agents`,
+ * 0 drumuri, 0 chunk-uri promovate.
+ *
+ * Adica testul central al lui M5 — „1000 + load + 1000 == 2000" — compara doua
+ * lumi in care nu se intampla NIMIC. Nu poate deveni rosu. A stat asa de la
+ * felia 1, si a fost declarat in DEVLOG drept „dovedit ca no-op observabil".
+ */
 function populated(seed: number, n = 12) {
   const w = createWorld(seed)
-  for (let i = 0; i < n; i++) {
-    applyCommand(w, { kind: 'spawnAgent', x: i * 1300, y: i * 700, z: 0, faction: i % 4 === 0 ? Faction.JEFUITOR : Faction.ASEZARE })
+  let pusi = 0
+  for (let k = 1; k <= 8000 && pusi < n; k++) {
+    const wx = (k * 1237 + seed) % WORLD_CELLS
+    const wy = (k * 7919 + seed * 31) % WORLD_CELLS
+    const g = groundLevelM(w.terrain, wx, wy)
+    if (!g.ok) continue
+    const sus = materialAt(w.terrain, wx, wy, g.value)
+    if (!sus.ok || !isSolid(sus.value)) continue
+    const r = applyCommand(w, {
+      kind: 'spawnAgent',
+      x: wx * 1000 + 500,
+      y: wy * 1000 + 500,
+      z: g.value + 1,
+      faction: pusi % 4 === 0 ? Faction.JEFUITOR : Faction.ASEZARE,
+    })
+    if (r.ok) pusi++
   }
+  assert.equal(pusi, n, 'fixtura n-a reusit sa aseze toti agentii pe sol')
   return w
 }
 

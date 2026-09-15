@@ -90,14 +90,27 @@ export function hashWorld(w: World): string {
   h.ints(a.z, a.count)
   h.bytes(a.faction, a.count)
   h.bytes(a.alive, a.count)
-  // Tintele sunt PERSISTED, deci intra in hash. Drumurile NU: sunt derivate din
-  // tinta si teren, si daca ar intra, doua lumi identice ca CONTINUT ar parea
-  // diferite dupa cat de departe a apucat fiecare sa calculeze.
+  // Tintele sunt PERSISTED, deci intra in hash. Si DRUMURILE, de cand s-a
+  // dovedit ca nu sunt derivate: un A* nu are raspuns unic, deci doua lumi cu
+  // aceeasi pozitie si aceeasi tinta pot merge legitim pe rute diferite. Daca
+  // drumul n-ar intra in hash, divergenta aia ar sta ascunsa pana se vede in
+  // pozitii, adica dupa cateva tickuri si fara sa se stie de unde a venit.
   h.ints(a.goalX, a.count)
   h.ints(a.goalY, a.count)
   h.ints(a.goalZ, a.count)
   h.bytes(a.hasGoal, a.count)
   h.ints(a.progresMm, a.count)
+
+  // Drumurile: numai coada ramasa a fiecarui agent viu, in ordinea slotului.
+  const p = w.paths
+  for (let i = 0; i < a.count; i++) {
+    const len = p.len[i]!
+    const cur = p.cursor[i]!
+    const ramase = a.alive[i] === 0 || cur >= len ? 0 : len - cur
+    h.u32(ramase).u32(p.nextReplanTick[i]! >>> 0)
+    const baza = i * p.maxCells * 3
+    for (let c = 0; c < ramase * 3; c++) h.u32(p.cells[baza + cur * 3 + c]! >>> 0)
+  }
 
   // Terenul: NUMAI chunk-urile promovate. Cele ne-promovate sunt DERIVED — se
   // regenereaza identic din seed, deci n-au ce cauta in hash. Daca ar intra,

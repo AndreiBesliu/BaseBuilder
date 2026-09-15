@@ -1320,3 +1320,96 @@ niciunul.
 ## Task Completed
 
 142 de teste verzi. D20 se poate acum judeca uitându-te la ea.
+
+---
+
+## Task Started — recenzie adversarială peste tot ce am scris azi
+
+**Prompt:** „continua"
+**Model:** Claude Opus 5 · workflow cu 20 de agenți (6 dimensiuni + verificare pe două lentile)
+
+2361 de linii adăugate într-o sesiune, mare parte în `src/sim/`, de către cineva care deja greșise de
+trei ori în aceeași sesiune. Înainte să construiesc joburile peste ele, le-am dat pe mâna unor ochi
+independenți: **23 de constatări, 7 verificate adversarial, zero respinse.**
+
+### Un singur defect, văzut din cinci unghiuri
+
+**`markDirty` nu era chemat NICIODATĂ pe `w.regions`.** Funcția exista, era bine scrisă, avea un
+comentariu bun despre de ce supra-murdărește deliberat — și singurul ei apel din tot proiectul era în
+viewer, pe un **al doilea** store de regiuni, folosit doar de overlay, și doar când overlay-ul era
+vizibil.
+
+Consecințele, toate permanente și toate tăcute:
+
+| ce făcea jucătorul | ce se întâmpla |
+|---|---|
+| săpa o cameră | rămânea `NO_REGION` pe veci; niciun agent nu o ținea drept țintă și nu intra în ea |
+| zidea un perete | celula rămânea marcată ca regiune validă; `findPath` pornea A*-uri pe promisiuni false |
+| zidea în fața unui pion | pionul mergea mai departe pe drumul vechi, **prin piatră** |
+| zidea peste un pion | pionul rămânea îngropat pe viață, raportând `INACCESIBIL` — un motiv care minte |
+| deschidea overlay-ul de regiuni | vedea **verde exact acolo unde simularea era ruptă** |
+
+Ultima e cea mai urâtă: adminul vizual care trebuia să prindă exact genul ăsta de defect se uita la
+alt obiect decât sistemul. K13 din registrul de riscuri spune „n-am overlay de debug pentru regiuni"
+ca semnal de pericol; aveam unul, și arăta altceva.
+
+**Reparat:** `dig`/`fill` murdăresc graful; `rebuildDirty` se cheamă necondiționat (varianta cu
+`if (ceva)` era cod mort — condiția devenea adevărată doar când un agent era în afara unei regiuni,
+ceea ce în regim stabil nu se întâmplă); `avanseaza` re-validează terenul la fiecare pas; `fill`
+**refuză** peste un om, cu `CELULA_OCUPATA` și id-ul lui; viewerul folosește **un singur** store.
+
+### Invariantul central era rupt, și garda lui era oarbă
+
+„1000 de tickuri + save + load + 1000 == 2000" — testul central al lui M5 — trecea. Fixtura lui
+năștea agenții la `z = 0`, în aer. Măsurat pe ea: după 2000 de tickuri, **0 din 12 agenți se
+mutaseră, 0 trageri de RNG, 0 drumuri.** Poarta compara două lumi în care nu se întâmpla nimic.
+Aceeași clasă de defect pe care o reparasem azi în `standardScenario` — și n-am verificat cealaltă
+fixtură.
+
+Cu fixtura reparată, invariantul pică. Trei cauze, fiecare reală:
+
+1. **Drumul era clasificat greșit.** Antetul lui `agents.ts` scria, cu argument: *„se recalculează
+   din (poziție, țintă, teren), deci e TRANSIENT"*. Propoziția e **falsă** — un A* nu are răspuns
+   unic. Un agent care își reface drumul din poziția lui curentă alege, legitim, altă rută la fel de
+   scurtă decât sufixul celei vechi. Drumul e **PERSISTED**.
+2. **Coridorul departaja pe id-ul de regiune**, iar id-urile vin dintr-un contor global — adică din
+   ordinea istorică a calculului. Acum departajează pe o **ancoră geometrică** (`bloc × 256 + prima
+   celulă a componentei), care nu depinde de ordine. La fel și etichetele de componentă din `relabel`.
+3. **Extinderea acoperirii nu se salva.** *Care* blocuri sunt calculate e istorie; *conținutul* lor e
+   funcție pură de teren. Extinderea e PERSISTED, conținutul DERIVED.
+
+Rezultat: invariantul ține pe scenariul standard, pe toate configurațiile încercate.
+
+### Și încă o greșeală a mea, din aceeași familie
+
+Am „dovedit" la un moment dat, pe 144 de combinații, că extinderea acoperirii **nu** e necesară — și
+am scos-o. Testul a picat imediat cu 5 divergențe. Mutația cu care măsurasem golea `blocuri: []` dar
+lăsa `legate` salvată, iar `restoreRegions` reconstruia acoperirea din **ea**. Verificasem că
+*fișierul* s-a schimbat, nu că *mecanismul* s-a oprit.
+
+Exact capcana pe care mi-o notasem în memorie acum câteva ore. A doua oară în aceeași zi.
+
+### Ce s-a măsurat
+
+- acoperirea se stabilizează la **4730 de blocuri**, cost plat
+- tickul: **63 µs** la 40 de agenți pe 100.000 de tickuri (era 32; diferența e re-validarea terenului
+  la fiecare pas și reconstrucția necondiționată)
+- hash de referință: `555d90da` → `58fdcb51`
+- **148 de teste**, de la 142
+
+O încercare intermediară, abandonată: asigurarea acoperirii pentru *fiecare* agent la *fiecare* tick,
+ca să devină funcție de poziții. Măsurat: acoperirea crește nemărginit — 124.000 de blocuri la 20.000
+de tickuri, cu costul dublându-se la fiecare 10.000 — iar testul de acceptanță a trecut de la 7
+secunde la peste 578. Acumularea e **necesară** ca să fie ieftin; ea trebuia făcută reproductibilă,
+nu eliminată.
+
+### Mutațiile
+
+Fiecare fix are acum o gardă, și fiecare gardă a fost probată prin mutație: `dig` fără `markDirty`,
+`fill` fără refuz, `avanseaza` fără re-validare, drumurile nesalvate, extinderea nereconstruită,
+ancora înlocuită cu id-ul, etichetele date iar pe id. **Toate șapte pică testul care le apără.**
+
+## Task Completed
+
+148 de teste verzi. Rămân 16 constatări neverificate din recenzie, majoritatea despre teste care nu
+testează — următoarea bucată.

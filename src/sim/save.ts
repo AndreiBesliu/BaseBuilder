@@ -15,11 +15,13 @@
 import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import type { RngState } from './rng.ts'
-import type { RngStreamName, World } from './state.ts'
+import type { AgentStore, RngStreamName, World } from './state.ts'
 import { makeAgentStore, MM_PER_CELL, RNG_STREAMS, SCHEMA_VERSION } from './state.ts'
-import { createRegions } from './regions.ts'
+import { createRegions, restoreRegions } from './regions.ts'
 import { makePathStore } from './agents.ts'
+import type { PathStore } from './agents.ts'
 import { DEFAULT_RULES } from './content.ts'
+import type { Rules } from './content.ts'
 import { runCount } from './terrain/chunk.ts'
 import { createTerrain, ensureChunk, inWorld, WORLD_CELLS } from './terrain/terrain.ts'
 
@@ -72,6 +74,15 @@ export function encode(w: World): string {
           }),
       },
       rng,
+      // Extinderea acoperirii de regiuni: CARE blocuri sunt calculate, si care
+      // sunt legate. Continutul nu se salveaza — e o functie pura de teren. Dar
+      // care blocuri sunt e ISTORIE, si fara ea o lume reincarcata capata un graf
+      // mai sarac decat cea continua: alte coridoare, alte drumuri, alte pozitii.
+      // Cateva zeci de kiloocteti, langa megaoctetii de teren promovat.
+      regiuni: {
+        blocuri: [...w.regions.keys],
+        legate: [...w.regions.legate].sort((a, b) => a - b),
+      },
       agents: {
         count: a.count,
         capacity: a.capacity,
@@ -83,12 +94,22 @@ export function encode(w: World): string {
         faction: Array.from(a.faction.subarray(0, a.count)),
         alive: Array.from(a.alive.subarray(0, a.count)),
         // Tinta e PERSISTED: fara ea, un save reincarcat ar trimite oamenii in
-        // alta parte decat mergeau. Drumul NU se salveaza — se recalculeaza.
+        // alta parte decat mergeau. Si DRUMUL e persistat, din acelasi motiv —
+        // vezi antetul lui agents.ts.
         goalX: Array.from(a.goalX.subarray(0, a.count)),
         goalY: Array.from(a.goalY.subarray(0, a.count)),
         goalZ: Array.from(a.goalZ.subarray(0, a.count)),
         hasGoal: Array.from(a.hasGoal.subarray(0, a.count)),
         progresMm: Array.from(a.progresMm.subarray(0, a.count)),
+        // Numai coada ramasa, de la cursor incolo. La incarcare cursorul e zero.
+        drumuri: Array.from({ length: a.count }, (_, i) => {
+          const len = w.paths.len[i]!
+          const cur = w.paths.cursor[i]!
+          if (a.alive[i] === 0 || cur >= len) return []
+          const baza = i * w.paths.maxCells * 3
+          return Array.from(w.paths.cells.subarray(baza + cur * 3, baza + len * 3))
+        }),
+        nextReplanTick: Array.from(w.paths.nextReplanTick.subarray(0, a.count)),
       },
     },
   }
@@ -101,7 +122,33 @@ const MIGRATIONS: Record<number, (data: Record<string, unknown>) => Record<strin
   // 1: (d) => ({ ...d, campNou: 0 }),
 }
 
-export function decode(text: string): Outcome<World> {
+/**
+ * Marcheaza fiecare agent viu ca avand nevoie de un drum refacut, nu re-planificat.
+ *
+ * Distinctia conteaza: plafonul de re-planificari exista ca sa nu porneasca toata
+ * lumea o cautare in acelasi tick. La incarcare insa exact asta trebuie sa se
+ * intample, fiindca drumurile sunt TRANSIENT si dispar toate deodata. Orice
+ * plafon pe reconstructie face ca ea sa coste tickuri pe care rularea continua nu
+ * le plateste, iar diferenta ajunge in pozitii — care sunt PERSISTED.
+ */
+function incarcaDrumuri(p: PathStore, agents: AgentStore, raw: unknown): Outcome<PathStore> {
+  const drumuri = (raw as { drumuri?: number[][]; nextReplanTick?: number[] } | undefined) ?? {}
+  if (drumuri.nextReplanTick) p.nextReplanTick.set(drumuri.nextReplanTick)
+  const lista = drumuri.drumuri
+  if (!lista) return accept(p) // save mai vechi: agentii pornesc fara drum
+  for (let i = 0; i < agents.count && i < lista.length; i++) {
+    const d = lista[i] ?? []
+    if (d.length % 3 !== 0) return refuse(Reason.VALOARE_INVALIDA, { camp: `drumuri[${i}]`, lungime: d.length })
+    const celule = d.length / 3
+    if (celule > p.maxCells) return refuse(Reason.CAPACITATE_DEPASITA, { camp: `drumuri[${i}]`, valoare: String(celule), maxim: p.maxCells })
+    p.cells.set(d, i * p.maxCells * 3)
+    p.len[i] = celule
+    p.cursor[i] = 0
+  }
+  return accept(p)
+}
+
+export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<World> {
   let env: Envelope
   try {
     env = JSON.parse(text) as Envelope
@@ -192,6 +239,16 @@ export function decode(text: string): Outcome<World> {
     }
   }
 
+  const drumuri = incarcaDrumuri(makePathStore(capacity, rules.maxPathCells), agents, agentsRaw)
+  if (!drumuri.ok) return drumuri
+
+  // Extinderea acoperirii. Un save mai vechi n-o are: atunci se porneste gol si se
+  // reconstruieste lene, ca inainte.
+  const rRaw = data.regiuni as { blocuri?: number[]; legate?: number[] } | undefined
+  const regiuni = rRaw && Array.isArray(rRaw.blocuri) && rRaw.blocuri.length > 0
+    ? restoreRegions(terrain, rRaw.blocuri, rRaw.legate ?? [], rules)
+    : createRegions()
+
   return accept({
     schema: SCHEMA_VERSION,
     seed,
@@ -199,11 +256,8 @@ export function decode(text: string): Outcome<World> {
     nextId: data.nextId as number,
     rng,
     agents,
-    // DERIVED si TRANSIENT: nu vin din fisier, se construiesc goale. Regiunile se
-    // recalculeaza la primul tick, din pozitiile agentilor — care VIN din fisier,
-    // deci acoperirea ramane o functie de starea persistata.
-    regions: createRegions(),
-    paths: makePathStore(capacity, DEFAULT_RULES.maxPathCells),
+    regions: regiuni,
+    paths: drumuri.value,
     // DERIVED de cand marimea lumii e o constanta a hartii macro. Un save vechi
     // are inca `data.bounds` scris; se ignora deliberat — daca l-as citi, un save
     // facut inainte de corectie ar readuce cutia de 256 m in lumea incarcata.

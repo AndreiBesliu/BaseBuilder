@@ -22,8 +22,27 @@
  * ## Ce e persistat si ce nu
  *
  * **Tinta** unui agent e stare reala: fara ea, un save reincarcat ar trimite
- * oamenii in alta parte. **Drumul** nu e: se recalculeaza din (pozitie, tinta,
- * teren), deci e TRANSIENT si nu intra nici in save, nici in hash.
+ * oamenii in alta parte.
+ *
+ * **Drumul e si el stare reala**, si prima versiune a acestui fisier spunea
+ * contrariul: „se recalculeaza din (pozitie, tinta, teren), deci e TRANSIENT".
+ * Propozitia aia e FALSA, si nu putin — un A* nu are un raspuns unic. Pentru
+ * aceeasi pereche (pozitie, tinta) exista de obicei mai multe drumuri la fel de
+ * scurte, iar care dintre ele iese depinde de punctul din care a pornit cautarea.
+ * Un agent care isi refacea drumul din pozitia lui CURENTA alegea, legitim, alta
+ * ruta decat sufixul celui vechi — si de acolo pozitii diferite, apoi tot restul.
+ *
+ * Masurat: pe scenariul standard, seed 12345, 40 de agenti, N=300, hash-ul era
+ * identic la momentul salvarii si diverge la doua tickuri dupa incarcare. Agentul
+ * 14 avea ACEEASI tinta in ambele lumi si drumuri diferite spre ea.
+ *
+ * Deci drumul se salveaza. Nu era o optimizare de spatiu, era o clasificare
+ * gresita — exact genul pe care disciplina PERSISTED/DERIVED/TRANSIENT exista ca
+ * s-o prinda, si pe care am ratat-o fiindca fixtura care ar fi trebuit s-o prinda
+ * nastea agentii in aer.
+ *
+ * Se salveaza doar coada ramasa, de la cursor incolo; la incarcare cursorul
+ * porneste de la zero. Un drum tipic are ~20 de celule.
  *
  * ## Plafonul de re-planificari
  *
@@ -39,7 +58,7 @@ import { nextInt } from './rng.ts'
 import type { RngState } from './rng.ts'
 import type { AgentStore, World } from './state.ts'
 import { MM_PER_CELL } from './state.ts'
-import { ensureArea, isWalkable, NO_REGION, rebuildDirty, regionAt } from './regions.ts'
+import { canStep, ensureArea, isWalkable, NO_REGION, rebuildDirty, regionAt } from './regions.ts'
 import { cellKey, findPath, pathLength } from './path.ts'
 import type { Ocupare } from './path.ts'
 import { Reason } from './result.ts'
@@ -55,7 +74,7 @@ function centerMm(cell: number): number {
 }
 
 /**
- * Drumurile. TRANSIENT prin definitie: nu se salveaza si nu intra in hash.
+ * Drumurile. PERSISTED — vezi antetul modulului pentru de ce NU sunt derivate.
  *
  * Stocate cu pas FIX per agent, nu ca liste: SoA, zero alocari dupa creare, si
  * un drum prea lung se taie la plafon in loc sa creasca memoria la nesfarsit.
@@ -173,9 +192,11 @@ export interface AgentTickReport {
   blocatiDeOstili: number
   /** Cati agenti au ATINS tinta in tickul asta. Masura pentru „chiar ajung undeva". */
   sosiri: number
+  /** Cati stau intr-o celula necalcabila si n-au unde sa iasa. Trebuie sa fie 0. */
+  ingropati: number
 }
 
-const raport: AgentTickReport = { replans: 0, refuzuri: 0, blocatiDeOstili: 0, sosiri: 0 }
+const raport: AgentTickReport = { replans: 0, refuzuri: 0, blocatiDeOstili: 0, sosiri: 0, ingropati: 0 }
 
 /** Ultimul raport de tick. TRANSIENT, pentru overlay si pentru teste. */
 export function lastAgentReport(): AgentTickReport {
@@ -190,6 +211,7 @@ export function stepAgents(w: World, rules: Rules): void {
   raport.refuzuri = 0
   raport.blocatiDeOstili = 0
   raport.sosiri = 0
+  raport.ingropati = 0
 
   // 1. Acoperirea de regiuni, ca functie de pozitiile PERSISTATE ale agentilor.
   //    Ordinea slotului, ca peste tot.
@@ -203,6 +225,19 @@ export function stepAgents(w: World, rules: Rules): void {
   //
   //    Racirea face din asta un cost marginit: se incearca, si daca tot nu iese,
   //    se asteapta. Un agent care nu poate fi ajutat devine gratis.
+  //    Acoperirea se extinde numai pentru agentii care NU sunt intr-o regiune.
+  //
+  //    Am incercat sa o asigur pentru toti, la fiecare tick, ca sa devina o functie
+  //    de pozitii si sa nu mai depinda de istorie. Masurat: acoperirea creste
+  //    atunci NEMARGINIT — 124.000 de blocuri la 20.000 de tickuri, cu costul
+  //    dublandu-se la fiecare 10.000 — fiindca fiecare pas al fiecarui agent
+  //    adauga un inel nou care nu se arunca niciodata. Testul de acceptanta a
+  //    trecut de la 7 secunde la peste 578.
+  //
+  //    Acumularea e deci NECESARA ca sa fie ieftin: agentii se plimba prin ce e
+  //    deja calculat si nu platesc nimic. Ea trebuie sa fie REPRODUCTIBILA, nu
+  //    eliminata — iar asta se rezolva in `save.ts`, unde extinderea acoperirii se
+  //    persista si se reconstruieste identic la incarcare.
   let ceva = false
   for (let i = 0; i < a.count; i++) {
     if (a.alive[i] === 0) continue
@@ -218,14 +253,40 @@ export function stepAgents(w: World, rules: Rules): void {
       p.nextReplanTick[i] = w.tick + rules.replanCooldownTicks
     }
   }
-  if (ceva) rebuildDirty(w.terrain, w.regions, rules)
+  void ceva
+  // Reconstructia se cheama MEREU, nu doar cand un agent e in afara unei regiuni.
+  //
+  // Varianta de dinainte era cod mort: conditia devenea adevarata numai cand un
+  // agent nu era intr-o regiune, iar in regim stabil asta nu se intampla — deci
+  // murdaria produsa de sapat si zidit nu s-ar fi procesat NICIODATA.
+  // `rebuildDirty` iese singur devreme cand nu e nimic murdar.
+  rebuildDirty(w.terrain, w.regions, rules)
 
   for (let i = 0; i < a.count; i++) {
     if (a.alive[i] === 0) continue
 
-    const cx = cellOf(a.x[i]!)
-    const cy = cellOf(a.y[i]!)
-    const cz = a.z[i]!
+    let cx = cellOf(a.x[i]!)
+    let cy = cellOf(a.y[i]!)
+    let cz = a.z[i]!
+
+    // Ingropat? Se scoate.
+    //
+    // `fill` refuza acum sa zideasca peste cineva, dar asta nu acopera tot: un
+    // save facut inainte de regula aia, sau o schimbare de teren care face celula
+    // necalcabila din alt motiv, lasa agentul in piatra. Iar acolo e prins pe
+    // viata: poarta de mai jos il opreste, si fiindca e oprit nu mai ajunge
+    // niciodata sa se miste. Un pion care nu poate fi ajutat trebuie sa produca
+    // MACAR un semnal, nu tacere.
+    if (!isWalkable(w.terrain, cx, cy, cz, rules)) {
+      if (!dezgroapa(w, rules, i)) {
+        raport.ingropati++
+        continue
+      }
+      cx = cellOf(a.x[i]!)
+      cy = cellOf(a.y[i]!)
+      cz = a.z[i]!
+    }
+
     // Cine nu e intr-o regiune n-are ce cauta mai departe: nici tinta, nici drum.
     if (regionAt(w.regions, cx, cy, cz) === NO_REGION) continue
 
@@ -324,12 +385,67 @@ function avanseaza(w: World, rules: Rules, slot: number): void {
   // `while`, nu `if`: un pas mai mare decat o celula trece prin mai multe. Azi
   // nu se intampla, dar regula nu trebuie sa depinda de o valoare din content.
   while (a.progresMm[slot]! >= MM_PER_CELL && p.cursor[slot]! < p.len[slot]!) {
-    a.progresMm[slot] = a.progresMm[slot]! - MM_PER_CELL
     const baza = slot * p.maxCells * 3 + p.cursor[slot]! * 3
-    a.x[slot] = centerMm(p.cells[baza]!)
-    a.y[slot] = centerMm(p.cells[baza + 1]!)
-    a.z[slot] = p.cells[baza + 2]!
+    const tx = p.cells[baza]!
+    const ty = p.cells[baza + 1]!
+    const tz = p.cells[baza + 2]!
+
+    // Terenul se RE-VERIFICA la fiecare pas, nu doar la planificare.
+    //
+    // Drumul se calculeaza o data si nimic nu-l invalida cand terenul se schimba
+    // sub el. Un zid ridicat in fata unui pion nu-l oprea: continua sa mearga pe
+    // drumul vechi, prin piatra, si era desenat in interiorul zidului. Intr-un
+    // colony sim asta inseamna „pionii ignora zidurile pe care tocmai le-ai
+    // construit". Verificarea costa un `canStep` pe pas — adica o data la patru
+    // tickuri per agent.
+    if (!canStep(w.terrain, cellOf(a.x[slot]!), cellOf(a.y[slot]!), a.z[slot]!, tx, ty, tz, rules)) {
+      clearPath(p, slot)
+      a.progresMm[slot] = 0
+      return
+    }
+
+    a.progresMm[slot] = a.progresMm[slot]! - MM_PER_CELL
+    a.x[slot] = centerMm(tx)
+    a.y[slot] = centerMm(ty)
+    a.z[slot] = tz
     p.cursor[slot] = p.cursor[slot]! + 1
   }
   if (p.cursor[slot]! >= p.len[slot]!) clearPath(p, slot)
+}
+
+/**
+ * Scoate un agent dintr-o celula in care nu se poate sta.
+ *
+ * Ordinea de cautare e FIXA si porneste de la celula proprie: patru vecini
+ * orizontali, apoi cote in jurul celei proprii. Prima celula calcabila castiga.
+ * Nu e teleportare la distanta — daca nu e nimic la un pas, agentul ramane si
+ * intra la socoteala ca `ingropat`, fiindca un pion pierdut trebuie NUMARAT, nu
+ * mutat in celalalt capat al hartii.
+ */
+function dezgroapa(w: World, rules: Rules, slot: number): boolean {
+  const a = w.agents
+  const cx = cellOf(a.x[slot]!)
+  const cy = cellOf(a.y[slot]!)
+  const cz = a.z[slot]!
+  const pas = Math.max(0, Math.min(4, rules.maxStepM))
+
+  for (let dz = 0; dz <= pas; dz++) {
+    for (const nz of dz === 0 ? [cz] : [cz + dz, cz - dz]) {
+      for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        if (dx === 0 && dy === 0 && nz === cz) continue
+        const nx = cx + dx
+        const ny = cy + dy
+        if (nx < 0 || ny < 0) continue
+        if (!isWalkable(w.terrain, nx, ny, nz, rules)) continue
+        a.x[slot] = centerMm(nx)
+        a.y[slot] = centerMm(ny)
+        a.z[slot] = nz
+        a.progresMm[slot] = 0
+        a.hasGoal[slot] = 0
+        clearPath(w.paths, slot)
+        return true
+      }
+    }
+  }
+  return false
 }
