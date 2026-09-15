@@ -322,8 +322,8 @@ export function indexZone(w: World, rules: Rules): IndexZone {
 
   const c = s.celule
   const it = w.iteme
-  ix.pasi += c.count + it.count
   for (let cs = 0; cs < c.count; cs++) {
+    ix.pasi++
     if (c.alive[cs] === 0) continue
     const zs = slotZona(s, c.zonaId[cs]!)
     if (zs === -1) continue
@@ -352,6 +352,7 @@ export function indexZone(w: World, rules: Rules): IndexZone {
   ix.deMutat.length = 0
   ix.peJosFaraDepozit = 0
   for (let i = 0; i < it.count; i++) {
+    ix.pasi++
     if (it.alive[i] === 0) continue
     const prioLoc = prioritateaLocului(s, it.wx[i]!, it.wy[i]!, it.z[i]!)
     const cant = Math.min(it.cantitate[i]!, rules.haulCarryMax)
