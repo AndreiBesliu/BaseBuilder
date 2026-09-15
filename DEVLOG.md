@@ -1879,3 +1879,32 @@ care o declanșează.
 
 **Măsurat după toată tranșa:** scenariul standard **74 µs/tick** (tăietura 1: 68), carieră+depozit 89
 µs/tick, 261 de teste.
+
+## Task Completed
+
+Tăietura 2 din S16-19 e livrată și trecută prin panou de design, mutații, recenzie de cod și încă o
+rundă de mutații. **261 de teste**, CI verde, scenariul standard **74 µs/tick** (tăietura 1: 68, cu
+cărat pe deasupra).
+
+Ce a produs fiecare pas, pe scurt:
+
+| pas | ce a schimbat |
+|---|---|
+| panou de design (5 lentile, 56 de constatări) | opt lucruri, ÎNAINTE de cod: `jobCantitate` înghețat în job, o singură `asazaItem`, index DERIVED sub steag murdar, dreptunghi la pictare, schema 4, `haulCarryMax` în loc de `itemMaxClaimants`, `jobEfect`, o singură listă de candidați |
+| mutații, runda 1 (32) | 29 prinse; cele trei ratate au scos două mecanisme redundante și au adăugat o gardă pe vizitele trecerii ieftine |
+| **K05, măsurat** | acoperirea de regiuni creștea nemărginit; coridoarele spre marfă scoase, discul la pictare întors, invariant nou în `parseRules`, gardă „zero blocuri noi în 2000 de tickuri" |
+| recenzie de cod (3 lentile, 23 de constatări) | o buclă infinită (INACCESIBIL fără contor de încercări) și șapte găuri mai mici; șase gărzi noi |
+| **K05, a doua oară** | poarta ieftină întreabă „încape cât car?", plafonul de destinație leagă, celulele de depozit se retrag când își pierd podeaua, răcirea se derivă din candidați; gardă pe PAȘI, nu pe reconstrucții |
+| mutații, runda 2 (37) | toate prinse |
+
+**Ce rămâne deschis, cu cifra lui:**
+
+- reconstrucția indexului de zone e Θ(celule + iteme): 20,9 µs la 0 mormane, 135,4 µs la 3000. La
+  ținta din DESIGN §10 ar fi ~0,5 ms/tick. Devine incrementală când cifra din joc o cere; garda de
+  acceptanță o măsoară (12 pași/tick azi, prag 30).
+- raportul drum/lucru e **4,7** — pionii merg de aproape cinci ori mai mult decât muncesc. Ăsta e
+  pragul pentru batching (mai multe mormane pe un drum), și e o judecată de joc, nu una de cod:
+  întrebarea e la Andrei, în OWNER_VERIFY punctul 7.
+- sortarea completă a candidaților (~1 ms la 4096) rămâne, ca la tăietura 1.
+
+Următoarea tăietură: **foame / odihnă / dispoziție**.

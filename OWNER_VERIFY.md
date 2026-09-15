@@ -114,7 +114,14 @@ depozitul umplându-se dinspre partea apropiată de carieră. Un morman roșu = 
 depozit sau e plin); violet = are unde, dar nu se ajunge. Dacă vezi un morman care stă roșu deși
 depozitul are loc, sau un pion care ridică și lasă același morman la nesfârșit, aia e ce vreau să știu.
 
-**De ce nu pot eu.** Corectitudinea o acoperă 246 de teste (marfa nu dispare, nimic nu se mută între
-depozite egale, drumurile blocate nu produc bucle). Ce nu pot judeca e dacă se CITEȘTE — și dacă
-ritmul (pionii merg de ~5 ori mai mult decât muncesc, măsurat) pare „joc" sau pare defect. De
-răspunsul ăsta depinde dacă batching-ul (mai multe mormane pe drum) intră acum sau mai târziu.
+**De ce nu pot eu.** Corectitudinea o acoperă 261 de teste (marfa nu dispare, nimic nu se mută între
+depozite egale, drumurile blocate nu produc bucle, iar suma cantităților se conservă în acceptanță).
+Ce nu pot judeca e dacă se CITEȘTE.
+
+**Și o întrebare separată, de ritm.** Măsurat: pionii petrec **de 4,7 ori mai multe tickuri pe drum
+decât muncind**. Asta e pragul pentru „batching" (un cărăuș strânge mai multe mormane pe un drum, în
+loc de unul singur) — research-ul cere decizia pe cifra asta, iar cifra există acum. Uită-te la
+carieră cu **J** apăsat: dacă ți se pare că pionii mai mult umblă decât lucrează, îl fac; dacă ți se
+pare normal pentru un colony sim, rămâne cum e. Costul dacă îl fac mai târziu: rescrierea driverului
+de cărat (cei patru pași devin bucle cu cursor), a cererilor de rezervare și a reconstrucției de la
+încărcare — deci nu e gratis, dar nici blocant.
