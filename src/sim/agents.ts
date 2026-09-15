@@ -1,0 +1,335 @@
+/**
+ * Agenti care chiar merg undeva — S12-15.
+ *
+ * Inlocuieste plimbarea aleatoare care a tinut locul pana acum. Rolul ei era sa
+ * exercite mecanismele care nu se pot retrofita (fluxuri de RNG numite, ordine
+ * fixa de iterare, aritmetica intreaga, hash de stare) inainte sa existe joburi.
+ * Acum exista drumuri, deci substitutul iese.
+ *
+ * ## Problema pe care o rezolva PRIMA, fiindca altfel tot restul e nisip
+ *
+ * Drumurile depind de REGIUNI, iar regiunile sunt DERIVED: se calculeaza lene,
+ * numai unde a intrebat cineva. Asta inseamna ca doua lumi cu stare PERSISTED
+ * identica pot da drumuri diferite, dupa cum s-a nimerit sa fie calculate
+ * regiunile — iar invariantul „1000 de tickuri + save + load + 1000 == 2000"
+ * s-ar rupe tacut, si s-ar rupe doar uneori.
+ *
+ * Leacul e sa faci ACOPERIREA o functie de starea persistata: la fiecare tick,
+ * fiecare agent viu isi asigura regiunile din jurul lui, in ordinea slotului, cu
+ * o raza din `content`. Pozitiile agentilor sunt persistate, deci acoperirea
+ * devine reproductibila prin constructie, nu prin noroc.
+ *
+ * ## Ce e persistat si ce nu
+ *
+ * **Tinta** unui agent e stare reala: fara ea, un save reincarcat ar trimite
+ * oamenii in alta parte. **Drumul** nu e: se recalculeaza din (pozitie, tinta,
+ * teren), deci e TRANSIENT si nu intra nici in save, nici in hash.
+ *
+ * ## Plafonul de re-planificari
+ *
+ * Cerut explicit de plan. Fara el, o singura schimbare de teren pune toti agentii
+ * sa caute in acelasi tick — exact varful pe care research-ul il descrie ca
+ * „FPS-ul scade cand construiesti un zid". Cu el, varful se intinde pe mai multe
+ * tickuri, iar cine n-a apucat asteapta. Un agent care asteapta nu e blocat: sta
+ * pe loc si incearca la tickul urmator.
+ */
+
+import type { Rules } from './content.ts'
+import { nextInt } from './rng.ts'
+import type { RngState } from './rng.ts'
+import type { AgentStore, World } from './state.ts'
+import { MM_PER_CELL } from './state.ts'
+import { ensureArea, isWalkable, NO_REGION, rebuildDirty, regionAt } from './regions.ts'
+import { cellKey, findPath, pathLength } from './path.ts'
+import type { Ocupare } from './path.ts'
+import { Reason } from './result.ts'
+
+/** Celula in care sta un agent, din pozitia lui in milimetri. */
+export function cellOf(mm: number): number {
+  return Math.floor(mm / MM_PER_CELL)
+}
+
+/** Centrul unei celule, in milimetri. Tinta spre care merge agentul. */
+function centerMm(cell: number): number {
+  return cell * MM_PER_CELL + MM_PER_CELL / 2
+}
+
+/**
+ * Drumurile. TRANSIENT prin definitie: nu se salveaza si nu intra in hash.
+ *
+ * Stocate cu pas FIX per agent, nu ca liste: SoA, zero alocari dupa creare, si
+ * un drum prea lung se taie la plafon in loc sa creasca memoria la nesfarsit.
+ */
+export interface PathStore {
+  readonly maxCells: number
+  /** (x, y, z) per celula, `maxCells * 3` numere rezervate pentru fiecare agent. */
+  readonly cells: Int32Array
+  readonly len: Int32Array
+  readonly cursor: Int32Array
+  /** Tickul de la care agentul mai are voie sa re-planifice. */
+  readonly nextReplanTick: Int32Array
+}
+
+export function makePathStore(capacity: number, maxCells: number): PathStore {
+  return {
+    maxCells,
+    cells: new Int32Array(capacity * maxCells * 3),
+    len: new Int32Array(capacity),
+    cursor: new Int32Array(capacity),
+    nextReplanTick: new Int32Array(capacity),
+  }
+}
+
+export function clearPath(p: PathStore, slot: number): void {
+  p.len[slot] = 0
+  p.cursor[slot] = 0
+}
+
+// ---------------------------------------------------------------------------
+// ocuparea
+// ---------------------------------------------------------------------------
+
+const ostileBuf = new Set<number>()
+const propriiBuf = new Set<number>()
+
+/**
+ * Cine sta unde, in tickul asta.
+ *
+ * Se reconstruieste de la zero la fiecare tick, din pozitii. Ar fi tentant sa se
+ * intretina incremental, dar atunci ocuparea ar deveni stare — adica inca un
+ * lucru care poate ramane in urma realitatii fara ca cineva sa afle.
+ *
+ * „Ostil" e o relatie, nu o proprietate: pentru un agent din asezare, ostili sunt
+ * jefuitorii; pentru un jefuitor, invers. De aia se construieste per FACTIUNE.
+ */
+export function buildOcupare(a: AgentStore, pentruFactiune: number): Ocupare {
+  ostileBuf.clear()
+  propriiBuf.clear()
+  for (let i = 0; i < a.count; i++) {
+    if (a.alive[i] === 0) continue
+    const k = cellKey(cellOf(a.x[i]!), cellOf(a.y[i]!), a.z[i]!)
+    if (a.faction[i] === pentruFactiune) propriiBuf.add(k)
+    else ostileBuf.add(k)
+  }
+  return { ostile: ostileBuf, proprii: propriiBuf }
+}
+
+// ---------------------------------------------------------------------------
+// tinte
+// ---------------------------------------------------------------------------
+
+/**
+ * Alege o tinta noua: o celula la intamplare in jur, pe care chiar se poate sta.
+ *
+ * E un substitut, si e scris ca substitut: la S16-19 tinta vine de la un job, nu
+ * de la zar. Ce ramane insa permanent e FORMA — o tinta se valideaza inainte de
+ * a fi adoptata, altfel agentul porneste spre ceva ce nu exista si esueaza abia
+ * la cautare, de fiecare data, la nesfarsit.
+ *
+ * Numarul de trageri din flux e MARGINIT: cel mult `incercari * 2`. Fara plafon,
+ * consumul de RNG ar depinde de teren, iar cursorul fluxului n-ar mai fi o
+ * functie previzibila de stare.
+ */
+function alegeTinta(w: World, rules: Rules, rng: RngState, slot: number): boolean {
+  const a = w.agents
+  const cx = cellOf(a.x[slot]!)
+  const cy = cellOf(a.y[slot]!)
+  const raza = rules.agentGoalRadiusCells
+
+  for (let incercare = 0; incercare < rules.agentGoalAttempts; incercare++) {
+    const dx = nextInt(rng, raza * 2 + 1) - raza
+    const dy = nextInt(rng, raza * 2 + 1) - raza
+    const tx = cx + dx
+    const ty = cy + dy
+    if (tx < 0 || ty < 0) continue
+
+    // Cota se cauta in jurul celei proprii: o tinta la alt etaj cere scari, si
+    // scarile nu exista inca.
+    for (let dz = 0; dz <= rules.maxStepM * 2; dz++) {
+      for (const tz of dz === 0 ? [a.z[slot]!] : [a.z[slot]! + dz, a.z[slot]! - dz]) {
+        if (!isWalkable(w.terrain, tx, ty, tz, rules)) continue
+        if (regionAt(w.regions, tx, ty, tz) === NO_REGION) continue
+        a.goalX[slot] = tx
+        a.goalY[slot] = ty
+        a.goalZ[slot] = tz
+        a.hasGoal[slot] = 1
+        return true
+      }
+    }
+  }
+  return false
+}
+
+// ---------------------------------------------------------------------------
+// tickul de agenti
+// ---------------------------------------------------------------------------
+
+export interface AgentTickReport {
+  /** Cate re-planificari s-au facut. Plafonate de `maxReplansPerTick`. */
+  replans: number
+  /** Cati agenti au cerut un drum si au primit un refuz. */
+  refuzuri: number
+  /** Cati au fost opriti de cineva ostil. Asta e semnalul D7c. */
+  blocatiDeOstili: number
+  /** Cati agenti au ATINS tinta in tickul asta. Masura pentru „chiar ajung undeva". */
+  sosiri: number
+}
+
+const raport: AgentTickReport = { replans: 0, refuzuri: 0, blocatiDeOstili: 0, sosiri: 0 }
+
+/** Ultimul raport de tick. TRANSIENT, pentru overlay si pentru teste. */
+export function lastAgentReport(): AgentTickReport {
+  return raport
+}
+
+export function stepAgents(w: World, rules: Rules): void {
+  const a = w.agents
+  const p = w.paths
+  const rng = w.rng.agents
+  raport.replans = 0
+  raport.refuzuri = 0
+  raport.blocatiDeOstili = 0
+  raport.sosiri = 0
+
+  // 1. Acoperirea de regiuni, ca functie de pozitiile PERSISTATE ale agentilor.
+  //    Ordinea slotului, ca peste tot.
+  //
+  //    **Un agent care nu poate face nimic nu are voie sa coste nimic.** Prima
+  //    versiune cerea `ensureArea` ori de cate ori agentul nu era intr-o regiune,
+  //    fara nicio racire. Agentii-substitut se nasc la z = 0, iar solul de sub ei
+  //    e la -70 m: nu ajungeau NICIODATA intr-o regiune, deci fiecare dintre ei
+  //    platea o reconstructie completa de regiuni la FIECARE tick, pe veci.
+  //    200 de tickuri nu se terminau in doua minute.
+  //
+  //    Racirea face din asta un cost marginit: se incearca, si daca tot nu iese,
+  //    se asteapta. Un agent care nu poate fi ajutat devine gratis.
+  let ceva = false
+  for (let i = 0; i < a.count; i++) {
+    if (a.alive[i] === 0) continue
+    const cx = cellOf(a.x[i]!)
+    const cy = cellOf(a.y[i]!)
+    if (regionAt(w.regions, cx, cy, a.z[i]!) !== NO_REGION) continue
+    if (w.tick < p.nextReplanTick[i]!) continue
+
+    ensureArea(w.terrain, w.regions, cx, cy, a.z[i]!, rules.agentRegionRadiusBlocks, rules)
+    ceva = true
+    if (regionAt(w.regions, cx, cy, a.z[i]!) === NO_REGION) {
+      // Nici dupa calcul nu e nicaieri: probabil e in aer sau in piatra.
+      p.nextReplanTick[i] = w.tick + rules.replanCooldownTicks
+    }
+  }
+  if (ceva) rebuildDirty(w.terrain, w.regions, rules)
+
+  for (let i = 0; i < a.count; i++) {
+    if (a.alive[i] === 0) continue
+
+    const cx = cellOf(a.x[i]!)
+    const cy = cellOf(a.y[i]!)
+    const cz = a.z[i]!
+    // Cine nu e intr-o regiune n-are ce cauta mai departe: nici tinta, nici drum.
+    if (regionAt(w.regions, cx, cy, cz) === NO_REGION) continue
+
+    // 2. Fara tinta nu se merge nicaieri. Se alege una, si daca nu se poate,
+    //    agentul sta — un tick pierdut e mai bun decat o cautare care nu poate reusi.
+    if (a.hasGoal[i] === 0) {
+      if (!alegeTinta(w, rules, rng, i)) continue
+      clearPath(p, i)
+    }
+
+    // A ajuns?
+    if (cx === a.goalX[i] && cy === a.goalY[i] && cz === a.goalZ[i]) {
+      a.hasGoal[i] = 0
+      clearPath(p, i)
+      raport.sosiri++
+      continue
+    }
+
+    // 3. Fara drum, se cere unul — daca bugetul mai permite si racirea a trecut.
+    if (p.len[i] === 0) {
+      if (raport.replans >= rules.maxReplansPerTick) continue
+      if (w.tick < p.nextReplanTick[i]!) continue
+      raport.replans++
+
+      const ocupare = buildOcupare(a, a.faction[i]!)
+      const out = findPath(
+        w.terrain,
+        w.regions,
+        rules,
+        { wx: cx, wy: cy, z: cz },
+        { wx: a.goalX[i]!, wy: a.goalY[i]!, z: a.goalZ[i]! },
+        ocupare,
+      )
+
+      if (!out.ok) {
+        raport.refuzuri++
+        if (out.reason === Reason.OCUPAT_DE_OSTIL) raport.blocatiDeOstili++
+        // Tinta se abandoneaza si se asteapta. Asta e diferenta dintre un agent
+        // care incearca si unul care se blocheaza pe viata: nu insista pe o tinta
+        // pe care lumea tocmai a refuzat-o.
+        a.hasGoal[i] = 0
+        p.nextReplanTick[i] = w.tick + rules.replanCooldownTicks
+        continue
+      }
+
+      const n = Math.min(pathLength(out.value), p.maxCells)
+      const baza = i * p.maxCells * 3
+      for (let c = 0; c < n; c++) {
+        p.cells[baza + c * 3] = out.value.cells[c * 3]!
+        p.cells[baza + c * 3 + 1] = out.value.cells[c * 3 + 1]!
+        p.cells[baza + c * 3 + 2] = out.value.cells[c * 3 + 2]!
+      }
+      p.len[i] = n
+      // Cursorul porneste de la 1: celula 0 e chiar cea pe care sta agentul.
+      p.cursor[i] = 1
+    }
+
+    // 4. Mersul.
+    avanseaza(w, rules, i)
+  }
+}
+
+/**
+ * Un pas pe drum.
+ *
+ * Agentul sta MEREU in centrul unei celule. Ce se acumuleaza e progresul, in
+ * milimetri; cand trece de o celula intreaga, agentul sare in centrul urmatoare,
+ * cu tot cu cota ei.
+ *
+ * Prima versiune aluneca in milimetri spre centrul urmatoarei celule si aplica
+ * `z` abia la sosire. Pe teren plat mergea. Pe o panta, `cellOf(x)` trecea
+ * granita cu un tick inaintea lui `z`, si in tickul ala tripletul agentului arata
+ * celula noua la cota veche — o celula plina cu piatra, deci fara regiune. Poarta
+ * de la inceputul lui `stepAgents` il oprea, si fiindca era oprit nu mai ajungea
+ * niciodata la randul asta ca sa se alinieze. Un agent blocat pe viata, la sapte
+ * celule de unde pornise, cu racirea prelungindu-se la nesfarsit.
+ *
+ * Nu era un defect de pathfinding: drumul era corect. Era doua reprezentari ale
+ * aceleiasi pozitii care se schimbau la momente diferite. Miscarea atomica
+ * inseamna ca nu exista moment in care tripletul sa fie invalid.
+ *
+ * Randarea neteda nu se pierde: are drumul si `progresMm`, deci poate interpola
+ * intre centre. Doar SIMULAREA e discreta — ceea ce e si politica („fara float in
+ * starea de simulare"), nu doar o comoditate.
+ */
+function avanseaza(w: World, rules: Rules, slot: number): void {
+  const a = w.agents
+  const p = w.paths
+  if (p.cursor[slot]! >= p.len[slot]!) {
+    clearPath(p, slot)
+    return
+  }
+
+  a.progresMm[slot] = a.progresMm[slot]! + rules.agentStepMm
+
+  // `while`, nu `if`: un pas mai mare decat o celula trece prin mai multe. Azi
+  // nu se intampla, dar regula nu trebuie sa depinda de o valoare din content.
+  while (a.progresMm[slot]! >= MM_PER_CELL && p.cursor[slot]! < p.len[slot]!) {
+    a.progresMm[slot] = a.progresMm[slot]! - MM_PER_CELL
+    const baza = slot * p.maxCells * 3 + p.cursor[slot]! * 3
+    a.x[slot] = centerMm(p.cells[baza]!)
+    a.y[slot] = centerMm(p.cells[baza + 1]!)
+    a.z[slot] = p.cells[baza + 2]!
+    p.cursor[slot] = p.cursor[slot]! + 1
+  }
+  if (p.cursor[slot]! >= p.len[slot]!) clearPath(p, slot)
+}

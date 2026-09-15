@@ -5,6 +5,7 @@ import { DEFAULT_RULES, parseRules } from '../src/sim/content.ts'
 import { Reason } from '../src/sim/result.ts'
 import { createWorld } from '../src/sim/world.ts'
 import { MM_PER_CELL } from '../src/sim/state.ts'
+import { WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 
 test('fisierul de reguli livrat cu jocul e valid', () => {
   // Daca asta pica, jocul nu porneste — si vreau sa aflu in CI, nu la rulare.
@@ -19,12 +20,12 @@ test('regulile implicite trec propria validare', () => {
 })
 
 test('un camp lipsa e refuzat, cu numele campului', () => {
-  const { worldWidthCells: _omit, ...rest } = DEFAULT_RULES
+  const { agentStepMm: _omit, ...rest } = DEFAULT_RULES
   const out = parseRules(rest)
   assert.equal(out.ok, false)
   if (!out.ok) {
     assert.equal(out.reason, Reason.LIPSA_MATERIAL)
-    assert.equal(out.params.camp, 'worldWidthCells')
+    assert.equal(out.params.camp, 'agentStepMm')
   }
 })
 
@@ -66,9 +67,10 @@ test('radacina trebuie sa fie un obiect', () => {
 })
 
 test('regulile chiar ajung in lume, nu sunt decorative', () => {
-  const rules = { ...DEFAULT_RULES, worldWidthCells: 10, worldHeightCells: 20, agentCapacity: 3 }
+  const rules = { ...DEFAULT_RULES, agentCapacity: 3, chunkResidentRadius: 4 }
   const w = createWorld(1, rules)
-  assert.equal(w.bounds.w, 10 * MM_PER_CELL)
-  assert.equal(w.bounds.h, 20 * MM_PER_CELL)
   assert.equal(w.agents.capacity, 3)
+  assert.equal(w.terrain.radius, 4)
+  // Marimea lumii NU mai vine din reguli: o da harta macro.
+  assert.equal(w.bounds.w, WORLD_CELLS * MM_PER_CELL)
 })

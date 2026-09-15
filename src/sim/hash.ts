@@ -74,7 +74,7 @@ export class Hasher {
 export function hashWorld(w: World): string {
   const h = new Hasher()
   h.u32(w.schema).u32(w.seed).u32(w.tick).u32(w.nextId)
-  h.u32(w.bounds.w).u32(w.bounds.h)
+  // `bounds` nu se mai amesteca: e o constanta, deci n-ar putea distinge doua lumi.
 
   // RNG_STREAMS e o lista ordonata, nu Object.keys(w.rng).
   for (const name of RNG_STREAMS) {
@@ -90,6 +90,14 @@ export function hashWorld(w: World): string {
   h.ints(a.z, a.count)
   h.bytes(a.faction, a.count)
   h.bytes(a.alive, a.count)
+  // Tintele sunt PERSISTED, deci intra in hash. Drumurile NU: sunt derivate din
+  // tinta si teren, si daca ar intra, doua lumi identice ca CONTINUT ar parea
+  // diferite dupa cat de departe a apucat fiecare sa calculeze.
+  h.ints(a.goalX, a.count)
+  h.ints(a.goalY, a.count)
+  h.ints(a.goalZ, a.count)
+  h.bytes(a.hasGoal, a.count)
+  h.ints(a.progresMm, a.count)
 
   // Terenul: NUMAI chunk-urile promovate. Cele ne-promovate sunt DERIVED — se
   // regenereaza identic din seed, deci n-au ce cauta in hash. Daca ar intra,

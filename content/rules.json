@@ -1,6 +1,4 @@
 {
-  "worldWidthCells": 256,
-  "worldHeightCells": 256,
   "agentCapacity": 64,
   "agentStepMm": 250,
   "ticksPerSecond": 20,
@@ -11,5 +9,11 @@
   "allyStepPenalty": 175,
   "climbCost": 60,
   "maxRegionNodes": 4000,
-  "maxPathNodes": 20000
+  "maxPathNodes": 20000,
+  "maxPathCells": 192,
+  "maxReplansPerTick": 4,
+  "replanCooldownTicks": 40,
+  "agentGoalRadiusCells": 24,
+  "agentGoalAttempts": 6,
+  "agentRegionRadiusBlocks": 2
 }

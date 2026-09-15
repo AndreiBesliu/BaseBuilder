@@ -16,11 +16,13 @@
 
 import type { Rules } from './content.ts'
 import { DEFAULT_RULES } from './content.ts'
-import { nextInt, stream } from './rng.ts'
+import { stream } from './rng.ts'
 import type { RngState } from './rng.ts'
 import type { RngStreamName, World } from './state.ts'
 import { makeAgentStore, MM_PER_CELL, RNG_STREAMS, SCHEMA_VERSION } from './state.ts'
-import { createTerrain } from './terrain/terrain.ts'
+import { createTerrain, WORLD_CELLS } from './terrain/terrain.ts'
+import { createRegions } from './regions.ts'
+import { makePathStore, stepAgents } from './agents.ts'
 
 /**
  * Creeaza o lume. NU incarca teren: `createTerrain` aloca doar structura goala,
@@ -40,46 +42,28 @@ export function createWorld(seed: number, rules: Rules = DEFAULT_RULES): World {
     nextId: 1,
     rng,
     agents: makeAgentStore(rules.agentCapacity),
-    bounds: {
-      w: rules.worldWidthCells * MM_PER_CELL,
-      h: rules.worldHeightCells * MM_PER_CELL,
-    },
+    // DERIVED. Marimea lumii NU e un numar de gameplay: o determina harta macro
+    // (MACRO_SIZE x MACRO_METERS), deci nu are ce cauta in content/rules.json.
+    //
+    // Cat a stat acolo, au existat doua adevaruri despre cat e de mare lumea:
+    // `worldWidthCells: 256` pentru agenti si 16384 de celule pentru teren. Nimic
+    // nu le compara, asa ca au divergat tacut din S3. S-a vazut abia cand agentii
+    // au inceput sa se nasca pe sol: siturile de sapat sunt imprastiate pe toti
+    // cei 16 km, iar `spawnAgent` le refuza pe toate cu IN_AFARA_LUMII.
+    bounds: { w: WORLD_CELLS * MM_PER_CELL, h: WORLD_CELLS * MM_PER_CELL },
     terrain: createTerrain(seed, rules.chunkResidentRadius),
+    regions: createRegions(),
+    paths: makePathStore(rules.agentCapacity, rules.maxPathCells),
   }
 }
 
 /** Un singur pas de simulare. */
 export function tick(w: World, rules: Rules = DEFAULT_RULES): void {
-  const a = w.agents
-  const r = w.rng.agents
-  const step = rules.agentStepMm
-
-  // Ordinea de parcurgere e indexul slotului — fixa, si independenta de id-uri
-  // sau de ordinea de inserare. Asta e ce tine hash-ul stabil.
-  for (let i = 0; i < a.count; i++) {
-    if (a.alive[i] === 0) continue
-
-    // Cele patru directii cardinale. Fiecare agent viu consuma EXACT o tragere
-    // pe tick — asa cursorul fluxului e o functie de (tick, numar de agenti vii),
-    // deci previzibil si verificabil intr-un test.
-    const dir = nextInt(r, 4)
-    let nx = a.x[i]!
-    let ny = a.y[i]!
-    if (dir === 0) nx += step
-    else if (dir === 1) nx -= step
-    else if (dir === 2) ny += step
-    else ny -= step
-
-    // Marginile lumii reflecta, nu opresc — ca sa nu se adune toti agentii pe muchie.
-    if (nx < 0) nx = -nx
-    else if (nx >= w.bounds.w) nx = 2 * (w.bounds.w - 1) - nx
-    if (ny < 0) ny = -ny
-    else if (ny >= w.bounds.h) ny = 2 * (w.bounds.h - 1) - ny
-
-    a.x[i] = nx
-    a.y[i] = ny
-  }
-
+  // Agentii merg acum spre tinte reale, pe drumuri reale. Plimbarea aleatoare
+  // care a tinut locul pana aici si-a facut treaba: a exercitat fluxurile de RNG
+  // numite, ordinea fixa de iterare si hash-ul de stare INAINTE sa existe ceva de
+  // miscat — adica exact lucrurile care nu se pot retrofita.
+  stepAgents(w, rules)
   w.tick++
 }
 

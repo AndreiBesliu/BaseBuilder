@@ -16,9 +16,12 @@ import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import type { RngState } from './rng.ts'
 import type { RngStreamName, World } from './state.ts'
-import { makeAgentStore, RNG_STREAMS, SCHEMA_VERSION } from './state.ts'
+import { makeAgentStore, MM_PER_CELL, RNG_STREAMS, SCHEMA_VERSION } from './state.ts'
+import { createRegions } from './regions.ts'
+import { makePathStore } from './agents.ts'
+import { DEFAULT_RULES } from './content.ts'
 import { runCount } from './terrain/chunk.ts'
-import { createTerrain, ensureChunk, inWorld } from './terrain/terrain.ts'
+import { createTerrain, ensureChunk, inWorld, WORLD_CELLS } from './terrain/terrain.ts'
 
 /** Creste cand se schimba FORMATUL de fisier, independent de schema de stare. */
 export const SAVE_BUILD = 1
@@ -45,7 +48,6 @@ export function encode(w: World): string {
       seed: w.seed,
       tick: w.tick,
       nextId: w.nextId,
-      bounds: w.bounds,
       // Terenul: se salveaza DOAR chunk-urile promovate. Restul lumii — 268 km² —
       // se regenereaza din seed. Asta e trucul care face ca un save sa fie de
       // ordinul megabytelor si nu al gigabytelor.
@@ -80,6 +82,13 @@ export function encode(w: World): string {
         z: Array.from(a.z.subarray(0, a.count)),
         faction: Array.from(a.faction.subarray(0, a.count)),
         alive: Array.from(a.alive.subarray(0, a.count)),
+        // Tinta e PERSISTED: fara ea, un save reincarcat ar trimite oamenii in
+        // alta parte decat mergeau. Drumul NU se salveaza — se recalculeaza.
+        goalX: Array.from(a.goalX.subarray(0, a.count)),
+        goalY: Array.from(a.goalY.subarray(0, a.count)),
+        goalZ: Array.from(a.goalZ.subarray(0, a.count)),
+        hasGoal: Array.from(a.hasGoal.subarray(0, a.count)),
+        progresMm: Array.from(a.progresMm.subarray(0, a.count)),
       },
     },
   }
@@ -134,6 +143,13 @@ export function decode(text: string): Outcome<World> {
   agents.z.set(agentsRaw.z as number[])
   agents.faction.set(agentsRaw.faction as number[])
   agents.alive.set(agentsRaw.alive as number[])
+  // Save-urile de dinainte de S12-15 n-au tinte: agentii pornesc fara si isi
+  // aleg una la primul tick. Un camp lipsa nu are voie sa pice incarcarea.
+  if (agentsRaw.goalX) agents.goalX.set(agentsRaw.goalX as number[])
+  if (agentsRaw.goalY) agents.goalY.set(agentsRaw.goalY as number[])
+  if (agentsRaw.goalZ) agents.goalZ.set(agentsRaw.goalZ as number[])
+  if (agentsRaw.hasGoal) agents.hasGoal.set(agentsRaw.hasGoal as number[])
+  if (agentsRaw.progresMm) agents.progresMm.set(agentsRaw.progresMm as number[])
 
   // Identitati unice — un save corupt sau editat manual nu are voie sa treaca tacut.
   const seen = new Set<number>()
@@ -153,7 +169,6 @@ export function decode(text: string): Outcome<World> {
     rng[name] = { s0: st.s0, s1: st.s1, s2: st.s2, s3: st.s3, draws: st.draws }
   }
 
-  const bounds = data.bounds as { w: number; h: number }
   const seed = data.seed as number
 
   const tRaw = data.terrain as SavedTerrain | undefined
@@ -184,7 +199,15 @@ export function decode(text: string): Outcome<World> {
     nextId: data.nextId as number,
     rng,
     agents,
-    bounds: { w: bounds.w, h: bounds.h },
+    // DERIVED si TRANSIENT: nu vin din fisier, se construiesc goale. Regiunile se
+    // recalculeaza la primul tick, din pozitiile agentilor — care VIN din fisier,
+    // deci acoperirea ramane o functie de starea persistata.
+    regions: createRegions(),
+    paths: makePathStore(capacity, DEFAULT_RULES.maxPathCells),
+    // DERIVED de cand marimea lumii e o constanta a hartii macro. Un save vechi
+    // are inca `data.bounds` scris; se ignora deliberat — daca l-as citi, un save
+    // facut inainte de corectie ar readuce cutia de 256 m in lumea incarcata.
+    bounds: { w: WORLD_CELLS * MM_PER_CELL, h: WORLD_CELLS * MM_PER_CELL },
     terrain,
   })
 }

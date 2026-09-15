@@ -4,8 +4,10 @@ import {
   areConnected,
   BLOCK_CELLS,
   blockOfCell,
+  canStep,
   componentCount,
   createRegions,
+  decodeBlockKey,
   ensureArea,
   find,
   isWalkable,
@@ -334,4 +336,143 @@ test('fuzz: 10.000 de edituri aleatorii, invariantii rezista', () => {
   assert.ok(zidite > 500, `doar ${zidite} zidiri reusite`)
   assert.ok(s.keys.length > 0, 'niciun bloc rezident la final')
   void blockOfCell
+})
+
+// --- memoizarea legarii ------------------------------------------------------
+//
+// `linkBlock` nu mai re-deriva muchiile unui bloc deja legat. E schimbarea care a
+// scos tickul de agenti de la 6741 µs la 311 µs, si e exact genul de optimizare
+// care poate pierde o muchie fara ca nimic sa se planga: graful ar ramane valid,
+// doar mai sarac, iar reachability-ar spune „nu exista drum" pentru un drum care
+// exista. Testele de mai jos sunt plasa.
+
+/** Amprenta completa a grafului: ce celula e in ce componenta. */
+function amprenta(s: RegionStore): string {
+  const out: string[] = []
+  for (const key of [...s.keys].sort((a, b) => a - b)) {
+    const cells = s.cells.get(key)!
+    const linie: number[] = []
+    for (let i = 0; i < BLOCK_CELLS; i++) {
+      const r = cells[i]!
+      linie.push(r === NO_REGION ? -1 : find(s, r))
+    }
+    out.push(`${key}:${linie.join(',')}`)
+  }
+  return out.join('\n')
+}
+
+test('MEMOIZARE: o raza mica urmata de una mare da acelasi graf ca una mare singura', () => {
+  // Riscul concret al memoizarii: blocul A se leaga cand vecinul B inca nu exista,
+  // iar la a doua cerere A e sarit, deci muchia A-B nu apare niciodata. Daca asta
+  // s-ar intampla, amprentele ar diferi.
+  const a = lume()
+  ensureArea(a.t, a.s, a.baseX + 8, a.baseY + 8, a.z, 1, R)
+  ensureArea(a.t, a.s, a.baseX + 8, a.baseY + 8, a.z, 3, R)
+
+  const b = lume()
+  ensureArea(b.t, b.s, b.baseX + 8, b.baseY + 8, b.z, 3, R)
+
+  assert.equal(amprenta(a.s), amprenta(b.s))
+})
+
+test('MEMOIZARE: o cerere repetata nu mai face nicio munca', () => {
+  const { t, s, baseX, baseY, z } = lume()
+  ensureArea(t, s, baseX + 8, baseY + 8, z, 2, R)
+  const blocuri = s.cells.size
+  const regiuni = regionCount(s)
+  const legate = s.legate.size
+  assert.ok(legate > 0, 'prima cerere n-a legat nimic — fixtura e goala')
+
+  ensureArea(t, s, baseX + 8, baseY + 8, z, 2, R)
+  assert.equal(s.cells.size, blocuri)
+  assert.equal(regionCount(s), regiuni)
+  assert.equal(s.legate.size, legate)
+})
+
+test('MEMOIZARE: o sapatura DEZLEAGA blocurile atinse, deci muchiile se refac', () => {
+  // Proba negativa a memoizarii. Daca `rebuildDirty` n-ar sterge din `legate`,
+  // blocurile atinse ar ramane marcate ca legate si muchiile rupte de sapatura
+  // n-ar mai fi recalculate niciodata — graful ar minti pe viata.
+  const { t, s, baseX, baseY, z } = lume()
+  ensureArea(t, s, baseX + 8, baseY + 8, z, 2, R)
+
+  // Un zid inalt taie o celula de vecinii ei: coloana devine ne-walkable.
+  const zx = baseX + 8
+  const zy = baseY + 8
+  for (let h = 0; h < R.agentHeadroomM + 1; h++) {
+    fill(t, zx, zy, z + h, Material.PIATRA_CONSTRUITA)
+    markDirty(s, zx, zy, z + h, R)
+  }
+  rebuildDirty(t, s, R)
+
+  assert.equal(isWalkable(t, zx, zy, z, R), false, 'zidul n-a schimbat nimic — fixtura e gresita')
+  assert.equal(regionAt(s, zx, zy, z), NO_REGION, 'celula zidita e inca intr-o regiune')
+
+  // Si graful de dupa trebuie sa fie identic cu unul construit de la zero pe
+  // terenul modificat — adica memoizarea n-a lasat cioturi.
+  const proaspat = createRegions()
+  ensureArea(t, proaspat, baseX + 8, baseY + 8, z, 2, R)
+  assert.equal(componentCount(s), componentCount(proaspat))
+})
+
+test('ORACOL: graful e COMPLET fata de teren, nu doar consistent cu el insusi', () => {
+  // Testul de mai sus compara doua magazine construite in ordini diferite. O
+  // mutatie care le strica pe amandoua la fel ii e invizibila — si chiar asa s-a
+  // intamplat: scotand `ensureBlock` din bucla de vecini a lui `linkBlock`, toate
+  // cele trei teste de memoizare au ramas verzi. Un test care compara codul cu el
+  // insusi nu e un oracol.
+  //
+  // Asta e: pentru fiecare pereche de celule intre care terenul spune ca se poate
+  // pasi, graful TREBUIE sa le puna in aceeasi componenta. Sursa adevarului e
+  // `canStep`, nu o a doua rulare a aceluiasi cod.
+  const { t, s, baseX, baseY, z } = lume()
+  ensureArea(t, s, baseX + 8, baseY + 8, z, 2, R)
+
+  const step = Math.max(0, Math.min(4, R.maxStepM))
+  let perechi = 0
+  for (const key of [...s.keys].sort((a, b) => a - b)) {
+    const cells = s.cells.get(key)!
+    const { bx, by, z: bz } = decodeBlockKey(key)
+    for (let i = 0; i < BLOCK_CELLS; i++) {
+      const mine = cells[i]!
+      if (mine === NO_REGION) continue
+      const wx = bx * REGION_SIZE + (i % REGION_SIZE)
+      const wy = by * REGION_SIZE + Math.floor(i / REGION_SIZE)
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        for (let dz = -step; dz <= step; dz++) {
+          const nz = bz + dz
+          const other = regionAt(s, wx + dx, wy + dy, nz)
+          if (other === NO_REGION) continue
+          if (!canStep(t, wx, wy, bz, wx + dx, wy + dy, nz, R)) continue
+          perechi++
+          assert.equal(find(s, mine), find(s, other),
+            `pas posibil intre (${wx},${wy},${bz}) si (${wx + dx},${wy + dy},${nz}), dar componente diferite`)
+        }
+      }
+    }
+  }
+  assert.ok(perechi > 1000, `doar ${perechi} perechi verificate — fixtura e prea saraca ca sa dovedeasca ceva`)
+})
+
+test('ORACOL: legarea isi creeaza blocurile vecine de care are nevoie', () => {
+  // Mutatia care a trecut neobservata: `linkBlock` nu mai chema `ensureBlock` pe
+  // vecin. In interiorul razei nu se vede nimic, fiindca `ensureArea` creeaza ea
+  // insasi toate blocurile. Se vede numai la MARGINE — unde acoperirea inceteaza
+  // sa fie „necunoscut" si devine „calculat", ceea ce schimba raspunsul lui
+  // `areConnected` de la „nu" la un raspuns adevarat.
+  const { t, s, baseX, baseY, z } = lume()
+  const raza = 1
+  ensureArea(t, s, baseX + 8, baseY + 8, z, raza, R)
+
+  const centru = blockOfCell(baseX + 8, baseY + 8)
+  // Coloana imediat in afara razei cerute, pe latura +x.
+  const dincolo = (centru.bx + raza + 1) * REGION_SIZE
+  let gasit = false
+  for (let ly = 0; ly < REGION_SIZE && !gasit; ly++) {
+    const wy = (centru.by - raza) * REGION_SIZE + ly
+    for (let dz = -2; dz <= 2 && !gasit; dz++) {
+      if (regionAt(s, dincolo, wy, z + dz) !== NO_REGION) gasit = true
+    }
+  }
+  assert.ok(gasit, 'niciun bloc dincolo de raza n-a fost creat de legare')
 })

@@ -14,10 +14,6 @@ import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 
 export interface Rules {
-  /** Latimea lumii, in celule. */
-  readonly worldWidthCells: number
-  /** Inaltimea lumii, in celule. */
-  readonly worldHeightCells: number
   /** Cati agenti incap. Plafon dur, verificat de comanda de spawn. */
   readonly agentCapacity: number
   /** Cati milimetri face un agent intr-un tick. */
@@ -40,13 +36,23 @@ export interface Rules {
   readonly maxRegionNodes: number
   /** Plafon de noduri pentru cautarea pe celule. Depasirea NU inseamna „imposibil". */
   readonly maxPathNodes: number
+  /** Cate celule incap intr-un drum stocat. Peste atat, drumul se taie si se reia. */
+  readonly maxPathCells: number
+  /** Cate re-planificari se fac cel mult intr-un tick. Fara plafon, un zid nou le declanseaza pe toate deodata. */
+  readonly maxReplansPerTick: number
+  /** Cate tickuri asteapta un agent dupa un drum refuzat, inainte sa reincerce. */
+  readonly replanCooldownTicks: number
+  /** Cat de departe isi cauta un agent tinta urmatoare, in celule. */
+  readonly agentGoalRadiusCells: number
+  /** Cate incercari de tinta se fac intr-un tick. Margineste consumul de RNG. */
+  readonly agentGoalAttempts: number
+  /** Ce raza de blocuri de regiuni isi asigura un agent in jur. */
+  readonly agentRegionRadiusBlocks: number
 }
 
 type FieldSpec = { min: number; max: number }
 
 const RULES_SPEC: Record<keyof Rules, FieldSpec> = {
-  worldWidthCells: { min: 1, max: 65536 },
-  worldHeightCells: { min: 1, max: 65536 },
   agentCapacity: { min: 1, max: 100000 },
   agentStepMm: { min: 1, max: 100000 },
   ticksPerSecond: { min: 1, max: 240 },
@@ -58,6 +64,12 @@ const RULES_SPEC: Record<keyof Rules, FieldSpec> = {
   climbCost: { min: 0, max: 100000 },
   maxRegionNodes: { min: 16, max: 1000000 },
   maxPathNodes: { min: 64, max: 10000000 },
+  maxPathCells: { min: 8, max: 4096 },
+  maxReplansPerTick: { min: 1, max: 10000 },
+  replanCooldownTicks: { min: 0, max: 100000 },
+  agentGoalRadiusCells: { min: 1, max: 1024 },
+  agentGoalAttempts: { min: 1, max: 64 },
+  agentRegionRadiusBlocks: { min: 0, max: 16 },
 }
 
 /**
@@ -100,8 +112,6 @@ export function parseRules(raw: unknown): Outcome<Rules> {
 
 /** Reguli implicite, folosite doar de teste si de harness cand nu se da un fisier. */
 export const DEFAULT_RULES: Rules = {
-  worldWidthCells: 256,
-  worldHeightCells: 256,
   agentCapacity: 64,
   agentStepMm: 250,
   ticksPerSecond: 20,
@@ -113,4 +123,10 @@ export const DEFAULT_RULES: Rules = {
   climbCost: 60,
   maxRegionNodes: 4000,
   maxPathNodes: 20000,
+  maxPathCells: 192,
+  maxReplansPerTick: 4,
+  replanCooldownTicks: 40,
+  agentGoalRadiusCells: 24,
+  agentGoalAttempts: 6,
+  agentRegionRadiusBlocks: 2,
 }

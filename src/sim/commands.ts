@@ -16,6 +16,7 @@ import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import type { World, FactionId } from './state.ts'
 import { slotOf } from './state.ts'
+import { clearPath } from './agents.ts'
 import type { MaterialId } from './terrain/chunk.ts'
 import { CHUNK_GRID, dig, fill, inWorld, setFocus } from './terrain/terrain.ts'
 
@@ -64,6 +65,16 @@ export function applyCommand(w: World, cmd: Command): Outcome<number> {
       a.z[slot] = cmd.z
       a.faction[slot] = cmd.faction
       a.alive[slot] = 1
+      // Slotul se REUTILIZEAZA, deci tot ce tine de agentul dinainte se sterge
+      // explicit. Fara asta, un agent nou se nastea cu tinta mortului si pornea
+      // spre ea — un defect care nu se vede in nicio rulare scurta, fiindca cere
+      // ca un slot sa fi murit intai.
+      a.goalX[slot] = 0
+      a.goalY[slot] = 0
+      a.goalZ[slot] = 0
+      a.hasGoal[slot] = 0
+      a.progresMm[slot] = 0
+      clearPath(w.paths, slot)
       return accept(id)
     }
 

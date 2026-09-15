@@ -338,15 +338,33 @@ export function promote(chunk: Chunk): void {
   chunk.voxels = rebuild(zBaseM, columns)
 }
 
-/** Materialul dintr-un voxel al unui chunk promovat. `z` e cota absoluta in metri. */
+/**
+ * Materialul dintr-un voxel al unui chunk promovat. `z` e cota absoluta in metri.
+ *
+ * Merge pe runs, nu desface coloana. Prima versiune aloca un `Uint8Array` de 64
+ * si desfacea TOATA coloana ca sa citeasca un singur nivel — la fiecare
+ * interogare. Cand agentii au inceput sa mearga pe drumuri, profilerul a pus
+ * `decodeColumn` pe primul loc cu 20,5% si `voxelAt` pe al doilea cu 10,9%, plus
+ * 3,4% colector de gunoi din alocarile alea. Un bloc de regiuni intreaba 256 de
+ * celule; fiecare platea 64 de scrieri si o alocare pentru un octet.
+ *
+ * O coloana are ~4 runs, deci asta e O(4) fara alocare in locul lui O(64) cu una.
+ * `decodeColumn` ramane — e folosit la editare, unde chiar trebuie toata coloana.
+ */
 export function voxelAt(chunk: Chunk, lx: number, ly: number, z: number): MaterialId {
   const v = chunk.voxels
   if (!v) throw new Error('voxelAt pe un chunk ne-promovat')
   const level = z - v.zBaseM
   if (level < 0 || level >= VOXEL_LEVELS) return Material.AER
-  const scratch = new Uint8Array(VOXEL_LEVELS)
-  decodeColumn(v, ly * CHUNK_CELLS + lx, scratch)
-  return scratch[level] as MaterialId
+  const col = ly * CHUNK_CELLS + lx
+  const end = v.columnStart[col + 1]!
+  let sus = 0
+  for (let r = v.columnStart[col]!; r < end; r++) {
+    sus += v.runLength[r]!
+    if (level < sus) return v.runMaterial[r] as MaterialId
+  }
+  // O coloana care nu acopera toate nivelurile se termina in aer, ca in `decodeColumn`.
+  return Material.AER
 }
 
 const scratchColumn = new Uint8Array(VOXEL_LEVELS)

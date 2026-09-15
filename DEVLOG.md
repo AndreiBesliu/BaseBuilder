@@ -1061,3 +1061,91 @@ scrisesem eu în cod ca viitoare prăpastie. Pathfinding-ul avea oricum nevoie d
 iar cheile ei *sunt* indexul de regiuni vii. Reconstrucția costă acum 2,9 ms la 85, 264 **și** 600 de
 blocuri — perfect plat.
 
+
+---
+
+## Task Started — S12-15: agenții merg pe drumuri reale
+
+**Prompt:** „continua" (sesiune de continuare autonomă a planului)
+**Model:** Claude Opus 5
+
+Substitutul care se plimba aleator iese. Agenții își aleg o țintă, cer un drum prin sistemul
+de două straturi și îl parcurg. Ce a ieșit la iveală făcând asta e mai interesant decât felia.
+
+### Trei defecte, toate ascunse unul sub altul
+
+**1. Lumea avea două mărimi.** `rules.worldWidthCells = 256` pentru agenți, 16384 de celule pentru
+teren. Nimic nu le compara, așa că au divergat tăcut din S3. S-a văzut abia când agenții au început
+să se nască pe sol: siturile de săpat sunt împrăștiate pe toți cei 16 km, iar `spawnAgent` le refuza
+pe toate cu `IN_AFARA_LUMII`. Mărimea lumii nu e un număr de gameplay — o determină harta macro —
+deci a ieșit din `content/rules.json` și a devenit DERIVED.
+
+**2. Agenții se năşteau la z = 0, cu solul la −70 m.** Pluteau în aer, nu ajungeau în nicio regiune,
+deci fiecare cerea o reconstrucție completă de regiuni la **fiecare tick, pe veci**. 200 de tickuri
+nu se terminau în două minute. Regula pe care o încalcă: *un agent care nu poate face nimic nu are
+voie să coste nimic.*
+
+**3. Poziția avea două reprezentări care se schimbau la momente diferite.** `x`/`y` alunecau continuu
+în milimetri, `z` se aplica discret, la sosire. Pe teren plat mergea. Pe o pantă, `cellOf(x)` trecea
+granița cu un tick înaintea lui `z`, și în tickul ăla tripletul agentului arăta **celula nouă la cota
+veche** — o celulă plină cu piatră, deci fără regiune. Poarta de la începutul lui `stepAgents` îl
+oprea, și fiindcă era oprit nu mai ajungea niciodată să se alinieze. **Blocat pe viață, la șapte
+celule de unde pornise.** Nu era un defect de pathfinding: drumul era corect.
+
+Simularea mișcă acum din centru în centru, atomic, cu un `progresMm` persistat. Interpolarea netedă
+rămâne treaba randării — ceea ce e și politica („fără float în starea de simulare"), nu o comoditate.
+
+### Măsurătoarea: 12989 → 32 µs/tick
+
+Prima cifră onestă, după ce agenții au ajuns pe sol, a fost **12989 µs/tick**. Cei 1306 µs/tick de
+dinainte măsurau agenți care nu făceau nimic.
+
+| pas | µs/tick (1000 t) | ce era |
+|---|---|---|
+| agenți pe sol, prima măsurătoare | 12989 | — |
+| `voxelAt` merge pe runs | 6741 | aloca un `Uint8Array` de 64 și desfăcea toată coloana pentru **un octet** |
+| legarea blocurilor, memoizată | 311 | `ensureArea` re-deriva fiecare muchie la fiecare cerere |
+
+Pe 100.000 de tickuri, scenariul standard costă acum **32,4 µs/tick** (3236 ms). Hash-ul de referință
+din CI: `69cb5da3` → `555d90da`.
+
+**Cum s-a găsit.** Pe timp *propriu*, profilul arăta o mulțime de interogări de teren fără niciun
+vinovat: `decodeColumn` 20,5%, `locate` 11,6%, `ensureChunk` 10,9%. Pe timp *inclusiv*, răspunsul era
+o singură linie: `ensureArea` 88,5%, din care `linkBlock` 80,2% — în timp ce `computeBlock` era la
+3,1%. **Nu se calcula nimic nou; se relega același lucru la nesfârșit.** Cele două unelte sunt acum
+în `tools/prof-propriu.mjs` și `tools/prof-inclusiv.mjs`.
+
+Și o ipoteză a mea, greșită: crezusem că acoperirea de regiuni crește la nesfârșit, fiindcă 400 de
+tickuri costau 3562 ms și 1000 costau 12989 — de 2,5× tickurile, de 3,65× timpul. Măsurat direct,
+acoperirea se stabilizează la 5282 de blocuri după tickul 200 și costul e **plat**. Comparația era
+confundată de construcția inițială.
+
+### Mutațiile, din nou
+
+Cele trei teste de memoizare au trecut toate verzi cu `ensureBlock` **scos** din bucla de vecini a
+lui `linkBlock` — adică exact mecanismul prin care memoizarea putea pierde o muchie. Motivul: comparau
+două magazine construite în ordini diferite, deci o mutație care le strică pe amândouă la fel le e
+invizibilă. **Un test care compară codul cu el însuși nu e un oracol.** Adăugate două care nu depind
+de o a doua rulare a aceluiași cod: unul cere ca orice pereche de celule între care `canStep` spune
+că se poate păși să fie în aceeași componentă, celălalt verifică marginea acoperirii. Al doilea prinde
+mutația.
+
+Testul de acceptanță (40 de agenți, 100k tickuri) pică la 11 ținte atinse din 200 dacă reintroduc
+defectul cu `z`.
+
+### Contracte schimbate
+
+`fiecare agent viu consumă exact o tragere pe tick` era adevărat despre plimbarea aleatoare. Agenții
+care merg pe drumuri trag numai când își **aleg** o țintă. Rescris în două invarianți care
+supraviețuiesc substitutului: un agent care nu poate face nimic consumă zero, iar consumul e mărginit
+de reguli, nu de teren. Fereastra primei versiuni era de 30 de tickuri — mai scurtă decât un drum —
+deci măsura zero pentru ambele lumi și ar fi trecut verde fără să compare nimic. Garda „fixtura e
+vidă" a prins-o.
+
+Reparat în trecere: `spawnAgent` nu reseta ținta la reutilizarea unui slot, deci un agent nou se
+năștea cu ținta mortului.
+
+## Task Completed
+
+133 de teste verzi, `npm run check` curat. Rămâne: randarea agenților (viewerul nu-i desenează încă),
+și interpolarea lor între centre, care are tot ce-i trebuie în `progresMm` + drum.

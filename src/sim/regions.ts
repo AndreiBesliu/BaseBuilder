@@ -165,6 +165,24 @@ export interface RegionStore {
    */
   nextId: number
   /** Blocuri care trebuie recalculate inainte de urmatoarea interogare. */
+  /**
+   * Blocurile ale caror MUCHII sunt deja derivate. DERIVED, ca tot storeul.
+   *
+   * Fara asta, `ensureArea` nu era idempotenta: a cere o zona deja calculata
+   * costa exact cat prima oara. Blocurile se reciclau din `cells`, dar fiecare
+   * muchie se re-derivа de la zero — 256 de celule x 4 directii x nivelurile din
+   * pas, adica mii de interogari de teren per bloc, pentru zero munca utila.
+   * Profilerul a pus `ensureArea` la 88,5% din tick, din care `linkBlock` 80,2%,
+   * in timp ce `computeBlock` era la 3,1%: nu se calcula nimic nou, se relega
+   * acelasi lucru la nesfarsit.
+   *
+   * E sigur sa se memoizeze fiindca `linkBlock` isi creeaza SINGUR blocurile
+   * vecine de care are nevoie (`ensureBlock` inainte de `connect`), deci muchiile
+   * unui bloc sunt complete in momentul legarii. Ce apare mai tarziu si chiar
+   * conteaza trece printr-o schimbare de teren, iar aia trece prin `rebuildDirty`,
+   * care sterge de aici tot ce a dezlegat.
+   */
+  readonly legate: Set<number>
   readonly dirty: Set<number>
 }
 
@@ -176,6 +194,7 @@ export function createRegions(): RegionStore {
     regionBlock: new Map(),
     component: new Int32Array(0),
     nextId: 0,
+    legate: new Set(),
     dirty: new Set(),
   }
 }
@@ -351,7 +370,12 @@ export function ensureBlock(t: Terrain, s: RegionStore, bx: number, by: number, 
  * doua ori, si fiecare muchie e vazuta din ambele capete.
  */
 export function linkBlock(t: Terrain, s: RegionStore, bx: number, by: number, z: number, rules: Rules): void {
-  const key = ensureBlock(t, s, bx, by, z, rules)
+  const key = blockKey(bx, by, z)
+  // Deja legat: muchiile lui exista si nu s-a schimbat nimic de atunci. Vezi
+  // `legate` pentru de ce e sigur.
+  if (s.legate.has(key)) return
+  ensureBlock(t, s, bx, by, z, rules)
+  s.legate.add(key)
   const cells = s.cells.get(key)!
   const originX = bx * REGION_SIZE
   const originY = by * REGION_SIZE
@@ -441,6 +465,7 @@ export function ensureArea(
 ): void {
   const { bx, by } = blockOfCell(wx, wy)
   const step = clampStep(rules)
+  const legateInainte = s.legate.size
   for (let dy = -radiusBlocks; dy <= radiusBlocks; dy++) {
     for (let dx = -radiusBlocks; dx <= radiusBlocks; dx++) {
       const nbx = bx + dx
@@ -454,7 +479,10 @@ export function ensureArea(
       for (let zz = lo; zz <= hi; zz++) linkBlock(t, s, nbx, nby, zz, rules)
     }
   }
-  relabel(s)
+  // Re-etichetarea costa O(regiuni + muchii) si e inutila daca n-a aparut nicio
+  // muchie noua. `connect` se apeleaza doar din `linkBlock`, iar `linkBlock` face
+  // treaba doar cand adauga in `legate` — deci marimea aia e semnalul exact.
+  if (s.legate.size !== legateInainte) relabel(s)
 }
 
 // --- interogarea ------------------------------------------------------------
@@ -557,7 +585,8 @@ export function markDirty(s: RegionStore, wx: number, wy: number, z: number, rul
 }
 
 /** Coordonatele unui bloc, din cheia lui. */
-function decodeKey(key: number): { bx: number; by: number; z: number } {
+/** Inversa lui `blockKey`. Exportata ca `decodeBlockKey` pentru oracolul din teste. */
+export function decodeBlockKey(key: number): { bx: number; by: number; z: number } {
   const z = (key % Z_SPAN) - Z_OFFSET
   const flat = Math.floor(key / Z_SPAN)
   return { bx: flat % WORLD_BLOCKS, by: Math.floor(flat / WORLD_BLOCKS), z }
@@ -616,7 +645,7 @@ export function rebuildDirty(t: Terrain, s: RegionStore, rules: Rules): number {
   const atinse = new Set<number>()
   for (const key of murdare) {
     atinse.add(key)
-    const { bx, by, z } = decodeKey(key)
+    const { bx, by, z } = decodeBlockKey(key)
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
       const nbx = bx + dx
       const nby = by + dy
@@ -631,6 +660,8 @@ export function rebuildDirty(t: Terrain, s: RegionStore, rules: Rules): number {
   // Muchiile regiunilor atinse dispar. Cele din capatul celalalt dispar si ele,
   // fiindca `connect` le-a scris simetric.
   for (const key of atinse) {
+    // Muchiile lui dispar, deci nu mai e legat.
+    s.legate.delete(key)
     const cells = s.cells.get(key)!
     for (let i = 0; i < BLOCK_CELLS; i++) {
       const r = cells[i]!
@@ -651,17 +682,18 @@ export function rebuildDirty(t: Terrain, s: RegionStore, rules: Rules): number {
       if (r !== NO_REGION) s.regionBlock.delete(r)
     }
     s.cells.delete(key)
+    s.legate.delete(key)
     const pos = s.keys.indexOf(key)
     if (pos >= 0) s.keys.splice(pos, 1)
   }
 
   const ordonate = [...atinse].sort((a, b) => a - b)
   for (const key of ordonate) {
-    const { bx, by, z } = decodeKey(key)
+    const { bx, by, z } = decodeBlockKey(key)
     ensureBlock(t, s, bx, by, z, rules)
   }
   for (const key of ordonate) {
-    const { bx, by, z } = decodeKey(key)
+    const { bx, by, z } = decodeBlockKey(key)
     linkBlock(t, s, bx, by, z, rules)
   }
 

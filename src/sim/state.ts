@@ -18,6 +18,8 @@
 
 import type { RngState } from './rng.ts'
 import type { Terrain } from './terrain/terrain.ts'
+import type { RegionStore } from './regions.ts'
+import type { PathStore } from './agents.ts'
 
 /** Versiunea schemei de stare. Creste la ORICE camp nou. Vezi save.ts. */
 export const SCHEMA_VERSION = 1
@@ -47,9 +49,36 @@ export interface AgentStore {
   /** PERSISTED */ id: Int32Array
   /** PERSISTED — milimetri */ x: Int32Array
   /** PERSISTED — milimetri */ y: Int32Array
-  /** PERSISTED — milimetri */ z: Int32Array
+  /** PERSISTED — NIVEL, in metri intregi. Nu milimetri: verticala e pe grila. */ z: Int32Array
   /** PERSISTED */ faction: Uint8Array
   /** PERSISTED — 0 = mort, slotul se poate reutiliza */ alive: Uint8Array
+  /**
+   * PERSISTED — unde vrea sa ajunga, in CELULE.
+   *
+   * Tinta e stare reala, nu derivata: fara ea in save, o lume reincarcata ar
+   * trimite oamenii in alta parte decat mergeau. Drumul, in schimb, NU e stare —
+   * se recalculeaza din (pozitie, tinta, teren) si sta in `PathStore`.
+   */
+  goalX: Int32Array
+  /** PERSISTED */ goalY: Int32Array
+  /** PERSISTED */ goalZ: Int32Array
+  /** PERSISTED — 0 = nu are tinta */ hasGoal: Uint8Array
+  /**
+   * PERSISTED — milimetri acumulati spre celula urmatoare de pe drum.
+   *
+   * Exista fiindca `x`/`y` se schimba continuu, iar `z` discret, si tripletul
+   * (celulaX, celulaY, z) trebuie sa fie VALID in orice moment. Cat timp agentul
+   * aluneca in milimetri spre celula urmatoare, `cellOf(x)` trece granita cu un
+   * tick inaintea lui `z`. Pe o panta, tickul ala il pune in celula destinatie cu
+   * cota sursa — adica in piatra. Poarta din `stepAgents` il oprea acolo, si
+   * fiindca era oprit nu mai apuca sa se alinieze: blocat pe viata, la 7 celule de
+   * unde pornise.
+   *
+   * Acum simularea sare din centru in centru, dintr-o data, iar aici se aduna cat
+   * a mers. Interpolarea neteda e treaba randarii, nu a simularii — exact cum
+   * cere „fara float in starea de simulare".
+   */
+  progresMm: Int32Array
 }
 
 export interface World {
@@ -66,12 +95,24 @@ export interface World {
    * substitut. Se contopesc la S12-15, cand agentii devin reali si incep sa
    * calce pe celule de teren.
    */
+  /** DERIVED. Extinderea lumii in mm, din harta macro. Vezi `createWorld`. */
   bounds: { w: number; h: number }
   /**
    * MIXT: chunk-urile ne-promovate sunt DERIVED (se regenereaza din seed),
    * cele promovate sunt PERSISTED (contin munca jucatorului).
    */
   terrain: Terrain
+  /**
+   * DERIVED — regiunile si reachability. Se reconstruiesc din teren.
+   *
+   * Stau pe `World` fiindca agentii au nevoie de ele la fiecare tick, iar
+   * acoperirea lor trebuie sa fie o functie de starea PERSISTATA (pozitiile
+   * agentilor), nu de istoricul intamplator al sesiunii. Vezi antetul din
+   * `agents.ts` — fara asta, un roundtrip de save ar putea da alte drumuri.
+   */
+  regions: RegionStore
+  /** TRANSIENT — drumurile in curs. Se recalculeaza din (pozitie, tinta, teren). */
+  paths: PathStore
 }
 
 export function makeAgentStore(capacity: number): AgentStore {
@@ -84,6 +125,11 @@ export function makeAgentStore(capacity: number): AgentStore {
     z: new Int32Array(capacity),
     faction: new Uint8Array(capacity),
     alive: new Uint8Array(capacity),
+    goalX: new Int32Array(capacity),
+    goalY: new Int32Array(capacity),
+    goalZ: new Int32Array(capacity),
+    hasGoal: new Uint8Array(capacity),
+    progresMm: new Int32Array(capacity),
   }
 }
 

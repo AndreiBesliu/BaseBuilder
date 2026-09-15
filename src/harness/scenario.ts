@@ -86,20 +86,31 @@ export function runScenario(s: Scenario): RunReport {
 export function standardScenario(seed: number, ticks: number, agents = 20): Scenario {
   const commands: LoggedCommand[] = []
 
+  // Siturile se aleg INAINTE de agenti, fiindca agentii se nasc pe ele.
+  const sites = pickSites(seed)
+
+  // Agentii se nasc PE SOL, nu la cota zero.
+  //
+  // Pana la S12-15 n-a contat: un agent-substitut se plimba aleator si n-avea
+  // nevoie de teren sub picioare. De cand merg pe drumuri, conteaza enorm —
+  // solul la siturile astea e pe la -70 m, deci la z = 0 agentii pluteau in aer,
+  // nu ajungeau niciodata intr-o regiune, si fiecare dintre ei cerea o
+  // reconstructie completa de regiuni la fiecare tick. 200 de tickuri nu se
+  // terminau in doua minute.
   for (let i = 0; i < agents; i++) {
+    const sit = sites[i % Math.max(1, sites.length)]
     const cmd: Command = {
       kind: 'spawnAgent',
-      x: (i * 7919) % 200000,
-      y: (i * 104729) % 200000,
-      z: 0,
+      // Centrul celulei, imprastiat putin in jurul situlului.
+      x: (sit ? sit.wx + (i % 5) : i * 7) * 1000 + 500,
+      y: (sit ? sit.wy + Math.floor(i / 5) % 5 : i * 11) * 1000 + 500,
+      z: sit ? sit.groundM + 1 : 0,
       faction: i % 5 === 0 ? 2 : 0,
     }
     commands.push({ tick: i % 3, cmd })
   }
 
-  // Terenul. Siturile se aleg din seed, nu din constante scrise de mana, ca
-  // scenariul sa ramana valid pe orice seed.
-  const sites = pickSites(seed)
+  // Terenul.
   let t = 100
   for (const s of sites) {
     commands.push({ tick: t, cmd: { kind: 'setFocus', cx: Math.floor(s.wx / CHUNK_CELLS), cy: Math.floor(s.wy / CHUNK_CELLS) } })
