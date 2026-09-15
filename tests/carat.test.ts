@@ -627,10 +627,12 @@ test('ACCEPTANTA: 12 pioni, cariera de 900 de celule + depozit de 20x20, 6000 de
   // Garda pe COST, nu pe frecventa: numarul de reconstructii nu spune nimic —
   // una peste 3000 de mormane costa de 60 de ori cat una peste 50.  numara
   // celulele si sloturile atinse. Masurat ~57 ns/celula si ~38 ns/morman, deci
-  // pragul de mai jos e si un buget de timp: 200 de pasi/tick ≈ 10 µs/tick.
+  // pragul de mai jos e si un buget de timp. Masurat azi: 12 pasi/tick. Pragul e
+  // 30, nu 200: un plafon care nu leaga nu e un plafon — cu 200, mutatia „indexul
+  // se reconstruieste la FIECARE scanare" (81 pasi/tick) trecea verde.
   const pasiPeTick = w.zone.index.pasi / 6000
   assert.ok(w.zone.index.reconstructii < 6000 * 2, 'indexul se reconstruieste de mai multe ori pe tick')
-  assert.ok(pasiPeTick < 200, `reconstructia indexului costa ${pasiPeTick.toFixed(0)} pasi/tick`)
+  assert.ok(pasiPeTick < 30, `reconstructia indexului costa ${pasiPeTick.toFixed(0)} pasi/tick`)
 })
 
 // ---------------------------------------------------------------------------
