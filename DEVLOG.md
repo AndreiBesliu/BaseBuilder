@@ -1223,3 +1223,61 @@ că nu e asta" minte la fel de ușor.
 ## Task Completed
 
 135 de teste verzi.
+
+---
+
+## Task Started — așezarea liberă a clădirilor: partea care se poate dovedi
+
+**Prompt:** „continua" (aceeași sesiune)
+**Model:** Claude Opus 5
+
+A doua jumătate din ce ai cerut lângă spike. M-am uitat întâi în PLAN.md, și bine am făcut:
+**D19 e închisă și unanimă pe toate trei lentilele**, iar textul ei spune exact „grila de 1 m e
+universală ca sistem de coordonate **și de coliziune**… «organicul» exclusiv în prezentare".
+
+Așezarea liberă în *simulare* ar răsturna-o tăcut. Așa că n-am mutat coliziunea. Am mutat **poza**:
+o clădire primește centru în milimetri și orientare liberă; ce se desenează e dreptunghiul rotit
+adevărat, ce se simulează sunt celulele pe care le acoperă. Asta e D20, scrisă în PLAN.md ca
+**deschisă** — nu e decizia mea de luat.
+
+### Orientarea nu e un unghi
+
+E un vector unitate Q14. `Math.cos` nu e garantat bit-exact între motoare JS, deci un unghi ar
+însemna că aceeași lume dă amprente diferite pe mașini diferite. Cine cheamă îl calculează din
+unghiul mouse-ului cu ce vrea; până ajunge în simulare sunt doi întregi, iar simularea nu atinge
+niciodată trigonometrie. Un vector nenormalizat primește **refuz cu motiv**, nu un boolean.
+
+### Riscul nu e estetic. E că zidul curge.
+
+Un zid rotit poate arăta continuu pe ecran și să aibă goluri în grilă — agenți care trec prin
+pereți, dintr-o cauză pe care n-ai găsi-o niciodată privind zidul. Deci regula de acoperire nu e o
+preferință, e decizia care ține tot:
+
+| regulă | ce face | rezultat |
+|---|---|---|
+| **ORICE atingere** | celula intră dacă e atinsă cât de puțin | **etanș la toate unghiurile 0–180°** |
+| **centrul celulei** | celula intră dacă centrul ei e înăuntru | **curge** |
+
+Al doilea are și un caz catastrofal: un zid de 0,2 m așezat exact pe o graniță de celulă blochează
+**zero** celule. Arată ca un zid, nu oprește pe nimeni, și nimic nu se plânge.
+
+Testul de etanșeitate are proba negativă lipită de el: dacă `CENTRU` n-ar curge niciodată, „etanș"
+n-ar dovedi nimic — ar putea fi adevărat din întâmplare, pentru orice regulă.
+
+### Cât costă etanșeitatea
+
+| formă | 0° | 15° | 30° | 45° |
+|---|---|---|---|---|
+| hală 12 × 7 m | 1,33× | 1,29× | 1,33× | 1,24× |
+| colibă 4 × 3 m | 2,00× | 1,83× | 2,00× | 2,00× |
+| zid 0,2 × 8 m | 1,13 cel./m | 1,63 | 1,88 | 2,38 |
+
+Costul scade cu mărimea: pentru o clădire adevărată e neglijabil, pentru un zid subțire e scara
+inerentă oricărei grile. Și o consecință care iese direct din cifre: **axa subțire a unui zid se
+ancorează pe centrul celulei** — 20 de celule devin 10, la aceeași lungime — chiar dacă poziția pe
+lungime și unghiul rămân libere.
+
+## Task Completed
+
+142 de teste verzi. Ce am livrat e traducerea poză↔grilă, dovedită; ce urmează — modelul de date al
+clădirilor, camerele, stabilitatea — așteaptă D20.

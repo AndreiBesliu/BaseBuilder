@@ -28,6 +28,8 @@ export const Reason = {
   /** Cautarea a atins plafonul de noduri. NU inseamna imposibil — inseamna prea scump ACUM. */
   BUGET_DEPASIT: 'BUGET_DEPASIT',
   CAPACITATE_DEPASITA: 'CAPACITATE_DEPASITA',
+  /** Un camp a venit cu o valoare pe care sistemul n-o poate interpreta — nu „lipseste", ci „nu e buna". */
+  VALOARE_INVALIDA: 'VALOARE_INVALIDA',
 } as const
 
 export type ReasonCode = (typeof Reason)[keyof typeof Reason]
