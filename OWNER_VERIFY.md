@@ -125,3 +125,31 @@ carieră cu **J** apăsat: dacă ți se pare că pionii mai mult umblă decât l
 pare normal pentru un colony sim, rămâne cum e. Costul dacă îl fac mai târziu: rescrierea driverului
 de cărat (cei patru pași devin bucle cu cursor), a cererilor de rezervare și a reconstrucției de la
 încărcare — deci nu e gratis, dar nici blocant.
+
+---
+
+## 8. Oamenii pleacă — se vede DE CE, și are sens?
+
+**Ce te uiți.** Viewerul, tasta **J**. Rândul de sus arată acum și `flămânzi`, `obosiți`,
+`refuză`, `plecați`, plus avertismentul „N pleacă în curând" și „nu mai e mâncare în așezare".
+Pionii galbeni mănâncă, cei violeți dorm. Lasă o carieră să meargă câteva minute fără să pui mâncare.
+
+**Cum arată bine.** Întâi apar flămânzi, apoi contorul de „refuză" crește, apoi avertismentul, și abia
+după aia pleacă cineva. Fereastra dintre avertisment și plecare e de vreo **50 de secunde de joc** —
+cât să apuci să reacționezi. Dacă îți par prea scurte sau prea lungi, cifrele sunt în
+`content/rules.json` (`dispozitieTicks`, `dispozitieUrcare`, `dispozitieCoborare`, pragurile).
+
+**De ce nu pot eu.** Corectitudinea o acoperă 315 teste și 89 de mutații: pragurile se ating,
+plecarea eliberează tot, marfa nu pleacă cu omul. Ce nu pot judeca e dacă **ritmul** e cel al unui
+joc — dacă ai timp să reacționezi, și dacă pierderea unui om se simte ca o consecință sau ca un
+accident.
+
+**Și o măsurătoare care cere o decizie.** Într-o colonie cu mâncare la fiecare sit, **8 din 32 de
+pioni pleacă** în 100.000 de tickuri. Nu e un defect al nevoilor: pionii fără treabă **hoinăresc**
+(plimbarea aleatoare rămasă din S12-15) și ajung la 3.000–6.000 de celule de cea mai apropiată hrană,
+adică mult peste raza în care își caută de mâncare. Am încercat să-i opresc din hoinărit când sunt
+flămânzi — au plecat 12 în loc de 8, fiindcă se depărtează înainte să flămânzească. Deci reparația
+adevărată e **să nu mai hoinărească oriunde**: fie se întorc spre așezare, fie stau. Asta e o decizie
+de joc, nu de cod: vrei ca un pion fără treabă să se plimbe prin toată valea, sau să rămână pe lângă
+casă? Costul: mic acum (o ancoră în `alegeTinta`), mai mare după ce apar clădirile care ar putea-o
+defini singure.

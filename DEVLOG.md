@@ -1953,3 +1953,71 @@ foame.
 
 Designul v2 e în `scratchpad/design-s16-t3.md`. Livrarea e în trei commit-uri: structura (tabel de
 drivere, fel de zonă, strat de mâncat), nevoile, dispoziția.
+
+## Task Completed
+
+**Tăietura 3 din S16-19 e livrată:** foame, odihnă, dispoziție. **315 teste**, **89 din 89 de
+mutații prinse** pe trei suite, zero controale invalide. Schema 5 și 6, hash de referință nou
+(`e6585927`), scenariul standard **79–81 µs/tick** — HEAD-ul de dinaintea tăieturii dădea 85–92 pe
+aceeași mașină, deci nevoile și dispoziția nu costă nimic măsurabil.
+
+Trei commit-uri, în ordinea asta, și ordinea a fost jumătate din livrare:
+
+| commit | ce a schimbat |
+|---|---|
+| **structura** | tabel de drivere pe felul jobului (cinci `else` care presupuneau SAPA), `Strat.MANCAT`, felul zonei citit în sfârșit de index, `iaDinItem` murdărește condiționat |
+| **nevoile** | tabel indexat, două ceasuri, defazare pe id, MANANCA + DOARME, schema 5 + migrare, mâncare în scenariul standard |
+| **dispoziția** | gânduri de stare vs. de eveniment, țintă DERIVED + bară PERSISTED, cele trei trepte, schema 6 + migrare, HUD și overlay |
+
+### Ce a prins panoul de design, și ce a prins măsurătoarea
+
+Panoul a găsit **rădăcina**: dispecerizarea binară. Patru lentile independente au ajuns la același
+loc, iar consecința era invarianta pe care stă tot determinismul — `1000 + save + load + 1000 ≠ 2000`
+pentru fiecare pion care mănâncă sau doarme când se salvează, adică aproape mereu. Tabelul de drivere
+a fost scris ca **refactorizare fără comportament nou**, cu hash-ul neschimbat ca dovadă.
+
+Dar trei lucruri nu le-a prins nimeni pe hârtie, și au ieșit din sonde:
+
+1. **`resetJobReport` enumera câmpurile unul câte unul.** Lista a supraviețuit trei tăieturi și a
+   căzut la a patra: trei contoare noi nu erau în ea, deci se adunau la infinit. Sonda a raportat
+   **44 de milioane de unități mâncate într-o lume care conținea 900** — un număr imposibil, pe care
+   nicio aserțiune nu-l urmărea. Un contor de tick care nu se resetează nu dă erori, dă cifre. Ambele
+   resetări sunt acum STRUCTURALE, deci clasa e închisă, nu instanța.
+2. **Treapta a treia era inaccesibilă ÎN JOC**, deși invariantul aritmetic trecea. Cu INFOMETAT la
+   −200, o așezare fără pic de mâncare se stabiliza la o dispoziție de 230 și nu pleca nimeni
+   niciodată: catalogul atingea pragul doar adunând și EPUIZAT, iar somnul pe jos reușește mereu, deci
+   EPUIZAT nu apare practic. Exact forma pe care panoul o găsise, reîntoarsă pe altă ușă — invariantul
+   verifică ce POATE aduna catalogul, nu ce se întâmplă. Reparat la −450, măsurat: fără mâncare pleacă
+   toți în ~40.000 de tickuri, cu ~1.500 între „refuză munca" și plecare.
+3. **`refuzaMunca` exista în DOUĂ rapoarte** și se incrementa doar în al doilea, deci sonda citea
+   mereu zero.
+
+### O reparație aruncată
+
+Pionii care pleacă dintr-o așezare **bine aprovizionată** sunt la 3.000–6.000 de celule de cea mai
+apropiată hrană, deși fiecare sit are mâncare: au ajuns acolo **hoinărind**. Am încercat să opresc
+hoinăreala cât timp o nevoie e nerezolvată. Au plecat **12 în loc de 8**: se îndepărtează *înainte* să
+flămânzească, iar oprirea pe loc îi lasă acolo. Am scos-o. Cauza e hoinăreala-substitut din S12-15, și
+reparația ei ține de înlocuirea substitutului — OWNER_VERIFY punctul 8.
+
+### Trei gărzi care nu legau
+
+Suita de mutații le-a găsit, și fiecare a fost o descoperire, nu o scuză:
+
+- fixtura porții de nevoi avea un ciclu de 10 tickuri, deci mutația „verifică doar la ticul de
+  nevoie" tot încăpea în fereastră. Acum ciclul e lung, fereastra strânsă, iar fixtura **verifică
+  întâi că mutația chiar ar rata-o**;
+- clauza „deja o rezolv pe asta" e apărată de rezervarea proprie a pionului: fără ea, tot ajunge la
+  mâncare. Ce diferă e că își scrie o răcire pe nevoia pe care tocmai o rezolvă — și asta se
+  asertează acum;
+- mutația mea pe podeaua de muncă scotea doar jumătatea de jos a multiplicatorului, deci „mai fericit
+  face mai mult" rămânea adevărat.
+
+### Ce rămâne deschis, cu cifra lui
+
+- **raportul drum/lucru a urcat de la 4,7 la 7,7.** Nevoile adaugă drum. Întrebarea despre batching
+  (OWNER_VERIFY 7) devine mai apăsată, nu mai puțin.
+- **hoinăreala-substitut costă acum oameni**: 8 din 32 pleacă în 100.000 de tickuri dintr-o colonie
+  aprovizionată, fiindcă ies din raza aprovizionării. OWNER_VERIFY 8.
+- căutările de nevoie costă **0,11 pași/tick**, indexul de zone **2,19** (garda leagă la 30). Ieftine.
+- producția de hrană nu există: mâncarea din scenariul standard se pune cu comanda.
