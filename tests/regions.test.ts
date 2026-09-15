@@ -17,6 +17,7 @@ import {
   regionAt,
   REGION_SIZE,
   regionCount,
+  statistici,
 } from '../src/sim/regions.ts'
 import type { RegionStore } from '../src/sim/regions.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
@@ -375,18 +376,31 @@ test('MEMOIZARE: o raza mica urmata de una mare da acelasi graf ca una mare sing
   assert.equal(amprenta(a.s), amprenta(b.s))
 })
 
-test('MEMOIZARE: o cerere repetata nu mai face nicio munca', () => {
+test('MEMOIZARE: o cerere repetata nu mai face nicio MUNCA', () => {
+  // Prima versiune a acestui test compara MARIMILE structurilor dupa a doua
+  // cerere — `cells.size`, `regionCount`, `legate.size`. Toate trei raman
+  // neschimbate si daca memoizarea e scoasa complet, fiindca a doua rulare
+  // reconstruieste exact aceleasi blocuri si aceleasi regiuni. Testul nu putea
+  // deosebi „n-a facut nimic" de „a refacut acelasi lucru" — adica exact
+  // regresia de 21x pe care e pus sa o pazeasca.
+  //
+  // Acum se masoara MUNCA.
   const { t, s, baseX, baseY, z } = lume()
   ensureArea(t, s, baseX + 8, baseY + 8, z, 2, R)
+  assert.ok(s.legate.size > 0, 'prima cerere n-a legat nimic — fixtura e goala')
+
+  const calculatePrima = statistici.blocuriCalculate
+  const legatePrima = statistici.blocuriLegate
+  assert.ok(legatePrima > 20, `prima cerere a legat doar ${legatePrima} blocuri — fixtura e prea mica`)
+
   const blocuri = s.cells.size
   const regiuni = regionCount(s)
-  const legate = s.legate.size
-  assert.ok(legate > 0, 'prima cerere n-a legat nimic — fixtura e goala')
-
   ensureArea(t, s, baseX + 8, baseY + 8, z, 2, R)
+
+  assert.equal(statistici.blocuriLegate, legatePrima, 'a doua cerere a mai legat blocuri')
+  assert.equal(statistici.blocuriCalculate, calculatePrima, 'a doua cerere a mai calculat blocuri')
   assert.equal(s.cells.size, blocuri)
   assert.equal(regionCount(s), regiuni)
-  assert.equal(s.legate.size, legate)
 })
 
 test('MEMOIZARE: o sapatura DEZLEAGA blocurile atinse, deci muchiile se refac', () => {

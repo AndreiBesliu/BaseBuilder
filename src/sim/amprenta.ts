@@ -47,8 +47,20 @@ export const DIR_ONE = 16384
 /** Jumatate de celula, in milimetri. Raza unei celule pe fiecare axa. */
 const RAZA_CELULA = MM_PER_CELL / 2
 
-/** Cat de mult are voie sa devieze un vector de orientare de la lungimea 1. */
-const TOLERANTA_LUNGIME = 64
+/**
+ * Cat de mult are voie sa devieze un vector de orientare de la lungimea 1.
+ *
+ * Unu, nu 64. Axele proprii ale dreptunghiului NU se normalizeaza in `atingeCelula`:
+ * proiectiile se compara cu `halfW * DIR_ONE`, desi raza corecta pe axa unitate e
+ * `halfW * L`. Cu L in banda DIR_ONE +/- 64, eroarea relativa e de 0,4% — la un
+ * zid de 200 m inseamna aproape o celula intreaga, si invariantul „ORICE contine
+ * CENTRU" chiar pica.
+ *
+ * Unu e realizabil: un vector unitate adevarat, rotunjit la intregi in Q14, are
+ * fiecare componenta gresita cu cel mult 0,5, deci lungimea cu cel mult ~0,71.
+ * Cine trimite altceva n-a rotunjit un vector unitate, si merita refuzul.
+ */
+const TOLERANTA_LUNGIME = 1
 
 export const Acoperire = {
   /** Celula intra daca e atinsa cat de putin. Conservator: nu curge. */
@@ -83,6 +95,23 @@ export interface Poza {
  * blocheaza mai mult decat arata". Contractul din CLAUDE.md cere ca un „nu" sa
  * poarte cu el motivul.
  */
+export function verificaPoza(p: Poza): Outcome<number> {
+  // Dimensiunile.
+  //
+  // Erau singurele campuri nevalidate, iar o jumatate-dimensiune NEGATIVA producea
+  // o amprenta GOALA: cutia iesea inversata, bucla nu intra niciodata, iar
+  // cladirea se desena exact ca una valida. Un zid care arata perfect si nu
+  // opreste pe nimeni. Un UI de constructie produce asta din primul drag facut de
+  // la dreapta spre stanga.
+  if (!Number.isInteger(p.halfW) || !Number.isInteger(p.halfH) || p.halfW <= 0 || p.halfH <= 0) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'dimensiuni', halfW: p.halfW, halfH: p.halfH })
+  }
+  if (!Number.isInteger(p.x) || !Number.isInteger(p.y)) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'centru', x: p.x, y: p.y })
+  }
+  return verificaOrientare(p.dirX, p.dirY)
+}
+
 export function verificaOrientare(dirX: number, dirY: number): Outcome<number> {
   if (!Number.isInteger(dirX) || !Number.isInteger(dirY)) {
     return refuse(Reason.VALOARE_INVALIDA, { camp: 'dir', dirX, dirY })
@@ -101,10 +130,17 @@ export function verificaOrientare(dirX: number, dirY: number): Outcome<number> {
 /** Cutia de celule care poate contine amprenta. Larga cu o celula, deliberat. */
 export function cutiaAmprentei(p: Poza): { x0: number; y0: number; x1: number; y1: number } {
   // Raza dreptunghiului rotit pe fiecare axa a lumii, in milimetri.
+  //
+  // Valorile ABSOLUTE ale jumatatilor de dimensiune, ca modul de esec sa fie
+  // conservator. `verificaPoza` refuza o dimensiune negativa, dar daca cineva
+  // ocoleste verificarea, o amprenta prea MARE se vede pe ecran; una goala — un
+  // zid care nu opreste pe nimeni — nu se vede deloc.
   const ax = Math.abs(p.dirX)
   const ay = Math.abs(p.dirY)
-  const razaX = Math.ceil((p.halfW * ax + p.halfH * ay) / DIR_ONE)
-  const razaY = Math.ceil((p.halfW * ay + p.halfH * ax) / DIR_ONE)
+  const hw = Math.abs(p.halfW)
+  const hh = Math.abs(p.halfH)
+  const razaX = Math.ceil((hw * ax + hh * ay) / DIR_ONE)
+  const razaY = Math.ceil((hw * ay + hh * ax) / DIR_ONE)
   return {
     x0: Math.floor((p.x - razaX) / MM_PER_CELL) - 1,
     y0: Math.floor((p.y - razaY) / MM_PER_CELL) - 1,
@@ -129,15 +165,17 @@ export function atingeCelula(p: Poza, cx: number, cy: number): boolean {
   const dy = centruY - p.y
   const ax = Math.abs(p.dirX)
   const ay = Math.abs(p.dirY)
+  const hw = Math.abs(p.halfW)
+  const hh = Math.abs(p.halfH)
 
   // Axele lumii.
-  if (Math.abs(dx) * DIR_ONE > RAZA_CELULA * DIR_ONE + p.halfW * ax + p.halfH * ay) return false
-  if (Math.abs(dy) * DIR_ONE > RAZA_CELULA * DIR_ONE + p.halfW * ay + p.halfH * ax) return false
+  if (Math.abs(dx) * DIR_ONE > RAZA_CELULA * DIR_ONE + hw * ax + hh * ay) return false
+  if (Math.abs(dy) * DIR_ONE > RAZA_CELULA * DIR_ONE + hw * ay + hh * ax) return false
 
   // Axele dreptunghiului. Raza celulei pe o axa oblica e proiectia patratului ei.
   const razaCelulaOblic = RAZA_CELULA * (ax + ay)
-  if (Math.abs(dx * p.dirX + dy * p.dirY) > p.halfW * DIR_ONE + razaCelulaOblic) return false
-  if (Math.abs(-dx * p.dirY + dy * p.dirX) > p.halfH * DIR_ONE + razaCelulaOblic) return false
+  if (Math.abs(dx * p.dirX + dy * p.dirY) > hw * DIR_ONE + razaCelulaOblic) return false
+  if (Math.abs(-dx * p.dirY + dy * p.dirX) > hh * DIR_ONE + razaCelulaOblic) return false
 
   return true
 }

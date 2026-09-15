@@ -9,12 +9,14 @@
 
 import type { Rules } from '../sim/content.ts'
 import { DEFAULT_RULES } from '../sim/content.ts'
-import type { Command, LoggedCommand } from '../sim/commands.ts'
+import type { LoggedCommand } from '../sim/commands.ts'
 import { applyCommand } from '../sim/commands.ts'
 import { hashWorld } from '../sim/hash.ts'
 import { describe } from '../sim/result.ts'
 import { CHUNK_CELLS, isSolid, Material } from '../sim/terrain/chunk.ts'
 import { createTerrain, groundLevelM, materialAt, WORLD_CELLS } from '../sim/terrain/terrain.ts'
+import type { Terrain } from '../sim/terrain/terrain.ts'
+import { isWalkable } from '../sim/regions.ts'
 import type { World } from '../sim/state.ts'
 import { advance, createWorld, liveAgentCount, tick } from '../sim/world.ts'
 
@@ -97,17 +99,31 @@ export function standardScenario(seed: number, ticks: number, agents = 20): Scen
   // nu ajungeau niciodata intr-o regiune, si fiecare dintre ei cerea o
   // reconstructie completa de regiuni la fiecare tick. 200 de tickuri nu se
   // terminau in doua minute.
+  //
+  // Cota se citeste PER CELULA, nu se ia cea a sitului.
+  //
+  // Prima versiune imprastia agentii pe un patrat de 5x5 in jurul sitului dar le
+  // dadea tuturor `sit.groundM + 1`. Pe teren inclinat, vecinii au alt sol — deci
+  // majoritatea agentilor ajungeau in aer sau in piatra si nu faceau nimic. Cat
+  // timp `spawnAgent` accepta orice pozitie, nimic nu se plangea: scenariul pe
+  // care stau testele de determinism si hash-ul de referinta din CI era pe
+  // jumatate populat cu agenti inerti.
+  const scratch = createTerrain(seed, 1)
   for (let i = 0; i < agents; i++) {
     const sit = sites[i % Math.max(1, sites.length)]
-    const cmd: Command = {
-      kind: 'spawnAgent',
-      // Centrul celulei, imprastiat putin in jurul situlului.
-      x: (sit ? sit.wx + (i % 5) : i * 7) * 1000 + 500,
-      y: (sit ? sit.wy + Math.floor(i / 5) % 5 : i * 11) * 1000 + 500,
-      z: sit ? sit.groundM + 1 : 0,
-      faction: i % 5 === 0 ? 2 : 0,
-    }
-    commands.push({ tick: i % 3, cmd })
+    if (!sit) continue
+    const loc = celulaBuna(scratch, sit.wx + (i % 5), sit.wy + (Math.floor(i / 5) % 5))
+    if (!loc) continue
+    commands.push({
+      tick: i % 3,
+      cmd: {
+        kind: 'spawnAgent',
+        x: loc.wx * 1000 + 500,
+        y: loc.wy * 1000 + 500,
+        z: loc.z,
+        faction: i % 5 === 0 ? 2 : 0,
+      },
+    })
   }
 
   // Terenul.
@@ -177,3 +193,27 @@ function pickSites(seed: number): Site[] {
 }
 
 export { advance, createWorld, hashWorld }
+
+/**
+ * O celula pe care se poate STA, cautata in spirala in jurul unui punct.
+ *
+ * Ordinea e fixa si marginita: fara ea, alegerea ar depinde de cat de departe
+ * cauta, iar scenariul n-ar mai fi o functie pura de seed.
+ */
+function celulaBuna(t: Terrain, wx: number, wy: number): { wx: number; wy: number; z: number } | null {
+  for (let r = 0; r <= 4; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue
+        const cx = wx + dx
+        const cy = wy + dy
+        if (cx < 0 || cy < 0) continue
+        const g = groundLevelM(t, cx, cy)
+        if (!g.ok) continue
+        if (!isWalkable(t, cx, cy, g.value + 1, DEFAULT_RULES)) continue
+        return { wx: cx, wy: cy, z: g.value + 1 }
+      }
+    }
+  }
+  return null
+}

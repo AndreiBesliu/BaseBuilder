@@ -19,7 +19,7 @@ import { slotOf } from './state.ts'
 import { cellOf, clearPath } from './agents.ts'
 import type { Rules } from './content.ts'
 import { DEFAULT_RULES } from './content.ts'
-import { markDirty } from './regions.ts'
+import { isWalkable, markDirty } from './regions.ts'
 import type { MaterialId } from './terrain/chunk.ts'
 import { CHUNK_GRID, dig, fill, inWorld, setFocus } from './terrain/terrain.ts'
 
@@ -53,6 +53,21 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       const a = w.agents
       if (cmd.x < 0 || cmd.y < 0 || cmd.x >= w.bounds.w || cmd.y >= w.bounds.h) {
         return refuse(Reason.IN_AFARA_LUMII, { x: cmd.x, y: cmd.y, latime: w.bounds.w, inaltime: w.bounds.h })
+      }
+      // Si ca se poate STA acolo.
+      //
+      // Pana acum singura validare era cutia lumii. Un agent asezat in piatra sau
+      // in aer nu ajunge niciodata intr-o regiune, deci e oprit pe viata de poarta
+      // din `stepAgents` — inert, si tacut. Costul real nu e agentul pierdut, ci
+      // ca fixturile de test se umplu cu el fara sa se vada: in testul D7c, 15 din
+      // 40 de agenti cadeau pe celule necalcabile si stateau nemiscati toate cele
+      // 20.000 de tickuri, iar testul trecea.
+      {
+        const cx = cellOf(cmd.x)
+        const cy = cellOf(cmd.y)
+        if (!isWalkable(w.terrain, cx, cy, cmd.z, rules)) {
+          return refuse(Reason.LOC_NECALCABIL, { wx: cx, wy: cy, z: cmd.z })
+        }
       }
       let slot = -1
       for (let i = 0; i < a.count; i++) {

@@ -406,7 +406,10 @@ export function regionAt(s: RegionStore, wx: number, wy: number, z: number): num
 /** Calculeaza blocul daca lipseste. Nu leaga nimic — legarea e pasul urmator. */
 export function ensureBlock(t: Terrain, s: RegionStore, bx: number, by: number, z: number, rules: Rules): number {
   const key = blockKey(bx, by, z)
-  if (!s.cells.has(key)) computeBlock(t, s, key, bx, by, z, rules)
+  if (!s.cells.has(key)) {
+    computeBlock(t, s, key, bx, by, z, rules)
+    statistici.blocuriCalculate++
+  }
   return key
 }
 
@@ -423,6 +426,16 @@ export function ensureBlock(t: Terrain, s: RegionStore, bx: number, by: number, 
  * Legarea e idempotenta: union-find nu se supara daca aceeasi pereche vine de
  * doua ori, si fiecare muchie e vazuta din ambele capete.
  */
+/**
+ * Cate blocuri s-au calculat si s-au legat de la pornire.
+ *
+ * Nu e decor si nu e doar pentru teste: „memoizarea a incetat sa scurtcircuiteze"
+ * e o regresie de 21x care nu schimba niciun rezultat, deci nu poate fi prinsa
+ * decat masurand MUNCA. Un test care se uita la marimea structurilor trece si cu
+ * memoizarea scoasa, fiindca a doua rulare reconstruieste exact aceleasi blocuri.
+ */
+export const statistici = { blocuriCalculate: 0, blocuriLegate: 0 }
+
 export function linkBlock(t: Terrain, s: RegionStore, bx: number, by: number, z: number, rules: Rules): void {
   const key = blockKey(bx, by, z)
   // Deja legat: muchiile lui exista si nu s-a schimbat nimic de atunci. Vezi
@@ -430,6 +443,7 @@ export function linkBlock(t: Terrain, s: RegionStore, bx: number, by: number, z:
   if (s.legate.has(key)) return
   ensureBlock(t, s, bx, by, z, rules)
   s.legate.add(key)
+  statistici.blocuriLegate++
   const cells = s.cells.get(key)!
   const originX = bx * REGION_SIZE
   const originY = by * REGION_SIZE

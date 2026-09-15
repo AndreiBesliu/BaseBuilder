@@ -1413,3 +1413,73 @@ ancora înlocuită cu id-ul, etichetele date iar pe id. **Toate șapte pică tes
 
 148 de teste verzi. Rămân 16 constatări neverificate din recenzie, majoritatea despre teste care nu
 testează — următoarea bucată.
+
+---
+
+## Task Started — testele care nu testau
+
+**Prompt:** „continua"
+**Model:** Claude Opus 5
+
+Restul recenziei: 16 constatări neverificate, majoritatea despre gărzi care nu pot deveni roșii.
+Nu erau presupuneri — fiecare venea cu o mutație care trecea verde.
+
+### Un agent inert se strecoară tăcut într-o fixtură
+
+`spawnAgent` valida doar cutia lumii. Nu verifica dacă se poate **sta** acolo. Un agent așezat în
+piatră sau în aer nu ajunge niciodată într-o regiune, deci e oprit pe viață de poarta din
+`stepAgents` — inert, și tăcut.
+
+Costul real nu e agentul pierdut, ci că **fixturile se umplu cu el fără să se vadă**: în testul meu
+D7c, **15 din 40** de agenți cădeau pe celule necalcabile și stăteau nemișcați toate cele 20.000 de
+tickuri. Testul trecea.
+
+Acum `spawnAgent` refuză, cu `LOC_NECALCABIL`. Adăugarea a picat imediat **șase** teste — toate
+sprijinindu-se, fără să știe, pe agenți care nu făceau nimic. Inclusiv unul al meu, scris azi:
+`standardScenario` împrăștia agenții pe un pătrat de 5×5 în jurul sitului dar le dădea tuturor cota
+**sitului**. Pe teren înclinat vecinii au alt sol — deci scenariul pe care stau testele de
+determinism și hash-ul de referință din CI era pe jumătate populat cu agenți inerți. Reparat azi
+dimineață pe jumătate, fără să observ.
+
+### Șapte gărzi rescrise, fiecare cu mutația care o probează
+
+| ce susținea garda | ce măsura de fapt |
+|---|---|
+| „D7c: agentul abandonează ținta și așteaptă" | trei contoare agregate; despre agent, nimic |
+| „memoizarea nu mai face nicio muncă" | **mărimea** structurilor — neschimbată și cu memoizarea scoasă |
+| „consumul de RNG e mărginit de reguli" | un prag de 3600 pe o valoare măsurată de 28 |
+| „plafonul de re-planificări" | nimic: pe 100.000 de tickuri se fac 0,48 pe tick, față de un plafon de 4 |
+| „amprenta e corectă" | doar margini **inferioare** — o axă SAT putea dispărea, verde |
+| „răcirea din pasul 1" | trageri de RNG, zero și cu răcire, și fără |
+| `assert.equal(refuzuri, ostili)` | adevărat trivial — contorul putea număra orice refuz |
+
+Pentru memoizare a fost nevoie de instrumentare: `statistici.blocuriLegate`. „Memoizarea a încetat să
+scurtcircuiteze" e o regresie de 21× care **nu schimbă niciun rezultat** — nu se poate prinde decât
+măsurând munca.
+
+### Și un test al meu care tot nu prindea, de două ori
+
+Am scris garda pentru plafonul de încercări de țintă, am mutat plafonul ×3, și testul a trecut. Am
+lărgit fereastra de la 50 la 200 de tickuri, plafonul chiar a fost atins, și testul **tot** a trecut.
+
+Motivul: agentul care ajunge la a șasea încercare o și **reușește**. Plafonul nu e niciodată
+constrângerea, deci poate fi ridicat fără ca ceva să se schimbe. „Plafonul e atins" nu înseamnă
+„plafonul oprește ceva".
+
+Fixtura corectă e una în care fiecare încercare eșuează **prin construcție**: rază de căutare de 4000
+de celule, deci candidații cad mereu în afara acoperirii. Abia atunci bucla merge până la plafon de
+fiecare dată, și plafonul e singurul lucru care o oprește. Mutația pică.
+
+### Reparat în cod, nu doar în teste
+
+- `spawnAgent` refuză pozițiile necalcabile
+- `standardScenario` citește cota **per celulă**
+- `amprenta` refuză dimensiuni negative — o jumătate-dimensiune negativă producea o amprentă **goală**,
+  iar clădirea se desena identic: un zid care arată perfect și nu oprește pe nimeni. Un UI de
+  construcție produce asta din primul drag făcut de la dreapta spre stânga
+- toleranța de orientare: de la ±64 la ±1. Axele proprii nu se normalizează, deci banda de toleranță
+  devine eroare de geometrie proporțională cu mărimea clădirii — la 200 m, aproape o celulă întreagă
+
+## Task Completed
+
+**154 de teste.** Nouă mutații probate, toate prinse. Hash de referință: `58fdcb51` → `9552870a`.

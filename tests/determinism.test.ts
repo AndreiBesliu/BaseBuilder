@@ -2,13 +2,14 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { runScenario, standardScenario } from '../src/harness/scenario.ts'
 import { hashWorld } from '../src/sim/hash.ts'
-import { advance, createWorld, liveAgentCount } from '../src/sim/world.ts'
+import { advance, createWorld, liveAgentCount, tick } from '../src/sim/world.ts'
 import { decode, encode } from '../src/sim/save.ts'
 import { find, NO_REGION } from '../src/sim/regions.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { Faction } from '../src/sim/state.ts'
 import { Reason } from '../src/sim/result.ts'
 import { groundLevelM, materialAt, promotedCount, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
+import { lastAgentReport } from '../src/sim/agents.ts'
 import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
 import type { World } from '../src/sim/state.ts'
@@ -41,7 +42,7 @@ test('rularea in doua transe e identica cu rularea continua', () => {
 
 test('hash-ul e sensibil la orice bit din stare', () => {
   const w = createWorld(31)
-  const spawn = applyCommand(w, { kind: 'spawnAgent', x: 1000, y: 1000, z: 0, faction: Faction.ASEZARE })
+  const spawn = applyCommand(w, { kind: 'spawnAgent', ...locBun(w), faction: Faction.ASEZARE })
   assert.ok(spawn.ok)
   const before = hashWorld(w)
   w.agents.x[0] = w.agents.x[0]! + 1
@@ -63,38 +64,95 @@ test('un tick nu schimba nimic intr-o lume fara agenti, in afara contorului', ()
 // care exista: cursorul de RNG trebuie sa fie o functie previzibila de STARE, nu
 // de teren si nu de cat de norocoasa a fost o cautare.
 
-test('un agent care nu poate face nimic nu consuma nimic din flux', () => {
-  // Agentii astia se nasc in aer, deasupra solului: nu ajung in nicio regiune,
-  // deci n-au de unde sa-si aleaga o tinta. Regula e ca asta sa fie GRATIS.
-  // Contra-exemplul e chiar versiunea dinainte a lui `stepAgents`, in care un
-  // agent de negasit cerea o reconstructie completa de regiuni la fiecare tick.
+test('un agent nu se poate naste unde nu se poate STA', () => {
+  // Invariantul asta a inlocuit unul mai slab — „un agent care nu poate face nimic
+  // nu consuma nimic din flux" — care masura trageri de RNG. Erau zero si cu
+  // aparatoarea pusa, si fara ea: testul nu putea deosebi „e gratis" de „nu face
+  // nimic". Acum problema e rezolvata mai devreme: un agent inert nici nu se
+  // naste.
+  //
+  // Conteaza fiindca agentii inerti se strecoara TACUT in fixturi. In testul D7c,
+  // 15 din 40 stateau nemiscati toate cele 20.000 de tickuri, iar testul trecea.
   const w = createWorld(90)
-  for (let i = 0; i < 7; i++) {
-    const r = applyCommand(w, { kind: 'spawnAgent', x: i * 1000, y: 0, z: 0, faction: Faction.ASEZARE })
-    assert.ok(r.ok)
-  }
-  const before = w.rng.agents.draws
-  advance(w, 10)
-  assert.equal(w.rng.agents.draws - before, 0)
+  const g = groundLevelM(w.terrain, 5000, 5000)
+  assert.ok(g.ok)
+
+  const inAer = applyCommand(w, { kind: 'spawnAgent', x: 5_000_500, y: 5_000_500, z: g.value + 40, faction: Faction.ASEZARE })
+  assert.equal(inAer.ok, false, 'un agent asezat in aer a fost acceptat')
+  if (!inAer.ok) assert.equal(inAer.reason, Reason.LOC_NECALCABIL)
+
+  const inPiatra = applyCommand(w, { kind: 'spawnAgent', x: 5_000_500, y: 5_000_500, z: g.value - 3, faction: Faction.ASEZARE })
+  assert.equal(inPiatra.ok, false, 'un agent asezat in piatra a fost acceptat')
+
+  const peSol = applyCommand(w, { kind: 'spawnAgent', x: 5_000_500, y: 5_000_500, z: g.value + 1, faction: Faction.ASEZARE })
+  assert.ok(peSol.ok, 'locul bun a fost refuzat — verificarea e prea stricta')
 })
 
 test('consumul de RNG e MARGINIT de reguli, nu de teren', () => {
-  // Plafonul e ce face cursorul previzibil. `alegeTinta` face cel mult
-  // `agentGoalAttempts` incercari, fiecare cu exact doua trageri, si numai pentru
-  // agentii care chiar sunt undeva. Fara plafon, consumul ar depinde de cat de
-  // greu e de gasit o celula libera — adica de relief.
+  // Plafonul e ce face cursorul previzibil. Fara el, consumul ar depinde de cat
+  // de greu e de gasit o celula libera — adica de relief — si cursorul fluxului
+  // ar inceta sa mai fie o functie previzibila de stare.
+  //
+  // Prima versiune a acestui test asertase `trase <= vii * 50 * attempts * 2`,
+  // adica 3600, in timp ce valoarea masurata era 28: o plasa de 128 de ori mai
+  // larga decat pestele. `agentGoalAttempts` putea fi inmultit cu 33 fara ca
+  // testul sa clipeasca. Acum relatia e EXACTA.
   const w = peSol(4242, 6)
   const vii = liveAgentCount(w)
   assert.equal(vii, 6, 'fixtura n-a asezat agentii pe sol')
 
+  // 200 de tickuri, nu 50: pe o fereastra scurta plafonul nu e ATINS niciodata,
+  // deci „nu e depasit" ar fi adevarat si daca plafonul ar lipsi cu totul. Garda
+  // de mai jos cere explicit sa fie atins.
+  let incercari = 0
+  let maxUnAgent = 0
   const before = w.rng.agents.draws
-  advance(w, 50)
+  for (let t = 0; t < 200; t++) {
+    advance(w, 1)
+    const r = lastAgentReport()
+    incercari += r.incercariTinta
+    if (r.maxIncercariUnAgent > maxUnAgent) maxUnAgent = r.maxIncercariUnAgent
+  }
   const trase = w.rng.agents.draws - before
-  assert.ok(trase > 0, 'niciun agent n-a ales vreo tinta — fixtura e vida, nu invariantul verde')
+
+  assert.ok(incercari > 0, 'niciun agent n-a ales vreo tinta — fixtura e vida, nu invariantul verde')
+  // O incercare costa EXACT doua trageri. Nu „cel mult".
+  assert.equal(trase, 2 * incercari, `${trase} trageri pentru ${incercari} incercari`)
   assert.ok(
-    trase <= vii * 50 * DEFAULT_RULES.agentGoalAttempts * 2,
-    `${trase} trageri depasesc plafonul teoretic`,
+    maxUnAgent <= DEFAULT_RULES.agentGoalAttempts,
+    `un agent a facut ${maxUnAgent} incercari, peste plafonul de ${DEFAULT_RULES.agentGoalAttempts}`,
   )
+})
+
+test('plafonul de incercari CHIAR opreste cautarea, nu doar o margineste pe hartie', () => {
+  // Testul de mai sus nu putea prinde ridicarea plafonului, si motivul merita
+  // scris: in fixtura lui, agentul care ajunge la a sasea incercare o si
+  // REUSESTE. Plafonul nu e niciodata constrangerea, deci poate fi inmultit cu
+  // trei fara ca nimic sa se schimbe.
+  //
+  // Aici e o fixtura in care fiecare incercare EsUEAZA prin constructie: raza de
+  // cautare e atat de mare incat candidatii cad mereu in afara acoperirii de
+  // regiuni. Atunci bucla merge pana la plafon de fiecare data, si plafonul e
+  // singurul lucru care o opreste.
+  const reguli = { ...DEFAULT_RULES, agentGoalRadiusCells: 4000 }
+  const w = peSol(4242, 4)
+  const vii = liveAgentCount(w)
+
+  let maxUnAgent = 0
+  let tickuriCuIncercari = 0
+  for (let t = 0; t < 30; t++) {
+    tick(w, reguli)
+    const r = lastAgentReport()
+    if (r.incercariTinta > 0) tickuriCuIncercari++
+    if (r.maxIncercariUnAgent > maxUnAgent) maxUnAgent = r.maxIncercariUnAgent
+  }
+
+  assert.ok(tickuriCuIncercari > 5, `doar ${tickuriCuIncercari} tickuri cu incercari — fixtura e vida`)
+  assert.equal(
+    maxUnAgent, reguli.agentGoalAttempts,
+    `cea mai lunga serie a fost ${maxUnAgent}, nu ${reguli.agentGoalAttempts}: plafonul nu e ce opreste cautarea`,
+  )
+  assert.ok(vii > 0)
 })
 
 test('un agent mort nu mai consuma din flux', () => {
@@ -155,11 +213,12 @@ test('comenzile refuzate spun DE CE, si nu schimba starea', () => {
 test('plafonul de agenti e o refuzare explicita, nu o crestere tacuta', () => {
   const w = createWorld(6)
   const cap = w.agents.capacity
+  const loc = locBun(w)
   for (let i = 0; i < cap; i++) {
-    const r = applyCommand(w, { kind: 'spawnAgent', x: 0, y: 0, z: 0, faction: Faction.ASEZARE })
+    const r = applyCommand(w, { kind: 'spawnAgent', ...loc, faction: Faction.ASEZARE })
     assert.ok(r.ok, `spawn ${i} a esuat inainte de plafon`)
   }
-  const over = applyCommand(w, { kind: 'spawnAgent', x: 0, y: 0, z: 0, faction: Faction.ASEZARE })
+  const over = applyCommand(w, { kind: 'spawnAgent', ...loc, faction: Faction.ASEZARE })
   assert.equal(over.ok, false)
   if (!over.ok) {
     assert.equal(over.reason, Reason.CAPACITATE_DEPASITA)
@@ -169,10 +228,11 @@ test('plafonul de agenti e o refuzare explicita, nu o crestere tacuta', () => {
 
 test('slotul unui agent mort se reutilizeaza, dar id-ul nu', () => {
   const w = createWorld(8)
-  const a = applyCommand(w, { kind: 'spawnAgent', x: 0, y: 0, z: 0, faction: Faction.ASEZARE })
+  const loc = locBun(w)
+  const a = applyCommand(w, { kind: 'spawnAgent', ...loc, faction: Faction.ASEZARE })
   assert.ok(a.ok)
   applyCommand(w, { kind: 'killAgent', id: a.value })
-  const b = applyCommand(w, { kind: 'spawnAgent', x: 0, y: 0, z: 0, faction: Faction.ASEZARE })
+  const b = applyCommand(w, { kind: 'spawnAgent', ...loc, faction: Faction.ASEZARE })
   assert.ok(b.ok)
   assert.equal(w.agents.count, 1, 'slotul nu a fost reutilizat')
   assert.notEqual(b.value, a.value, 'id-ul a fost reciclat')
@@ -325,3 +385,17 @@ test('o lume incarcata are ACELASI graf de regiuni ca cea continua', () => {
   }
   assert.equal(amprenta(incarcat.value.regions), amprenta(w.regions), 'componentele difera dupa incarcare')
 })
+
+/** Prima celula pe care se poate STA, pentru testele care au nevoie doar de un loc valid. */
+function locBun(w: World): { x: number; y: number; z: number } {
+  for (let k = 1; k <= 8000; k++) {
+    const wx = (k * 1237 + w.seed) % WORLD_CELLS
+    const wy = (k * 7919 + w.seed * 31) % WORLD_CELLS
+    const g = groundLevelM(w.terrain, wx, wy)
+    if (!g.ok) continue
+    const sus = materialAt(w.terrain, wx, wy, g.value)
+    if (!sus.ok || !isSolid(sus.value)) continue
+    return { x: wx * 1000 + 500, y: wy * 1000 + 500, z: g.value + 1 }
+  }
+  throw new Error('niciun loc bun')
+}

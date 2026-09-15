@@ -28,6 +28,8 @@ export const Reason = {
   /** Cautarea a atins plafonul de noduri. NU inseamna imposibil — inseamna prea scump ACUM. */
   BUGET_DEPASIT: 'BUGET_DEPASIT',
   CAPACITATE_DEPASITA: 'CAPACITATE_DEPASITA',
+  /** Nu se poate sta acolo: e piatra, e apa, sau nu e podea dedesubt. */
+  LOC_NECALCABIL: 'LOC_NECALCABIL',
   /** Cineva sta acolo. Nu se zideste peste un om. */
   CELULA_OCUPATA: 'CELULA_OCUPATA',
   /** Un camp a venit cu o valoare pe care sistemul n-o poate interpreta — nu „lipseste", ci „nu e buna". */

@@ -7,6 +7,7 @@ import {
   cutiaAmprentei,
   DIR_ONE,
   verificaOrientare,
+  verificaPoza,
 } from '../src/sim/amprenta.ts'
 import type { AcoperireId, Poza } from '../src/sim/amprenta.ts'
 import { Reason } from '../src/sim/result.ts'
@@ -168,4 +169,84 @@ test('CURGE: acelasi zid, cu regula CENTRU, chiar are goluri', () => {
     if (!taie(g, Acoperire.CENTRU)) curse++
   }
   assert.ok(curse > 0, 'CENTRU n-a curs niciodata — testul de etanseitate nu dovedeste nimic')
+})
+
+// --- marginea de SUS --------------------------------------------------------
+
+test('MARGINE: fiecare celula din amprenta e CHIAR atinsa de cladire', () => {
+  // Toate probele de mai sus sunt margini INFERIOARE: amprenta sa nu fie prea
+  // mica. Niciuna n-o marginea de sus. Daca o axa din testul SAT dispare la un
+  // refactor, amprenta se umfla pana la cutia de incadrare — o cladire de 1 x 10 m
+  // la 45 de grade ar ocupa 64 de celule in loc de 22 — iar agentii ar fi refuzati
+  // pe pamant gol, la cativa metri de zid. Toate cele sapte teste ar ramane verzi.
+  //
+  // Oracolul e independent de codul testat: se esantioneaza puncte in celula si
+  // se cere ca macar unul sa cada in dreptunghi, cu aritmetica in virgula mobila,
+  // nu cu acelasi SAT intreg.
+  const N = 24
+  for (const [hw, hh] of [[2000, 1500], [500, 5000], [6000, 3500], [1000, 1000]] as const) {
+    for (const g of [0, 17, 30, 45, 61, 90, 123]) {
+      const p = poza(9_500, 7_500, hw, hh, g)
+      const a = amprenta(p, Acoperire.ORICE)
+      assert.ok(a.length > 0, `amprenta goala la ${hw}x${hh} @ ${g}`)
+
+      const ux = p.dirX / DIR_ONE
+      const uy = p.dirY / DIR_ONE
+      for (let i = 0; i < a.length; i += 2) {
+        const cx = a[i]!
+        const cy = a[i + 1]!
+        let atinsa = false
+        for (let sy = 0; sy <= N && !atinsa; sy++) {
+          for (let sx = 0; sx <= N && !atinsa; sx++) {
+            const px = (cx + sx / N) * 1000 - p.x
+            const py = (cy + sy / N) * 1000 - p.y
+            const pe = Math.abs(px * ux + py * uy)
+            const pn = Math.abs(-px * uy + py * ux)
+            // O toleranta de o zecime de milimetru, pentru rotunjirea din Q14.
+            if (pe <= hw + 0.1 && pn <= hh + 0.1) atinsa = true
+          }
+        }
+        assert.ok(atinsa, `celula (${cx},${cy}) e in amprenta dar NU e atinsa de ${hw}x${hh} @ ${g}`)
+      }
+    }
+  }
+})
+
+test('o dimensiune NEGATIVA e refuzata, si nu produce o amprenta goala', () => {
+  // Un UI de constructie calculeaza jumatatea de dimensiune dintr-un drag. Primul
+  // drag facut de la dreapta spre stanga da un `halfW` negativ. Pana acum
+  // `verificaOrientare` era singura validare, iar o dimensiune negativa producea
+  // o amprenta GOALA: cladirea se desena identic si nu bloca nimic.
+  const rea: Poza = { ...poza(5_000, 5_000, 2_000, 1_000, 30), halfW: -2_000 }
+  const out = verificaPoza(rea)
+  assert.equal(out.ok, false)
+  if (!out.ok) {
+    assert.equal(out.reason, Reason.VALOARE_INVALIDA)
+    assert.equal(out.params.camp, 'dimensiuni')
+  }
+  assert.equal(verificaPoza(poza(5_000, 5_000, 2_000, 1_000, 30)).ok, true, 'o poza buna a fost refuzata')
+
+  // Si daca cineva ocoleste verificarea, modul de esec e conservator: amprenta
+  // iese cel putin la fel de mare, niciodata goala.
+  const bun = amprenta(poza(5_000, 5_000, 2_000, 1_000, 30)).length
+  assert.equal(amprenta(rea).length, bun, 'o dimensiune negativa a schimbat amprenta')
+})
+
+test('toleranta de orientare e destul de STRANSA cat sa nu strice geometria', () => {
+  // Axele proprii nu se normalizeaza in `atingeCelula`: proiectiile se compara cu
+  // `halfW * DIR_ONE`, desi raza pe axa unitate e `halfW * L`. Banda de toleranta
+  // devine deci eroare de geometrie, proportionala cu marimea cladirii.
+  for (let g = 0; g < 360; g++) {
+    const d = dir(g)
+    assert.equal(verificaOrientare(d.dirX, d.dirY).ok, true, `unghiul intreg ${g} a fost refuzat`)
+  }
+  // Si pe unghiuri care nu sunt grade intregi — cine roteste cu mouse-ul.
+  for (let k = 0; k < 500; k++) {
+    const r = (k * 0.719) % (2 * Math.PI)
+    const dx = Math.round(Math.cos(r) * DIR_ONE)
+    const dy = Math.round(Math.sin(r) * DIR_ONE)
+    assert.equal(verificaOrientare(dx, dy).ok, true, `vectorul rotunjit de la ${r} a fost refuzat`)
+  }
+  // Dar un vector vizibil nenormalizat nu trece.
+  assert.equal(verificaOrientare(DIR_ONE + 40, 0).ok, false, 'un vector cu 0,25% mai lung a trecut')
 })

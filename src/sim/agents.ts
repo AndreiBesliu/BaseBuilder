@@ -155,9 +155,13 @@ function alegeTinta(w: World, rules: Rules, rng: RngState, slot: number): boolea
   const cy = cellOf(a.y[slot]!)
   const raza = rules.agentGoalRadiusCells
 
+  let facute = 0
   for (let incercare = 0; incercare < rules.agentGoalAttempts; incercare++) {
     const dx = nextInt(rng, raza * 2 + 1) - raza
     const dy = nextInt(rng, raza * 2 + 1) - raza
+    facute++
+    raport.incercariTinta++
+    if (facute > raport.maxIncercariUnAgent) raport.maxIncercariUnAgent = facute
     const tx = cx + dx
     const ty = cy + dy
     if (tx < 0 || ty < 0) continue
@@ -194,9 +198,13 @@ export interface AgentTickReport {
   sosiri: number
   /** Cati stau intr-o celula necalcabila si n-au unde sa iasa. Trebuie sa fie 0. */
   ingropati: number
+  /** Cate INCERCARI de tinta s-au facut. Fiecare costa exact doua trageri de RNG. */
+  incercariTinta: number
+  /** Cea mai lunga serie de incercari a unui singur agent. Nu are voie sa treaca de plafon. */
+  maxIncercariUnAgent: number
 }
 
-const raport: AgentTickReport = { replans: 0, refuzuri: 0, blocatiDeOstili: 0, sosiri: 0, ingropati: 0 }
+const raport: AgentTickReport = { replans: 0, refuzuri: 0, blocatiDeOstili: 0, sosiri: 0, ingropati: 0, incercariTinta: 0, maxIncercariUnAgent: 0 }
 
 /** Ultimul raport de tick. TRANSIENT, pentru overlay si pentru teste. */
 export function lastAgentReport(): AgentTickReport {
@@ -212,6 +220,8 @@ export function stepAgents(w: World, rules: Rules): void {
   raport.blocatiDeOstili = 0
   raport.sosiri = 0
   raport.ingropati = 0
+  raport.incercariTinta = 0
+  raport.maxIncercariUnAgent = 0
 
   // 1. Acoperirea de regiuni, ca functie de pozitiile PERSISTATE ale agentilor.
   //    Ordinea slotului, ca peste tot.

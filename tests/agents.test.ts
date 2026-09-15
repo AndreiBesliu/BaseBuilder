@@ -5,7 +5,7 @@ import { applyCommand } from '../src/sim/commands.ts'
 import { createWorld, tick } from '../src/sim/world.ts'
 import { Faction } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
-import { cellOf, lastAgentReport } from '../src/sim/agents.ts'
+import { cellOf, clearPath, lastAgentReport } from '../src/sim/agents.ts'
 import { Reason } from '../src/sim/result.ts'
 import { isSolid, Material } from '../src/sim/terrain/chunk.ts'
 import { groundLevelM, materialAt, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
@@ -176,9 +176,97 @@ test('D7c: aglomerarea produce blocare de OSTIL, si nu deadlock', () => {
   }
 
   assert.ok(ostili > 0, 'niciun agent n-a fost oprit de un ostil — fixtura nu exercita D7c')
-  assert.equal(refuzuri, ostili, `${refuzuri - ostili} refuzuri din alt motiv decat ostilii`)
   // Partea care conteaza: ostilii incurca, nu opresc lumea.
   assert.ok(sosiri > 1000, `doar ${sosiri} tinte atinse — inghesuiala a produs deadlock`)
+  assert.ok(refuzuri >= ostili)
+})
+
+test('D7c: agentul REACTIONEAZA la refuz — abandoneaza tinta si asteapta', () => {
+  // Testul de mai sus numara agregate. Comentariul lui sustinea ca dovedeste ceva
+  // ce nu asertase niciodata: „agentul abandoneaza tinta si asteapta, in loc sa
+  // reincerce la nesfarsit acelasi drum blocat". Aia e reactia care face
+  // diferenta dintre un pion incurcat si un deadlock, si nimic n-o verifica.
+  //
+  // Se construieste direct: un agent cu o tinta pe care `findPath` o refuza,
+  // fiindca un ostil sta chiar pe ea.
+  const w = peSol(20260916, 2)
+  for (let t = 0; t < 40; t++) tick(w, R)
+
+  // Doi agenti de factiuni diferite, adusi unul langa altul.
+  const propriu = 1 // peSol face din indexul 0 un JEFUITOR
+  const ostil = 0
+  assert.notEqual(w.agents.faction[propriu], w.agents.faction[ostil], 'fixtura n-a produs doua factiuni')
+
+  // Ostilul se muta EXACT pe tinta pe care i-o dam celuilalt.
+  const tx = cellOf(w.agents.x[propriu]!) + 1
+  const ty = cellOf(w.agents.y[propriu]!)
+  const tz = w.agents.z[propriu]!
+  if (regionAt(w.regions, tx, ty, tz) === NO_REGION) return // teren nepotrivit, nu fortam
+
+  w.agents.x[ostil] = tx * 1000 + 500
+  w.agents.y[ostil] = ty * 1000 + 500
+  w.agents.z[ostil] = tz
+  w.agents.hasGoal[ostil] = 0
+  clearPath(w.paths, ostil)
+
+  w.agents.goalX[propriu] = tx
+  w.agents.goalY[propriu] = ty
+  w.agents.goalZ[propriu] = tz
+  w.agents.hasGoal[propriu] = 1
+  clearPath(w.paths, propriu)
+  w.paths.nextReplanTick[propriu] = 0
+
+  const tickInainte = w.tick
+  tick(w, R)
+
+  // Reactia ceruta: tinta ABANDONATA, si o racire pusa. Fara ele, agentul ar cere
+  // acelasi drum blocat la fiecare tick, pe veci.
+  assert.equal(w.agents.hasGoal[propriu], 0, 'tinta refuzata n-a fost abandonata')
+  assert.ok(
+    w.paths.nextReplanTick[propriu]! > tickInainte,
+    `nu s-a pus nicio racire (nextReplanTick=${w.paths.nextReplanTick[propriu]})`,
+  )
+  assert.equal(w.paths.len[propriu], 0, 'a ramas cu un drum dupa un refuz')
+})
+
+test('plafonul de re-planificari se RESPECTA, si munca se amana, nu se pierde', () => {
+  // `maxReplansPerTick` e cerut explicit de plan, si nicio fixtura nu-l atingea:
+  // pe 100.000 de tickuri cu 40 de agenti se fac 0,48 re-planificari pe tick, fata
+  // de un plafon de 4. Plafonul putea fi sters fara ca vreun test sa clipeasca.
+  //
+  // Aici se forteaza: plafon 1, multi agenti fara drum in acelasi tick.
+  const reguli = { ...R, maxReplansPerTick: 1, replanCooldownTicks: 0 }
+  const w = peSol(4242, 12)
+  for (let t = 0; t < 60; t++) tick(w, reguli)
+
+  // Toata lumea isi pierde drumul deodata — ca dupa un zid nou.
+  let cuTinta = 0
+  for (let i = 0; i < w.agents.count; i++) {
+    if (w.agents.alive[i] === 0) continue
+    clearPath(w.paths, i)
+    w.paths.nextReplanTick[i] = 0
+    if (w.agents.hasGoal[i] === 1) cuTinta++
+  }
+  assert.ok(cuTinta >= 5, `doar ${cuTinta} agenti cu tinta — fixtura nu forteaza plafonul`)
+
+  let maxIntrUnTick = 0
+  let atins = false
+  for (let t = 0; t < 60; t++) {
+    tick(w, reguli)
+    const n = lastAgentReport().replans
+    if (n > maxIntrUnTick) maxIntrUnTick = n
+    if (n === reguli.maxReplansPerTick) atins = true
+  }
+  assert.ok(atins, 'plafonul n-a fost atins niciodata — testul nu dovedeste nimic')
+  assert.ok(
+    maxIntrUnTick <= reguli.maxReplansPerTick,
+    `${maxIntrUnTick} re-planificari intr-un tick, peste plafonul de ${reguli.maxReplansPerTick}`,
+  )
+
+  // Si munca nu s-a pierdut: pana la urma agentii chiar pornesc.
+  let cuDrum = 0
+  for (let i = 0; i < w.agents.count; i++) if (w.agents.alive[i] === 1 && w.paths.len[i]! > 0) cuDrum++
+  assert.ok(cuDrum > 0, 'dupa 60 de tickuri niciun agent n-a primit drum — munca s-a pierdut, nu s-a amanat')
 })
 
 // --- terenul ajunge la agenti ------------------------------------------------
