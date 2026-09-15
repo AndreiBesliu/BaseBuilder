@@ -997,3 +997,67 @@ Rescris ca **oracol independent**: se reface partiția cu un flood propriu peste
 și se compară cu etichetarea. Nu o adaptare a vechii aserțiuni la noul model — o verificare care nu
 folosește codul testat.
 
+---
+
+## S12-15: pathfinding în două straturi, și un refuz de 0,5 µs
+
+**Prompt:** „fa altceva singur"
+**Model:** Opus 5
+
+Am reluat raționamentul de la capăt, nu din concluzii parțiale: stare curată, CI verde, agenții încă
+plimbarea aleatoare. Deci următoarea felie din plan e S12-15 — și e exact ce fundația de regiuni a
+fost construită ca să suporte.
+
+### Ordinea operațiilor *este* algoritmul
+
+Research-ul e neechivoc și a costat pe alții cinci ani: *graf de regiuni peste A\* local, de la
+primul commit.* Going Medieval l-a rescris de patru ori și îl declară și azi, după 1.0, problema
+numărul unu.
+
+Deci: **întâi se întreabă graful** — o citire de etichetă de componentă, O(1). Dacă zice nu, nu se
+pornește niciun A\*. Abia apoi A\* peste regiuni dă un *coridor*, iar A\*-ul pe celule caută doar
+înăuntrul lui.
+
+| | cost măsurat |
+|---|---|
+| drum lung, 109 celule | ~380 µs · 109 noduri explorate |
+| **refuz** | **~0,5 µs** |
+
+**De ~700× mai ieftin.** Asta e toată justificarea stratului de regiuni, și e exact semnalul de
+alarmă din research: *„FPS-ul scade când construiești un zid, nu când adaugi pioni"* — adică 15 pioni
+căutând simultan un drum inexistent.
+
+Un detaliu care m-a bucurat: pe teren deschis, A\*-ul explorează **exact** atâtea noduri câte are
+drumul. Cu cost uniform, euristica Manhattan e exactă, deci căutarea nu rătăcește deloc.
+
+### Motivele unui refuz sunt informație de joc
+
+- `INACCESIBIL` — nu există drum. Un zid, o prăpastie.
+- `OCUPAT_DE_OSTIL` — drumul **există**, dar e blocat. Ăsta e D7c: un raider în coridor nu îngheață
+  colonia, produce un mesaj pe care jucătorul îl poate rezolva.
+- `BUGET_DEPASIT` — prea scump **acum**, nu imposibil. Confuzia dintre astea două e exact felul în
+  care un pion se blochează pe viață.
+
+### Două teste care nu dovedeau ce credeam
+
+Le-am prins supunând codul la mutații, cum am făcut și cu oracolul de determinism:
+
+1. **„același drum de două ori" trecea și cu departajarea din coadă SCOASĂ.** Într-un singur proces,
+   un heap e determinist oricum — ordinea din tablou e ea însăși deterministă. Testul nu dovedea
+   nimic despre ce credeam că dovedește. Înlocuit cu unul care inserează aceleași elemente în **două
+   ordini diferite** și cere aceeași ieșire.
+2. **„agenții proprii scumpesc drumul" asertase `cost >= cost`** — adevărat trivial când penalizarea
+   lipsește. Acum cere ca penalizarea să *schimbe* ceva: ori drumul ocolește, ori costă strict mai
+   mult.
+
+Toate patru mutațiile pică acum. Și o fixtură care era greșită: zidul din testul D7c avea 32 de
+celule într-o zonă calculată de 64, deci drumul îl ocolea pe la capete — **testul pica pe fixtură, nu
+pe cod.** Acum testul dovedește întâi că poarta e singurul drum, și abia apoi pune ostilul în ea.
+
+### Și o datorie plătită
+
+`relabel` parcurgea toate celulele rezidente doar ca să afle ce regiuni trăiesc — limita pe care o
+scrisesem eu în cod ca viitoare prăpastie. Pathfinding-ul avea oricum nevoie de maparea regiune→bloc,
+iar cheile ei *sunt* indexul de regiuni vii. Reconstrucția costă acum 2,9 ms la 85, 264 **și** 600 de
+blocuri — perfect plat.
+
