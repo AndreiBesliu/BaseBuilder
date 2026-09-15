@@ -63,7 +63,7 @@ import { cellKey, findPath, pathLength } from './path.ts'
 import type { Ocupare } from './path.ts'
 import { Reason } from './result.ts'
 import { cellOf, centerMm, clearPath } from './drumuri.ts'
-import { cautaJob, drumRefuzat, lucreaza, resetJobReport, tintesteLocDeLucru } from './joburi.ts'
+import { cautaJob, drumRefuzat, lucreaza, resetJobReport, Sfarsit, terminaJob, tintesteLocDeLucru } from './joburi.ts'
 
 // Drumurile si aritmetica de celule stau in `drumuri.ts` (ca `joburi.ts` sa le
 // poata folosi fara un ciclu de import). Re-exportate de aici pentru cine le
@@ -276,6 +276,13 @@ export function stepAgents(w: World, rules: Rules): void {
     if (!isWalkable(w.terrain, cx, cy, cz, rules)) {
       if (!dezgroapa(w, rules, i)) {
         raport.ingropati++
+        // Un pion din care nu se mai poate iesi nu mai ajunge NICIODATA la munca
+        // sau la drum, deci nici `drumRefuzat`, nici `lucreaza`, nici vreun plafon
+        // nu-l mai ating. Fara linia asta, jobul lui ramanea viu pe veci: tinta
+        // rezervata pentru toata colonia si marfa blocata in mana — vizibila in
+        // suma totala, deci nici macar numarata ca pierduta. Jobul se incheie
+        // aici; marfa trece prin `lasaLaPicioare`, si daca n-are unde, se NUMARA.
+        terminaJob(w, rules, i, Sfarsit.INTRERUPT)
         continue
       }
       cx = cellOf(a.x[i]!)

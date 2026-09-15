@@ -141,7 +141,7 @@ export function ruleaza(w: World, ticks: number, rules: Rules = R, laFiecareTick
   const t: Totaluri = {
     scanari: 0, vizite: 0, candidatiExaminati: 0, candidatiTaiati: 0, coridoare: 0, joburiPornite: 0, joburiTerminate: 0, joburiAnulate: 0,
     tickuriDeLucru: 0, locuriDeLucruRefacute: 0, refuzuriDrum: 0, faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0,
-    faraDepozit: 0, evaluariDestinatie: 0, itemeProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
+    faraDepozit: 0, evaluariDestinatie: 0, itemeProduse: 0, unitatiProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
     refuzuriAgenti: 0, maxScanariPeTick: 0,
   }
   for (let i = 0; i < ticks; i++) {

@@ -5,10 +5,12 @@ import { tick } from '../src/sim/world.ts'
 import { Categorie, FelJob, Item, ITEME, PasCara } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { cellOf } from '../src/sim/drumuri.ts'
+import { Material } from '../src/sim/terrain/chunk.ts'
+import { fill } from '../src/sim/terrain/terrain.ts'
 import { codMotiv, Reason } from '../src/sim/result.ts'
-import { find, isWalkable, NO_REGION, regionAt } from '../src/sim/regions.ts'
-import { existaTinta, lastJobReport, StareRatiune } from '../src/sim/joburi.ts'
-import { itemLaCelula, slotItem } from '../src/sim/iteme.ts'
+import { find, isWalkable, markDirty, NO_REGION, regionAt } from '../src/sim/regions.ts'
+import { drumRefuzat, esteEvitata, evitaTinta, existaTinta, lastJobReport, StareRatiune } from '../src/sim/joburi.ts'
+import { itemLaCelula, locPeCelula, slotItem } from '../src/sim/iteme.ts'
 import { celulaDeZonaLa, indexZone } from '../src/sim/zone.ts'
 import { dumpRezervari, verificaRezervari } from '../src/sim/rezervari.ts'
 import { decode, encode } from '../src/sim/save.ts'
@@ -583,7 +585,7 @@ test('ACCEPTANTA: 12 pioni, cariera de 900 de celule + depozit de 20x20, 6000 de
   let produse = 0
   const t = ruleaza(w, 6000, R, (w) => {
     if (w.regions.dirty.size > 0) murdare++
-    produse += lastJobReport().itemeProduse
+    produse += lastJobReport().unitatiProduse
     if (w.tick % 100 === 0) {
       for (let i = 0; i < w.iteme.count; i++) {
         if (w.iteme.alive[i] === 0) continue
@@ -604,12 +606,13 @@ test('ACCEPTANTA: 12 pioni, cariera de 900 de celule + depozit de 20x20, 6000 de
   assert.ok(t.itemeMutate > 100, `doar ${t.itemeMutate} depuneri in depozit`)
   assert.equal(w.ratiune.itemePierdute, 0, 'marfa pierduta')
   assert.equal(w.ratiune.joburiFaraProgres, 0)
-  // Tot ce s-a produs e undeva: pe jos sau in depozit. Nimic nu se consuma inca.
-  let asteptat = 0
-  const sapate = t.joburiTerminate - t.itemeMutate
-  void sapate
-  asteptat = produse > 0 ? marfaTotala(w) : 0
-  assert.ok(asteptat > 0)
+  // CONSERVAREA, in unitati. Prima versiune calcula un numar si il arunca cu
+  // `void`, apoi asserta doar ca totalul e nenul: mutatia „scade 1 unitate la
+  // fiecare depunere" trecea verde. Acum: tot ce s-a produs e ori in lume, ori
+  // numarat ca pierdut. `itemeProduse` numara MORMANE si nu se poate aduna;
+  // `unitatiProduse` e numarul cu care se face contabilitatea.
+  assert.ok(produse > 0, 'fixtura: sapatul n-a produs nimic')
+  assert.equal(marfaTotala(w) + w.ratiune.itemePierdute, produse, 'marfa nu se conserva: produs vs. (in lume + pierdut)')
   const inDepozit = itemeInZona(w, zona)
   assert.ok(inDepozit.iteme > 0)
   assert.ok(inDepozit.iteme <= celuleDepozit)
@@ -617,4 +620,172 @@ test('ACCEPTANTA: 12 pioni, cariera de 900 de celule + depozit de 20x20, 6000 de
   const raportPion = w.ratiune.tickuriDeLucru > 0 ? w.ratiune.tickuriPeDrum / w.ratiune.tickuriDeLucru : 0
   console.log(`  cariera + depozit (${celuleDepozit} celule): ${t.joburiTerminate} joburi, ${t.itemeMutate} depuneri, ${w.iteme.vii} mormane vii (${inDepozit.iteme} in depozit), ${t.candidatiExaminati} evaluari scumpe, ${t.evaluariDestinatie} celule de destinatie examinate, ${w.zone.index.reconstructii} reconstructii de index, drum/lucru ${raportPion.toFixed(2)}, ${(ms / 6000 * 1000).toFixed(0)} µs/tick`)
   assert.ok(w.zone.index.reconstructii < 6000 * 2, 'indexul se reconstruieste de mai multe ori pe tick')
+})
+
+// ---------------------------------------------------------------------------
+// gardele adaugate dupa recenzia codului
+// ---------------------------------------------------------------------------
+
+test('refuz INACCESIBIL repetat in MERGE_DEST: jobul se incheie in plafon, marfa ajunge jos, celula de depozit se elibereaza', () => {
+  // Ping-pong-ul de destinatie: se elibereaza A si se rezerva B, iar la refuzul
+  // urmator A redevine cea mai apropiata si se revine pe ea. Fara contor, bucla
+  // era infinita, cu marfa in mana pe viata si o celula rezervata degeaba.
+  const { w, zona } = fixturaCarat(621, 1, 20, 2, 8, 40)
+  const n = panaCand(w, 600, (w) => inPas(w, 0, PasCara.MERGE_DEST) && w.agents.caraCantitate[0]! > 0)
+  assert.ok(n >= 0, 'fixtura: pionul n-a ajuns sa care')
+  assert.equal(w.rezervari.total, 1, 'fixtura: destinatia nu e rezervata')
+
+  let apeluri = 0
+  for (let k = 0; k < 50 && w.agents.jobKind[0] !== 0; k++) {
+    drumRefuzat(w, R, 0, Reason.INACCESIBIL)
+    apeluri++
+  }
+  assert.equal(w.agents.jobKind[0], 0, `jobul de carat n-a murit dupa ${apeluri} de refuzuri`)
+  assert.ok(apeluri <= R.jobMaxIncercari, `${apeluri} refuzuri pana la incheiere, plafonul e ${R.jobMaxIncercari}`)
+  assert.equal(w.agents.caraCantitate[0], 0, 'marfa a ramas in mana')
+  assert.equal(marfaTotala(w), 20)
+  assert.equal(w.rezervari.total, 0, 'celula de depozit a ramas rezervata')
+  assert.equal(w.ratiune.itemePierdute, 0)
+  void zona
+})
+
+test('fill nu zideste un pion la inaltimea capului: garda acopera tot headroom-ul, nu doar celula picioarelor', () => {
+  const { w } = laSit(622, 1)
+  const cx = cellOf(w.agents.x[0]!)
+  const cy = cellOf(w.agents.y[0]!)
+  const cz = w.agents.z[0]!
+  for (let h = 0; h < R.agentHeadroomM; h++) {
+    const out = applyCommand(w, { kind: 'fill', wx: cx, wy: cy, z: cz + h, material: Material.PIATRA_CONSTRUITA }, R)
+    assert.equal(out.ok, false, `zidirea la z+${h} peste pion a trecut`)
+    if (!out.ok) assert.equal(out.reason, Reason.CELULA_OCUPATA)
+  }
+  // Deasupra headroom-ului se poate.
+  assert.ok(applyCommand(w, { kind: 'fill', wx: cx, wy: cy, z: cz + R.agentHeadroomM, material: Material.PIATRA_CONSTRUITA }, R).ok)
+})
+
+test('un pion ingropat din care nu se mai iese isi INCHEIE jobul: marfa iese din mana si rezervarea se elibereaza', () => {
+  // Fara asta, pionul nu mai ajunge nici la munca, nici la drum, deci niciun
+  // plafon nu-l atinge: tinta ramanea rezervata pentru toata colonia si marfa
+  // ramanea in mana pe veci — vizibila in suma totala, deci nici macar numarata.
+  const { w } = fixturaCarat(623, 1, 20, 2, 8, 40)
+  const n = panaCand(w, 600, (w) => inPas(w, 0, PasCara.MERGE_DEST) && w.agents.caraCantitate[0]! > 0)
+  assert.ok(n >= 0, 'fixtura: pionul n-a ajuns sa care')
+  assert.equal(w.rezervari.total, 1)
+  const inainte = marfaTotala(w)
+  // Se ingroapa prin editare directa de teren: comanda `fill` refuza acum, si pe
+  // drept — dar un save vechi sau alta cale de editare poate produce starea asta.
+  const px = cellOf(w.agents.x[0]!)
+  const py = cellOf(w.agents.y[0]!)
+  const pz = w.agents.z[0]!
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+    for (let h = 0; h < R.agentHeadroomM; h++) fill(w.terrain, px + dx, py + dy, pz + h, Material.PIATRA_CONSTRUITA)
+  }
+  fill(w.terrain, px, py, pz + 1, Material.PIATRA_CONSTRUITA)
+  markDirty(w.regions, px, py, pz, R)
+  ruleaza(w, 3)
+  assert.equal(w.agents.jobKind[0], 0, 'pionul ingropat si-a pastrat jobul')
+  assert.equal(w.agents.caraCantitate[0], 0, 'marfa a ramas in mana unui pion ingropat')
+  assert.equal(w.rezervari.total, 0, 'rezervarea a ramas pe veci')
+  assert.equal(marfaTotala(w) + w.ratiune.itemePierdute, inainte, 'marfa nu se conserva la ingropare')
+})
+
+test('marfa din mana unui slot MORT se NUMARA la incarcare, nu se sterge tacut', () => {
+  const { w } = fixturaCarat(624, 1, 20, 2, 8, 40)
+  const n = panaCand(w, 600, (w) => inPas(w, 0, PasCara.MERGE_DEST) && w.agents.caraCantitate[0]! > 0)
+  assert.ok(n >= 0)
+  const cant = w.agents.caraCantitate[0]!
+  const raw = JSON.parse(encode(w)) as { data: { agents: Record<string, number[]> } }
+  raw.data.agents.alive![0] = 0
+  const loaded = decode(JSON.stringify(raw))
+  assert.ok(loaded.ok, JSON.stringify(loaded))
+  assert.equal(loaded.value.rezervari.anulateLaIncarcare, 1)
+  assert.equal(loaded.value.agents.caraCantitate[0], 0)
+  assert.equal(loaded.value.ratiune.itemePierdute, cant, 'marfa mortului a disparut fara sa fie numarata')
+})
+
+test('o zona EVITATA de un pion nu produce racire pe ITEM: cauza e a perechii, nu a marfii', () => {
+  // Doua depozite: A (evitat de pionul care intreaba) si B, cu loc. Prima
+  // versiune cerea ca TOATE zonele cu loc sa fie evitate ca sa scrie racirea pe
+  // pereche; cu B in peisaj scria pe ITEM — si ascundea marfa de toata colonia.
+  const { w, sit } = laSit(625, 1)
+  const cx = cellOf(w.agents.x[0]!)
+  const cy = cellOf(w.agents.y[0]!)
+  const a = patratPlat(w, sit, 2, 6, 40)
+  assert.ok(a)
+  const zonaA = picteaza(w, a.x0, a.y0, 2, 5)
+  const id = lasaItem(w, Item.PIATRA, 20, cx + 2, cy)
+  const is0 = slotItem(w.iteme, id)
+  assert.notEqual(is0, -1)
+  // Pionul evita zona A: singura cu loc. Cauza e a PERECHII.
+  evitaTinta(w, 0, zonaA, w.tick + 10000)
+  ruleaza(w, 2 * R.jobRescanTicks + 2)
+  const is = slotItem(w.iteme, id)
+  assert.notEqual(is, -1, 'marfa a fost carata desi zona era evitata')
+  assert.equal(w.iteme.reincercaLaTick[is], 0, 'racirea unei cauze de PERECHE a ajuns pe item')
+  assert.ok(esteEvitata(w, 0, id), 'pionul n-a luat racirea pe el')
+})
+
+test('la incarcare, marfa se lasa la picioare DUPA ce toate rezervarile exista: o celula rezervata de alt pion nu se umple', () => {
+  // `asazaItem` sare peste celulele rezervate ca destinatie intreband
+  // `w.rezervari`. Intr-o singura trecere, slotul 0 intreaba INAINTE ca slotul 1
+  // sa-si fi scris rezervarea — deci ar fi umplut exact celula pe care slotul 1
+  // o tine, si promisiunea „existent + jobCantitate ≤ itemStackMax intre scan si
+  // LASA" s-ar rupe in lumea INCARCATA, dupa ordinea sloturilor.
+  const { w, sit } = laSit(626, 2)
+  const px = cellOf(w.agents.x[0]!)
+  const py = cellOf(w.agents.y[0]!)
+  const pz = w.agents.z[0]!
+  // Zona Z: exact celula pe care sta pionul 0 (deci acolo ii cade marfa).
+  const zid = applyCommand(w, { kind: 'picteazaZona', x0: px, y0: py, x1: px, y1: py, z: pz, prioritate: 3 }, R)
+  assert.ok(zid.ok, JSON.stringify(zid))
+  const zc = celulaDeZonaLa(w.zone, px, py, pz)
+  assert.notEqual(zc, -1)
+  const idZ = w.zone.celule.id[zc]!
+  // Zona moarta, doar ca sa aiba pionul 0 o destinatie care nu mai exista.
+  const alta = patratPlat(w, sit, 1, 6, 40)
+  assert.ok(alta)
+  picteaza(w, alta.x0, alta.y0, 1, 3)
+  const zcMoarta = celulaDeZonaLa(w.zone, alta.x0, alta.y0, alta.g + 1)
+  assert.notEqual(zcMoarta, -1)
+  const idMoarta = w.zone.celule.id[zcMoarta]!
+
+  const raw = JSON.parse(encode(w)) as { data: { nextId: number; agents: Record<string, number[]>; zone: { celule: Record<string, number[]> } } }
+  const a = raw.data.agents
+  // Pionul 0: cara 50, destinatia lui e celula care tocmai a MURIT → jobul se
+  // anuleaza la incarcare si marfa ii cade la picioare, adica pe celula Z.
+  a.jobKind![0] = 2
+  a.jobId![0] = raw.data.nextId++
+  a.jobTarget![0] = 0
+  a.jobStep![0] = 2
+  a.jobDest![0] = idMoarta
+  a.jobCantitate![0] = 50
+  a.jobEfect![0] = 1
+  a.caraKind![0] = Item.PIATRA
+  a.caraCantitate![0] = 50
+  // Pionul 1: cara 50 spre celula Z, si rezervarea lui trebuie sa se refaca.
+  a.jobKind![1] = 2
+  a.jobId![1] = raw.data.nextId++
+  a.jobTarget![1] = 0
+  a.jobStep![1] = 2
+  a.jobDest![1] = idZ
+  a.jobCantitate![1] = 50
+  a.jobEfect![1] = 1
+  a.caraKind![1] = Item.PIATRA
+  a.caraCantitate![1] = 50
+  const idx = raw.data.zone.celule.id!.indexOf(idMoarta)
+  assert.ok(idx >= 0)
+  raw.data.zone.celule.alive![idx] = 0
+
+  const loaded = decode(JSON.stringify(raw))
+  assert.ok(loaded.ok, JSON.stringify(loaded))
+  const lw = loaded.value
+  assert.equal(lw.rezervari.anulateLaIncarcare, 1, 'doar jobul cu destinatia moarta trebuia anulat')
+  assert.equal(lw.agents.jobKind[1], 2, 'jobul pionului 1 s-a anulat, desi destinatia lui exista')
+  // Marfa pionului 0 a ajuns jos, dar NU pe celula rezervata de pionul 1.
+  assert.equal(lw.agents.caraCantitate[0], 0)
+  assert.equal(marfaTotala(lw), 100, 'marfa nu se conserva la incarcare')
+  const peZ = itemLaCelula(lw.iteme, px, py, pz)
+  assert.equal(peZ, -1, 'marfa a fost lasata pe celula rezervata de alt pion')
+  assert.ok(locPeCelula(lw, R, Item.PIATRA, px, py, pz) >= 50, 'celula rezervata n-are loc pentru ce a promis pionul 1')
+  assert.ok(verificaRezervari(lw.rezervari, lw.agents, existaTinta(lw)).ok)
 })

@@ -12,7 +12,7 @@ import { isSolid, Material } from '../src/sim/terrain/chunk.ts'
 import { groundLevelM, materialAt, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 import { areConnected, blockKey, blockOfCell, isWalkable, NO_REGION, regionAt } from '../src/sim/regions.ts'
 import { cellKey } from '../src/sim/path.ts'
-import { DetaliuMotiv } from '../src/sim/desemnari.ts'
+import { DetaliuMotiv, slotDesemnare } from '../src/sim/desemnari.ts'
 import { celulaDeLucru, drumRefuzat, esteEvitata, lastJobReport, maiBun, StareRatiune } from '../src/sim/joburi.ts'
 import type { JobTickReport } from '../src/sim/joburi.ts'
 import { lastAgentReport } from '../src/sim/agents.ts'
@@ -102,7 +102,7 @@ function ruleaza(w: World, ticks: number, rules: Rules = R, laFiecareTick?: (w: 
   const t: Totaluri = {
     scanari: 0, vizite: 0, candidatiExaminati: 0, candidatiTaiati: 0, coridoare: 0, joburiPornite: 0, joburiTerminate: 0, joburiAnulate: 0,
     tickuriDeLucru: 0, locuriDeLucruRefacute: 0, refuzuriDrum: 0, faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0,
-    faraDepozit: 0, evaluariDestinatie: 0, itemeProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
+    faraDepozit: 0, evaluariDestinatie: 0, itemeProduse: 0, unitatiProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
     refuzuriAgenti: 0, maxScanariPeTick: 0,
   }
   for (let i = 0; i < ticks; i++) {
@@ -1213,4 +1213,36 @@ test('ACCEPTANTA: 12 pioni, o cariera de 900 de celule, 6000 de tickuri — inva
     assert.equal(cellOf(w.agents.y[i]!), w.agents.jobWorkY[i])
   }
   console.log(`  cariera: ${t.joburiTerminate} sapate, ${t.joburiAnulate} anulate, ${t.locuriDeLucruRefacute} locuri refacute, ${t.candidatiExaminati} evaluari scumpe, ${t.coridoare} coridoare, ${((100 * hoinari) / pioniTickuri).toFixed(1)}% hoinareala, ${(ms / 6000 * 1000).toFixed(0)} µs/tick`)
+})
+
+// ---------------------------------------------------------------------------
+// plafonul de incercari acopera TOATE refuzurile de drum
+// ---------------------------------------------------------------------------
+
+test('INACCESIBIL numara o incercare si jobul se incheie: „refacut" inseamna ALTA celula, nu aceeasi', () => {
+  // `findPath` intoarce INACCESIBIL si cand componenta e corecta (A*-ul pe celule
+  // n-a incaput in banda de regiuni). Prima versiune sarea peste `jobIncercari++`
+  // si chema `refaLoculDeLucru` fara `evita`, care intoarce prima celula in ordine
+  // FIXA — exact cea de dinainte. Jobul nu se mai incheia niciodata: desemnarea
+  // ramanea rezervata pentru toata colonia si pionul parcat pe viata.
+  const { w } = laSit(230, 1)
+  const cx = cellOf(w.agents.x[0]!)
+  const cy = cellOf(w.agents.y[0]!)
+  const { id } = desemneaza(w, cx + 2, cy)
+  const n = panaCand(w, 60, (w) => w.agents.jobKind[0] !== 0)
+  assert.ok(n >= 0, 'fixtura: pionul n-a luat jobul')
+  assert.equal(w.rezervari.total, 1)
+
+  // Refuzuri de drum repetate, ca si cum banda de regiuni n-ar incapea niciodata.
+  let apeluri = 0
+  for (let k = 0; k < 50 && w.agents.jobKind[0] !== 0; k++) {
+    drumRefuzat(w, R, 0, Reason.INACCESIBIL)
+    apeluri++
+  }
+  assert.equal(w.agents.jobKind[0], 0, `jobul n-a murit dupa ${apeluri} de refuzuri INACCESIBIL`)
+  assert.ok(apeluri <= R.jobMaxIncercari, `${apeluri} refuzuri pana la incheiere, plafonul e ${R.jobMaxIncercari}`)
+  assert.equal(w.rezervari.total, 0, 'desemnarea a ramas rezervata')
+  assert.notEqual(slotDesemnare(w.desemnari, id), -1, 'desemnarea a disparut; trebuia doar eliberata')
+  // Si cauza ajunge undeva: fie pe tinta, fie pe pereche.
+  assert.ok(w.desemnari.ultimulMotiv[0]! > 0 || esteEvitata(w, 0, id), 'niciun semnal dupa plafon')
 })

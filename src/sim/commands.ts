@@ -209,12 +209,18 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       // produce e `INACCESIBIL` — un motiv care MINTE, fiindca problema nu e ca
       // nu exista drum, ci ca pionul e in piatra. Un refuz explicit e si corect,
       // si lizibil pentru jucator.
+      // Si NU doar pe celula picioarelor: un pion ocupa `agentHeadroomM` niveluri,
+      // deci un zid la inaltimea capului il face la fel de ingropat. Prima
+      // versiune verifica doar `a.z[i] === cmd.z` — asimetric fata de garda pe
+      // mormane de dedesubt, care parcurgea corect headroom-ul.
       const a = w.agents
-      for (let i = 0; i < a.count; i++) {
-        if (a.alive[i] === 0) continue
-        if (a.z[i] !== cmd.z) continue
-        if (cellOf(a.x[i]!) !== cmd.wx || cellOf(a.y[i]!) !== cmd.wy) continue
-        return refuse(Reason.CELULA_OCUPATA, { id: a.id[i], wx: cmd.wx, wy: cmd.wy, z: cmd.z })
+      for (let h = 0; h < rules.agentHeadroomM; h++) {
+        for (let i = 0; i < a.count; i++) {
+          if (a.alive[i] === 0) continue
+          if (a.z[i] !== cmd.z - h) continue
+          if (cellOf(a.x[i]!) !== cmd.wx || cellOf(a.y[i]!) !== cmd.wy) continue
+          return refuse(Reason.CELULA_OCUPATA, { id: a.id[i], wx: cmd.wx, wy: cmd.wy, z: cmd.z - h })
+        }
       }
       // Nici peste un morman, nici deasupra unuia caruia i-ar lua headroom-ul: un
       // item in piatra e inaccesibil pe veci si un candidat fals la fiecare racire.

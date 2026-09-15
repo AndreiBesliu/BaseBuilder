@@ -1792,3 +1792,38 @@ Mutația care o probează e chiar starea de dinainte: coridorul pion → marfă 
 
 **Măsurat după:** scenariul standard 149 → **86 µs/tick** (tăietura 1: 68); carieră+depozit 138
 µs/tick; 249 de teste verzi. Hash de referință `24e9cb17` → `4e0d2322`.
+
+### Recenzia codului tăieturii 2: 23 de constatări, 3 lentile
+
+Panoul de cod (determinism, marfă, K05) a rulat pe `a2a3396`. Verdictele: lanțul mărfii ține (n-au
+găsit nicio cale prin care o unitate să dispară sau să se dubleze), dar mașina de stare a cărat-ului
+avea o **poartă lipsă** și K05 mai avea două uși deschise.
+
+**Bucla infinită, găsită de două lentile independent (2 CRITIC).** `findPath` întoarce INACCESIBIL și
+când componenta e corectă: A\*-ul pe celule e mărginit la banda de regiuni, iar un ocol care iese din
+bandă golește coada fără ostil (`path.ts`, „graful promitea un drum, celulele nu l-au confirmat").
+Ramura INACCESIBIL din `drumRefuzat` **nu incrementa `jobIncercari`** și chema `refaLoculDeLucru`
+fără `evita` — iar `celulaDeLucru` întoarce prima celulă în ordine FIXĂ, adică exact cea de dinainte.
+Jobul nu se mai încheia niciodată: desemnarea rămânea rezervată pentru toată colonia, pionul parcat pe
+viață, și niciun zăvor nu se trăgea, fiindcă toate se trag la SFÂRȘITUL unui job. La cărat, aceeași
+gaură producea ping-pong între două celule de depozit (se eliberează A, se rezervă B; la refuzul
+următor A redevine cea mai apropiată), cu marfa blocată în mână. Verificat în cod înainte de reparație.
+
+Acum: **orice** refuz de drum numără o încercare; re-alegerea țintei sare peste cea curentă (deci
+„refăcut" înseamnă „alta"); la plafon jobul se încheie cu răcire pe PERECHE. Re-alegerea rămâne
+rezervată cauzelor în care ținta curentă e problema — „prea scump ACUM" nu se repară mutându-te o
+celulă mai încolo, și testul existent de BUGET_DEPASIT a prins imediat prima versiune care o făcea.
+
+**Celelalte reparate în tranșa asta:**
+
+| ce | de ce conta |
+|---|---|
+| `reconstruiesteRezervari` în DOUĂ treceri | marfa se lăsa la picioare înainte ca rezervările sloturilor următoare să existe, deci putea umple exact celula pe care altcineva o ținea rezervată. Divergență continuu/încărcat, dependentă de ordinea sloturilor |
+| `fill` verifică tot headroom-ul pentru PIONI | garda pentru mormane parcurgea corect `agentHeadroomM`, cea pentru oameni doar cota picioarelor — un zid la înălțimea capului îngropa pionul, exact ce comentariul de deasupra declara închis |
+| pion îngropat își încheie jobul | nu mai ajunge nici la muncă, nici la drum, deci niciun plafon nu-l atinge: ținta rămânea rezervată pentru toată colonia și marfa în mână pe veci — vizibilă în sumă, deci nici măcar numărată ca pierdută |
+| marfa unui slot MORT se numără la încărcare | ramura vie o trecea prin `asazaItem`, cea moartă o punea pe 0 în tăcere |
+| răcirea unei cauze de PERECHE nu mai ajunge pe ITEM | dacă MĂCAR o zonă a fost sărită fiindcă pionul ăsta o evită, refuzul e al perechii; prima versiune cerea ca TOATE să fie evitate, deci cu două depozite scria pe marfă o răcire PERSISTED care o ascundea de toată colonia |
+| detaliul de pe desemnare se derivă din motiv | era hardcodat pe FARA_LOC_DE_LUCRU: panoul „De ce nu?" spunea „sapă o rampă" și când cauza era „nu mai încape niciun morman" (acționabil: cărați marfa) |
+| acceptanța probează CONSERVAREA, în unități | linia care trebuia s-o facă era moartă (`void sapate`, apoi doar „totalul e nenul"). `itemeProduse` numără MORMANE și nu se poate aduna; acum există `unitatiProduse`, și aserția e `în lume + pierdut === produs`. Mutația pe care recenzia a dat-o ca trecând verde („−1 la fiecare depunere") o face roșie |
+
+Șase gărzi noi, fiecare cu mutația ei. 249 → 255 de teste.

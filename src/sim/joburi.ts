@@ -206,6 +206,8 @@ export interface JobTickReport {
   evaluariDestinatie: number
   /** Cate mormane a produs sapatul. */
   itemeProduse: number
+  /** Cate UNITATI a produs sapatul. Cu asta se poate asserta conservarea; mormanele nu se pot aduna. */
+  unitatiProduse: number
   /** Cate depuneri reusite in depozit (LASA). */
   itemeMutate: number
   /** De cate ori s-a lasat marfa la picioare (job incheiat cu mana plina). */
@@ -217,7 +219,7 @@ const raport: JobTickReport = {
   joburiPornite: 0, joburiTerminate: 0, joburiAnulate: 0,
   tickuriDeLucru: 0, locuriDeLucruRefacute: 0, refuzuriDrum: 0,
   faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0, faraDepozit: 0,
-  evaluariDestinatie: 0, itemeProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
+  evaluariDestinatie: 0, itemeProduse: 0, unitatiProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
 }
 
 export function lastJobReport(): JobTickReport {
@@ -244,6 +246,7 @@ export function resetJobReport(): void {
   raport.faraDepozit = 0
   raport.evaluariDestinatie = 0
   raport.itemeProduse = 0
+  raport.unitatiProduse = 0
   raport.itemeMutate = 0
   raport.lasateLaPicioare = 0
 }
@@ -619,7 +622,12 @@ export function cautaDestinatie(
     }
     if (best !== -1) return accept({ cs: best, zs })
   }
-  if (zoneCuLoc > 0 && evitate === zoneCuLoc) return refuse(Reason.FARA_DEPOZIT, { detaliu: 'evitate', zone: zoneCuLoc })
+  // Daca MACAR o zona a fost sarita fiindca pionul ASTA o evita, refuzul e al
+  // PERECHII, nu al tintei: altcineva poate duce marfa acolo chiar acum. Prima
+  // versiune cerea ca TOATE zonele cu loc sa fie evitate, deci cu doua depozite
+  // (unul evitat, unul prea departe) scria pe ITEM o racire PERSISTED pentru o
+  // cauza care tinea de un singur pion — si o ascundea de toata colonia.
+  if (evitate > 0) return refuse(Reason.FARA_DEPOZIT, { detaliu: 'evitate', zone: zoneCuLoc, evitate })
   if (inAltaComponenta) return refuse(Reason.INACCESIBIL, { detaliu: 'componenta' })
   return refuse(Reason.FARA_DEPOZIT, { detaliu: 'pline', zone: zoneCuLoc })
 }
@@ -1060,6 +1068,11 @@ export function lasaLaPicioare(w: World, rules: Rules, slot: number): number {
   return r.ultimulSlot
 }
 
+/** Detaliul de pe o DESEMNARE, derivat din motiv. Vezi `detaliuItemDin`. */
+function detaliuDesemnareDin(motiv: ReasonCode): number {
+  return motiv === Reason.INACCESIBIL ? DetaliuMotiv.FARA_LOC_DE_LUCRU : DetaliuMotiv.NICIUNUL
+}
+
 function detaliuItemDin(motiv: ReasonCode): number {
   return motiv === Reason.INACCESIBIL ? DetaliuItem.COMPONENTE_DIFERITE : DetaliuItem.DEPOZITE_PLINE
 }
@@ -1097,7 +1110,7 @@ export function terminaJob(
         if (ds !== -1) {
           w.desemnari.reincercaLaTick[ds] = w.tick + racireDesemnare(w, rules)
           w.desemnari.ultimulMotiv[ds] = codMotiv(motiv ?? Reason.INACCESIBIL)
-          w.desemnari.ultimulMotivDetaliu[ds] = DetaliuMotiv.FARA_LOC_DE_LUCRU
+          w.desemnari.ultimulMotivDetaliu[ds] = detaliuDesemnareDin(motiv ?? Reason.INACCESIBIL)
         }
       } else {
         evitaTinta(w, slot, target, w.tick + rules.jobRetryTicks)
@@ -1187,29 +1200,47 @@ export function drumRefuzat(w: World, rules: Rules, slot: number, motiv: ReasonC
   raport.refuzuriDrum++
   const cara = a.jobKind[slot] === FelJob.CARA
 
-  if (motiv === Reason.INACCESIBIL) {
-    if (w.regions.dirty.size > 0) return
-    if (!cara) {
-      if (refaLoculDeLucru(w, rules, slot)) return
-    } else if (a.jobStep[slot] === PasCara.MERGE_DEST) {
-      if (refaDestinatia(w, rules, slot)) return
-    }
-    terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.INACCESIBIL, Racire.TINTA)
-    return
-  }
+  // Pe regiuni stale nu se decide nimic: o celula proaspat calcabila e invizibila
+  // pana la reconstructie, si jobul s-ar incheia cu un motiv fals.
+  if (motiv === Reason.INACCESIBIL && w.regions.dirty.size > 0) return
 
+  // ORICE refuz de drum numara o incercare, INACCESIBIL inclusiv.
+  //
+  // Prima versiune scutea INACCESIBIL, pe motiv ca „re-alegerea tintei e progres,
+  // nu insistenta". Nu e: `findPath` intoarce INACCESIBIL si cand componenta e
+  // corecta, dar A*-ul pe celule n-a incaput in banda de regiuni (path.ts, „graful
+  // promitea un drum, celulele nu l-au confirmat"). Atunci re-alegerea da acelasi
+  // raspuns la nesfarsit — la SAPA fiindca `celulaDeLucru` intoarce prima celula in
+  // ordine fixa, adica exact cea de dinainte; la CARA fiindca destinatia alterneaza
+  // intre doua celule, cea eliberata redevenind cea mai apropiata. Jobul nu se mai
+  // incheia NICIODATA: desemnarea sau celula de depozit ramaneau rezervate pe veci,
+  // marfa ramanea in mana, si niciun zavor nu se tragea, fiindca toate se trag la
+  // SFARSITUL unui job. Un plafon care nu se incrementeaza nu e un plafon.
   a.jobIncercari[slot] = a.jobIncercari[slot]! + 1
   if (a.jobIncercari[slot]! >= rules.jobMaxIncercari) {
+    // La plafon, cauza e a PERECHII: drumul ASTA n-a mers, dar tinta ramane
+    // libera pentru altcineva, care poate veni din alta parte.
     terminaJob(w, rules, slot, Sfarsit.INCOMPLET, motiv, Racire.PERECHE)
     return
   }
 
-  if (motiv === Reason.OCUPAT_DE_OSTIL && w.regions.dirty.size === 0) {
+  // Se incearca ALTA tinta, sarind peste cea curenta — „refacut" trebuie sa
+  // insemne „alta", altfel contorul de mai sus doar amana bucla.
+  //
+  // Doar cand tinta CURENTA e problema: celula nu mai e buna (INACCESIBIL) sau
+  // sta cineva ostil in drum. „Prea scump ACUM" nu se repara mutandu-te cu o
+  // celula mai incolo — se asteapta, si se numara incercarea.
+  if ((motiv === Reason.INACCESIBIL || motiv === Reason.OCUPAT_DE_OSTIL) && w.regions.dirty.size === 0) {
     if (!cara) {
       const curenta = cellKey(a.jobWorkX[slot]!, a.jobWorkY[slot]!, a.jobWorkZ[slot]!)
       if (refaLoculDeLucru(w, rules, slot, curenta)) return
     } else if (a.jobStep[slot] === PasCara.MERGE_DEST) {
       if (refaDestinatia(w, rules, slot, slotCelulaDeZona(w.zone, a.jobDest[slot]!))) return
+    }
+    // Nicio alta tinta, si drumul spre asta nu exista: e o proprietate a TINTEI.
+    if (motiv === Reason.INACCESIBIL) {
+      terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.INACCESIBIL, Racire.TINTA)
+      return
     }
   }
 
@@ -1513,6 +1544,7 @@ export function sapaVoxel(w: World, wx: number, wy: number, z: number, rules: Ru
   if (y && y.cantitate > 0) {
     asazaItem(w, rules, y.fel, y.cantitate, wx, wy, z)
     raport.itemeProduse++
+    raport.unitatiProduse += y.cantitate
   }
   return accept()
 }
@@ -1572,6 +1604,16 @@ export function anuleazaCelulaDeZona(w: World, rules: Rules, cs: number): void {
 export function reconstruiesteRezervari(w: World, rules: Rules): number {
   const a = w.agents
   let anulate = 0
+  // DOUA treceri. Prima re-rezerva ce se poate si doar NOTEAZA ce se anuleaza;
+  // a doua lasa marfa la picioare, dupa ce TOATE rezervarile exista.
+  //
+  // Intr-o singura trecere, `asazaItem` de la slotul i intreaba rezervarile
+  // sloturilor > i, care inca nu sunt scrise: ar fi putut umple o celula de
+  // depozit pe care slotul j o tine rezervata ca destinatie, si atunci
+  // promisiunea „existent + jobCantitate ≤ itemStackMax intre scan si LASA" —
+  // aia pe care sta toata rezervarea de destinatie — s-ar rupe in lumea
+  // INCARCATA, dupa ordinea sloturilor. Adica exact o divergenta continuu/incarcat.
+  const deGolit: number[] = []
   for (let i = 0; i < a.count; i++) {
     if (a.jobKind[i] === 0) continue
     let out: Outcome<void>
@@ -1602,9 +1644,20 @@ export function reconstruiesteRezervari(w: World, rules: Rules): number {
     a.jobIncercari[i] = 0
     a.hasGoal[i] = 0
     clearPath(w.paths, i)
-    if (a.alive[i] === 1) lasaLaPicioare(w, rules, i)
-    else { a.caraKind[i] = 0; a.caraCantitate[i] = 0 }
+    deGolit.push(i)
     anulate++
+  }
+  for (const i of deGolit) {
+    if (a.alive[i] === 1) {
+      lasaLaPicioare(w, rules, i)
+    } else {
+      // Un mort n-are unde s-o lase, dar pierderea se NUMARA. Altfel marfa
+      // dintr-un slot mort dispare fara sa apara in niciun contor — exact ce
+      // interzice regula „marfa nu dispare niciodata tacut".
+      w.ratiune.itemePierdute += a.caraCantitate[i]!
+      a.caraKind[i] = 0
+      a.caraCantitate[i] = 0
+    }
   }
   w.rezervari.anulateLaIncarcare = anulate
   marcheazaZoneMurdare(w)
