@@ -11,14 +11,15 @@ iernile se lungesc, filonul se termină. Când valea nu te mai ține, o parte di
 **Stare: preproducție.** Nucleul de simulare și terenul există; jocul nu.
 
 Terenul e real și se poate săpa: o lume plată continuă de 16 × 16 km ca heightfield ieftin, din care
-un chunk de 32 m devine voxeli pe 64 de niveluri **doar când sapi sau construiești în el**. Agenții,
-în schimb, sunt încă un substitut deliberat — fac o plimbare aleatoare mărginită. Rolul lor e să
-exercite mecanismele care nu se pot retrofita (fluxuri de RNG, ordine fixă de iterare, aritmetică
-întreagă, hash de stare), ca dovada de determinism să existe **înainte** de a exista joburi, nevoi
-sau luptă. Se înlocuiesc la S12-15.
+un chunk de 32 m devine voxeli pe 64 de niveluri **doar când sapi sau construiești în el**. Agenții
+**merg pe drumuri adevărate** din S12-15: își aleg o țintă, cer un drum prin sistemul de două
+straturi (verificare O(1) de componentă → coridor de regiuni → A* pe celule) și îl parcurg, cu plafon
+de re-planificări. 40 de agenți costă 32 µs pe tick, măsurat pe 100.000 de tickuri. Ce nu au încă
+sunt **motive** — joburi, nevoi, luptă. Alea vin la S16-19.
 
 - [DESIGN.md](DESIGN.md) — ce e jocul
 - [PLAN.md](PLAN.md) — registrul de decizii, arhitectura, fazele, riscurile
+- [OWNER_VERIFY.md](OWNER_VERIFY.md) — ce așteaptă o decizie sau o privire de la owner
 - [CLAUDE.md](CLAUDE.md) — regulile dure ale nucleului
 - [research/](research/) — 23 de lentile de research, 549 de constatări cu surse
 
@@ -29,7 +30,8 @@ deschide browserul. Închizi fereastra neagră ca să oprești.
 
 Dublu-click pe **`Verifica.cmd`** rulează poarta proiectului — aceleași verificări ca CI-ul.
 
-Dublu-click pe **`benchuleaza-gate.cmd`** rulează măsurătoarea gate-ului de motor. Durează un
+Dublu-click pe **`bench
+uleaza-gate.cmd`** rulează măsurătoarea gate-ului de motor. Durează un
 minut, nu minimiza fereastra, și descarcă singur un `.json` cu rezultatul.
 
 Din linia de comandă, echivalentele sunt `npm run viewer`, `npm run check` și protocolul din
