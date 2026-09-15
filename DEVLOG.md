@@ -1483,3 +1483,104 @@ fiecare dată, și plafonul e singurul lucru care o oprește. Mutația pică.
 ## Task Completed
 
 **154 de teste.** Nouă mutații probate, toate prinse. Hash de referință: `58fdcb51` → `9552870a`.
+
+---
+
+## Task Started — S16-19, tăietura 1: desemnări → joburi → săpat
+
+**Prompt:** „continua"
+**Model:** Claude Fable 5.1 · un panou de design cu 5 agenți (1,36 M tokeni — estimasem 550 k; fiecare
+lentilă a citit tot nucleul, deci ~270 k pe agent, nu ~110 k. Cifra de buget pe agent pentru recenzii
+care citesc codul e 250–300 k, nu 110 k)
+
+Prima dată când jocul are **muncă**. Jucătorul desemnează celule de săpat; pionii liberi **cer** un
+job (pull), aleg după scor, **rezervă** ținta ca tuplu, merg la un loc de lucru, sapă, eliberează.
+Fiecare „nu" din scanner poartă cauza, și cauzele ajung în overlay-ul din viewer (K13) în aceeași zi.
+
+### Designul, dat pe mâna unui panou înainte de cod
+
+Am scris designul concret (model de date, scanner, driver, comenzi, content, teste) și l-am dat la
+cinci lentile independente cu ordinul să-l **respingă**: determinism, cost, rezervări, lizibilitate,
+completitudine. Cinci lentile au convers pe aceleași trei defecte — toate reale, toate în cazul de
+utilizare cel mai comun, o **zonă pictată**:
+
+| ce scria designul | ce s-ar fi întâmplat |
+|---|---|
+| plafonul de evaluări scumpe se aplică **în ordinea slotului** | o cameră de 16×16 desemnată înaintea rampei ei nu se sapă **niciodată**: cele 256 de celule fără loc de lucru consumă plafonul la fiecare scanare, rampa din sloturile de după nu e evaluată de nimeni |
+| celula de lucru se alege **o singură dată**, iar un refuz de drum pune răcire de 600 de tickuri **pe țintă** | într-o zonă pictată, locul de lucru al lui A e capacul voxelului lui B; B îl sapă, A cade, abandonează cu `INACCESIBIL` — un motiv care minte — și ținta stă 30 s deși are alte trei locuri de lucru. K01, întocmai |
+| `BUGET_DEPASIT` → „jobul rămâne" | plafonul de noduri e o constantă pe aceleași intrări: „prea scump acum" e „prea scump mereu". Pionul parcat pe viață cu ținta rezervată, repetând cea mai scumpă căutare din joc la fiecare 40 de tickuri |
+
+Plus două pe care nu le-aș fi văzut singur: **`regions.dirty` devine nevid la save** pentru prima
+dată (jobul sapă *în* tick, după reconstrucția de la începutul lui; lumea continuă ar fi legat la
+tickul următor vecini pe care cea încărcată nu i-ar fi legat niciodată), și **golul de acoperire** e
+permanent, nu tranzitoriu (hoinăreala nu iese niciodată din ce e calculat).
+
+### Ce s-a construit, după corecții
+
+- **Rezervarea e tuplul** `(claimant, jobId, targetId, layer, count, maxClaimants)`, cu toate trei
+  dimensiunile din prima zi. Tranzacție „verifică tot, apoi scrie tot" — pe un fir (D12) aia E
+  atomicitatea. Eliberare pe **pereche**, nu pe claimant. Invariant verificabil (`verificaRezervari`).
+- **Rezervările sunt DERIVED din joburi; joburile sunt PERSISTED.** Asta rafinează M5, care spunea
+  „la load: anulează toate joburile". Scrisă înainte de ieri: un pion cu jobul anulat la load ar
+  relua progresul de la zero, altă poziție, alt hash. Intenția lui M5 se păstrează prin
+  `reconstruiesteRezervari`: ce nu se poate re-rezerva se anulează **cu raport**.
+- **Scanarea în două treceri**: porți ieftine peste tot (răciri, distanță, rezervare), apoi
+  candidații sortați după o **margine superioară** a scorului, evaluările scumpe pe primii K, cu
+  **oprire timpurie** când cel mai bun scor real bate marginea următorului. Refuzul „fără loc de
+  lucru" e o proprietate a țintei și se memorează pe ea, cu răcire scurtă — așa plafonul se cheltuie
+  pe candidați noi. Măsurat pe scenariul standard: evaluări scumpe 109 → 49.
+- **Scorul în întregi**: `2^prio × 4^personal / (1 + drum)` prin înmulțire încrucișată, fără float.
+  „+1 nivel = jumătate din drum", cu pragul de egalitate testat exact.
+- **Răcirea urmează scopul predicatului**: „fără loc de lucru" → pe țintă; „drumul MEU e blocat de un
+  ostil / peste buget" → pe perechea (pion, țintă). Un jefuitor în coridor nu mai blochează munca
+  celor de dincolo de el — D7c prin sistemul de cauze.
+- **Celula de lucru se reface** când se pierde (progresul rămâne) și **nu stă niciodată pe voxelul
+  desemnat al altuia** — o citire în index. Testul cu două desemnări vecine și doi pioni: zero
+  abandonuri, zero tickuri de lucru pe o desemnare vie.
+- **`jobMaxIncercari`**: după trei refuzuri de drum jobul se încheie, ținta rămâne liberă, pionul
+  nu rămâne parcat.
+- **`rebuildDirty` și la sfârșit de tick**: invariantul „la sfârșitul oricărui tick, `dirty` e gol",
+  testat pe un save făcut exact în tickul unei săpături de pion.
+- **Invariant de content validat**: discul de acoperire al pionului și al desemnării trebuie să se
+  atingă pe toată raza de scanare. Aritmetica s-a măsurat pe graf, nu s-a presupus: un disc de rază
+  r leagă până la r și își scrie muchiile până la r+1, deci `a + j + 2 ≥ ⌈rază/16⌉`. Panoul spusese
+  `+1` — cu un bloc prea strict, și testul l-a corectat.
+- **Schema 2**, cu migrare 1→2 probată pe o **fixtură golden** capturată înainte de schimbare:
+  save-ul vechi se încarcă fără joburi și dă exact hash-ul lumii pe care codul nou ar fi construit-o.
+- **Overlay K13** (`J`): chihlimbar liberă · albastru rezervată · roșu fără loc de lucru (sapă o
+  rampă) · violet nu se ajunge (leagă zonele) · linie de la pion la locul lui de lucru. Trei culori
+  pe pioni: idle / merge / sapă. Rând în HUD, cu avertismentul „NIMENI NU SAPĂ". Click = desemnează,
+  Ctrl+click = retrage, Alt+click = sapă pe loc.
+
+### Ce s-a decis să NU existe, și de ce
+
+- **Garda „10 joburi într-un tick"** din research: aici un agent pornește cel mult un job per tick de
+  scanare, deci plafonul n-ar lega niciodată — „plafon atins nu înseamnă plafon care leagă". Ce
+  apără efectiv: răcirea pe țintă, răcirea pe pereche, `jobMaxIncercari`, zăvorul `joburiFaraProgres`.
+- **Muncă dincolo de `jobScanRadiusCells`** (96 m): `PREA_DEPARTE`, onest și acționabil, nu un
+  `INACCESIBIL` fals produs de un gol de acoperire. Se rescrie când există „baza" ca noțiune.
+
+### Măsurat
+
+- **192 de teste**, de la 154. Toate cele 14 bug-uri clasice de rezervări din research au fie un test
+  care le-ar prinde, fie o notă că nu se aplică încă.
+- scenariul standard: 48 de desemnări, **47 săpate, 0 anulate** până la tickul ~3000; pe 100k tickuri
+  **80 µs/tick** — regim idle, cifra de dinainte de joburi (panoul a spus-o: măsurătoarea aia e vidă
+  pentru scan)
+- **cariera**: 12 pioni, 900 de celule, 6000 de tickuri, **900 săpate, 0 anulate, 0 locuri refăcute**,
+  **~220–280 µs/tick** cu o săpătură la câteva tickuri și `rebuildDirty` la fiecare. Ăsta e costul real
+  al muncii continue; plafonul de evaluări **nu** se atinge acolo (ieșirea timpurie găsește marginea
+  carierei din primele evaluări) — că leagă o dovedește fixtura de înfometare
+- hash de referință: `9552870a` → `42e4501a`
+
+### K01 s-a declanșat
+
+PLAN spune: „prima dată când scriu cod care caută o poziție de lucru liberă în jurul unei ținte".
+E `celulaDeLucru`: 4 vecini orizontali, `z ± maxStepM`, ordine fixă, niciodată voxelul propriu,
+niciodată capacul unei desemnări vii. 30 de linii, iar panoul a găsit în ele exact cascada pe care
+K01 o anunță. Se rămâne cu ochii pe ea.
+
+## Task Completed
+
+192 de teste verzi, CI verde. Următoarea tăietură: **iteme, cărat, depozite** — `Strat.CARAT` e
+deja rezervat, `count`/`maxCount` din tuplu așteaptă mormanele.

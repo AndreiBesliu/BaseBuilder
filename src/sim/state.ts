@@ -19,10 +19,36 @@
 import type { RngState } from './rng.ts'
 import type { Terrain } from './terrain/terrain.ts'
 import type { RegionStore } from './regions.ts'
-import type { PathStore } from './agents.ts'
+import type { PathStore } from './drumuri.ts'
+import type { DesignationStore } from './desemnari.ts'
+import type { ReservationStore } from './rezervari.ts'
+import type { RatiuneStore } from './joburi.ts'
 
-/** Versiunea schemei de stare. Creste la ORICE camp nou. Vezi save.ts. */
-export const SCHEMA_VERSION = 1
+/**
+ * Versiunea schemei de stare. Creste la ORICE camp nou. Vezi save.ts.
+ *
+ *   1 — S1-15: agenti, teren, drumuri, extinderea acoperirii de regiuni
+ *   2 — S16-19: desemnari, joburi pe agenti, prioritati personale
+ */
+export const SCHEMA_VERSION = 2
+
+/**
+ * Categoriile de munca. Lista de STRUCTURA (ce feluri de munca exista), nu numar
+ * de gameplay: prioritatile personale se stocheaza per categorie, iar semantica
+ * lor (0 = niciodata, N = exclusiv) e in content.
+ */
+export const Categorie = {
+  SAPA: 0,
+} as const
+export type CategorieId = (typeof Categorie)[keyof typeof Categorie]
+export const CATEGORII = 1
+
+/** Pasii unui job. Un job e o masina de stare liniara, nu un arbore. */
+export const PasJob = {
+  MERGE: 0,
+  LUCREAZA: 1,
+} as const
+export type PasJobId = (typeof PasJob)[keyof typeof PasJob]
 
 /** Un milimetru e unitatea de baza. O celula de 1 m = 1000. */
 export const MM_PER_CELL = 1000
@@ -56,8 +82,9 @@ export interface AgentStore {
    * PERSISTED — unde vrea sa ajunga, in CELULE.
    *
    * Tinta e stare reala, nu derivata: fara ea in save, o lume reincarcata ar
-   * trimite oamenii in alta parte decat mergeau. Drumul, in schimb, NU e stare —
-   * se recalculeaza din (pozitie, tinta, teren) si sta in `PathStore`.
+   * trimite oamenii in alta parte decat mergeau. Si drumul e stare — sta in
+   * `PathStore` si se salveaza; vezi antetul din `agents.ts` pentru de ce
+   * propozitia „se recalculeaza din (pozitie, tinta, teren)" s-a dovedit falsa.
    */
   goalX: Int32Array
   /** PERSISTED */ goalY: Int32Array
@@ -79,6 +106,55 @@ export interface AgentStore {
    * cere „fara float in starea de simulare".
    */
   progresMm: Int32Array
+
+  // --- jobul curent (S16-19). Toate PERSISTED. ---
+  //
+  // Jobul NU se anuleaza la incarcare. PLAN M5 spunea „la load: anuleaza toate
+  // joburile si rezervarile", scris inainte sa se dovedeasca (8 divergente din
+  // 72) ca tot ce influenteaza miscarea trebuie sa supravietuiasca roundtrip-ului
+  // ca `1000 + save + load + 1000 == 2000` sa tina. Un pion cu jobul anulat la
+  // load re-scaneaza si reia progresul de la zero: alta pozitie, alt hash.
+  // Intentia lui M5 — un save inconsistent nu deadlock-uieste tacut — se
+  // pastreaza in `reconstruiesteRezervari`, care anuleaza CU RAPORT ce nu se
+  // poate re-rezerva.
+  /** 0 = fara job; altfel felul (vezi `Desemnare` din desemnari.ts, +1). */
+  jobKind: Uint8Array
+  /** Identitatea INSTANTEI de job, din `w.nextId`. E componenta `jobId` din tuplul de rezervare. */
+  jobId: Int32Array
+  /** Id-ul tintei (o desemnare). */
+  jobTarget: Int32Array
+  /** `PasJob`. */
+  jobStep: Uint8Array
+  /** Unitati de munca acumulate in pasul LUCREAZA. */
+  jobProgres: Int32Array
+  /**
+   * Celula de lucru aleasa la scanare. Se persista SEPARAT de `goal*`: cautarea
+   * ei nu are raspuns unic in timp (terenul se schimba), deci dupa incarcare
+   * agentul ar putea alege alta — iar `goal*` se goleste la sosire.
+   */
+  jobWorkX: Int32Array
+  jobWorkY: Int32Array
+  jobWorkZ: Int32Array
+  /**
+   * Cate refuzuri de drum a primit jobul curent (BUGET_DEPASIT, OCUPAT_DE_OSTIL,
+   * sau o celula de lucru pierduta). La `jobMaxIncercari` jobul se incheie: fara
+   * plafon, un drum mereu peste buget parca pionul pe viata cu tinta rezervata.
+   */
+  jobIncercari: Uint8Array
+  /**
+   * Racirea pe PERECHEA (pion, tinta): dupa ce pionul a renuntat la o tinta din
+   * cauze care tin de EL (drumul lui e blocat de un ostil, prea scump pentru el),
+   * n-o reia pana la `refuzPanaLa`. Pe tinta nu se scrie nimic — altcineva, din
+   * alta parte, poate ajunge. 0 = nicio tinta refuzata.
+   */
+  tintaRefuzata: Int32Array
+  refuzPanaLa: Int32Array
+  /**
+   * Prioritatea personala pe fiecare categorie, `slot * CATEGORII + categorie`.
+   * 0 = niciodata; 1..personalPriorityLevels. E „grila manuala"; modul Auto e
+   * pur si simplu toata lumea la valoarea implicita din content.
+   */
+  prioPersonala: Uint8Array
 }
 
 export interface World {
@@ -111,11 +187,20 @@ export interface World {
    * `agents.ts` — fara asta, un roundtrip de save ar putea da alte drumuri.
    */
   regions: RegionStore
-  /** TRANSIENT — drumurile in curs. Se recalculeaza din (pozitie, tinta, teren). */
+  /** PERSISTED — drumurile in curs. Un A* nu are raspuns unic; vezi `agents.ts`. */
   paths: PathStore
+  /** PERSISTED — ce a cerut jucatorul sa se faca. Tintele joburilor. */
+  desemnari: DesignationStore
+  /**
+   * DERIVED din joburile agentilor. Se reconstruieste la incarcare, in ordinea
+   * slotului; ce nu se poate reconstrui se anuleaza cu raport. Vezi rezervari.ts.
+   */
+  rezervari: ReservationStore
+  /** TRANSIENT — de ce sta fiecare pion. Pentru overlay si teste, nu pentru simulare. */
+  ratiune: RatiuneStore
 }
 
-export function makeAgentStore(capacity: number): AgentStore {
+export function makeAgentStore(capacity: number, prioPersonalaImplicita = 1): AgentStore {
   return {
     count: 0,
     capacity,
@@ -130,6 +215,18 @@ export function makeAgentStore(capacity: number): AgentStore {
     goalZ: new Int32Array(capacity),
     hasGoal: new Uint8Array(capacity),
     progresMm: new Int32Array(capacity),
+    jobKind: new Uint8Array(capacity),
+    jobId: new Int32Array(capacity),
+    jobTarget: new Int32Array(capacity),
+    jobStep: new Uint8Array(capacity),
+    jobProgres: new Int32Array(capacity),
+    jobWorkX: new Int32Array(capacity),
+    jobWorkY: new Int32Array(capacity),
+    jobWorkZ: new Int32Array(capacity),
+    jobIncercari: new Uint8Array(capacity),
+    tintaRefuzata: new Int32Array(capacity),
+    refuzPanaLa: new Int32Array(capacity),
+    prioPersonala: new Uint8Array(capacity * CATEGORII).fill(prioPersonalaImplicita),
   }
 }
 

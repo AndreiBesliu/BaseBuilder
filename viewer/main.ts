@@ -26,6 +26,9 @@ import { writeQuadIndices } from '../src/render/winding.ts'
 import { Ballast, Bisector, checkGuards, clockGranularityMs, FrameProbe, heapMB } from './probe.ts'
 import { createRegionOverlay, rebuildRegionOverlay } from './overlay-regions.ts'
 import { createAmprentaOverlay, FORME, rebuildAmprentaOverlay } from './overlay-amprenta.ts'
+import { createJobOverlay, rebuildJobOverlay, rezumatJoburi } from './overlay-joburi.ts'
+import { desemnareLaCelula, slotDesemnare } from '../src/sim/desemnari.ts'
+import { PasJob } from '../src/sim/state.ts'
 import { createDensePanel, densePanelReport, PANEL_HZ, tickDensePanel } from './panel-dens.ts'
 import { rebuildDirty } from '../src/sim/regions.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
@@ -547,6 +550,10 @@ scene.add(regionOverlay.group)
 const amprentaOverlay = createAmprentaOverlay()
 scene.add(amprentaOverlay.group)
 
+// K13: desemnarile, rezervarile si drumurile spre lucru. Vezi overlay-joburi.ts.
+const jobOverlay = createJobOverlay()
+scene.add(jobOverlay.group)
+
 function refreshAmprenta(): void {
   const wx = Math.floor(controls.target.x)
   const wy = Math.floor(controls.target.z)
@@ -620,14 +627,33 @@ renderer.domElement.addEventListener('click', (ev) => {
 
   const promotedBefore = promotedKeys()
 
-  const out = ev.shiftKey
-    ? applyCommand(world, { kind: 'fill', wx, wy, z, material: Material.PIATRA_CONSTRUITA })
-    : applyCommand(world, { kind: 'dig', wx, wy, z })
+  // Click = DESEMNEAZA (un pion vine sa sape). Alt+click = sapa pe loc (unealta
+  // de debug, si ce chema scenariul de gate S-DIG). Ctrl+click = retrage
+  // desemnarea de pe celula. Shift+click = zideste, ca inainte.
+  let out
+  if (ev.shiftKey) {
+    out = applyCommand(world, { kind: 'fill', wx, wy, z, material: Material.PIATRA_CONSTRUITA })
+  } else if (ev.altKey) {
+    out = applyCommand(world, { kind: 'dig', wx, wy, z })
+  } else if (ev.ctrlKey) {
+    const ds = desemnareLaCelula(world.desemnari, wx, wy, z)
+    out = ds === -1
+      ? applyCommand(world, { kind: 'anuleazaDesemnarea', id: -1 })
+      : applyCommand(world, { kind: 'anuleazaDesemnarea', id: world.desemnari.id[ds]! })
+  } else {
+    out = applyCommand(world, { kind: 'desemneaza', wx, wy, z })
+  }
 
   // Un refuz care nu se vede e un buton care „nu face nimic". Contractul de
   // Outcome poarta motivul — ar fi absurd sa-l arunc exact la capatul lantului.
   if (!out.ok) {
     console.warn(`refuzat la ${wx},${wy},${z}: ${describe(out)}`)
+    el('spot').textContent = `refuzat: ${describe(out)}`
+    return
+  }
+  if (!ev.altKey) {
+    // Nimic de remesh-uit: terenul se schimba abia cand vine pionul.
+    if (jobOverlay.visible) rebuildJobOverlay(jobOverlay, world)
     return
   }
 
@@ -675,6 +701,12 @@ window.addEventListener('keydown', (ev) => {
     regionOverlay.visible = !regionOverlay.visible
     regionOverlay.group.visible = regionOverlay.visible
     refreshOverlay()
+    return
+  }
+  if (ev.key === 'j' || ev.key === 'J') {
+    jobOverlay.visible = !jobOverlay.visible
+    jobOverlay.group.visible = jobOverlay.visible
+    rebuildJobOverlay(jobOverlay, world)
     return
   }
   if (ev.key === 't' || ev.key === 'T') {
@@ -976,8 +1008,25 @@ function stepFrame(ts: number): void {
   const cpuStart = performance.now()
   stepDensePanel(dt)
   if (AGENTI_ACTIVI) {
+    // Sapaturile pionilor schimba terenul, si mesh-ul trebuie sa afle. Cine
+    // poate sapa in cadrul asta e cine LUCREAZA acum: se retin celulele lor
+    // inainte de pas, si dupa pas se remesh-uieste in jurul celor a caror
+    // desemnare a disparut. Rar (o sapatura la cateva secunde) si local.
+    const lucratori: { wx: number; wy: number; z: number }[] = []
+    for (let i = 0; i < world.agents.count; i++) {
+      if (world.agents.alive[i] === 0 || world.agents.jobKind[i] === 0 || world.agents.jobStep[i] !== PasJob.LUCREAZA) continue
+      const ds = slotDesemnare(world.desemnari, world.agents.jobTarget[i]!)
+      if (ds !== -1) lucratori.push({ wx: world.desemnari.wx[ds]!, wy: world.desemnari.wy[ds]!, z: world.desemnari.z[ds]! })
+    }
+    const promotedInainte = lucratori.length > 0 ? promotedKeys() : null
     stepSim(agentLayer, world, DEFAULT_RULES, dt, simTick)
     updateAgentLayer(agentLayer, world, DEFAULT_RULES)
+    if (promotedInainte) {
+      for (const c of lucratori) {
+        if (desemnareLaCelula(world.desemnari, c.wx, c.wy, c.z) === -1) remeshAfterEdit(c.wx, c.wy, promotedInainte)
+      }
+    }
+    if (jobOverlay.visible && frameIndex % 6 === 0) rebuildJobOverlay(jobOverlay, world)
   }
   driveScenario(frameIndex)
   stepNegativeProbe()
@@ -1025,6 +1074,14 @@ function stepFrame(ts: number): void {
     el('regions').textContent = regionOverlay.visible
       ? `${regionOverlay.cells.toLocaleString('ro-RO')} celule · ${regionOverlay.components} componente · ${lastOverlayMs.toFixed(0)} ms`
       : 'G'
+    {
+      const r = rezumatJoburi(world)
+      const d = world.desemnari.vii
+      const o = jobOverlay.visible ? ` · liber ${jobOverlay.desemnari - jobOverlay.rezervate - jobOverlay.faraLoc - jobOverlay.componente - jobOverlay.altRefuz} rez ${jobOverlay.rezervate} fara-loc ${jobOverlay.faraLoc} rupt ${jobOverlay.componente}` : ''
+      el('jobs').textContent = `${d} desemnari · idle ${r.idle} merg ${r.merg} sapa ${r.lucreaza}${o}`
+      el('jobs').className = r.faraMuncitori ? 'warn' : ''
+      if (r.faraMuncitori) el('jobs').textContent += ' · NIMENI NU SAPA'
+    }
     if (probe.invalid) {
       el('spot').textContent = `INVALID · ${probe.invalid}`
       el('spot').className = 'warn'

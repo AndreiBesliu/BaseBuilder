@@ -1,0 +1,823 @@
+/**
+ * Joburile — S16-19, taietura 1: desemnari → joburi → sapat.
+ *
+ * Arhitectura e PULL, nu push (DESIGN §5.4): munca nu se impinge catre pioni,
+ * pionul liber CERE un job cand ii vine randul. Nicio coada globala de joburi —
+ * costul invalidarii ei la fiecare schimbare de lume o face imposibil de
+ * intretinut de un singur om.
+ *
+ * ## Scanarea, in doua treceri
+ *
+ * **Trecerea ieftina**, peste TOATE desemnarile vii, in ordinea slotului (ordine
+ * PERSISTED, identica in lumea continua si in cea incarcata): racire pe
+ * desemnare, racire pe perechea (pion, tinta), distanta Manhattan, rezervare. Nu
+ * atinge terenul. Ce trece e un candidat cu o MARGINE SUPERIOARA de scor: celula
+ * de lucru e la cel mult `1 + maxStepM` de desemnare, deci scorul real nu poate
+ * depasi scorul calculat cu distanta pana la desemnare minus atat.
+ *
+ * **Trecerea scumpa**, pe candidatii sortati dupa margine (descrescator, apoi
+ * id): locul de lucru si componenta. Plafonata de `jobScanMaxCandidates` si
+ * oprita devreme cand cel mai bun scor REAL bate marginea urmatorului candidat —
+ * de acolo incolo nimeni nu-l mai poate intrece.
+ *
+ * De ce nu „in ordinea slotului, primele 256": panoul de design a aratat ca asa
+ * o camera de 16×16 desemnata inaintea rampei ei nu s-ar sapa niciodata — cele
+ * 256 de celule fara loc de lucru ar consuma plafonul la fiecare scanare, iar
+ * rampa, in sloturile de dupa, n-ar fi evaluata de nimeni, vreodata. Sortarea pe
+ * margine face plafonul sa taie DEPARTELE, nu arbitrarul; memorarea refuzului
+ * „fara loc de lucru" pe desemnare (racire scurta) face ca plafonul sa se
+ * cheltuie pe candidati noi.
+ *
+ * In bucla de scan nu se porneste NICIODATA un A* (research: „in bucla de scan
+ * ai voie doar canReach si distanta; A* o singura data, la start").
+ *
+ * ## Scorul, in intregi
+ *
+ * `2^prioTask × 4^prioPersonala / (1 + costDrum)` — regula pentru jucator:
+ * „+1 nivel de prioritate merita jumatate din drum". Fara impartire si fara
+ * float: A bate B daca `2^(pA + 2(qA−1)) · (1 + dB) > 2^(pB + 2(qB−1)) · (1 + dA)`.
+ * Asta elimina din start defectul structural al RimWorld si ONI — pionul care
+ * traverseaza harta pentru o bucata de lemn — fara sortarea lexicografica pe
+ * care ONI a trebuit s-o peticeasca cu un toggle „Enable Proximity".
+ *
+ * ## Racirea urmeaza SCOPUL predicatului
+ *
+ * Un refuz e fie o proprietate a TINTEI (n-are niciun loc de lucru), fie a
+ * PERECHII (drumul acestui pion e blocat de un ostil, sau e peste bugetul lui).
+ * Prima se scrie pe desemnare: nimeni n-o evalueaza o vreme. A doua se scrie pe
+ * pion: EL n-o reia o vreme, dar altcineva, din alta parte, poate. Prima
+ * versiune a designului le punea pe amandoua pe tinta, si un jefuitor intr-un
+ * coridor ar fi blocat 30 de secunde munca pionilor de DINCOLO de el — exact ce
+ * D7c interzice.
+ *
+ * ## Fiecare „nu" poarta cauza
+ *
+ * Scannerul nu intoarce `null`. Cauza se calculeaza acolo unde exista deja
+ * contextul si se scrie pe desemnare (`ultimulMotiv` + detaliu) si pe pion
+ * (`ratiune`). De aici iese, fara al doilea scan, panoul „De ce nu?".
+ *
+ * ## Politica de preemptiune, scrisa
+ *
+ * Un job in curs e intrerupt DOAR de: (a) o nevoie critica — nu exista inca;
+ * (b) pericol — nu exista inca; (c) ordin direct al jucatorului (anularea
+ * desemnarii, sapatul manual). Un job nou cu scor mai bun NU intrerupe. Un pion
+ * cu job nu hoinareste si nu re-scaneaza.
+ *
+ * ## Garda anti-bucla
+ *
+ * NU e contorul „10 joburi intr-un tick": aici un agent porneste cel mult un job
+ * per tick de scanare, deci plafonul ala n-ar lega niciodata. Ce apara sunt:
+ * `reincercaLaTick` pe desemnare, racirea pe pereche, `jobMaxIncercari` pe job
+ * (fara el, un drum mereu peste buget parca pionul pe viata cu tinta rezervata)
+ * si zavorul `joburiFaraProgres` din raport.
+ */
+
+import type { Rules } from './content.ts'
+import type { Outcome, ReasonCode } from './result.ts'
+import { accept, codMotiv, refuse, Reason } from './result.ts'
+import type { World } from './state.ts'
+import { Categorie, CATEGORII, PasJob } from './state.ts'
+import { cellOf, clearPath } from './drumuri.ts'
+import { ensureArea, find, isWalkable, markDirty, NO_REGION, regionAt } from './regions.ts'
+import type { RegionStore } from './regions.ts'
+import type { Terrain } from './terrain/terrain.ts'
+import { dig } from './terrain/terrain.ts'
+import { cellKey } from './path.ts'
+import { desemnareLaCelula, DetaliuMotiv, slotDesemnare, stergeDesemnare } from './desemnari.ts'
+import type { DesignationStore } from './desemnari.ts'
+import type { Cerere } from './rezervari.ts'
+import { elibereaza, elibereazaTinta, poateRezerva, rezervaToate, Strat } from './rezervari.ts'
+
+// ---------------------------------------------------------------------------
+// ratiunea — TRANSIENT
+// ---------------------------------------------------------------------------
+
+/** In ce s-a incheiat ultima scanare a unui pion. Stari interne, nu refuzuri de Outcome. */
+export const StareRatiune = {
+  /** N-a scanat inca. */
+  NIMIC: 0,
+  /** A pornit un job. */
+  JOB: 1,
+  /** Nu exista nicio desemnare vie. */
+  NIMIC_DE_FACUT: 2,
+  /** Toate candidatele erau in racire (a lor, sau a perechii cu el). */
+  IN_ASTEPTARE: 3,
+  /** Au fost candidate, toate respinse; `motivFinal` spune de ce cea mai avansata. */
+  RESPINS: 4,
+  /** Plafonul de evaluari scumpe s-a atins fara sa gaseasca ceva; `taiati` spune cate au ramas. */
+  PLAFON: 5,
+  /** Are job, dar drumul ii e refuzat si asteapta; `motivFinal` spune de ce. */
+  ASTEAPTA_DRUM: 6,
+} as const
+
+/**
+ * De ce sta fiecare pion. Prima forma a tabului „Ratiune" din panoul pionului
+ * (research/pawn-ai.md): feature de produs, nu unealta de dev.
+ *
+ * TRANSIENT: nu influenteaza nicio decizie, nu intra in hash, nu se salveaza.
+ */
+export interface RatiuneStore {
+  /** Tickul ultimei scanari. -1 = niciodata. */
+  readonly ultimaScanareTick: Int32Array
+  /** `StareRatiune`. */
+  readonly stare: Uint8Array
+  /** Cate evaluari scumpe a facut ultima scanare. */
+  readonly candidati: Int32Array
+  /** Cati candidati au ramas neevaluati din cauza plafonului. */
+  readonly taiati: Int32Array
+  /** `codMotiv` al cauzei celei mai „avansate" din ultima scanare fara job, sau al asteptarii de drum. */
+  readonly motivFinal: Uint8Array
+}
+
+export function makeRatiuneStore(capacity: number): RatiuneStore {
+  return {
+    ultimaScanareTick: new Int32Array(capacity).fill(-1),
+    stare: new Uint8Array(capacity),
+    candidati: new Int32Array(capacity),
+    taiati: new Int32Array(capacity),
+    motivFinal: new Uint8Array(capacity),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// raportul de tick — TRANSIENT
+// ---------------------------------------------------------------------------
+
+export interface JobTickReport {
+  /** Cati pioni au cerut de lucru in tickul asta. */
+  scanari: number
+  /** Cate evaluari SCUMPE (loc de lucru + componenta) s-au facut. */
+  candidatiExaminati: number
+  /** Cati candidati au ramas neevaluati din cauza plafonului, insumat. */
+  candidatiTaiati: number
+  joburiPornite: number
+  joburiTerminate: number
+  /** Incheiate altfel decat TERMINAT: incomplete sau intrerupte. */
+  joburiAnulate: number
+  /** ZAVOR: joburi incheiate fara nicio unitate de munca. Se aduna, nu se reseteaza per tick. */
+  joburiFaraProgres: number
+  /** Cati pioni au muncit efectiv (pasul LUCREAZA) in tickul asta. */
+  tickuriDeLucru: number
+  /** De cate ori un job si-a schimbat celula de lucru fara sa se incheie. */
+  locuriDeLucruRefacute: number
+  /** Respingeri per cauza, in tickul asta. */
+  faraMuncitor: number
+  preaDeparte: number
+  inaccesibil: number
+  rezervat: number
+}
+
+const raport: JobTickReport = {
+  scanari: 0, candidatiExaminati: 0, candidatiTaiati: 0,
+  joburiPornite: 0, joburiTerminate: 0, joburiAnulate: 0, joburiFaraProgres: 0,
+  tickuriDeLucru: 0, locuriDeLucruRefacute: 0, faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0,
+}
+
+export function lastJobReport(): JobTickReport {
+  return raport
+}
+
+/** Se cheama la inceputul fiecarui tick de agenti. Zavorul NU se reseteaza. */
+export function resetJobReport(): void {
+  raport.scanari = 0
+  raport.candidatiExaminati = 0
+  raport.candidatiTaiati = 0
+  raport.joburiPornite = 0
+  raport.joburiTerminate = 0
+  raport.joburiAnulate = 0
+  raport.tickuriDeLucru = 0
+  raport.locuriDeLucruRefacute = 0
+  raport.faraMuncitor = 0
+  raport.preaDeparte = 0
+  raport.inaccesibil = 0
+  raport.rezervat = 0
+}
+
+/**
+ * Cat de „avansata" e o cauza: cat de aproape de reusita a ajuns candidatul.
+ * O tinta REZERVATA e una perfect valida pe care o face altcineva; una
+ * INACCESIBILA e una la care nu se ajunge; PREA_DEPARTE nici n-a fost evaluata.
+ */
+function rang(r: ReasonCode): number {
+  switch (r) {
+    case Reason.FARA_MUNCITOR: return 1
+    case Reason.PREA_DEPARTE: return 2
+    case Reason.INACCESIBIL: return 3
+    case Reason.REZERVAT: return 4
+    default: return 0
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ce cere un job
+// ---------------------------------------------------------------------------
+
+/**
+ * Cererile de rezervare ale unui job, calculate INAINTE de start si identic la
+ * reconstructia de dupa incarcare. Functie pura de (fel, tinta).
+ *
+ * Sapatul: un singur sapator pe un voxel. `count`/`maxCount` sunt 1/1 fiindca un
+ * voxel nu se imparte; dimensiunea exista pentru mormanele de mai tarziu.
+ */
+export function cereriPentru(kind: number, targetId: number): readonly Cerere[] {
+  void kind
+  return [{ targetId, layer: Strat.LUCRU, count: 1, maxCount: 1, maxClaimants: 1 }]
+}
+
+// ---------------------------------------------------------------------------
+// scorul
+// ---------------------------------------------------------------------------
+
+/**
+ * A e strict mai bun decat B?
+ *
+ * `prio` in 1..designationPriorityLevels, `pers` in 1..personalPriorityLevels,
+ * `dist` in celule (Manhattan). Cu prio ≤ 9 si pers ≤ 9 exponentul e ≤ 25, iar
+ * distanta ≤ 2·16384, deci produsul ramane sub 2^41 — sigur ca intreg JS.
+ */
+export function maiBun(prioA: number, persA: number, distA: number, prioB: number, persB: number, distB: number): boolean {
+  const gA = 2 ** (prioA + 2 * (persA - 1))
+  const gB = 2 ** (prioB + 2 * (persB - 1))
+  return gA * (1 + distB) > gB * (1 + distA)
+}
+
+// ---------------------------------------------------------------------------
+// locul de lucru — K01 se declanseaza aici
+// ---------------------------------------------------------------------------
+
+const DIRECTII = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+] as const
+
+/**
+ * De unde se sapa voxelul (wx, wy, z).
+ *
+ * PLAN K01 numeste momentul asta — „prima data cand scriu cod care cauta o
+ * pozitie de lucru libera in jurul unei tinte" — drept semnalul de alarma al
+ * gropii fara fund a genului. De aia e scris cat de ingust se poate:
+ *
+ *   - cei 4 vecini ORIZONTALI, niciodata voxelul insusi: dupa sapare podeaua
+ *     dispare, iar `isWalkable` cere podea solida; un pion care isi sapa celula
+ *     de sub picioare ar ramane in aer.
+ *   - nici o celula a carei PODEA e o desemnare vie: altfel pionul A sta pe
+ *     voxelul lui B, B il sapa, A cade — si abandoneaza cu un motiv care minte.
+ *     Intr-o zona pictata asta ar fi regula, nu exceptia.
+ *   - nivelurile `z ± maxStepM`, in ordine FIXA: intai z, apoi +1, −1, +2, −2…
+ *     Stand la z+1, voxelul e treapta de sub tine; la z−1, e la nivelul capului.
+ *   - prima celula intr-o regiune calculata SI calcabila castiga. Nu „cea mai
+ *     apropiata": ordinea fixa e ce face alegerea reproductibila, si diferenta
+ *     de cost intre doua celule vecine e sub o celula.
+ *
+ * `regionAt` se intreaba INAINTE de `isWalkable`: o citire dintr-un Map fata de
+ * trei `materialAt` cu decodare RLE. Un voxel din adancul rocii costa astfel 12
+ * citiri si zero decodari. `isWalkable` ramane pe celula gasita ca sa prinda
+ * asimetria din acelasi tick: o sapatura de la slotul i poate scoate podeaua de
+ * sub o celula pe care regiunile o mai declara vie pana la reconstructie.
+ *
+ * `null` inseamna „nu exista loc de lucru" — un voxel in adancul rocii, sau unul
+ * inconjurat de apa, sau unul ale carui vecine stau toate pe desemnari. Cauza e
+ * INACCESIBIL, si o scrie apelantul.
+ */
+export function celulaDeLucru(
+  t: Terrain,
+  s: RegionStore,
+  d: DesignationStore,
+  wx: number,
+  wy: number,
+  z: number,
+  rules: Rules,
+): { wx: number; wy: number; z: number } | null {
+  const pas = Math.max(0, Math.min(4, rules.maxStepM))
+  for (let dz = 0; dz <= pas; dz++) {
+    for (const zs of dz === 0 ? [z] : [z + dz, z - dz]) {
+      for (const [dx, dy] of DIRECTII) {
+        const nx = wx + dx
+        const ny = wy + dy
+        if (nx < 0 || ny < 0) continue
+        if (regionAt(s, nx, ny, zs) === NO_REGION) continue
+        if (d.laCelula.has(cellKey(nx, ny, zs - 1))) continue
+        if (!isWalkable(t, nx, ny, zs, rules)) continue
+        return { wx: nx, wy: ny, z: zs }
+      }
+    }
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// scanarea
+// ---------------------------------------------------------------------------
+
+/** Buffer de candidati, refolosit intre scanari. Zero alocari in regim stabil. */
+let candSlot: number[] = []
+let candDist: number[] = []
+
+/**
+ * Un pion liber cere de lucru. Intoarce `true` daca a pornit un job.
+ *
+ * Apelantul decide CAND (decalajul pe id e al lui `stepAgents`); aici se decide
+ * CE. Agentul trebuie sa fie viu, intr-o regiune, si fara job.
+ */
+export function cautaJob(w: World, rules: Rules, slot: number): boolean {
+  const a = w.agents
+  const d = w.desemnari
+  const rat = w.ratiune
+  raport.scanari++
+  rat.ultimaScanareTick[slot] = w.tick
+  rat.candidati[slot] = 0
+  rat.taiati[slot] = 0
+  rat.motivFinal[slot] = 0
+
+  // shouldSkip, in O(1): nimic de facut, sau pionul nu face asta.
+  if (d.vii === 0) {
+    rat.stare[slot] = StareRatiune.NIMIC_DE_FACUT
+    return false
+  }
+  const pers = a.prioPersonala[slot * CATEGORII + Categorie.SAPA]!
+  if (pers === 0) {
+    raport.faraMuncitor++
+    rat.stare[slot] = StareRatiune.RESPINS
+    rat.motivFinal[slot] = codMotiv(Reason.FARA_MUNCITOR)
+    return false
+  }
+
+  const ax = cellOf(a.x[slot]!)
+  const ay = cellOf(a.y[slot]!)
+  const az = a.z[slot]!
+  const compAgent = find(w.regions, regionAt(w.regions, ax, ay, az))
+  const eu = a.id[slot]!
+  const evitata = w.tick < a.refuzPanaLa[slot]! ? a.tintaRefuzata[slot]! : 0
+  // Celula de lucru e la cel mult atat de desemnare; marginea de scor foloseste
+  // distanta pana la desemnare minus atat.
+  const margine = 1 + Math.max(0, Math.min(4, rules.maxStepM))
+
+  let celMaiAvansat: ReasonCode | null = null
+  const noteaza = (r: ReasonCode): void => {
+    if (celMaiAvansat === null || rang(r) > rang(celMaiAvansat)) celMaiAvansat = r
+  }
+
+  // --- trecerea ieftina: porti fara teren, peste tot ---
+  let n = 0
+  let inRacire = 0
+  for (let s = 0; s < d.count; s++) {
+    if (d.alive[s] === 0) continue
+    if (d.reincercaLaTick[s]! > w.tick || d.id[s] === evitata) { inRacire++; continue }
+
+    const dist0 = Math.abs(d.wx[s]! - ax) + Math.abs(d.wy[s]! - ay) + Math.abs(d.z[s]! - az)
+    if (dist0 > rules.jobScanRadiusCells) {
+      raport.preaDeparte++
+      noteaza(Reason.PREA_DEPARTE)
+      continue
+    }
+
+    let rezervata = false
+    for (const c of cereriPentru(d.kind[s]!, d.id[s]!)) {
+      if (!poateRezerva(w.rezervari, eu, c).ok) { rezervata = true; break }
+    }
+    if (rezervata) {
+      raport.rezervat++
+      noteaza(Reason.REZERVAT)
+      continue
+    }
+
+    candSlot[n] = s
+    candDist[n] = Math.max(0, dist0 - margine)
+    n++
+  }
+
+  if (n === 0) {
+    if (celMaiAvansat === null) {
+      rat.stare[slot] = inRacire > 0 ? StareRatiune.IN_ASTEPTARE : StareRatiune.NIMIC_DE_FACUT
+    } else {
+      rat.stare[slot] = StareRatiune.RESPINS
+      rat.motivFinal[slot] = codMotiv(celMaiAvansat)
+    }
+    return false
+  }
+
+  // --- ordinea: dupa marginea superioara a scorului, descrescator; apoi id ---
+  //
+  // Ordine TOTALA pe date persistate (prioritate, distanta, id), deci aceeasi in
+  // orice lume cu aceeasi stare. Marginea e `2^prio / (1 + dist')`; comparatia
+  // e cea din `maiBun`, cu prioritatea personala constanta (e a pionului).
+  const ordine: number[] = []
+  for (let i = 0; i < n; i++) ordine.push(i)
+  ordine.sort((i, j) => {
+    const si = candSlot[i]!
+    const sj = candSlot[j]!
+    const gi = 2 ** d.prioritate[si]!
+    const gj = 2 ** d.prioritate[sj]!
+    const li = gi * (1 + candDist[j]!)
+    const lj = gj * (1 + candDist[i]!)
+    if (li !== lj) return li > lj ? -1 : 1
+    return d.id[si]! - d.id[sj]!
+  })
+
+  // --- trecerea scumpa: loc de lucru si componenta, pe primele K ---
+  let best = -1
+  let bestPrio = 0
+  let bestDist = 0
+  let bestWork: { wx: number; wy: number; z: number } | null = null
+  let scumpe = 0
+  let taiati = 0
+
+  for (let k = 0; k < n; k++) {
+    const i = ordine[k]!
+    const s = candSlot[i]!
+    const prio = d.prioritate[s]!
+
+    // Nimeni de aici incolo nu mai poate intrece cel mai bun scor real: marginea
+    // lui e sub el, si urmatorii au margini si mai mici.
+    if (best !== -1 && maiBun(bestPrio, pers, bestDist, prio, pers, candDist[i]!)) break
+
+    if (scumpe >= rules.jobScanMaxCandidates) {
+      taiati = n - k
+      break
+    }
+    scumpe++
+    raport.candidatiExaminati++
+
+    const work = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules)
+    if (!work) {
+      // Proprietate a TINTEI: se memoreaza pe ea, cu racire scurta. Fara asta,
+      // aceleasi desemnari fara loc de lucru ar consuma plafonul la fiecare
+      // scanare a fiecarui pion, si tot ce e dupa ele n-ar fi evaluat niciodata.
+      raport.inaccesibil++
+      d.ultimulMotiv[s] = codMotiv(Reason.INACCESIBIL)
+      d.ultimulMotivDetaliu[s] = DetaliuMotiv.FARA_LOC_DE_LUCRU
+      d.reincercaLaTick[s] = w.tick + rules.jobInfeasibleRetryTicks
+      noteaza(Reason.INACCESIBIL)
+      continue
+    }
+    if (find(w.regions, regionAt(w.regions, work.wx, work.wy, work.z)) !== compAgent) {
+      // Proprietate a PERECHII (alt pion poate fi in componenta buna): nu se
+      // memoreaza pe tinta; se scrie doar cauza, pentru overlay.
+      raport.inaccesibil++
+      d.ultimulMotiv[s] = codMotiv(Reason.INACCESIBIL)
+      d.ultimulMotivDetaliu[s] = DetaliuMotiv.COMPONENTE_DIFERITE
+      noteaza(Reason.INACCESIBIL)
+      continue
+    }
+
+    const dist = Math.abs(work.wx - ax) + Math.abs(work.wy - ay) + Math.abs(work.z - az)
+    if (best === -1 || maiBun(prio, pers, dist, bestPrio, pers, bestDist)) {
+      best = s
+      bestPrio = prio
+      bestDist = dist
+      bestWork = work
+    }
+    // Egalitate de scor real: candidatii vin deja in ordinea id-ului la margini
+    // egale, iar la margini diferite cel cu marginea mai mare a fost evaluat
+    // primul si ramane — deci „primul evaluat castiga la egalitate" e o regula
+    // fixa, nu una de noroc.
+  }
+
+  rat.candidati[slot] = scumpe
+  rat.taiati[slot] = taiati
+  raport.candidatiTaiati += taiati
+
+  if (best === -1 || !bestWork) {
+    if (taiati > 0) rat.stare[slot] = StareRatiune.PLAFON
+    else rat.stare[slot] = StareRatiune.RESPINS
+    rat.motivFinal[slot] = celMaiAvansat === null ? 0 : codMotiv(celMaiAvansat)
+    return false
+  }
+
+  const out = pornesteJob(w, slot, best, bestWork)
+  if (!out.ok) {
+    // Verificat la scan, refuzat la start: intre ele nu s-a schimbat nimic pe
+    // un singur fir, deci nu se intampla. Dar contractul cere re-verificarea,
+    // si refuzul se numara, nu se inghite.
+    raport.rezervat++
+    rat.stare[slot] = StareRatiune.RESPINS
+    rat.motivFinal[slot] = codMotiv(out.reason)
+    return false
+  }
+  rat.stare[slot] = StareRatiune.JOB
+  return true
+}
+
+/**
+ * Check+claim atomic la START (research: chiar daca ai verificat la scan,
+ * re-verifica si scrie totul sau nimic). Id-ul de job se consuma DOAR daca
+ * rezervarea reuseste.
+ */
+function pornesteJob(w: World, slot: number, ds: number, work: { wx: number; wy: number; z: number }): Outcome<void> {
+  const a = w.agents
+  const d = w.desemnari
+  const jobId = w.nextId
+  const out = rezervaToate(w.rezervari, a.id[slot]!, jobId, cereriPentru(d.kind[ds]!, d.id[ds]!))
+  if (!out.ok) return out
+  w.nextId++
+
+  a.jobKind[slot] = d.kind[ds]! + 1
+  a.jobId[slot] = jobId
+  a.jobTarget[slot] = d.id[ds]!
+  a.jobStep[slot] = PasJob.MERGE
+  a.jobProgres[slot] = 0
+  a.jobIncercari[slot] = 0
+  a.jobWorkX[slot] = work.wx
+  a.jobWorkY[slot] = work.wy
+  a.jobWorkZ[slot] = work.z
+  tintesteLocDeLucru(w, slot)
+  raport.joburiPornite++
+  return accept()
+}
+
+/** Tinta de mers devine celula de lucru. Se cheama la start si ori de cate ori tinta s-a pierdut. */
+export function tintesteLocDeLucru(w: World, slot: number): void {
+  const a = w.agents
+  a.goalX[slot] = a.jobWorkX[slot]!
+  a.goalY[slot] = a.jobWorkY[slot]!
+  a.goalZ[slot] = a.jobWorkZ[slot]!
+  a.hasGoal[slot] = 1
+  clearPath(w.paths, slot)
+}
+
+// ---------------------------------------------------------------------------
+// sfarsitul unui job
+// ---------------------------------------------------------------------------
+
+/**
+ * Cum s-a incheiat. RimWorld are noua conditii; aici sunt trei, si distinctia
+ * care conteaza e intre INCOMPLET (lumea a refuzat: se scrie o racire si cauza)
+ * si INTRERUPT (a decis cineva: nimic de reincercat).
+ */
+export const Sfarsit = {
+  TERMINAT: 0,
+  INCOMPLET: 1,
+  INTRERUPT: 2,
+} as const
+export type SfarsitId = (typeof Sfarsit)[keyof typeof Sfarsit]
+
+/** Pe cine se scrie racirea unui INCOMPLET: pe tinta (e a ei) sau pe pereche (e a lui). */
+export const Racire = {
+  TINTA: 0,
+  PERECHE: 1,
+} as const
+export type RacireId = (typeof Racire)[keyof typeof Racire]
+
+/**
+ * Incheie jobul unui agent: elibereaza rezervarile pe PERECHEA (claimant, jobId),
+ * scrie racirea si cauza unde le e locul, si lasa agentul liber.
+ */
+export function terminaJob(
+  w: World,
+  rules: Rules,
+  slot: number,
+  cum: SfarsitId,
+  motiv?: ReasonCode,
+  racire: RacireId = Racire.TINTA,
+): void {
+  const a = w.agents
+  if (a.jobKind[slot] === 0) return
+  elibereaza(w.rezervari, a.id[slot]!, a.jobId[slot]!)
+
+  if (cum === Sfarsit.INCOMPLET) {
+    const ds = slotDesemnare(w.desemnari, a.jobTarget[slot]!)
+    if (racire === Racire.TINTA) {
+      if (ds !== -1) {
+        w.desemnari.reincercaLaTick[ds] = w.tick + rules.jobInfeasibleRetryTicks
+        if (motiv) w.desemnari.ultimulMotiv[ds] = codMotiv(motiv)
+        w.desemnari.ultimulMotivDetaliu[ds] = DetaliuMotiv.FARA_LOC_DE_LUCRU
+      }
+    } else {
+      a.tintaRefuzata[slot] = a.jobTarget[slot]!
+      a.refuzPanaLa[slot] = w.tick + rules.jobRetryTicks
+      // Cauza se vede si pe tinta, ca overlay-ul sa aiba ce arata — dar fara
+      // racire pe ea: altcineva o poate lua chiar acum.
+      if (ds !== -1 && motiv) {
+        w.desemnari.ultimulMotiv[ds] = codMotiv(motiv)
+        w.desemnari.ultimulMotivDetaliu[ds] = DetaliuMotiv.NICIUNUL
+      }
+    }
+    if (motiv) {
+      w.ratiune.stare[slot] = StareRatiune.RESPINS
+      w.ratiune.motivFinal[slot] = codMotiv(motiv)
+    }
+  }
+  if (cum === Sfarsit.TERMINAT) raport.joburiTerminate++
+  else {
+    raport.joburiAnulate++
+    if (a.jobProgres[slot] === 0) raport.joburiFaraProgres++
+  }
+
+  a.jobKind[slot] = 0
+  a.jobId[slot] = 0
+  a.jobTarget[slot] = 0
+  a.jobStep[slot] = 0
+  a.jobProgres[slot] = 0
+  a.jobIncercari[slot] = 0
+  a.hasGoal[slot] = 0
+  clearPath(w.paths, slot)
+}
+
+// ---------------------------------------------------------------------------
+// drumul refuzat, in pasul MERGE
+// ---------------------------------------------------------------------------
+
+/**
+ * `findPath` a spus nu unui pion cu job. Trei cauze, trei raspunsuri:
+ *
+ *   BUGET_DEPASIT    — prea scump ACUM. Jobul ramane, se reincearca dupa racire.
+ *   OCUPAT_DE_OSTIL  — drumul EXISTA, cineva sta in el (D7c). La fel: e dinamic.
+ *   INACCESIBIL      — celula de lucru nu mai e buna (i-a disparut podeaua, a
+ *                      zidit-o cineva). Se cauta ALTA celula de lucru pentru
+ *                      aceeasi tinta — intr-o zona pictata aproape fiecare
+ *                      desemnare are vecini care se sapa intre timp — si abia
+ *                      daca nu mai e niciuna, jobul se incheie cu racire pe TINTA.
+ *
+ * Toate trei numara o incercare; la `jobMaxIncercari` jobul se incheie cu racire
+ * pe PERECHE: pionul asta nu mai insista, dar tinta ramane libera pentru
+ * altcineva. Fara plafon, un drum mereu peste buget ar parca pionul pe viata cu
+ * tinta rezervata — si cea mai scumpa cautare din joc s-ar repeta la nesfarsit.
+ */
+export function drumRefuzat(w: World, rules: Rules, slot: number, motiv: ReasonCode): void {
+  const a = w.agents
+  a.jobIncercari[slot] = a.jobIncercari[slot]! + 1
+  if (a.jobIncercari[slot]! >= rules.jobMaxIncercari) {
+    terminaJob(w, rules, slot, Sfarsit.INCOMPLET, motiv, Racire.PERECHE)
+    return
+  }
+
+  if (motiv === Reason.INACCESIBIL) {
+    if (!refaLoculDeLucru(w, rules, slot)) {
+      terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.INACCESIBIL, Racire.TINTA)
+    }
+    return
+  }
+
+  // BUGET_DEPASIT, OCUPAT_DE_OSTIL: se asteapta. Cauza se vede pe pion.
+  w.ratiune.stare[slot] = StareRatiune.ASTEAPTA_DRUM
+  w.ratiune.motivFinal[slot] = codMotiv(motiv)
+}
+
+/**
+ * Cauta din nou celula de lucru a jobului curent si, daca gaseste una, o
+ * scrie si retinteste. Progresul ramane. Intoarce `false` daca nu mai exista.
+ */
+function refaLoculDeLucru(w: World, rules: Rules, slot: number): boolean {
+  const a = w.agents
+  const d = w.desemnari
+  const ds = slotDesemnare(d, a.jobTarget[slot]!)
+  if (ds === -1) return false
+  const work = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules)
+  if (!work) return false
+  a.jobWorkX[slot] = work.wx
+  a.jobWorkY[slot] = work.wy
+  a.jobWorkZ[slot] = work.z
+  a.jobStep[slot] = PasJob.MERGE
+  tintesteLocDeLucru(w, slot)
+  raport.locuriDeLucruRefacute++
+  return true
+}
+
+// ---------------------------------------------------------------------------
+// pasul LUCREAZA
+// ---------------------------------------------------------------------------
+
+/**
+ * Un tick de munca. Agentul sta pe celula lui de lucru si sapa.
+ *
+ * Validarea se face la FIECARE tick, nu doar la start (research: „un job trebuie
+ * sa-si poata declara invaliditatea in timpul executiei"): desemnarea poate fi
+ * anulata, agentul poate fi mutat de `dezgroapa`, voxelul poate fi sapat de
+ * altcineva cu mana.
+ */
+export function lucreaza(w: World, rules: Rules, slot: number): void {
+  const a = w.agents
+  const d = w.desemnari
+  const ds = slotDesemnare(d, a.jobTarget[slot]!)
+  if (ds === -1) {
+    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
+    return
+  }
+
+  if (cellOf(a.x[slot]!) !== a.jobWorkX[slot] || cellOf(a.y[slot]!) !== a.jobWorkY[slot] || a.z[slot] !== a.jobWorkZ[slot]) {
+    // Nu mai e unde trebuie (l-a scos `dezgroapa`, de exemplu). Se cauta alt
+    // loc de lucru pentru aceeasi tinta, cu progresul pastrat; daca nu mai e
+    // niciunul, jobul se incheie cu racire pe tinta.
+    if (!refaLoculDeLucru(w, rules, slot)) {
+      terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.INACCESIBIL, Racire.TINTA)
+    }
+    return
+  }
+
+  a.jobProgres[slot] = a.jobProgres[slot]! + rules.workUnitsPerTick
+  raport.tickuriDeLucru++
+  if (a.jobProgres[slot]! < rules.digWorkUnits) return
+
+  const out = sapaVoxel(w, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules)
+  if (!out.ok) {
+    // Voxelul nu mai e de sapat (l-a sapat altcineva, sau nu mai e solid).
+    // Premisa desemnarii a disparut: se termina jobul si dispare si ea. Nu
+    // primeste racire — o desemnare pe aer ar produce un job irosit la fiecare
+    // racire, la nesfarsit.
+    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
+    stergeDesemnare(d, ds)
+    return
+  }
+  terminaJob(w, rules, slot, Sfarsit.TERMINAT)
+  stergeDesemnare(d, ds)
+}
+
+// ---------------------------------------------------------------------------
+// editarea terenului — o singura cale, pentru comanda si pentru job
+// ---------------------------------------------------------------------------
+
+/**
+ * Sapa un voxel si murdareste graful de regiuni. Comanda `dig` si jobul de sapat
+ * trec AMANDOUA pe aici: un voxel sapat de un pion nu are voie sa fie altceva
+ * decat un voxel sapat de jucator.
+ */
+export function sapaVoxel(w: World, wx: number, wy: number, z: number, rules: Rules): Outcome<void> {
+  const out = dig(w.terrain, wx, wy, z)
+  if (!out.ok) return out
+  markDirty(w.regions, wx, wy, z, rules)
+  return accept()
+}
+
+/**
+ * Sapatul MANUAL, din comanda: pe langa voxel, ia si desemnarea de pe celula
+ * (daca e una), si intrerupe jobul cui o tinea. Munca s-a facut, doar ca de
+ * jucator — nimic de reincercat.
+ */
+export function sapaManual(w: World, wx: number, wy: number, z: number, rules: Rules): Outcome<void> {
+  const out = sapaVoxel(w, wx, wy, z, rules)
+  if (!out.ok) return out
+  const ds = desemnareLaCelula(w.desemnari, wx, wy, z)
+  if (ds !== -1) anuleazaDesemnare(w, rules, ds)
+  return accept()
+}
+
+/**
+ * O desemnare dispare (anulata de jucator, sau facuta cu mana): cine lucra la ea
+ * e intrerupt, in ordinea slotului, si rezervarile de pe ea se sterg.
+ */
+export function anuleazaDesemnare(w: World, rules: Rules, ds: number): void {
+  const a = w.agents
+  const id = w.desemnari.id[ds]!
+  for (let i = 0; i < a.count; i++) {
+    if (a.alive[i] === 0 || a.jobKind[i] === 0 || a.jobTarget[i] !== id) continue
+    terminaJob(w, rules, i, Sfarsit.INTRERUPT)
+  }
+  // Plasa de siguranta: n-ar trebui sa mai fie nimic, dar o tinta moarta nu are
+  // voie sa lase rezervari orfane.
+  elibereazaTinta(w.rezervari, id)
+  stergeDesemnare(w.desemnari, ds)
+}
+
+/**
+ * Acoperirea de regiuni din jurul unei desemnari noi.
+ *
+ * Fara ea, o desemnare intr-un bloc necalculat ar fi `NO_REGION` pe veci: nimeni
+ * n-ar putea evalua daca se ajunge la ea. Raza e legata de raza de scanare
+ * printr-un invariant validat in `parseRules`: discul desemnarii si discul
+ * oricarui pion din raza de scanare trebuie sa se atinga, altfel intre ele
+ * ramane un gol necalculat care nu se inchide niciodata singur. Acoperirea e
+ * PERSISTED prin extinderea ei (save.ts), deci ramane reproductibila.
+ */
+export function acoperaDesemnarea(w: World, rules: Rules, wx: number, wy: number, z: number): void {
+  ensureArea(w.terrain, w.regions, wx, wy, z, rules.jobRegionRadiusBlocks, rules)
+}
+
+// ---------------------------------------------------------------------------
+// dupa incarcare
+// ---------------------------------------------------------------------------
+
+/**
+ * Rezervarile sunt DERIVED: se refac din joburile agentilor VII, in ordinea
+ * slotului.
+ *
+ * Un job care nu se poate re-rezerva (tinta lipsa, doua joburi pe aceeasi tinta,
+ * un agent mort cu job) e un save inconsistent. Nu se lasa tacut: jobul se
+ * anuleaza — FARA eliberare, fiindca n-a apucat sa rezerve — si se numara in
+ * `anulateLaIncarcare`. Asta e intentia originala a lui M5 („un save inconsistent
+ * nu deadlock-uieste"), pastrata fara sa se rupa invariantul de roundtrip.
+ */
+export function reconstruiesteRezervari(w: World): number {
+  const a = w.agents
+  let anulate = 0
+  for (let i = 0; i < a.count; i++) {
+    if (a.jobKind[i] === 0) continue
+    const ds = a.alive[i] === 1 ? slotDesemnare(w.desemnari, a.jobTarget[i]!) : -1
+    const out = ds === -1
+      ? refuse(Reason.ENTITATE_INEXISTENTA, { id: a.jobTarget[i]! })
+      : rezervaToate(w.rezervari, a.id[i]!, a.jobId[i]!, cereriPentru(a.jobKind[i]! - 1, a.jobTarget[i]!))
+    if (out.ok) continue
+    a.jobKind[i] = 0
+    a.jobId[i] = 0
+    a.jobTarget[i] = 0
+    a.jobStep[i] = 0
+    a.jobProgres[i] = 0
+    a.jobIncercari[i] = 0
+    a.hasGoal[i] = 0
+    clearPath(w.paths, i)
+    anulate++
+  }
+  w.rezervari.anulateLaIncarcare = anulate
+  return anulate
+}

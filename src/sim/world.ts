@@ -6,12 +6,6 @@
  *   - `Math.random()` — INTERZIS. Aleatorul vine din fluxuri numite (rng.ts).
  *   - `async` / `await` / `Promise` — INTERZISE. Simularea e sincrona si pas cu pas.
  *   - iterare peste `Object.keys` / `Map` / `Set` fara sortare — INTERZISA.
- *
- * Ce se simuleaza acum e deliberat un substitut: agentii fac o plimbare aleatoare
- * marginita. NU e gameplay si nu pretinde sa fie. Rolul lui e sa exercite exact
- * mecanismele care nu se pot retrofita — fluxuri de RNG, ordine fixa de iterare,
- * aritmetica intreaga, hash de stare — ca sa existe dovada de determinism INAINTE
- * sa existe teren, agenti adevarati sau joburi. Se inlocuieste la S3-5.
  */
 
 import type { Rules } from './content.ts'
@@ -22,7 +16,11 @@ import type { RngStreamName, World } from './state.ts'
 import { makeAgentStore, MM_PER_CELL, RNG_STREAMS, SCHEMA_VERSION } from './state.ts'
 import { createTerrain, WORLD_CELLS } from './terrain/terrain.ts'
 import { createRegions } from './regions.ts'
-import { makePathStore, stepAgents } from './agents.ts'
+import { stepAgents } from './agents.ts'
+import { makePathStore } from './drumuri.ts'
+import { makeDesignationStore } from './desemnari.ts'
+import { createReservations } from './rezervari.ts'
+import { makeRatiuneStore } from './joburi.ts'
 
 /**
  * Creeaza o lume. NU incarca teren: `createTerrain` aloca doar structura goala,
@@ -41,7 +39,7 @@ export function createWorld(seed: number, rules: Rules = DEFAULT_RULES): World {
     tick: 0,
     nextId: 1,
     rng,
-    agents: makeAgentStore(rules.agentCapacity),
+    agents: makeAgentStore(rules.agentCapacity, rules.personalPriorityDefault),
     // DERIVED. Marimea lumii NU e un numar de gameplay: o determina harta macro
     // (MACRO_SIZE x MACRO_METERS), deci nu are ce cauta in content/rules.json.
     //
@@ -54,15 +52,19 @@ export function createWorld(seed: number, rules: Rules = DEFAULT_RULES): World {
     terrain: createTerrain(seed, rules.chunkResidentRadius),
     regions: createRegions(),
     paths: makePathStore(rules.agentCapacity, rules.maxPathCells),
+    desemnari: makeDesignationStore(rules.designationCapacity),
+    rezervari: createReservations(),
+    ratiune: makeRatiuneStore(rules.agentCapacity),
   }
 }
 
 /** Un singur pas de simulare. */
 export function tick(w: World, rules: Rules = DEFAULT_RULES): void {
-  // Agentii merg acum spre tinte reale, pe drumuri reale. Plimbarea aleatoare
-  // care a tinut locul pana aici si-a facut treaba: a exercitat fluxurile de RNG
-  // numite, ordinea fixa de iterare si hash-ul de stare INAINTE sa existe ceva de
-  // miscat — adica exact lucrurile care nu se pot retrofita.
+  // Agentii merg spre tinte reale, pe drumuri reale, si de la S16-19 cer de
+  // lucru. Plimbarea aleatoare care a tinut locul pana la S12 si-a facut treaba:
+  // a exercitat fluxurile de RNG numite, ordinea fixa de iterare si hash-ul de
+  // stare INAINTE sa existe ceva de miscat — adica exact lucrurile care nu se
+  // pot retrofita. Ramane ca stare Idle: un pion fara job hoinareste.
   stepAgents(w, rules)
   w.tick++
 }

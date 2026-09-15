@@ -81,3 +81,18 @@ spune dacă răspunde.
 **De ce îl las aici.** Era un defect real (fețe cu înfășurare inversată, eliminate de culling) și e
 reparat, cu test. Dar ce se vede acum în locul găurilor sunt **contratreptele** terenului voxelizat
 — adică exact aspectul „totul e din pătrate" de la punctul 4. Reparat nu înseamnă frumos.
+
+---
+
+## 6. Primii pioni care muncesc — se citește ce fac?
+
+**Ce te uiți.** Viewerul, tasta **J**. Dă click pe teren de câteva ori (fiecare click = „săpați aici").
+Pionii bej care merg spre o cerere devin albăstrui, cei care sapă devin verzi; o linie albă leagă
+fiecare pion de locul lui de lucru. Cererile: chihlimbar = liberă, albastru = a luat-o cineva,
+roșu = n-are niciun loc de unde s-o sapi (sapă o rampă), violet = are loc dar nu se ajunge.
+
+**Cum arată bine.** Fără să citești nimic din ce am scris mai sus, îți dai seama cine ce face și de ce
+o cerere nu e luată. Dacă trebuie să ghicești, spune-mi ce anume ai vrut să știi și n-ai găsit.
+
+**De ce nu pot eu.** E lizibilitate, nu corectitudine: corectitudinea o acoperă 192 de teste.
+Research-ul spune că genul se câștigă în lizibilitatea a 200 de stări simultane; aici sunt primele.

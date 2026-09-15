@@ -139,6 +139,25 @@ export function standardScenario(seed: number, ticks: number, agents = 20): Scen
     t += 20
   }
 
+  // Munca (S16-19). Desemnari de sapat langa fiecare sit, cu prioritati variate,
+  // ca hash-ul de referinta din CI sa acopere joburile, nu doar drumurile: un
+  // scanner care ar alege alt candidat, o rezervare care ar scapa, un job care
+  // n-ar mai fi persistat — toate ar muta hash-ul. Celulele se verifica solide
+  // pe terenul temporar, ca scenariul sa ramana fara refuzuri.
+  let k = 0
+  for (const s of sites) {
+    for (const [dx, dy] of [[2, 0], [-2, 0], [0, 2], [0, -2]] as const) {
+      const wx = s.wx + dx
+      const wy = s.wy + dy
+      const g = groundLevelM(scratch, wx, wy)
+      if (!g.ok) continue
+      const sus = materialAt(scratch, wx, wy, g.value)
+      if (!sus.ok || !isSolid(sus.value)) continue
+      commands.push({ tick: t + (k % 7), cmd: { kind: 'desemneaza', wx, wy, z: g.value, prioritate: 1 + (k % 5) } })
+      k++
+    }
+  }
+
   return { seed, ticks, commands }
 }
 

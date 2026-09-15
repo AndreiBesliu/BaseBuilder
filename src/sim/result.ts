@@ -34,9 +34,53 @@ export const Reason = {
   CELULA_OCUPATA: 'CELULA_OCUPATA',
   /** Un camp a venit cu o valoare pe care sistemul n-o poate interpreta — nu „lipseste", ci „nu e buna". */
   VALOARE_INVALIDA: 'VALOARE_INVALIDA',
+  /** Tinta e dincolo de raza in care un pion cauta de lucru. Nu „imposibil" — „nu de aici". */
+  PREA_DEPARTE: 'PREA_DEPARTE',
+  /** Celula are deja o desemnare. Refuzul poarta id-ul ei. */
+  DEJA_DESEMNATA: 'DEJA_DESEMNATA',
+  /** O verificare de integritate a picat. Nu e un refuz de joc, e un defect gasit la timp. */
+  INVARIANT_INCALCAT: 'INVARIANT_INCALCAT',
 } as const
 
 export type ReasonCode = (typeof Reason)[keyof typeof Reason]
+
+/**
+ * Cauzele, ca lista ORDONATA — ca sa poata fi stocate ca un octet in SoA
+ * (`ultimulMotiv` pe o desemnare, `motivFinal` pe un pion). Ordinea e fixa si
+ * se extinde doar la coada; codul 0 inseamna „niciun motiv".
+ *
+ * NU se salveaza si NU intra in hash: e reprezentarea unui camp TRANSIENT, deci
+ * renumerotarea n-ar strica niciun save.
+ */
+export const MOTIVE: readonly ReasonCode[] = [
+  Reason.LIPSA_MATERIAL,
+  Reason.INACCESIBIL,
+  Reason.FARA_MUNCITOR,
+  Reason.PRIORITATE_JOASA,
+  Reason.REZERVAT,
+  Reason.OCUPAT_DE_OSTIL,
+  Reason.IN_AFARA_LUMII,
+  Reason.ENTITATE_INEXISTENTA,
+  Reason.COMANDA_NECUNOSCUTA,
+  Reason.BUGET_DEPASIT,
+  Reason.CAPACITATE_DEPASITA,
+  Reason.LOC_NECALCABIL,
+  Reason.CELULA_OCUPATA,
+  Reason.VALOARE_INVALIDA,
+  Reason.PREA_DEPARTE,
+  Reason.DEJA_DESEMNATA,
+  Reason.INVARIANT_INCALCAT,
+]
+
+/** Codul (1-based) al unei cauze. 0 = niciuna. */
+export function codMotiv(r: ReasonCode): number {
+  return MOTIVE.indexOf(r) + 1
+}
+
+/** Cauza unui cod, sau `null` pentru 0. */
+export function motivDinCod(cod: number): ReasonCode | null {
+  return cod >= 1 && cod <= MOTIVE.length ? MOTIVE[cod - 1]! : null
+}
 
 export interface Refusal {
   readonly ok: false

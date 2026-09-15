@@ -57,52 +57,19 @@ import type { Rules } from './content.ts'
 import { nextInt } from './rng.ts'
 import type { RngState } from './rng.ts'
 import type { AgentStore, World } from './state.ts'
-import { MM_PER_CELL } from './state.ts'
+import { MM_PER_CELL, PasJob } from './state.ts'
 import { canStep, ensureArea, isWalkable, NO_REGION, rebuildDirty, regionAt } from './regions.ts'
 import { cellKey, findPath, pathLength } from './path.ts'
 import type { Ocupare } from './path.ts'
 import { Reason } from './result.ts'
+import { cellOf, centerMm, clearPath } from './drumuri.ts'
+import { cautaJob, drumRefuzat, lucreaza, resetJobReport, tintesteLocDeLucru } from './joburi.ts'
 
-/** Celula in care sta un agent, din pozitia lui in milimetri. */
-export function cellOf(mm: number): number {
-  return Math.floor(mm / MM_PER_CELL)
-}
-
-/** Centrul unei celule, in milimetri. Tinta spre care merge agentul. */
-function centerMm(cell: number): number {
-  return cell * MM_PER_CELL + MM_PER_CELL / 2
-}
-
-/**
- * Drumurile. PERSISTED — vezi antetul modulului pentru de ce NU sunt derivate.
- *
- * Stocate cu pas FIX per agent, nu ca liste: SoA, zero alocari dupa creare, si
- * un drum prea lung se taie la plafon in loc sa creasca memoria la nesfarsit.
- */
-export interface PathStore {
-  readonly maxCells: number
-  /** (x, y, z) per celula, `maxCells * 3` numere rezervate pentru fiecare agent. */
-  readonly cells: Int32Array
-  readonly len: Int32Array
-  readonly cursor: Int32Array
-  /** Tickul de la care agentul mai are voie sa re-planifice. */
-  readonly nextReplanTick: Int32Array
-}
-
-export function makePathStore(capacity: number, maxCells: number): PathStore {
-  return {
-    maxCells,
-    cells: new Int32Array(capacity * maxCells * 3),
-    len: new Int32Array(capacity),
-    cursor: new Int32Array(capacity),
-    nextReplanTick: new Int32Array(capacity),
-  }
-}
-
-export function clearPath(p: PathStore, slot: number): void {
-  p.len[slot] = 0
-  p.cursor[slot] = 0
-}
+// Drumurile si aritmetica de celule stau in `drumuri.ts` (ca `joburi.ts` sa le
+// poata folosi fara un ciclu de import). Re-exportate de aici pentru cine le
+// stia in locul asta.
+export { cellOf, clearPath, makePathStore } from './drumuri.ts'
+export type { PathStore } from './drumuri.ts'
 
 // ---------------------------------------------------------------------------
 // ocuparea
@@ -222,6 +189,7 @@ export function stepAgents(w: World, rules: Rules): void {
   raport.ingropati = 0
   raport.incercariTinta = 0
   raport.maxIncercariUnAgent = 0
+  resetJobReport()
 
   // 1. Acoperirea de regiuni, ca functie de pozitiile PERSISTATE ale agentilor.
   //    Ordinea slotului, ca peste tot.
@@ -300,9 +268,25 @@ export function stepAgents(w: World, rules: Rules): void {
     // Cine nu e intr-o regiune n-are ce cauta mai departe: nici tinta, nici drum.
     if (regionAt(w.regions, cx, cy, cz) === NO_REGION) continue
 
-    // 2. Fara tinta nu se merge nicaieri. Se alege una, si daca nu se poate,
-    //    agentul sta — un tick pierdut e mai bun decat o cautare care nu poate reusi.
-    if (a.hasGoal[i] === 0) {
+    // 2. Munca. Pull, nu push: un pion FARA job cere unul cand ii vine randul —
+    //    decalat pe id, ca sa nu scaneze toti in acelasi tick (research: id % 30).
+    //    Daca primeste, tinta de mers devine celula de lucru si hoinareala se
+    //    opreste. Un pion CU job nu re-scaneaza: politica de preemptiune din
+    //    joburi.ts.
+    if (a.jobKind[i] === 0 && (w.tick + a.id[i]!) % rules.jobRescanTicks === 0) {
+      cautaJob(w, rules, i)
+    }
+    if (a.jobKind[i] !== 0) {
+      if (a.jobStep[i] === PasJob.LUCREAZA) {
+        lucreaza(w, rules, i)
+        continue
+      }
+      // MERGE: tinta trebuie sa fie celula de lucru. `dezgroapa` o poate fi sters.
+      if (a.hasGoal[i] === 0) tintesteLocDeLucru(w, i)
+    } else if (a.hasGoal[i] === 0) {
+      // 2b. Fara job si fara tinta: hoinareste. Starea Idle trebuie sa fie
+      //     VIZIBILA (research), nu un pion intepenit — si un tick pierdut e mai
+      //     bun decat o cautare care nu poate reusi.
       if (!alegeTinta(w, rules, rng, i)) continue
       clearPath(p, i)
     }
@@ -311,7 +295,12 @@ export function stepAgents(w: World, rules: Rules): void {
     if (cx === a.goalX[i] && cy === a.goalY[i] && cz === a.goalZ[i]) {
       a.hasGoal[i] = 0
       clearPath(p, i)
-      raport.sosiri++
+      if (a.jobKind[i] !== 0) {
+        // La locul de lucru: de aici munceste, de la tickul urmator.
+        a.jobStep[i] = PasJob.LUCREAZA
+      } else {
+        raport.sosiri++
+      }
       continue
     }
 
@@ -334,11 +323,18 @@ export function stepAgents(w: World, rules: Rules): void {
       if (!out.ok) {
         raport.refuzuri++
         if (out.reason === Reason.OCUPAT_DE_OSTIL) raport.blocatiDeOstili++
+        p.nextReplanTick[i] = w.tick + rules.replanCooldownTicks
+        if (a.jobKind[i] !== 0) {
+          // Un job al carui drum e refuzat: decide `joburi.ts`, nu codul de
+          // mers. Diferenta dintre „prea scump acum", „blocat de cineva" si
+          // „nu se mai poate sta acolo" e exact D7c, si fiecare are alt raspuns.
+          drumRefuzat(w, rules, i, out.reason)
+          continue
+        }
         // Tinta se abandoneaza si se asteapta. Asta e diferenta dintre un agent
         // care incearca si unul care se blocheaza pe viata: nu insista pe o tinta
         // pe care lumea tocmai a refuzat-o.
         a.hasGoal[i] = 0
-        p.nextReplanTick[i] = w.tick + rules.replanCooldownTicks
         continue
       }
 
@@ -357,6 +353,18 @@ export function stepAgents(w: World, rules: Rules): void {
     // 4. Mersul.
     avanseaza(w, rules, i)
   }
+
+  // Si la SFARSIT de tick, nu doar la inceput.
+  //
+  // Sapaturile facute de pioni se intampla in bucla de mai sus, DUPA reconstructia
+  // de la inceputul tickului. Fara pasul asta, tickul s-ar incheia cu blocuri
+  // murdare, iar un save facut atunci n-ar contine murdaria (e TRANSIENT): lumea
+  // continua ar reconstrui la tickul urmator si ar lega vecini pe care lumea
+  // incarcata nu i-ar lega niciodata — alt graf, alte coridoare, alt hash.
+  // Costul e acelasi: fiecare multime murdara se reconstruieste o singura data,
+  // doar ca acum, nu peste un tick. Invariantul: la sfarsitul oricarui tick,
+  // `regions.dirty` e gol.
+  rebuildDirty(w.terrain, w.regions, rules)
 }
 
 /**

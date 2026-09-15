@@ -15,13 +15,15 @@
 import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import type { World, FactionId } from './state.ts'
-import { slotOf } from './state.ts'
-import { cellOf, clearPath } from './agents.ts'
+import { CATEGORII, slotOf } from './state.ts'
+import { cellOf, clearPath } from './drumuri.ts'
 import type { Rules } from './content.ts'
 import { DEFAULT_RULES } from './content.ts'
 import { isWalkable, markDirty } from './regions.ts'
-import type { MaterialId } from './terrain/chunk.ts'
-import { CHUNK_GRID, dig, fill, inWorld, setFocus } from './terrain/terrain.ts'
+import { isSolid, type MaterialId } from './terrain/chunk.ts'
+import { CHUNK_GRID, fill, inWorld, materialAt, setFocus, WORLD_CELLS } from './terrain/terrain.ts'
+import { adaugaDesemnare, Desemnare, slotDesemnare } from './desemnari.ts'
+import { acoperaDesemnarea, anuleazaDesemnare, sapaManual, Sfarsit, terminaJob } from './joburi.ts'
 
 export type Command =
   | { readonly kind: 'spawnAgent'; readonly x: number; readonly y: number; readonly z: number; readonly faction: FactionId }
@@ -33,6 +35,12 @@ export type Command =
   | { readonly kind: 'dig'; readonly wx: number; readonly wy: number; readonly z: number }
   /** Umple un voxel gol. */
   | { readonly kind: 'fill'; readonly wx: number; readonly wy: number; readonly z: number; readonly material: MaterialId }
+  /** Cere sa se sape un voxel. Un pion liber va veni sa-l sape. `prioritate` lipsa = implicitul din content. */
+  | { readonly kind: 'desemneaza'; readonly wx: number; readonly wy: number; readonly z: number; readonly prioritate?: number | undefined }
+  /** Retrage o desemnare. Cine lucra la ea e intrerupt. */
+  | { readonly kind: 'anuleazaDesemnarea'; readonly id: number }
+  /** Prioritatea personala a unui pion pe o categorie: 0 = niciodata. */
+  | { readonly kind: 'setPrioritatePersonala'; readonly id: number; readonly categorie: number; readonly nivel: number }
 
 /** O comanda, plus tickul la care a fost emisa. Asta e unitatea de replay. */
 export interface LoggedCommand {
@@ -99,6 +107,21 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       a.goalZ[slot] = 0
       a.hasGoal[slot] = 0
       a.progresMm[slot] = 0
+      // Si jobul: mortul si-a eliberat rezervarile la `killAgent`, dar campurile
+      // raman scrise in slot. Un nou-nascut cu `jobKind` al mortului ar „lucra"
+      // la o tinta pe care n-a rezervat-o niciodata.
+      a.jobKind[slot] = 0
+      a.jobId[slot] = 0
+      a.jobTarget[slot] = 0
+      a.jobStep[slot] = 0
+      a.jobProgres[slot] = 0
+      a.jobWorkX[slot] = 0
+      a.jobWorkY[slot] = 0
+      a.jobWorkZ[slot] = 0
+      a.jobIncercari[slot] = 0
+      a.tintaRefuzata[slot] = 0
+      a.refuzPanaLa[slot] = 0
+      for (let c = 0; c < CATEGORII; c++) a.prioPersonala[slot * CATEGORII + c] = rules.personalPriorityDefault
       clearPath(w.paths, slot)
       // Si racirea. Fara asta, un slot reutilizat mostenea racirea mortului si
       // agentul nou statea degeaba pana la un tick pe care nu l-a trait nimeni.
@@ -124,6 +147,9 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       const a = w.agents
       const slot = slotOf(a, cmd.id)
       if (slot === -1) return refuse(Reason.ENTITATE_INEXISTENTA, { id: cmd.id })
+      // Un mort nu tine rezervari. Fara asta, tinta lui ramane „ocupata" pe veci:
+      // deadlock tacut, care supravietuieste si in save (research, bug-ul 4).
+      terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
       a.alive[slot] = 0
       return accept(cmd.id)
     }
@@ -148,9 +174,10 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
     // — exact „FPS-ul scade cand construiesti un zid", pe care stratul de regiuni
     // exista ca sa-l previna.
     case 'dig': {
-      const out = dig(w.terrain, cmd.wx, cmd.wy, cmd.z)
+      // Aceeasi cale ca sapatul facut de un pion (joburi.ts). In plus, sapatul
+      // manual ia si desemnarea de pe celula si intrerupe jobul cui o tinea.
+      const out = sapaManual(w, cmd.wx, cmd.wy, cmd.z, rules)
       if (!out.ok) return out
-      markDirty(w.regions, cmd.wx, cmd.wy, cmd.z, rules)
       return accept(0)
     }
 
@@ -173,6 +200,51 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       if (!out.ok) return out
       markDirty(w.regions, cmd.wx, cmd.wy, cmd.z, rules)
       return accept(0)
+    }
+
+    case 'desemneaza': {
+      if (cmd.wx < 0 || cmd.wy < 0 || cmd.wx >= WORLD_CELLS || cmd.wy >= WORLD_CELLS) {
+        return refuse(Reason.IN_AFARA_LUMII, { x: cmd.wx, y: cmd.wy, limita: WORLD_CELLS })
+      }
+      const prioritate = cmd.prioritate ?? rules.designationPriorityDefault
+      if (!Number.isInteger(prioritate) || prioritate < 1 || prioritate > rules.designationPriorityLevels) {
+        return refuse(Reason.VALOARE_INVALIDA, { camp: 'prioritate', valoare: String(prioritate), min: 1, max: rules.designationPriorityLevels })
+      }
+      // E ceva de sapat acolo? Aceeasi intrebare pe care o pune `dig`, pusa
+      // ACUM, nu cand ajunge pionul: o desemnare in aer ar fi o tinta pe care
+      // toata lumea o ia si nimeni n-o poate termina.
+      const mat = materialAt(w.terrain, cmd.wx, cmd.wy, cmd.z)
+      if (!mat.ok) return mat
+      if (!isSolid(mat.value)) {
+        return refuse(Reason.LIPSA_MATERIAL, { motiv: 'nu e nimic de sapat', material: mat.value, wx: cmd.wx, wy: cmd.wy, z: cmd.z })
+      }
+      // Id-ul se consuma DOAR daca desemnarea intra. Un refuz nu muta `nextId`.
+      const out = adaugaDesemnare(w.desemnari, w.nextId, Desemnare.SAPA, cmd.wx, cmd.wy, cmd.z, prioritate)
+      if (!out.ok) return out
+      const id = w.nextId++
+      acoperaDesemnarea(w, rules, cmd.wx, cmd.wy, cmd.z)
+      return accept(id)
+    }
+
+    case 'anuleazaDesemnarea': {
+      const ds = slotDesemnare(w.desemnari, cmd.id)
+      if (ds === -1) return refuse(Reason.ENTITATE_INEXISTENTA, { id: cmd.id })
+      anuleazaDesemnare(w, rules, ds)
+      return accept(cmd.id)
+    }
+
+    case 'setPrioritatePersonala': {
+      const a = w.agents
+      const slot = slotOf(a, cmd.id)
+      if (slot === -1) return refuse(Reason.ENTITATE_INEXISTENTA, { id: cmd.id })
+      if (!Number.isInteger(cmd.categorie) || cmd.categorie < 0 || cmd.categorie >= CATEGORII) {
+        return refuse(Reason.VALOARE_INVALIDA, { camp: 'categorie', valoare: String(cmd.categorie), min: 0, max: CATEGORII - 1 })
+      }
+      if (!Number.isInteger(cmd.nivel) || cmd.nivel < 0 || cmd.nivel > rules.personalPriorityLevels) {
+        return refuse(Reason.VALOARE_INVALIDA, { camp: 'nivel', valoare: String(cmd.nivel), min: 0, max: rules.personalPriorityLevels })
+      }
+      a.prioPersonala[slot * CATEGORII + cmd.categorie] = cmd.nivel
+      return accept(cmd.id)
     }
 
     default: {

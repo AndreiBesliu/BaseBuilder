@@ -1,0 +1,181 @@
+/**
+ * Desemnarile — ce a cerut jucatorul sa se faca, pe o celula.
+ *
+ * O desemnare e o TINTA de job, nu un job: jobul apare abia cand un pion o
+ * trage (pull) din scanner. Ea nu stie cine lucreaza la ea — asta e treaba
+ * rezervarilor (K02: niciun `isBeingWorkedOn` pe entitate).
+ *
+ * SoA, sloturi stabile si reutilizate, exact ca la agenti. PERSISTED, cu
+ * exceptiile etichetate mai jos.
+ */
+
+import type { Outcome } from './result.ts'
+import { accept, refuse, Reason } from './result.ts'
+import { cellKey } from './path.ts'
+
+/** Felurile de desemnare. Un singur fel azi. */
+export const Desemnare = {
+  SAPA: 0,
+} as const
+export type DesemnareKind = (typeof Desemnare)[keyof typeof Desemnare]
+
+/** Detaliul unui refuz INACCESIBIL memorat pe desemnare. Pentru „De ce nu?". */
+export const DetaliuMotiv = {
+  NICIUNUL: 0,
+  /** Niciun vecin pe care sa se poata sta. Actionabil: sapa o rampa. */
+  FARA_LOC_DE_LUCRU: 1,
+  /** Are loc de lucru, dar nu in componenta pionului care a intrebat. Actionabil: leaga zonele. */
+  COMPONENTE_DIFERITE: 2,
+} as const
+
+export interface DesignationStore {
+  /** PERSISTED — sloturi folosite */ count: number
+  /** PERSISTED */ capacity: number
+  /** PERSISTED — din `w.nextId`; identitatea stabila a tintei */ readonly id: Int32Array
+  /** PERSISTED */ readonly kind: Uint8Array
+  /** PERSISTED — celula */ readonly wx: Int32Array
+  /** PERSISTED */ readonly wy: Int32Array
+  /** PERSISTED */ readonly z: Int32Array
+  /** PERSISTED — 1..designationPriorityLevels */ readonly prioritate: Uint8Array
+  /** PERSISTED — 0 = slot liber */ readonly alive: Uint8Array
+  /**
+   * PERSISTED — pana la tickul asta nimeni n-o evalueaza. Se scrie DOAR pentru
+   * ce e o proprietate a desemnarii insesi (n-are niciun loc de lucru), niciodata
+   * pentru ce tine de un anume pion (drumul LUI e blocat) — aia e racire pe
+   * pereche si sta pe agent.
+   *
+   * Doua roluri: opreste bucla „ia, esueaza, ia iar" (research:
+   * `markTargetInfeasible`) si face ca plafonul de evaluari scumpe al scanului sa
+   * se cheltuie pe candidati NOI — fara memorare, 256 de desemnari fara loc de
+   * lucru in sloturile mici ar ascunde pe veci tot ce e in sloturile mari.
+   * Influenteaza deciziile, deci e stare.
+   */
+  readonly reincercaLaTick: Int32Array
+  /**
+   * TRANSIENT — codul ultimului motiv (`codMotiv`) si detaliul lui, pentru
+   * „De ce nu?". Nu intra in hash, nu se salveaza; dupa incarcare sunt goale
+   * pana la prima scanare.
+   */
+  readonly ultimulMotiv: Uint8Array
+  readonly ultimulMotivDetaliu: Uint8Array
+  /** DERIVED — celula → slot, pentru duplicat si pentru stergerea la sapat manual. */
+  readonly laCelula: Map<number, number>
+  /** DERIVED — id → slot. Driverul intreaba „mai exista tinta?" la fiecare tick; liniar ar fi O(pioni × D). */
+  readonly laId: Map<number, number>
+  /** DERIVED — cate sunt vii. `shouldSkip` in O(1). */
+  vii: number
+}
+
+export function makeDesignationStore(capacity: number): DesignationStore {
+  return {
+    count: 0,
+    capacity,
+    id: new Int32Array(capacity),
+    kind: new Uint8Array(capacity),
+    wx: new Int32Array(capacity),
+    wy: new Int32Array(capacity),
+    z: new Int32Array(capacity),
+    prioritate: new Uint8Array(capacity),
+    alive: new Uint8Array(capacity),
+    reincercaLaTick: new Int32Array(capacity),
+    ultimulMotiv: new Uint8Array(capacity),
+    ultimulMotivDetaliu: new Uint8Array(capacity),
+    laCelula: new Map(),
+    laId: new Map(),
+    vii: 0,
+  }
+}
+
+/** Slotul unui id viu, sau -1. O citire. */
+export function slotDesemnare(d: DesignationStore, id: number): number {
+  const s = d.laId.get(id)
+  return s === undefined ? -1 : s
+}
+
+/** Slotul desemnarii de pe o celula, sau -1. */
+export function desemnareLaCelula(d: DesignationStore, wx: number, wy: number, z: number): number {
+  const s = d.laCelula.get(cellKey(wx, wy, z))
+  return s === undefined ? -1 : s
+}
+
+/**
+ * Adauga o desemnare. Validarile de TEREN (e ceva de sapat acolo?) sunt ale
+ * comenzii; aici se verifica doar ce stie storeul: duplicat si capacitate.
+ * Intoarce slotul. `id` vine de la apelant, din `w.nextId`.
+ */
+export function adaugaDesemnare(
+  d: DesignationStore,
+  id: number,
+  kind: DesemnareKind,
+  wx: number,
+  wy: number,
+  z: number,
+  prioritate: number,
+): Outcome<number> {
+  const key = cellKey(wx, wy, z)
+  const existent = d.laCelula.get(key)
+  if (existent !== undefined) {
+    return refuse(Reason.DEJA_DESEMNATA, { id: d.id[existent]!, wx, wy, z })
+  }
+  let slot = -1
+  for (let i = 0; i < d.count; i++) {
+    if (d.alive[i] === 0) { slot = i; break }
+  }
+  if (slot === -1) {
+    if (d.count >= d.capacity) return refuse(Reason.CAPACITATE_DEPASITA, { capacitate: d.capacity })
+    slot = d.count
+    d.count++
+  }
+  d.id[slot] = id
+  d.kind[slot] = kind
+  d.wx[slot] = wx
+  d.wy[slot] = wy
+  d.z[slot] = z
+  d.prioritate[slot] = prioritate
+  d.alive[slot] = 1
+  // Slotul se REUTILIZEAZA: nimic din desemnarea moarta nu are voie sa ramana.
+  // O racire mostenita ar face ca noua desemnare sa fie ignorata pana la un tick
+  // pe care nu l-a trait — acelasi defect reparat la agenti pentru `nextReplanTick`.
+  d.reincercaLaTick[slot] = 0
+  d.ultimulMotiv[slot] = 0
+  d.ultimulMotivDetaliu[slot] = 0
+  d.laCelula.set(key, slot)
+  d.laId.set(id, slot)
+  d.vii++
+  return accept(slot)
+}
+
+/** Sterge o desemnare vie. Rezervarile de pe ea sunt treaba apelantului. */
+export function stergeDesemnare(d: DesignationStore, slot: number): void {
+  if (d.alive[slot] === 0) return
+  d.alive[slot] = 0
+  d.laCelula.delete(cellKey(d.wx[slot]!, d.wy[slot]!, d.z[slot]!))
+  d.laId.delete(d.id[slot]!)
+  d.vii--
+}
+
+/**
+ * Reconstruieste partea DERIVED dupa incarcare. Doua desemnari vii pe aceeasi
+ * celula sau cu acelasi id inseamna un save editat sau corupt: refuz, nu
+ * „ultima castiga" — o desemnare ascunsa ar produce un job irosit la fiecare
+ * racire, la nesfarsit, invizibil.
+ */
+export function reindexeazaDesemnari(d: DesignationStore): Outcome<void> {
+  d.laCelula.clear()
+  d.laId.clear()
+  d.vii = 0
+  for (let i = 0; i < d.count; i++) {
+    if (d.alive[i] === 0) continue
+    const key = cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!)
+    if (d.laCelula.has(key)) {
+      return refuse(Reason.DEJA_DESEMNATA, { camp: 'desemnari', motiv: 'doua desemnari vii pe aceeasi celula', slot: i, wx: d.wx[i]!, wy: d.wy[i]!, z: d.z[i]! })
+    }
+    if (d.laId.has(d.id[i]!)) {
+      return refuse(Reason.ENTITATE_INEXISTENTA, { camp: 'desemnari.id', motiv: 'duplicat', id: d.id[i]! })
+    }
+    d.laCelula.set(key, i)
+    d.laId.set(d.id[i]!, i)
+    d.vii++
+  }
+  return accept()
+}

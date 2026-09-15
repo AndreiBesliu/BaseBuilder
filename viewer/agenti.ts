@@ -31,7 +31,7 @@ import * as THREE from 'three'
 import type { Rules } from '../src/sim/content.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { cellOf } from '../src/sim/agents.ts'
-import { Faction, MM_PER_CELL } from '../src/sim/state.ts'
+import { Faction, MM_PER_CELL, PasJob } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { groundLevelM, materialAt } from '../src/sim/terrain/terrain.ts'
@@ -130,7 +130,13 @@ export function stepSim(
   return rulate
 }
 
+// Trei culori pentru ai nostri, dupa STARE, nu doar dupa factiune: un pion care
+// merge 90 de celule la lucru si unul care se plimba la intamplare aratau la fel,
+// iar research-ul e explicit — „lipsa unei stari Idle vizibile: jucatorul
+// presupune bug".
 const culoareAsezare = new THREE.Color(0xd9c9a3)
+const culoareMerge = new THREE.Color(0x8fb5cc)
+const culoareLucreaza = new THREE.Color(0x8fbf6f)
 const culoareJefuitor = new THREE.Color(0xb1553f)
 const m = new THREE.Matrix4()
 const q = new THREE.Quaternion()
@@ -174,7 +180,11 @@ export function updateAgentLayer(layer: AgentLayer, world: World, rules: Rules):
     pozitie.set(fx, fz, fy)
     m.compose(pozitie, q, unu)
     mesh.setMatrixAt(n, m)
-    mesh.setColorAt(n, a.faction[i] === Faction.JEFUITOR ? culoareJefuitor : culoareAsezare)
+    const culoare = a.faction[i] === Faction.JEFUITOR ? culoareJefuitor
+      : a.jobKind[i] === 0 ? culoareAsezare
+      : a.jobStep[i] === PasJob.LUCREAZA ? culoareLucreaza
+      : culoareMerge
+    mesh.setColorAt(n, culoare)
     n++
   }
 

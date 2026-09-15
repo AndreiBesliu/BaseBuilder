@@ -15,5 +15,19 @@
   "replanCooldownTicks": 40,
   "agentGoalRadiusCells": 24,
   "agentGoalAttempts": 6,
-  "agentRegionRadiusBlocks": 2
+  "agentRegionRadiusBlocks": 2,
+  "jobRescanTicks": 30,
+  "jobScanRadiusCells": 96,
+  "jobScanMaxCandidates": 256,
+  "jobRegionRadiusBlocks": 2,
+  "jobRetryTicks": 600,
+  "jobInfeasibleRetryTicks": 100,
+  "jobMaxIncercari": 3,
+  "digWorkUnits": 400,
+  "workUnitsPerTick": 10,
+  "designationCapacity": 4096,
+  "designationPriorityLevels": 5,
+  "designationPriorityDefault": 3,
+  "personalPriorityLevels": 3,
+  "personalPriorityDefault": 1
 }

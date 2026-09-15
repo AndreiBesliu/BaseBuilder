@@ -11,7 +11,7 @@
  */
 
 import type { World } from './state.ts'
-import { RNG_STREAMS } from './state.ts'
+import { CATEGORII, RNG_STREAMS } from './state.ts'
 import { runCount } from './terrain/chunk.ts'
 
 const FNV_OFFSET = 0x811c9dc5
@@ -100,6 +100,32 @@ export function hashWorld(w: World): string {
   h.ints(a.goalZ, a.count)
   h.bytes(a.hasGoal, a.count)
   h.ints(a.progresMm, a.count)
+  // Jobul curent si prioritatile personale: PERSISTED, deci in hash. Rezervarile
+  // NU: sunt derivate din joburi, si doua lumi cu aceleasi joburi le au identice.
+  h.bytes(a.jobKind, a.count)
+  h.ints(a.jobId, a.count)
+  h.ints(a.jobTarget, a.count)
+  h.bytes(a.jobStep, a.count)
+  h.ints(a.jobProgres, a.count)
+  h.ints(a.jobWorkX, a.count)
+  h.ints(a.jobWorkY, a.count)
+  h.ints(a.jobWorkZ, a.count)
+  h.bytes(a.jobIncercari, a.count)
+  h.ints(a.tintaRefuzata, a.count)
+  h.ints(a.refuzPanaLa, a.count)
+  h.bytes(a.prioPersonala, a.count * CATEGORII)
+
+  // Desemnarile, in ordinea slotului. `ultimulMotiv` e TRANSIENT si nu intra.
+  const d = w.desemnari
+  h.u32(d.count)
+  h.ints(d.id, d.count)
+  h.bytes(d.kind, d.count)
+  h.ints(d.wx, d.count)
+  h.ints(d.wy, d.count)
+  h.ints(d.z, d.count)
+  h.bytes(d.prioritate, d.count)
+  h.bytes(d.alive, d.count)
+  h.ints(d.reincercaLaTick, d.count)
 
   // Drumurile: numai coada ramasa a fiecarui agent viu, in ordinea slotului.
   const p = w.paths
