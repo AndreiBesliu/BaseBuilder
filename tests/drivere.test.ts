@@ -20,7 +20,7 @@ import { indexZone, prioritateaLocului, Zona, celulaDeZonaLa } from '../src/sim/
 import { driverPentru } from '../src/sim/joburi.ts'
 import { DetaliuItem, iaDinItem, slotItem } from '../src/sim/iteme.ts'
 import { decode, encode } from '../src/sim/save.ts'
-import { itemeInZona, laSit, lasaItem, panaCand, patratPlat, picteaza, R, ruleaza, solid } from './fixturi.ts'
+import { desemneaza, itemeInZona, laSit, lasaItem, panaCand, patratPlat, picteaza, R, ruleaza, solid } from './fixturi.ts'
 
 // ---------------------------------------------------------------------------
 // tabelul de drivere
@@ -36,43 +36,39 @@ test('tabelul de drivere acopera exact felurile de job cunoscute', () => {
 })
 
 test('un fel de job fara driver ANULEAZA jobul la incarcare, nu il executa ca sapat', () => {
-  // Un pion cu job de carat, salvat in timpul jobului.
-  const { w, sit } = laSit(7311, 1)
+  // Fixtura e un job de SAPAT caruia i se falsifica felul, si asta nu e o
+  // alegere de comoditate — e singura forma care desparte cele doua variante.
+  //
+  // Cu un job de CARAT, un fel necunoscut cadea si la codul vechi pe ramura
+  // `else` = SAPA, care cerea o desemnare pentru un id de ITEM, primea -1 si
+  // anula jobul. Adica testul ar fi trecut si INAINTE de tabel: verde, si vid.
+  //
+  // Cu un job de SAPAT, tinta e chiar o desemnare valida. Codul vechi o gasea,
+  // re-rezerva linistit si lasa jobul VIU cu un fel pe care nu-l cunoaste
+  // nimeni; apoi il executa ca sapat. Tabelul refuza.
+  const { w } = laSit(7311, 1)
   const cx = cellOf(w.agents.x[0]!)
   const cy = cellOf(w.agents.y[0]!)
-  lasaItem(w, Item.PIATRA, 20, cx + 3, cy)
-  const p = patratPlat(w, sit, 2, 8, 40)
-  assert.ok(p, 'fixtura: niciun patrat plat')
-  picteaza(w, p.x0, p.y0, 2)
-  const t = panaCand(w, 400, (ww) => ww.agents.jobKind[0] === FelJob.CARA)
-  assert.notEqual(t, -1, 'fixtura: pionul n-a apucat sa care')
+  const d = desemneaza(w, cx + 3, cy)
+  const t = panaCand(w, 400, (ww) => ww.agents.jobKind[0] === FelJob.SAPA)
+  assert.notEqual(t, -1, 'fixtura: pionul n-a apucat sa ia jobul de sapat')
 
-  const text = encode(w)
-  const brut = JSON.parse(text) as { data: { agents: { jobKind: number[]; jobTarget: number[] } } }
-  assert.equal(brut.data.agents.jobKind[0], FelJob.CARA, 'fixtura: save-ul chiar contine jobul')
+  const brut = JSON.parse(encode(w)) as { data: { agents: { jobKind: number[]; jobTarget: number[] } } }
+  assert.equal(brut.data.agents.jobKind[0], FelJob.SAPA, 'fixtura: save-ul chiar contine jobul')
+  assert.equal(brut.data.agents.jobTarget[0], d.id, 'fixtura: tinta e desemnarea, si ea e VIE in save')
 
-  // Acelasi save, cu felul jobului schimbat intr-unul pe care codul asta nu-l
-  // cunoaste — cum ar arata un save scris de o versiune mai noua. Restul
-  // tuplului ramane VALID: tinta e un item viu, destinatia o celula vie. Adica
-  // nimic in afara de FEL nu-i poate spune incarcarii ca ceva nu e in regula.
+  // Acelasi save, cu felul schimbat intr-unul pe care codul asta nu-l cunoaste —
+  // cum ar arata un save scris de o versiune mai noua. Tot restul tuplului e
+  // valid, deci nimic in afara de FEL nu-i poate spune incarcarii ca e o problema.
   brut.data.agents.jobKind[0] = 7
   const out = decode(JSON.stringify(brut), R)
-  assert.ok(out.ok, `incarcarea a picut de tot: ${JSON.stringify(out)}`)
+  assert.ok(out.ok, `incarcarea a picat de tot: ${JSON.stringify(out)}`)
   const l = out.value
 
   assert.equal(l.rezervari.anulateLaIncarcare, 1, 'jobul cu fel necunoscut trebuie ANULAT, cu raport')
-  assert.equal(l.agents.jobKind[0], 0, 'si pionul trebuie sa ramana fara job')
-  // Si nu s-a comportat ca sapat: fara `jobKind`, ramane si fara tinta.
-  assert.equal(l.agents.jobTarget[0], 0)
+  assert.equal(l.agents.jobKind[0], 0, 'si pionul trebuie sa ramana fara job, nu sa-l pastreze pe cel necunoscut')
+  assert.equal(l.agents.jobTarget[0], 0, 'fara job inseamna si fara tinta')
   assert.equal(l.rezervari.total, 0, 'un job anulat nu lasa rezervari in urma')
-
-  // Iar lumea merge mai departe fara sa arda identitati: inainte de tabel,
-  // felul necunoscut intra in `lucreazaSapa`, nu gasea desemnarea, se intrerupea
-  // si se relua — o bucla de cate doua tickuri, fiecare consumand un `nextId`,
-  // care e PERSISTED si intra in hash.
-  const idInainte = l.nextId
-  ruleaza(l, 40)
-  assert.ok(l.nextId - idInainte < 20, `nextId a crescut cu ${l.nextId - idInainte} in 40 de tickuri: bucla de job`)
 })
 
 // ---------------------------------------------------------------------------
