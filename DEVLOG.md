@@ -1149,3 +1149,37 @@ năștea cu ținta mortului.
 
 133 de teste verzi, `npm run check` curat. Rămâne: randarea agenților (viewerul nu-i desenează încă),
 și interpolarea lor între centre, care are tot ce-i trebuie în `progresMm` + drum.
+
+---
+
+## Task Started — agenții, pe ecran
+
+**Prompt:** „continua" (aceeași sesiune)
+**Model:** Claude Opus 5
+
+Viewerul avea o lume, dar nu i-a dat niciodată `tick`: importa `createWorld` și atât. Săpăturile și
+zidirile se vedeau fiindcă sunt comenzi, nu simulare. **Oamenii nu s-au mișcat niciodată pe ecran.**
+
+Acum: 24 de agenți lângă fortăreață, pas fix de 20 Hz, capsule instanțiate, colorate pe facțiune.
+Randarea interpolează între centre din `progresMm` + drum + fracțiunea de tick scursă — simularea
+rămâne discretă, fiindcă are motiv să fie.
+
+Agenții rulează **numai la privit liber**, niciodată în scenariile de gate: un tick de simulare în
+bucla măsurată ar schimba tăcut ce măsoară protocolul pre-înregistrat.
+
+Două lucruri prinse uitându-mă:
+- Capsulele ieșeau negre. `vertexColors: true` pune materialul să caute un atribut de culoare pe
+  **geometrie**; în three 0.186 culoarea per-instanță vine din `instanceColor` și e de ajuns singură.
+- Argumentasem că `voxelAt` rescris pe runs e echivalent cu `decodeColumn`. Argumentul era corect,
+  dar `voxelAt` e folosit **și de mesher** — o greșeală acolo nu s-ar fi văzut ca un număr greșit, ci
+  ca teren greșit. Acum e dovedit pe 100.000+ de comparații, inclusiv sub și peste intervalul
+  acoperit; mutația `<` → `<=` îl pică.
+
+**Rămas deschis, vizual:** pete întunecate plate, la pasul grilei macro, pe pantă. Verificat și
+exclus: nu sunt găuri (fundalul nu trece prin ele), nu sunt normale întoarse (toate 377 de chunk-uri
+au normala în sus), nu sunt culori de vârf închise (luminanța medie e între 0,26 și 0,39 la toate),
+nu sunt mesh-uri străine (377 de chunk-uri + un singur InstancedMesh). Și nu vin de la felia asta.
+
+## Task Completed
+
+134 de teste verzi.

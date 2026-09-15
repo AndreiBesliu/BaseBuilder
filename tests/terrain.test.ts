@@ -20,6 +20,7 @@ import {
 } from '../src/sim/terrain/chunk.ts'
 import {
   CHUNK_GRID,
+  chunkKey,
   createTerrain,
   dig,
   ensureChunk,
@@ -523,4 +524,46 @@ test('promovarea NU schimba lumea: calea derivata si cea de voxeli spun acelasi 
     }
     assert.ok(inainte.length > 2000, `doar ${inainte.length} celule verificate`)
   }
+})
+
+test('voxelAt da EXACT ce da decodeColumn, pe toata coloana', () => {
+  // `voxelAt` a fost rescris sa mearga pe runs in loc sa desfaca toata coloana:
+  // aloca un `Uint8Array` de 64 si scria 64 de octeti ca sa citeasca unul singur,
+  // si asta la FIECARE interogare de material. Era 20,5% + 10,9% din tick.
+  //
+  // Argumentasem echivalenta in cap. Argumentul era corect, dar un argument nu e
+  // o dovada — si functia asta e folosita si de mesher, deci o greseala nu s-ar
+  // vedea ca un numar gresit, ci ca teren gresit pe ecran.
+  const t = createTerrain(4242, 2)
+  const scratch = new Uint8Array(VOXEL_LEVELS)
+  let comparate = 0
+
+  for (const [cx, cy] of [[200, 212], [201, 212], [200, 213], [312, 96]] as const) {
+    setFocus(t, cx, cy)
+    const g = groundLevelM(t, cx * CHUNK_CELLS + 4, cy * CHUNK_CELLS + 4)
+    if (!g.ok) continue
+    // O sapatura, ca sa existe si coloane NEuniforme, nu doar sol plin.
+    dig(t, cx * CHUNK_CELLS + 4, cy * CHUNK_CELLS + 4, g.value)
+    dig(t, cx * CHUNK_CELLS + 5, cy * CHUNK_CELLS + 4, g.value - 1)
+
+    const chunk = t.chunks.get(chunkKey(cx, cy))
+    if (!chunk?.voxels) continue
+    const v = chunk.voxels
+
+    for (let col = 0; col < CHUNK_CELLS * CHUNK_CELLS; col++) {
+      decodeColumn(v, col, scratch)
+      const lx = col % CHUNK_CELLS
+      const ly = Math.floor(col / CHUNK_CELLS)
+      // Si sub, si peste intervalul acoperit: acolo traieste ramura de AER.
+      for (let level = -2; level < VOXEL_LEVELS + 2; level++) {
+        const asteptat = level < 0 || level >= VOXEL_LEVELS ? Material.AER : scratch[level]!
+        assert.equal(
+          voxelAt(chunk, lx, ly, v.zBaseM + level), asteptat,
+          `col ${col} nivel ${level} in chunk ${cx}/${cy}`,
+        )
+        comparate++
+      }
+    }
+  }
+  assert.ok(comparate > 100_000, `doar ${comparate} comparatii — fixtura n-a promovat nimic`)
 })

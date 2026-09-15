@@ -12,7 +12,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
-import { createWorld } from '../src/sim/world.ts'
+import { createWorld, tick as simTick } from '../src/sim/world.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { describe } from '../src/sim/result.ts'
 import { CHUNK_CELLS, Material, VOXEL_LEVELS } from '../src/sim/terrain/chunk.ts'
@@ -28,6 +28,7 @@ import { createDensePanel, densePanelReport, PANEL_HZ, tickDensePanel } from './
 import { createRegions, markDirty, rebuildDirty } from '../src/sim/regions.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
 import { meshHeightfield } from '../src/render/heightfield.ts'
+import { createAgentLayer, spawnNear, stepSim, updateAgentLayer } from './agenti.ts'
 import { buildM10 } from '../src/harness/fixture-m10.ts'
 
 const SEED = 20260913
@@ -141,6 +142,15 @@ function buildFortress(): void {
   }
 }
 
+/**
+ * Agentii ruleaza NUMAI la privit liber.
+ *
+ * Gate-ul de motor masoara cadre pe un protocol pre-inregistrat. Un tick de
+ * simulare in bucla masurata ar schimba tacit ce masoara — chiar felul de drift
+ * impotriva caruia exista `bench/GATE.md` si garda lui.
+ */
+const AGENTI_ACTIVI = SCENARIO === null
+
 // Pe ce se masoara.
 //
 // Fortareata de mai sus promoveaza 12 chunk-uri. Fixtura M10 promoveaza 225 —
@@ -151,6 +161,10 @@ if (SCENARIO === null) {
   buildFortress()
 } else {
   buildM10(world.terrain, FOCUS_CX, FOCUS_CY)
+}
+
+if (AGENTI_ACTIVI) {
+  spawnNear(world, baseX + 16, baseY + 16, 14, 24)
 }
 
 // --------------------------------------------------------------------------
@@ -171,6 +185,9 @@ scene.add(new THREE.HemisphereLight(0xbcd3e0, 0x3a3529, 1.5))
 const sun = new THREE.DirectionalLight(0xfff0d8, 1.4)
 sun.position.set(0.5, 1, 0.35)
 scene.add(sun)
+
+const agentLayer = createAgentLayer(scene, DEFAULT_RULES.agentCapacity)
+agentLayer.mesh.visible = AGENTI_ACTIVI
 
 const controls = new OrbitControls(camera, renderer.domElement)
 controls.enableDamping = true
@@ -937,6 +954,10 @@ function stepFrame(ts: number): void {
 
   const cpuStart = performance.now()
   stepDensePanel(dt)
+  if (AGENTI_ACTIVI) {
+    stepSim(agentLayer, world, DEFAULT_RULES, dt, simTick)
+    updateAgentLayer(agentLayer, world, DEFAULT_RULES)
+  }
   driveScenario(frameIndex)
   stepNegativeProbe()
   stepTraverse(dt)
@@ -976,6 +997,7 @@ function stepFrame(ts: number): void {
     el('calls').textContent = String(renderer.info.render.calls)
     el('tris').textContent = renderer.info.render.triangles.toLocaleString('ro-RO')
     if (bisector) el('slice').textContent = bisector.progress
+    el('agents').textContent = AGENTI_ACTIVI ? `${agentLayer.vii} · t${world.tick}` : 'oprit la gate'
     el('regions').textContent = regionOverlay.visible
       ? `${regionOverlay.cells.toLocaleString('ro-RO')} celule · ${regionOverlay.components} componente · ${lastOverlayMs.toFixed(0)} ms`
       : 'G'
