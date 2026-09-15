@@ -327,11 +327,13 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
           if (!out.ok) continue
           w.nextId++
           adaugate++
-          // Acoperirea de regiuni, ca la desemnari: fara ea, un depozit pictat
-          // dincolo de discurile pionilor ar fi „INACCESIBIL" pe veci, cu drum real.
-          acoperaDesemnarea(w, rules, x, y, cmd.z)
         }
       }
+      // Fara disc de acoperire la pictare: coridorul item → celula de depozit din
+      // trecerea scumpa (joburi.ts, `cautaDestinatie`) leaga blocurile o data per
+      // zona, memoizat. Designul v2 cerea si discul; mutatia „fara disc" a trecut
+      // verde, deci discul nu lega nimic — s-a scos, ca sa nu existe doua mecanisme
+      // pentru aceeasi garantie, dintre care unul netestabil.
       void sarite
       void adaugate
       return accept(zonaId)

@@ -249,16 +249,18 @@ test('picteazaZona: un dreptunghi = O zona, celulele necalcabile si cele deja pi
   if (!lipsa.ok) assert.equal(lipsa.reason, Reason.ENTITATE_INEXISTENTA)
 })
 
-test('pictarea intinde acoperirea de regiuni: fiecare celula de zona e intr-o regiune calculata imediat dupa comanda', () => {
+test('pictarea NU calculeaza regiuni: un depozit departe ramane neacoperit pana cand o cautare de destinatie intinde coridorul spre el', () => {
+  // Designul v2 cerea un disc de acoperire la pictare; mutatia „fara disc" a
+  // trecut verde fiindca coridorul item → celula (joburi.ts) leaga oricum
+  // blocurile, o data per zona. Discul s-a scos; pictarea costa O(celule).
   const { w, sit } = laSit(509, 1)
-  // Departe de pion, in directia opusa oricarei desemnari: nimeni n-a umblat acolo.
   const p = patratPlat(w, sit, 3, 40, 70)
   assert.ok(p, 'fixtura: niciun patrat plat la 40-70 de celule')
   assert.equal(regionAt(w.regions, p.x0, p.y0, p.g + 1), NO_REGION, 'fixtura: zona era deja acoperita')
+  const blocuri = w.regions.keys.length
   picteaza(w, p.x0, p.y0, 3)
-  for (let i = 0; i < w.zone.celule.count; i++) {
-    assert.notEqual(regionAt(w.regions, w.zone.celule.wx[i]!, w.zone.celule.wy[i]!, w.zone.celule.z[i]!), NO_REGION, `celula de zona ${i} fara regiune`)
-  }
+  assert.equal(w.regions.keys.length, blocuri, 'pictarea a calculat blocuri de regiuni')
+  assert.equal(regionAt(w.regions, p.x0, p.y0, p.g + 1), NO_REGION)
 })
 
 test('indexul zonelor e o functie de stare: dupa orice schimbare se reconstruieste identic in lumea continua si in cea incarcata', () => {

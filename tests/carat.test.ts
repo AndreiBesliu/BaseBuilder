@@ -9,7 +9,7 @@ import { codMotiv, Reason } from '../src/sim/result.ts'
 import { isWalkable, NO_REGION, regionAt } from '../src/sim/regions.ts'
 import { existaTinta, lastJobReport, StareRatiune } from '../src/sim/joburi.ts'
 import { itemLaCelula, slotItem } from '../src/sim/iteme.ts'
-import { indexZone } from '../src/sim/zone.ts'
+import { celulaDeZonaLa, indexZone } from '../src/sim/zone.ts'
 import { dumpRezervari, verificaRezervari } from '../src/sim/rezervari.ts'
 import { decode, encode } from '../src/sim/save.ts'
 import { hashWorld } from '../src/sim/hash.ts'
@@ -125,6 +125,33 @@ test('fara depozit: itemul de pe jos primeste FARA_DEPOZIT (nicio zona), pionul 
   const t2 = ruleaza(w, 120)
   assert.equal(t2.candidatiExaminati, 0, 'un depozit cu loc doar pentru PAMANT a trimis PIATRA la evaluari scumpe')
   assert.equal(w.iteme.ultimulMotivDetaliu[slotItem(w.iteme, id)], 2 /* DEPOZITE_PLINE */)
+})
+
+test('trecerea ieftina vede DOAR ce are unde sa fie mutat: 36 de mormane la odihna in depozit nu costa nicio vizita', () => {
+  // K05 in forma pura: itemele din depozit traiesc cat colonia. Cu un singur
+  // morman de carat pe jos, o scanare viziteaza exact un item, nu 37.
+  const { w, sit } = laSit(619, 1)
+  const cx = cellOf(w.agents.x[0]!)
+  const cy = cellOf(w.agents.y[0]!)
+  const a = patratPlat(w, sit, 6, 4, 40)
+  assert.ok(a, 'fixtura: niciun patrat plat de 6')
+  picteaza(w, a.x0, a.y0, 6, 3)
+  for (let i = 0; i < 36; i++) {
+    const out = applyCommand(w, { kind: 'lasaItem', fel: Item.PAMANT, cantitate: R.itemStackMax, wx: w.zone.celule.wx[i]!, wy: w.zone.celule.wy[i]!, z: w.zone.celule.z[i]! }, R)
+    assert.ok(out.ok, JSON.stringify(out))
+  }
+  let b: ReturnType<typeof patratPlat> = null
+  for (let d = 6; d <= 40 && !b; d++) {
+    const c = patratPlat(w, { wx: cx, wy: cy, g: w.agents.z[0]! - 1 }, 1, d, d)
+    if (c && celulaDeZonaLa(w.zone, c.x0, c.y0, c.g + 1) === -1) b = c
+  }
+  assert.ok(b, 'fixtura: nicio celula plata in afara depozitului')
+  picteaza(w, b.x0, b.y0, 1, 2)
+  lasaItem(w, Item.PIATRA, 20, cx + 2, cy)
+  assert.equal(indexZone(w, R).deMutat.length, 1, 'fixtura: altceva decat piatra de pe jos are unde sa se mute')
+  const t = ruleaza(w, R.jobRescanTicks + 1)
+  assert.ok(t.scanari >= 1)
+  assert.ok(t.vizite <= t.scanari, `${t.vizite} vizite la ${t.scanari} scanari: trecerea ieftina parcurge si mormanele la odihna`)
 })
 
 test('carieră + depozit: caratul incepe cat timp mai sunt desemnari, nu dupa ce se termina cariera', () => {

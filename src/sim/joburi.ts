@@ -1109,7 +1109,11 @@ export function terminaJob(
           if (cs !== -1) evitaTinta(w, slot, w.zone.celule.zonaId[cs]!, w.tick + rules.jobRetryTicks)
         }
         if (sursa !== -1) evitaTinta(w, slot, target, w.tick + rules.jobRetryTicks)
-        if (rezultat !== -1 && rezultat !== sursa) evitaTinta(w, slot, w.iteme.id[rezultat]!, w.tick + rules.jobRetryTicks)
+        // Mormanul lasat jos NU se raceste pe pereche: cu zona evitata, scannerul
+        // il respinge singur (toate zonele cu loc sunt evitate → racire pe item,
+        // scrisa de scanner), iar daca exista ALT depozit, pionul are voie sa-l
+        // incerce. O racire aici ar fi fost redundanta (mutatia a trecut verde)
+        // si ar fi ascuns depozitul bun timp de `jobRetryTicks`.
         if (is !== -1 && motiv) {
           w.iteme.ultimulMotiv[is] = codMotiv(motiv)
           w.iteme.ultimulMotivDetaliu[is] = DetaliuItem.NICIUNUL
