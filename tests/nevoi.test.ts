@@ -30,6 +30,13 @@ function nevoia(w: World, slot: number, n: number): number {
   return w.agents.nevoi[slot * NEVOI + n]!
 }
 
+/** Reguli cu ciclurile din JOC. Pentru testele in care ritmul real conteaza. */
+function reguli(peste: Partial<Rules> = {}): Rules {
+  const out = parseRules({ ...R, ...peste })
+  assert.ok(out.ok, `reguli de test invalide: ${JSON.stringify(out)}`)
+  return out.value
+}
+
 /** Reguli cu o nevoie fortata: cicluri scurte, ca un test sa incapa in cateva mii de tickuri. */
 function reguliRapide(peste: Partial<Rules> = {}): Rules {
   const out = parseRules({ ...R, nevoiTicks: 10, ...peste })
@@ -186,7 +193,19 @@ test('foamea CRITICA intrerupe un job in curs — dar numai daca are ce manca', 
   const cy = cellOf(w.agents.y[0]!)
   lasaItem(w, Item.HRANA, 75, cx + 2, cy)
   for (const [dx, dy] of [[-3, 0], [0, -3], [-4, 0]] as const) desemneaza(w, cx + dx, cy + dy)
-  const rules = reguliRapide()
+  // `nevoiTicks` RAMANE cel din joc (250), si asta e tot rostul fixturii:
+  // pragurile se verifica la FIECARE tick, nu la ticul de nevoie. Cu verificarea
+  // pe ticul de nevoie, un pion care devine critic imediat DUPA ticul lui ar
+  // astepta pana la 250 de tickuri — iar momentul „liber SI pe tic de nevoie" e
+  // o coincidenta de ~1 la 250, deci pragul de preferinta nu s-ar declansa
+  // practic niciodata si tot jocul s-ar juca pe calea cu intreruperi.
+  // Ciclul de nevoie e LUNG aici, si asta e tot rostul fixturii: verificarea
+  // pragurilor e la FIECARE tick, nu la ticul de nevoie. Cu verificarea pe ticul
+  // de nevoie, un pion care devine critic imediat dupa ticul lui ar astepta un
+  // ciclu intreg — iar momentul „liber SI pe tic de nevoie" e o coincidenta de
+  // ~1 la `nevoiTicks`, deci pragul de preferinta nu s-ar declansa practic
+  // niciodata si tot jocul s-ar juca pe calea cu intreruperi.
+  const rules = reguli({ nevoiTicks: 5000 })
 
   // Intai il lasam sa apuce un job de sapat, satul.
   const cuJob = panaCand(w, 2000, (ww) => ww.agents.jobKind[0] === FelJob.SAPA, rules)
@@ -195,8 +214,13 @@ test('foamea CRITICA intrerupe un job in curs — dar numai daca are ce manca', 
 
   // Si abia acum ii dam foame CRITICA.
   w.agents.nevoi[0 * NEVOI + Nevoie.FOAME] = 20
-  const t = panaCand(w, 500, (ww) => ww.agents.jobKind[0] === FelJob.MANANCA, rules)
-  assert.notEqual(t, -1, 'foamea critica trebuia sa intrerupa jobul de sapat')
+  const FEREASTRA = 20
+  // Fixtura e valida doar daca urmatorul tic de nevoie e DINCOLO de fereastra —
+  // altfel testul ar trece si cu verificarea pe ticul de nevoie, adica vid.
+  const panaLaTic = (rules.nevoiTicks - ((w.tick + w.agents.id[0]!) % rules.nevoiTicks)) % rules.nevoiTicks
+  assert.ok(panaLaTic > FEREASTRA, `fixtura: urmatorul tic de nevoie e peste ${panaLaTic} tickuri, in fereastra`)
+  const t = panaCand(w, FEREASTRA, (ww) => ww.agents.jobKind[0] === FelJob.MANANCA, rules)
+  assert.notEqual(t, -1, `foamea critica trebuia sa intrerupa jobul in ${FEREASTRA} de tickuri, nu la urmatorul tic de nevoie (${rules.nevoiTicks})`)
   assert.notEqual(w.agents.jobId[0], jobVechi, 'e alt job')
   assert.equal(w.ratiune.intreruperiDeNevoie, 1, 'si intreruperea trebuie NUMARATA')
 })
@@ -267,6 +291,16 @@ test('jobul de mancat NU se auto-intrerupe la fiecare verificare', () => {
   const ajuns = panaCand(w, 3000, (ww) => ww.agents.jobKind[0] === FelJob.MANANCA && ww.agents.jobStep[0] === PasNevoie.CONSUMA, rules)
   assert.notEqual(ajuns, -1, 'n-a ajuns niciodata la mancare: si-a aruncat jobul pe drum')
   assert.equal(w.agents.jobId[0], jobId, 'si e ACELASI job, nu al saptelea')
+  // Si NICIO racire scrisa pe nevoia pe care tocmai o rezolva.
+  //
+  // Asta e ce desparte cu adevarat cele doua variante, si s-a aflat masurand:
+  // fara clauza „deja o rezolv", pionul TOT ajunge la mancare — cautarea lui
+  // esueaza pe `poateRezerva`, fiindca isi tine deja singur rezervarea — dar
+  // esecul ala se scrie ca racire pe (pion, FOAME). Adica jobul supravietuieste,
+  // si pionul iese din masa cu o nevoie pusa in asteptare pentru sute de tickuri
+  // fara niciun motiv.
+  assert.equal(w.agents.nevoieReincercaLaTick[0 * NEVOI + Nevoie.FOAME], 0, 'nevoia pe care o rezolva chiar acum n-are ce cauta in racire')
+  assert.equal(w.ratiune.nevoiNerezolvate, 0, 'si nici in contorul de nevoi nerezolvate')
 })
 
 // ---------------------------------------------------------------------------

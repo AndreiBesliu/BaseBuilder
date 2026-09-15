@@ -142,11 +142,17 @@ test('productivitatea urmeaza dispozitia, cu PODEAUA PE REZULTAT', () => {
   // Podeaua e pe REZULTAT, nu pe factor. Cu ea pe factor, un continut legal
   // (`workUnitsPerTick: 1`) ar da 0 unitati pe tick: jobul nu s-ar incheia
   // niciodata, tinta ar ramane rezervata, si niciun plafon nu s-ar incrementa.
-  const mic = reguli({ workUnitsPerTick: 2, multiplicatorMin: 500 })
+  //
+  // Regulile astea OCOLESC `parseRules` deliberat: invariantul le refuza (si are
+  // testul lui separat), dar podeaua trebuie sa lege PE EA INSASI. Cu garda
+  // scoasa din amandoua locurile, `floor(1 * 500 / 1000)` da 0 — si un job cu
+  // zero unitati pe tick nu se incheie niciodata.
+  const minim = { ...R, workUnitsPerTick: 1, multiplicatorMin: 500 } as Rules
   w.agents.dispozitie[0] = 0
-  assert.ok(unitatiDeMunca(w, mic, 0) >= 1, 'podeaua trebuie sa tina si la continut minim')
-  assert.equal(multiplicatorDeMunca(mic, 0), mic.multiplicatorMin)
-  assert.equal(multiplicatorDeMunca(mic, mic.dispozitieMax), mic.multiplicatorMax)
+  assert.equal(Math.floor((minim.workUnitsPerTick * multiplicatorDeMunca(minim, 0)) / 1000), 0, 'fixtura: fara podea chiar ar iesi zero')
+  assert.ok(unitatiDeMunca(w, minim, 0) >= 1, 'podeaua pe REZULTAT trebuie sa dea macar o unitate')
+  assert.equal(multiplicatorDeMunca(minim, 0), minim.multiplicatorMin)
+  assert.equal(multiplicatorDeMunca(minim, minim.dispozitieMax), minim.multiplicatorMax)
 })
 
 test('regulile REFUZA un continut la care un pion nefericit n-ar face nicio unitate', () => {
