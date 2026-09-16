@@ -15,6 +15,7 @@
     "gate:selftest": "node tools/gate-verdict.mjs --self-test",
     "gate:numbers": "node tools/check-gate-numbers.mjs",
     "run:headless": "node src/harness/cli.ts",
+    "mutatii": "node tools/mutatii/ruleaza.mjs",
     "viewer": "vite",
     "viewer:build": "vite build",
     "viewer:preview": "vite preview --port 4173 --strictPort"

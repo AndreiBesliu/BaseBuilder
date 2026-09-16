@@ -1,0 +1,8 @@
+# Fisierele .bat se scriu cu CRLF, ORIUNDE ar fi clonat repo-ul.
+#
+# Nu e cosmetica. `cmd.exe` cauta etichetele (`goto :undeva`) dupa pozitia in
+# fisier, iar cu terminatori LF gaseste unele si nu gaseste altele: lansatorul
+# a rulat prima comanda corect si apoi a picat cu „The system cannot find the
+# batch label specified". Cu `core.autocrlf=true` ar merge pe masina asta si
+# s-ar strica pe alta — deci regula sta in repo, nu in configul cuiva.
+*.bat text eol=crlf

@@ -1,0 +1,142 @@
+/**
+ * Harnasamentul de testare prin MUTATIE.
+ *
+ * Metoda, pe scurt: strica intentionat o singura garantie din cod, ruleaza
+ * testele, si verifica daca a picat CHIAR testul scris pentru ea. Un test care
+ * ramane verde cand garantia lui dispare nu probeaza nimic — si asta nu se vede
+ * altfel. In proiectul asta a prins, pana acum: doua fixturi devenite vide fara
+ * ca ceva sa se inroseasca, o bucla infinita, doua mecanisme redundante, si un
+ * plafon care nu lega.
+ *
+ * ## Trei lucruri pe care harnasamentul le face pentru ca s-au STRICAT o data
+ *
+ * 1. **Restaurarea e `git checkout --`, nu o rescriere proprie.** Tiparul
+ *    „capturez octetii la pornire, ii scriu inapoi la final, apoi verific" a
+ *    esuat de trei ori intr-o singura sesiune, si de fiecare data oracolul lui a
+ *    raportat curat: compara cu ce a capturat EL, deci o restaurare ratata si o
+ *    captura gresita arata la fel. Un script nu se poate verifica singur.
+ *
+ * 2. **Refuza sa porneasca daca arborele e murdar.** Restaurarea arunca orice
+ *    modificare necomisa a fisierelor atinse. Ordinea e: commit, mutatii,
+ *    reparatii, commit.
+ *
+ * 3. **Tiparele se adapteaza la terminatorul FISIERULUI.** Cu
+ *    `core.autocrlf=true`, orice fisier atins de git are CRLF, iar un tipar
+ *    scris cu `\n` nu se mai potriveste. `TIPAR LIPSA` se raporteaza ca ESEC,
+ *    nu se inghite: un tipar invechit trece drept „prinsa" si minte.
+ *
+ * NU se ruleaza in CI si NU face parte din `npm run check`: modifica fisiere
+ * sursa, si toate suitele impreuna trec de o jumatate de ora.
+ */
+
+import { readFileSync, writeFileSync } from 'node:fs'
+import { execSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
+
+/**
+ * Radacina repo-ului, DEDUSA din locul fisierului asta (tools/mutatii/ → doua
+ * niveluri in sus). Nu scrisa absolut: o cale de pe masina mea intr-un repo
+ * public e o garantie ca nu merge la nimeni altcineva.
+ */
+export const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+
+/** Semnul cu care `node --test` marcheaza un test picat. */
+const X = '✖'
+
+/** Numele testelor PICATE dintr-un fisier de teste. */
+export function testePicate(fisierDeTest) {
+  let out = ''
+  try {
+    out = execSync(`node --test ${fisierDeTest}`, { cwd: REPO, encoding: 'utf8', stdio: 'pipe', timeout: 900000 })
+  } catch (e) {
+    out = `${e.stdout ?? ''}${e.stderr ?? ''}`
+  }
+  const re = new RegExp(`^${X} (.+?) \\(\\d`, 'gm')
+  return new Set([...out.matchAll(re)].map((x) => x[1]))
+}
+
+/**
+ * Scrie o mutatie. Intoarce `false` daca tiparul nu s-a potrivit — adica un
+ * control INVALID, nu o mutatie trecuta.
+ */
+export function aplica(f, a, b) {
+  const cale = resolve(REPO, f)
+  const orig = readFileSync(cale, 'utf8')
+  const crlf = orig.includes('\r\n')
+  const aa = crlf ? a.replace(/\n/g, '\r\n') : a
+  const bb = crlf ? b.replace(/\n/g, '\r\n') : b
+  if (!orig.includes(aa)) return false
+  writeFileSync(cale, orig.replace(aa, bb), 'utf8')
+  return readFileSync(cale, 'utf8') !== orig
+}
+
+/** Restaureaza fisierele prin git si spune daca au ramas curate. */
+function restaureaza(fisiere) {
+  for (const f of fisiere) execSync(`git checkout -- ${f}`, { cwd: REPO, stdio: 'pipe' })
+  for (const f of fisiere) {
+    try {
+      execSync(`git diff --quiet -- ${f}`, { cwd: REPO, stdio: 'pipe' })
+    } catch {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * Ce e MODIFICAT si necomis, daca e ceva. Prima mutatie ar arunca tot.
+ *
+ * Fisierele NEURMARITE (`??`) nu se numara: `git checkout -- <fisier>` nu le
+ * atinge niciodata, deci n-au ce pierde. Refuzul pe ele ar fi blocat rularea
+ * pentru o ciorna lasata alaturi, fara sa apere nimic.
+ */
+export function arboreCurat() {
+  const out = execSync('git status --porcelain', { cwd: REPO, encoding: 'utf8' })
+  const linii = out.split(/\r?\n/).filter((l) => l.trim() !== '' && !l.startsWith('??'))
+  return linii.join(String.fromCharCode(10))
+}
+
+/**
+ * Ruleaza o suita. `baza` e o hartă fisierDeTest → testele care picau DEJA,
+ * ca sa nu se puna in seama mutatiei un test rosu dinainte.
+ */
+export function ruleazaSuita(nume, mutatii, baza, filtru) {
+  const alese = filtru ? mutatii.filter((m) => filtru.some((d) => m.n.includes(d))) : mutatii
+  let prinse = 0
+  let valide = 0
+  const ratate = []
+  const invalide = []
+
+  for (const m of alese) {
+    const editari = [{ f: m.f, a: m.a, b: m.b }, ...(m.e2 ?? [])]
+    const fisiere = [...new Set(editari.map((e) => e.f))]
+    let ok = true
+    for (const e of editari) {
+      if (!aplica(e.f, e.a, e.b)) {
+        ok = false
+        console.log(`  ?? ${m.n}: TIPAR LIPSA in ${e.f} — control invalid`)
+        invalide.push(m.n)
+        break
+      }
+    }
+    if (!ok) {
+      restaureaza(fisiere)
+      continue
+    }
+
+    const picate = testePicate(m.t)
+    for (const p of baza.get(m.t) ?? []) picate.delete(p)
+    const picat = [...picate].some((p) => p.startsWith(m.e))
+    const curat = restaureaza(fisiere)
+
+    valide++
+    if (picat) prinse++
+    else ratate.push(m.n)
+    const altele = [...picate].filter((p) => !p.startsWith(m.e)).map((p) => p.slice(0, 36))
+    const detalii = `${picate.size} teste picate${altele.length ? '; si: ' + altele.join(' | ') : ''}; restaurat: ${curat ? 'da' : 'NU'}`
+    console.log(`  ${picat ? 'PRINSA' : '!! RATATA'}  ${m.n}  [${detalii}]`)
+  }
+
+  return { nume, prinse, valide, ratate, invalide, alese: alese.length }
+}
