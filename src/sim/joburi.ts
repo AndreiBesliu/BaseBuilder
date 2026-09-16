@@ -691,7 +691,11 @@ function categoriiActive(w: World, rules: Rules, slot: number): { sapa: boolean;
   const a = w.agents
   const pS = a.prioPersonala[slot * CATEGORII + Categorie.SAPA]!
   const pC = a.prioPersonala[slot * CATEGORII + Categorie.CARA]!
-  const exclusiv = Math.max(pS, pC) === rules.personalPriorityLevels
+  // Maximul se ia peste TOATE categoriile, nu doar peste cele doua care au azi
+  // job. Altfel un pion pus exclusiv pe CONSTRUIESTE ar continua sa sape: `pS`
+  // n-ar fi maxim, dar nici `exclusiv` n-ar fi adevarat, deci poarta s-ar deschide.
+  const pB = a.prioPersonala[slot * CATEGORII + Categorie.CONSTRUIESTE]!
+  const exclusiv = Math.max(pS, pC, pB) === rules.personalPriorityLevels
   return {
     sapa: pS > 0 && (!exclusiv || pS === rules.personalPriorityLevels),
     cara: pC > 0 && (!exclusiv || pC === rules.personalPriorityLevels),

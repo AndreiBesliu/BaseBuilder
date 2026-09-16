@@ -5,7 +5,9 @@ import { decode, encode } from '../src/sim/save.ts'
 import { hashWorld } from '../src/sim/hash.ts'
 import { advance, createWorld } from '../src/sim/world.ts'
 import { applyCommand } from '../src/sim/commands.ts'
-import { CATEGORII, SCHEMA_VERSION } from '../src/sim/state.ts'
+import { CATEGORII, Categorie, SCHEMA_VERSION } from '../src/sim/state.ts'
+import { Desemnare, Piesa } from '../src/sim/desemnari.ts'
+import { Reason } from '../src/sim/result.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
 import { groundLevelM, materialAt, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 import { isSolid } from '../src/sim/terrain/chunk.ts'
@@ -202,4 +204,85 @@ test('un save de schema 4 cu prioPersonala de lungime gresita fata de `categorii
   raw.data.agents.prioPersonala.push(1)
   const out = decode(JSON.stringify(raw))
   assert.equal(out.ok, false)
+})
+
+// ---------------------------------------------------------------------------
+// 6 -> 7 (S20-23, taietura 2): constructia
+// ---------------------------------------------------------------------------
+
+const SCHEMA6 = readFileSync(new URL('./fixtures/save-schema6.json', import.meta.url), 'utf8')
+
+test('fixtura de schema 6 e chiar de schema 6: desemnari vii, prioPersonala cu DOUA categorii, zero piese', () => {
+  const env = JSON.parse(SCHEMA6) as {
+    schema: number
+    savedAtTick: number
+    data: { agents: { categorii: number }; desemnari: Record<string, unknown> }
+  }
+  assert.equal(env.schema, 6)
+  assert.equal(env.savedAtTick, 300)
+  assert.equal(env.data.agents.categorii, 2, `fixtura trebuie capturata cu DOUA categorii`)
+  assert.equal(env.data.desemnari.piesa, undefined, 'la schema 6 nu exista campul `piesa`')
+  assert.ok((env.data.desemnari.count as number) > 0, `fixtura trebuie sa CONTINA desemnari, altfel migrarea n-are ce migra`)
+  assert.ok(SCHEMA_VERSION > 6, 'testul asta exista pentru ca schema a crescut')
+})
+
+test('migrarea 6 -> 7: fiecare desemnare primeste santinela NICIUNA, si prioPersonala se largeste cu implicitul', () => {
+  const out = decode(SCHEMA6)
+  assert.ok(out.ok, `refuzat: ${JSON.stringify(out)}`)
+  const w = out.value
+  assert.equal(w.schema, SCHEMA_VERSION)
+  assert.equal(w.tick, 300)
+  assert.ok(w.desemnari.count > 0, `fixtura: ${w.desemnari.count} desemnari`)
+
+  for (let i = 0; i < w.desemnari.count; i++) {
+    assert.equal(w.desemnari.kind[i], Desemnare.SAPA, `desemnarea ${i} dintr-un save vechi nu poate fi decat de sapat`)
+    assert.equal(w.desemnari.piesa[i], Piesa.NICIUNA, `desemnarea ${i} trebuie sa primeasca santinela, nu o piesa`)
+  }
+
+  // A treia categorie exista si porneste de la implicit, nu de la zero: zero ar
+  // insemna „nu face asta niciodata", iar oamenii aia lucrau deja acolo.
+  for (let i = 0; i < w.agents.count; i++) {
+    assert.equal(
+      w.agents.prioPersonala[i * CATEGORII + Categorie.CONSTRUIESTE],
+      DEFAULT_RULES.personalPriorityDefault,
+      `pionul ${i} trebuie sa primeasca implicitul pe categoria noua`,
+    )
+  }
+})
+
+test('migrarea 6 -> 7 e idempotenta: rescris de codul nou si reincarcat, acelasi hash', () => {
+  const out = decode(SCHEMA6)
+  assert.ok(out.ok)
+  if (!out.ok) return
+  const rescris = decode(encode(out.value))
+  assert.ok(rescris.ok, `refuzat la reincarcare: ${JSON.stringify(rescris)}`)
+  if (!rescris.ok) return
+  assert.equal(hashWorld(rescris.value), hashWorld(out.value))
+})
+
+test('felul si piesa trebuie sa se potriveasca: ambele contradictii sunt REFUZATE', () => {
+  // Santinela ar fi decorativa fara refuzul asta. Un save in care o desemnare de
+  // sapat poarta o piesa, sau una de construit n-are niciuna, nu se repara tacit:
+  // prima ar fi un perete pe care nimeni nu l-a cerut, a doua un job fara ce sa
+  // construiasca.
+  const baza = decode(SCHEMA6)
+  assert.ok(baza.ok)
+  if (!baza.ok) return
+
+  const strica = (f: (d: Record<string, number[]>) => void): string => {
+    const raw = JSON.parse(encode(baza.value)) as { data: { desemnari: Record<string, number[]> } }
+    f(raw.data.desemnari)
+    return JSON.stringify(raw)
+  }
+
+  const cuPiesa = decode(strica((d) => { d.piesa[0] = Piesa.PERETE }))
+  assert.equal(cuPiesa.ok, false, 'o desemnare de SAPAT cu piesa trebuie refuzata')
+  if (!cuPiesa.ok) assert.equal(cuPiesa.reason, Reason.VALOARE_INVALIDA)
+
+  const faraPiesa = decode(strica((d) => { d.kind[0] = Desemnare.CONSTRUIESTE }))
+  assert.equal(faraPiesa.ok, false, 'o desemnare de CONSTRUIT fara piesa trebuie refuzata')
+  if (!faraPiesa.ok) assert.equal(faraPiesa.reason, Reason.VALOARE_INVALIDA)
+
+  // Controlul negativ: neatinsa, aceeasi lume se incarca.
+  assert.equal(decode(strica(() => {})).ok, true, 'fixtura: saveul neatins trebuie sa se incarce')
 })

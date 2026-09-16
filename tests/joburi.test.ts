@@ -1101,7 +1101,10 @@ test('un save cu doua desemnari vii pe aceeasi celula, sau cu acelasi id, e refu
     const raw = JSON.parse(encode(w)) as { data: { nextId: number; desemnari: Record<string, number | number[]> } }
     const d = raw.data.desemnari
     d.count = 2
-    for (const camp of ['id', 'kind', 'wx', 'wy', 'z', 'prioritate', 'alive', 'reincercaLaTick'] as const) {
+    // `piesa` e in lista din schema 7: un camp nou lipsa de aici face saveul
+    // malformat, iar `decode` il refuza pe LUNGIME inainte sa ajunga la duplicat —
+    // deci testul ar trece din alt motiv decat cel pentru care exista.
+    for (const camp of ['id', 'kind', 'wx', 'wy', 'z', 'prioritate', 'piesa', 'alive', 'reincercaLaTick'] as const) {
       const v = d[camp] as number[]
       v.push(v[0]!)
     }

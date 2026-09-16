@@ -148,6 +148,7 @@ export function hashWorld(w: World): string {
   h.ints(d.wy, d.count)
   h.ints(d.z, d.count)
   h.bytes(d.prioritate, d.count)
+  h.bytes(d.piesa, d.count)
   h.bytes(d.alive, d.count)
   h.ints(d.reincercaLaTick, d.count)
 

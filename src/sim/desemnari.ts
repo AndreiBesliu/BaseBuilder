@@ -27,6 +27,24 @@ export const Desemnare = {
 } as const
 export type DesemnareKind = (typeof Desemnare)[keyof typeof Desemnare]
 
+/**
+ * Ce piesa se construieste. Tabelul cu materiale, cantitati si timpi sta in
+ * `content/rules.json`; aici e doar indexul lui.
+ *
+ * **`NICIUNA = 0`, si piesele reale incep de la 1.** Zero e valoare VALIDA in
+ * enumerarile vecine (`Item.PIATRA = 0`), deci o migrare care ar umple cu zero
+ * ar preface fiecare desemnare de sapat dintr-un save vechi intr-un „perete de
+ * piatra" pe care nimic nu l-ar putea detecta. Cu o santinela, contradictia
+ * dintre fel si piesa se poate REFUZA la incarcare, si chiar se refuza.
+ */
+export const Piesa = {
+  NICIUNA: 0,
+  PERETE: 1,
+  PODEA: 2,
+  SCARA: 3,
+} as const
+export type PiesaId = (typeof Piesa)[keyof typeof Piesa]
+
 /** Detaliul unui refuz INACCESIBIL memorat pe desemnare. Pentru „De ce nu?". */
 export const DetaliuMotiv = {
   NICIUNUL: 0,
@@ -45,6 +63,7 @@ export interface DesignationStore {
   /** PERSISTED */ readonly wy: Int32Array
   /** PERSISTED */ readonly z: Int32Array
   /** PERSISTED — 1..designationPriorityLevels */ readonly prioritate: Uint8Array
+  /** PERSISTED — `Piesa.NICIUNA` pentru orice desemnare care nu e de construit. */ readonly piesa: Uint8Array
   /** PERSISTED — 0 = slot liber */ readonly alive: Uint8Array
   /**
    * PERSISTED — pana la tickul asta nimeni n-o evalueaza. Se scrie DOAR pentru
@@ -84,6 +103,7 @@ export function makeDesignationStore(capacity: number): DesignationStore {
     wy: new Int32Array(capacity),
     z: new Int32Array(capacity),
     prioritate: new Uint8Array(capacity),
+    piesa: new Uint8Array(capacity),
     alive: new Uint8Array(capacity),
     reincercaLaTick: new Int32Array(capacity),
     ultimulMotiv: new Uint8Array(capacity),
@@ -147,6 +167,10 @@ export function adaugaDesemnare(
   d.reincercaLaTick[slot] = 0
   d.ultimulMotiv[slot] = 0
   d.ultimulMotivDetaliu[slot] = 0
+  // Si piesa. `hashWorld` parcurge `subarray(0, count)`, nu doar sloturile vii,
+  // deci un camp ramas de la o desemnare moarta ar muta hash-ul dintr-un slot
+  // pe care nimeni nu-l mai citeste.
+  d.piesa[slot] = Piesa.NICIUNA
   d.laCelula.set(key, slot)
   d.laId.set(id, slot)
   d.vii++

@@ -24,7 +24,7 @@ import { DEFAULT_RULES } from './content.ts'
 import type { Rules } from './content.ts'
 import { runCount } from './terrain/chunk.ts'
 import { createTerrain, ensureChunk, inWorld, WORLD_CELLS } from './terrain/terrain.ts'
-import { makeDesignationStore, reindexeazaDesemnari } from './desemnari.ts'
+import { Desemnare, makeDesignationStore, Piesa, reindexeazaDesemnari } from './desemnari.ts'
 import type { DesignationStore } from './desemnari.ts'
 import { createReservations } from './rezervari.ts'
 import { makeRatiuneStore, reconstruiesteRezervari } from './joburi.ts'
@@ -176,6 +176,7 @@ export function encode(w: World): string {
         wy: Array.from(w.desemnari.wy.subarray(0, w.desemnari.count)),
         z: Array.from(w.desemnari.z.subarray(0, w.desemnari.count)),
         prioritate: Array.from(w.desemnari.prioritate.subarray(0, w.desemnari.count)),
+        piesa: Array.from(w.desemnari.piesa.subarray(0, w.desemnari.count)),
         alive: Array.from(w.desemnari.alive.subarray(0, w.desemnari.count)),
         reincercaLaTick: Array.from(w.desemnari.reincercaLaTick.subarray(0, w.desemnari.count)),
       },
@@ -225,6 +226,20 @@ const STORE_GOL = { count: 0, capacity: 0, id: [], kind: [], wx: [], wy: [], z: 
  * are o fixtura golden in `tests/fixtures/`, capturata INAINTE de schimbare.
  */
 const MIGRATIONS: Record<number, (data: Record<string, unknown>) => Record<string, unknown>> = {
+  // 6 -> 7 (S20-23, taietura 2): constructia. Un save de schema 6 n-are nicio
+  // piesa (nu existau), deci fiecare desemnare din el primeste SANTINELA
+  // `Piesa.NICIUNA` — si faptul ca santinela e chiar 0 nu e o coincidenta
+  // fericita, e motivul pentru care a fost aleasa acolo. Vezi `Piesa`.
+  //
+  // Latimea lui `prioPersonala` creste odata cu ea (CATEGORII 2 -> 3), dar aia
+  // nu are nevoie de intrare aici: pasul se scrie EXPLICIT in save (`categorii`),
+  // iar `decode` largeste cu implicitul din content — acelasi mecanism care a dus
+  // save-urile de schema 3 de la o categorie la doua.
+  6: (d) => {
+    const des = (d.desemnari as Record<string, unknown> | undefined) ?? {}
+    const n = (des.count as number | undefined) ?? 0
+    return { ...d, desemnari: { ...des, piesa: des.piesa ?? new Array<number>(n).fill(Piesa.NICIUNA) } }
+  },
   // 1 -> 2 (S16-19): desemnari, joburi pe agenti, prioritati personale.
   //
   // Un save de schema 1 n-are niciun job in curs si nicio desemnare, deci
@@ -612,13 +627,27 @@ function incarcaDesemnari(raw: unknown, rules: Rules): Outcome<DesignationStore>
   const count = citesteCount(r, 'desemnari', d.capacity)
   if (!count.ok) return count
   d.count = count.value
-  const c = citesteCampuri(r, 'desemnari', d.count, ['id', 'kind', 'wx', 'wy', 'z', 'prioritate', 'alive', 'reincercaLaTick'] as const, d)
+  const c = citesteCampuri(r, 'desemnari', d.count, ['id', 'kind', 'wx', 'wy', 'z', 'prioritate', 'piesa', 'alive', 'reincercaLaTick'] as const, d)
   if (!c.ok) return c
   for (let i = 0; i < d.count; i++) {
     if (d.alive[i] === 0) continue
     const p = d.prioritate[i]!
     if (p < 1 || p > rules.designationPriorityLevels) {
       return refuse(Reason.VALOARE_INVALIDA, { camp: `desemnari.prioritate[${i}]`, valoare: p, min: 1, max: rules.designationPriorityLevels })
+    }
+    // Felul si piesa trebuie sa se potriveasca. Fara refuzul asta, santinela
+    // `Piesa.NICIUNA` ar fi decorativa: o migrare care umple cu zero ar produce
+    // desemnari de CONSTRUIT fara piesa, si nimic nu le-ar deosebi. Contradictia
+    // se REFUZA, nu se repara tacut.
+    const felPiesa = d.piesa[i]!
+    const eConstructie = d.kind[i] === Desemnare.CONSTRUIESTE
+    if (eConstructie !== (felPiesa !== Piesa.NICIUNA)) {
+      return refuse(Reason.VALOARE_INVALIDA, {
+        camp: `desemnari.piesa[${i}]`,
+        valoare: felPiesa,
+        kind: d.kind[i]!,
+        motiv: eConstructie ? 'desemnare de construit fara piesa' : 'piesa pe o desemnare care nu e de construit',
+      })
     }
   }
   const idx = reindexeazaDesemnari(d)

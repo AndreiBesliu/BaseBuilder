@@ -38,7 +38,7 @@ import type { ZoneStore } from './zone.ts'
  *   5 — S16-19 taietura 3: nevoi (foame, odihna) si racirea lor
  *   6 — S16-19 taietura 3: dispozitia, gandurile de eveniment, plecatii
  */
-export const SCHEMA_VERSION = 6
+export const SCHEMA_VERSION = 7
 
 /**
  * Categoriile de munca. Lista de STRUCTURA (ce feluri de munca exista), nu numar
@@ -48,9 +48,16 @@ export const SCHEMA_VERSION = 6
 export const Categorie = {
   SAPA: 0,
   CARA: 1,
+  /**
+   * Exista inainte de primul job de construit, si asta muta hash-ul: latimea
+   * lui `prioPersonala` e PERSISTED. Se face acum, in acelasi pas cu schema 7,
+   * ca hash-ul de referinta sa se re-ancoreze O SINGURA data — altfel a doua
+   * mutare ar arata ca o regresie.
+   */
+  CONSTRUIESTE: 2,
 } as const
 export type CategorieId = (typeof Categorie)[keyof typeof Categorie]
-export const CATEGORII = 2
+export const CATEGORII = 3
 
 /**
  * Felul jobului curent al unui agent. 0 = fara job. Numerotarea e STRUCTURA si

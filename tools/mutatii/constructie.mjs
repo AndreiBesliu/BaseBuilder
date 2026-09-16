@@ -35,4 +35,34 @@ export const MUTATII = [
     b: '  return slot !== undefined',
     t: 'tests/constructie.test.ts', e: 'podeaua unei desemnari de CONSTRUIT',
   },
+
+  // --- pasul 2: schema 7 ---
+  {
+    n: 'felul si piesa nu se verifica la incarcare (santinela devine decorativa)',
+    f: 'src/sim/save.ts',
+    a: '    if (eConstructie !== (felPiesa !== Piesa.NICIUNA)) {',
+    b: '    if (false) {',
+    t: 'tests/migrare.test.ts', e: 'felul si piesa trebuie sa se potriveasca',
+  },
+  {
+    n: 'migrarea 6->7 nu scrie santinela (desemnarile vechi raman fara piesa)',
+    f: 'src/sim/save.ts',
+    a: "    return { ...d, desemnari: { ...des, piesa: des.piesa ?? new Array<number>(n).fill(Piesa.NICIUNA) } }",
+    b: '    void n\n    return { ...d, desemnari: { ...des } }',
+    t: 'tests/migrare.test.ts', e: 'migrarea 6 -> 7',
+  },
+  {
+    n: 'slotul reutilizat mosteneste piesa desemnarii moarte',
+    f: 'src/sim/desemnari.ts',
+    a: '  d.piesa[slot] = Piesa.NICIUNA',
+    b: '  void Piesa',
+    t: 'tests/constructie.test.ts', e: 'slotul reutilizat nu mosten',
+  },
+  {
+    n: '`exclusiv` se calculeaza doar peste sapat si carat',
+    f: 'src/sim/joburi.ts',
+    a: '  const exclusiv = Math.max(pS, pC, pB) === rules.personalPriorityLevels',
+    b: '  void pB\n  const exclusiv = Math.max(pS, pC) === rules.personalPriorityLevels',
+    t: 'tests/constructie.test.ts', e: 'un pion pus EXCLUSIV pe construit',
+  },
 ]
