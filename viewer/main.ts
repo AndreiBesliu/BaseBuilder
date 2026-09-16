@@ -561,12 +561,19 @@ scene.add(stabOverlay.group)
 /**
  * Nivelul pe care se judeca stabilitatea, si raza in jurul focusului.
  *
- * Se deseneaza pe nivelul ACTIV (cel pe care taie slice view-ul), fiindca acolo
- * se uita jucatorul cand decide unde sapa — dar CIFRA e a tavanului de deasupra.
+ * `sliceLevel - 1`, nu `sliceLevel`: planul de taiere pastreaza `y <= sliceLevel`,
+ * iar voxelul de la nivelul L ocupa `y in [L, L+1]` — deci nivelul `sliceLevel` e
+ * INTREG peste plan, si ultimul vizibil de sus e cel de sub el. Prima versiune
+ * judeca stratul ascuns si desena peste plan, deci nu se vedea nimic.
+ *
+ * Cu slice-ul oprit nu exista nivel activ. Varianta veche lua
+ * `Math.floor(camera.position.y)`, adica altitudinea CAMEREI — zeci de metri
+ * deasupra terenului, unde nu e niciun voxel. `null` spune overlay-ului sa scrie
+ * de ce tace, in loc sa deseneze zero patrate fara explicatie.
  */
 function refaStabilitate(): void {
-  const zActiv = sliceLevel >= VOXEL_LEVELS ? Math.floor(camera.position.y) : sliceLevel
-  rebuildStabilityOverlay(stabOverlay, world, zActiv, focusCx * CHUNK_CELLS + 16, focusCy * CHUNK_CELLS + 16, 24)
+  const zActiv = sliceLevel >= VOXEL_LEVELS ? null : sliceLevel - 1
+  rebuildStabilityOverlay(stabOverlay, world, DEFAULT_RULES, zActiv, focusCx * CHUNK_CELLS + 16, focusCy * CHUNK_CELLS + 16, 16)
 }
 
 function refreshAmprenta(): void {
@@ -1078,8 +1085,9 @@ function stepFrame(ts: number): void {
       }
     }
     if (jobOverlay.visible && frameIndex % 6 === 0) rebuildJobOverlay(jobOverlay, world)
-    // Mai rar decat overlay-ul de joburi: fiecare celula costa un BFS marginit.
-    if (stabOverlay.visible && frameIndex % 12 === 0) refaStabilitate()
+    // Mult mai rar decat overlay-ul de joburi: o celula care ajunge la scanarea
+    // scumpa costa ~19 µs, iar prefiltrul o plateste doar langa goluri.
+    if (stabOverlay.visible && frameIndex % 30 === 0) refaStabilitate()
     // Overlay-ul de regiuni (G) se reimprospateaza cand graful s-a schimbat —
     // sapaturile pionilor si acoperirea desemnarilor il schimba fara niciun click.
     if (regionOverlay.visible && world.regions.epoca !== epocaDesenata) refreshOverlay()
@@ -1143,10 +1151,12 @@ function stepFrame(ts: number): void {
       const av = r.pleacaCurand > 0 ? ` · ${r.pleacaCurand} pleaca in curand` : ''
       const fm = r.faraMancare ? ' · nu mai e mancare in asezare' : ''
       // Stabilitatea, doar cand overlay-ul e pornit: cifrele sunt scumpe de calculat.
-      const st = stabOverlay.visible
-        ? ` · ultima-celula ${stabOverlay.ultima} cade ${stabOverlay.cade}` +
-          (stabOverlay.previzualizate > 0 ? ` · desemnarile ar prabusi ${stabOverlay.previzualizate}` : '')
-        : ''
+      const st = !stabOverlay.visible
+        ? ''
+        : stabOverlay.piedica !== ''
+          ? ` · ${stabOverlay.piedica}`
+          : ` · ultima-celula ${stabOverlay.ultima} cade ${stabOverlay.cade}` +
+            (stabOverlay.previzualizate > 0 ? ` · desemnarile ar prabusi ${stabOverlay.previzualizate}` : '')
       el('jobs').textContent = `${d} desemnari · idle ${r.idle} merg ${r.merg} lucreaza ${r.lucreaza} cara ${r.cara}${o}${m}${n}${av}${fm}${st}`
       el('jobs').className = r.faraMuncitori || r.faraCarausi ? 'warn' : ''
       if (r.faraMuncitori) el('jobs').textContent += ' · NIMENI NU SAPA'

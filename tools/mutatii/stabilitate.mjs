@@ -75,24 +75,17 @@ export const MUTATII = [
     b: '  if (esteAsezat(t, wx, wy, z, cazute) && false) return rules.suportMax',
     t: 'tests/stabilitate.test.ts', e: 'suportul scade cu exact 1 pe pas lateral',
   },
-  // Plafonul din BFS si `max(0, ...)` sunt aceeasi garantie scrisa de doua ori, si
-  // se acopera unul pe altul: scos oricare SINGUR, raspunsul nu se schimba cu
-  // niciun bit, si prima versiune a probei a iesit RATATA tocmai de asta. Garantia
-  // exista insa, si e serioasa — fara amandoua, un tavan la 5 pasi da −1, care nu
-  // e nici 0 nici 1, deci `stareSapat` raspunde SIGUR unde e cel mai periculos.
-  // Se probeaza cu DOUA editari, prin `e2`.
-  {
-    n: 'suportul poate deveni NEGATIV (fara plafon si fara max)',
-    f: 'src/sim/stabilitate.ts',
-    a: '    if (d >= rules.suportMax) continue',
-    b: '    if (d >= rules.suportMax * 4) continue',
-    e2: [{
-      f: 'src/sim/stabilitate.ts',
-      a: '      if (esteAsezat(t, nx, ny, z, cazute)) return Math.max(0, rules.suportMax - (d + 1))',
-      b: '      if (esteAsezat(t, nx, ny, z, cazute)) return rules.suportMax - (d + 1)',
-    }],
-    t: 'tests/stabilitate.test.ts', e: 'starea are VERB',
-  },
+  // NU exista proba pentru `max(0, ...)` si nici pentru plafonul din BFS, si asta
+  // se scrie aici in loc sa se fabrice una.
+  //
+  // Cele doua sunt aceeasi garantie de doua ori si se acopera una pe alta, deci
+  // scoasa oricare SINGURA nu schimba niciun bit. Pana la rescrierea lui
+  // `stareSapat` se puteau proba impreuna, prin `e2`: fara amandoua, un tavan la 5
+  // pasi dadea −1, care nu e nici 0 nici 1, si raspunsul iesea SIGUR. Acum
+  // `stareSapat` nu mai citeste numarul brut — intreaba propagarea, care trateaza
+  // orice `suport <= 0` drept cadere — deci nici perechea nu mai are umbra in
+  // comportament. Clema ramane fiindca face functia sa respecte definitia scrisa in
+  // antetul ei, nu fiindca ar apara un caz observabil azi.
 
   // --- marginea lumii ---
   //
@@ -207,15 +200,32 @@ export const MUTATII = [
   {
     n: 'ULTIMA_CELULA se raporteaza ca SIGUR (sfatul dispare)',
     f: 'src/sim/stabilitate.ts',
-    a: '  if (dupa === 1) return StareSapat.ULTIMA_CELULA',
-    b: '  if (dupa === 1) return StareSapat.SIGUR',
+    a: '  return minim <= 1 ? StareSapat.ULTIMA_CELULA : StareSapat.SIGUR',
+    b: '  return StareSapat.SIGUR',
+    t: 'tests/stabilitate.test.ts', e: 'starea are VERB',
+  },
+  {
+    n: 'minimul nu se urmareste in propagare (ULTIMA_CELULA nu se poate atinge)',
+    f: 'src/sim/stabilitate.ts',
+    a: '      if (suport < minim) minim = suport',
+    b: '      if (suport < -1) minim = suport',
     t: 'tests/stabilitate.test.ts', e: 'starea are VERB',
   },
   {
     n: 'CADE nu se raporteaza niciodata',
     f: 'src/sim/stabilitate.ts',
-    a: '  if (dupa === 0) return StareSapat.CADE',
-    b: '  if (dupa === -1) return StareSapat.CADE',
-    t: 'tests/stabilitate.test.ts', e: 'starea are VERB',
+    a: '  if (cazute.size > 1) return StareSapat.CADE',
+    b: '  if (cazute.size > 99) return StareSapat.CADE',
+    t: 'tests/stabilitate.test.ts', e: 'stareSapat nu minte',
+  },
+  // Proba centrala a rescrierii: versiunea veche, care se uita doar la tavanul de
+  // deasupra celulei. Testul dreptunghiular trebuie s-o prinda; cele patrate nu o
+  // prindeau, fiindca acolo ce cade CHIAR e voxelul de deasupra.
+  {
+    n: 'stareSapat se uita doar la tavanul de deasupra (versiunea dinainte de recenzie)',
+    f: 'src/sim/stabilitate.ts',
+    a: '  const { cazute, minim } = propaga(t, rules, [cellKey(wx, wy, z)])',
+    b: '  const { cazute, minim } = propaga(t, rules, [cellKey(wx, wy, z)])\n  void cazute\n  void minim\n  const dupa = suportDacaSap(t, rules, wx, wy, z)\n  if (solLa(t, wx, wy, z + 1) !== Sol.SOLID) return StareSapat.SIGUR\n  if (dupa === 0) return StareSapat.CADE\n  if (dupa === 1) return StareSapat.ULTIMA_CELULA\n  return StareSapat.SIGUR',
+    t: 'tests/stabilitate.test.ts', e: 'stareSapat nu minte',
   },
 ]

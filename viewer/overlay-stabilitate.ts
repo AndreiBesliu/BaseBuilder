@@ -5,29 +5,40 @@
  * la Foxy Voxel absenta lui a fost reclamata ani intregi — sistemul arata doar un
  * mesaj de eroare la esec.
  *
- * ## Doua lucruri pe care panoul le-a masurat, si care schimba ce se deseneaza
+ * ## Ce deseneaza
  *
- * **Cifra nu e a celulei active.** Prima versiune a designului desena suportul
- * voxelului de pe nivelul activ. Masurat pe o baza realista: **0%** dintre
- * voxelii nivelului activ au alta cifra decat 4 — in roca netulburata fiecare are
- * solid dedesubt. Cifrele care conteaza sunt pe TAVAN, adica pe nivelul de
- * deasupra, pe care slice view-ul il taie. Vizualizatorul s-ar fi livrat aratand
- * nimic. Aici se deseneaza `suportDacaSap`: ce ar avea tavanul DACA sapi celula.
+ * Doar ce e ACTIONABIL: **ULTIMA CELULA** (lasa roca aici sau pune stalp) si
+ * **CADE**. *Sigur* ramane deliberat nedesenat — in roca netulburata ar acoperi
+ * ecranul uniform si ar ingropa exact cele cateva celule care conteaza. Plus
+ * previzualizarea: ce s-ar prabusi daca s-ar sapa TOATE desemnarile vii.
  *
- * **Culoarea e ACTIUNE, nu masura.** Overlay-ul de joburi, livrat tot ca raspuns
- * la K13, nu arata cifre — arata stari cu verbul in ele. O masura fara verb („1",
- * portocaliu) nu spune nici cat mai poti sapa, nici unde sa lasi roca. Si DESIGN
- * §9 regula 9 interzice explicit gradientul rosu→verde ca singur canal.
+ * Culoarea poarta ACTIUNEA, nu o masura. O cifra fara verb („1", portocaliu) nu
+ * spune nici cat mai poti sapa, nici unde sa lasi roca, iar DESIGN §9 regula 9
+ * interzice gradientul rosu→verde ca singur canal.
  *
- * Trei stari, si atat: **SIGUR** · **ULTIMA CELULA** (lasa roca aici sau pune
- * stalp) · **CADE**. Plus conturul a ce s-a prabusit, cu celula care a declansat
- * marcata — fara legatura „am sapat AICI → a cazut ACOLO", regula ramane
- * nelizibila oricat de simpla ar fi propozitia care o descrie.
+ * ## Trei lucruri pe care recenzia adversariala le-a gasit STRICATE
+ *
+ * Prima versiune a acestui fisier a fost livrata fara sa fie vazuta vreodata pe
+ * ecran, iar recenzia a masurat ca nu desena nimic, din trei motive independente
+ * — oricare dintre ele singur ar fi fost de ajuns:
+ *
+ * 1. **Patratele cadeau PESTE planul de taiere.** Se desenau la `zActiv + 1.02`,
+ *    iar planul global pastreaza `y <= sliceLevel`. Erau taiate din shader. Acum
+ *    nivelul judecat e `sliceLevel - 1` (ultimul vizibil INTREG, fiindca voxelul
+ *    de la nivelul L ocupa `y ∈ [L, L+1]`), iar conturul se aseaza pe fata lui de
+ *    sus, la `zActiv + 0.96`, adica sub plan.
+ * 2. **Cu slice-ul OPRIT — starea implicita — nivelul se lua din altitudinea
+ *    CAMEREI**, care e cu zeci de metri deasupra terenului. Zero patrate, mereu.
+ *    Acum overlay-ul spune explicit ca are nevoie de slice view.
+ * 3. **Previzualizarea desena la cota ei reala**, care e de obicei `z+1`, adica
+ *    tocmai deasupra planului de taiere. Se proiecteaza acum pe nivelul activ,
+ *    cu un contur mai stramt, ca sa se vada si cand cade in aceeasi coloana cu un
+ *    patrat de stare.
  */
 
 import * as THREE from 'three'
 import type { World } from '../src/sim/state.ts'
-import { DEFAULT_RULES } from '../src/sim/content.ts'
+import type { Rules } from '../src/sim/content.ts'
 import { decodeCell } from '../src/sim/path.ts'
 import { Sol, solLa, StareSapat, stareSapat } from '../src/sim/stabilitate.ts'
 import { prabusireaPrevizualizata } from '../src/sim/joburi.ts'
@@ -41,12 +52,16 @@ export interface StabilityOverlay {
   cade: number
   /** Cati voxeli ar cadea daca s-ar sapa TOATE desemnarile vii. */
   previzualizate: number
+  /** Cate celule au ajuns la scanarea SCUMPA. Pentru bugetul de cadru. */
+  scanate: number
+  /** Ce sa scrie in HUD cand overlay-ul nu poate desena nimic. Gol daca poate. */
+  piedica: string
 }
 
 export function createStabilityOverlay(): StabilityOverlay {
   const group = new THREE.Group()
   group.visible = false
-  return { group, visible: false, sigur: 0, ultima: 0, cade: 0, previzualizate: 0 }
+  return { group, visible: false, sigur: 0, ultima: 0, cade: 0, previzualizate: 0, scanate: 0, piedica: '' }
 }
 
 function goleste(group: THREE.Group): void {
@@ -65,45 +80,111 @@ const CULOARE: Record<number, number> = {
 }
 const CULOARE_PREVIZ = 0xff8030
 
+/** Conturul de stare umple celula; cel de previzualizare sta INAUNTRUL lui. */
+const INSET_STARE = 0.08
+const INSET_PREVIZ = 0.26
+
 /**
- * Se deseneaza doar ce e ACTIONABIL: „sigur" ramane nedesenat.
+ * Reconstruieste overlay-ul pentru nivelul activ.
  *
- * Daca s-ar desena si el, in roca netulburata ecranul ar fi acoperit uniform, iar
- * cele cateva celule care conteaza ar disparea in el — aceeasi greseala ca
- * desenarea cifrei pe nivelul activ, cu alta fata.
+ * `zActiv` e cota pe care se JUDECA (ultimul nivel vizibil intreg), sau `null`
+ * cand slice view-ul e oprit si nu exista un nivel activ de judecat.
  */
-export function rebuildStabilityOverlay(o: StabilityOverlay, w: World, zActiv: number, cx: number, cy: number, raza: number): void {
+export function rebuildStabilityOverlay(
+  o: StabilityOverlay,
+  w: World,
+  rules: Rules,
+  zActiv: number | null,
+  cx: number,
+  cy: number,
+  raza: number,
+): void {
   goleste(o.group)
   o.sigur = 0
   o.ultima = 0
   o.cade = 0
+  o.previzualizate = 0
+  o.scanate = 0
+  o.piedica = ''
   if (!o.visible) return
+  if (zActiv === null) {
+    o.piedica = 'stabilitatea cere slice view (Q/E/R)'
+    return
+  }
 
-  const rules = DEFAULT_RULES
   const pozitii: number[] = []
   const culori: number[] = []
+  const lat = 2 * raza + 1
+  const x0 = cx - raza
+  const y0 = cy - raza
 
-  for (let wx = cx - raza; wx <= cx + raza; wx++) {
-    for (let wy = cy - raza; wy <= cy + raza; wy++) {
-      if (solLa(w.terrain, wx, wy, zActiv) !== Sol.SOLID) continue
-      const stare = stareSapat(w.terrain, rules, wx, wy, zActiv)
-      if (stare === StareSapat.SIGUR) { o.sigur++; continue }
-      if (stare === StareSapat.NIMIC) continue
-      if (stare === StareSapat.ULTIMA_CELULA) o.ultima++
-      else o.cade++
-      patrat(pozitii, culori, wx, wy, zActiv + 1.02, CULOARE[stare]!)
+  // --- prefiltru: cat de departe e cel mai apropiat AER ---
+  //
+  // Scanarea scumpa (`stareSapat`) costa ~19 µs pe celula, deci fereastra intreaga
+  // ar fi 21 ms la raza 16 — un cadru pierdut. Dar o celula ingropata adanc in
+  // roca nu poate fi nici CADE nici ULTIMA CELULA: ca sa conteze, trebuie sa aiba
+  // gol la cel mult `suportMax` pasi, fiindca doar atat se intinde discul care i-ar
+  // schimba suportul. Deci se calculeaza intai distanta Manhattan pana la primul
+  // aer (doua treceri peste fereastra, O(celule)), si abia apoi se plateste scump
+  // acolo unde poate conta. In roca netulburata: zero apeluri scumpe.
+  const MARE = 9999
+  const dist = new Int32Array(lat * lat).fill(MARE)
+  const solidAici = new Uint8Array(lat * lat)
+  for (let i = 0; i < lat; i++) {
+    for (let j = 0; j < lat; j++) {
+      const k = i * lat + j
+      const solidJos = solLa(w.terrain, x0 + i, y0 + j, zActiv) === Sol.SOLID
+      const solidSus = solLa(w.terrain, x0 + i, y0 + j, zActiv + 1) === Sol.SOLID
+      solidAici[k] = solidJos ? 1 : 0
+      if (!solidJos || !solidSus) dist[k] = 0
+      // Marginea ferestrei nu stie ce e dincolo de ea: se trateaza ca „poate fi
+      // aer", ca sa nu ratam o celula periculoasa fiindca am privit prea ingust.
+      else if (i === 0 || j === 0 || i === lat - 1 || j === lat - 1) dist[k] = rules.suportMax
+    }
+  }
+  for (let i = 0; i < lat; i++) {
+    for (let j = 0; j < lat; j++) {
+      const k = i * lat + j
+      if (i > 0 && dist[k - lat]! + 1 < dist[k]!) dist[k] = dist[k - lat]! + 1
+      if (j > 0 && dist[k - 1]! + 1 < dist[k]!) dist[k] = dist[k - 1]! + 1
+    }
+  }
+  for (let i = lat - 1; i >= 0; i--) {
+    for (let j = lat - 1; j >= 0; j--) {
+      const k = i * lat + j
+      if (i < lat - 1 && dist[k + lat]! + 1 < dist[k]!) dist[k] = dist[k + lat]! + 1
+      if (j < lat - 1 && dist[k + 1]! + 1 < dist[k]!) dist[k] = dist[k + 1]! + 1
     }
   }
 
-  // Si ce s-ar prabusi daca s-ar sapa tot ce a cerut jucatorul. Se calculeaza pe
-  // MULTIMEA desemnarilor, nu pe fiecare in parte: o pivnita de 7x7 e 49 de
-  // comenzi, si niciuna dintre ele, luata singura, nu doboara nimic.
+  // --- scanarea propriu-zisa, doar unde prefiltrul o cere ---
+  for (let i = 0; i < lat; i++) {
+    for (let j = 0; j < lat; j++) {
+      const k = i * lat + j
+      if (solidAici[k] === 0) continue
+      if (dist[k]! > rules.suportMax) { o.sigur++; continue }
+      o.scanate++
+      const stare = stareSapat(w.terrain, rules, x0 + i, y0 + j, zActiv)
+      if (stare === StareSapat.SIGUR || stare === StareSapat.NIMIC) { o.sigur++; continue }
+      if (stare === StareSapat.ULTIMA_CELULA) o.ultima++
+      else o.cade++
+      patrat(pozitii, culori, x0 + i, y0 + j, zActiv + 0.96, INSET_STARE, CULOARE[stare]!)
+    }
+  }
+
+  // --- ce s-ar prabusi daca s-ar sapa tot ce a cerut jucatorul ---
+  //
+  // Se calculeaza pe MULTIMEA desemnarilor, nu pe fiecare in parte: o pivnita de
+  // 7x7 e 49 de comenzi, si niciuna dintre ele, luata singura, nu doboara nimic.
   const previz = prabusireaPrevizualizata(w, rules)
   o.previzualizate = previz.length
   for (const cheie of previz) {
     const c = decodeCell(cheie)
     if (Math.abs(c.wx - cx) > raza || Math.abs(c.wy - cy) > raza) continue
-    patrat(pozitii, culori, c.wx, c.wy, c.z + 0.02, CULOARE_PREVIZ)
+    // Proiectat pe nivelul activ: voxelul care cade e de obicei la z+1, adica
+    // deasupra planului de taiere, deci la cota lui reala ar fi invizibil. Ce
+    // conteaza pentru jucator e COLOANA care pierde un voxel.
+    patrat(pozitii, culori, c.wx, c.wy, Math.min(c.z, zActiv) + 0.98, INSET_PREVIZ, CULOARE_PREVIZ)
   }
 
   if (pozitii.length === 0) return
@@ -114,11 +195,13 @@ export function rebuildStabilityOverlay(o: StabilityOverlay, w: World, zActiv: n
 }
 
 /** Conturul unei celule, ca patru segmente. Coordonatele viewerului sunt (x, z, y). */
-function patrat(pozitii: number[], culori: number[], wx: number, wy: number, z: number, hex: number): void {
+function patrat(pozitii: number[], culori: number[], wx: number, wy: number, z: number, inset: number, hex: number): void {
   const r = ((hex >> 16) & 255) / 255
   const g = ((hex >> 8) & 255) / 255
   const b = (hex & 255) / 255
-  const colturi: readonly (readonly [number, number])[] = [[0.08, 0.08], [0.92, 0.08], [0.92, 0.92], [0.08, 0.92]]
+  const lo = inset
+  const hi = 1 - inset
+  const colturi: readonly (readonly [number, number])[] = [[lo, lo], [hi, lo], [hi, hi], [lo, hi]]
   for (let i = 0; i < 4; i++) {
     const a = colturi[i]!
     const c = colturi[(i + 1) % 4]!

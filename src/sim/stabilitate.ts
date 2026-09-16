@@ -40,7 +40,8 @@
  */
 
 import type { Rules } from './content.ts'
-import { cellKey, decodeCell } from './path.ts'
+import { cellKey, decodeCell, decodeCellIn } from './path.ts'
+import type { Celula } from './path.ts'
 import { materialFast } from './regions.ts'
 import { bazaVoxeli, WORLD_CELLS } from './terrain/terrain.ts'
 import type { Terrain } from './terrain/terrain.ts'
@@ -234,25 +235,45 @@ export function multimeaCareCade(t: Terrain, rules: Rules, wx: number, wy: numbe
  * `include` spune daca celulele sapate intra si ele in raspuns (la previzualizare
  * nu ne intereseaza: ele dispar oricum, prin sapat).
  */
-export function cadeDaca(t: Terrain, rules: Rules, sapate: readonly number[], include = false): number[] {
+/**
+ * Nucleul comun: ce cade daca dispar `sapate`, SI cat de aproape de 0 ajunge ce
+ * NU cade.
+ *
+ * Cele doua raspunsuri ies din aceeasi parcurgere fiindca sunt acelasi calcul:
+ * `cadeDaca` are nevoie doar de primul, `stareSapat` de amandoua. Scrise separat,
+ * s-ar desincroniza — si tocmai asta s-a intamplat in prima versiune, in care
+ * `stareSapat` isi raspundea singur, uitandu-se doar la voxelul de deasupra.
+ */
+function propaga(t: Terrain, rules: Rules, sapate: readonly number[]): { cazute: Set<number>; minim: number } {
   const cazute = new Set<number>(sapate)
   const deVerificat: number[] = []
+  // UN obiect de decodare per apel, nu unul per iteratie.
+  const c: Celula = { wx: 0, wy: 0, z: 0 }
   for (const cheie of sapate) {
-    const c = decodeCell(cheie)
+    decodeCellIn(cheie, c)
     celuleAtinse(rules, c.wx, c.wy, c.z, deVerificat)
   }
 
+  let minim = rules.suportMax
   for (let i = 0; i < deVerificat.length; i++) {
     const cheie = deVerificat[i]!
     if (cazute.has(cheie)) continue
-    const c = decodeCell(cheie)
+    decodeCellIn(cheie, c)
     if (solLa(t, c.wx, c.wy, c.z, cazute) !== Sol.SOLID) continue
-    if (suportLa(t, rules, c.wx, c.wy, c.z, cazute) > 0) continue
+    const suport = suportLa(t, rules, c.wx, c.wy, c.z, cazute)
+    if (suport > 0) {
+      if (suport < minim) minim = suport
+      continue
+    }
     cazute.add(cheie)
     // Ce cade poate lua cu el ce se sprijinea pe el: se re-verifica vecinatatea.
     celuleAtinse(rules, c.wx, c.wy, c.z, deVerificat)
   }
+  return { cazute, minim }
+}
 
+export function cadeDaca(t: Terrain, rules: Rules, sapate: readonly number[], include = false): number[] {
+  const { cazute } = propaga(t, rules, sapate)
   const sapateSet = include ? null : new Set(sapate)
   const chei = [...cazute].filter((k) => sapateSet === null || !sapateSet.has(k))
   chei.sort((a, b) => {
@@ -286,6 +307,25 @@ export function suportDacaSap(t: Terrain, rules: Rules, wx: number, wy: number, 
  * stari cu actiunea in ele. O masura fara verb („1", portocaliu) nu spune nici
  * cat mai poti sapa, nici unde sa lasi roca. Si DESIGN §9 regula 9 interzice
  * explicit gradientul rosu→verde ca singur canal.
+ *
+ * ## Prima versiune raspundea la alta intrebare
+ *
+ * Se uita la `suportDacaSap`, adica la suportul UNUI voxel — cel direct deasupra
+ * celulei. Dar ce cade cand sapi nu e, in general, voxelul de deasupra: sapatul
+ * rupe si conectivitatea LATERALA, iar un voxel atarnat de la trei celule
+ * distanta isi poate pierde drumul spre sprijin. Voxelul de deasupra, in schimb,
+ * e prin constructie la un pas de un vecin asezat imediat ce sapi la marginea
+ * unei camere, deci primeste suport 3 si raspunsul iesea SIGUR.
+ *
+ * Masurat, dupa ce recenzia a semnalat-o: intr-o camera de 6x7 toate cele 168 de
+ * celule solide din rama spuneau SIGUR, si DOUA dintre ele chiar prabuseau ceva.
+ * La 6x9, sase. La 6x13, paisprezece. Overlay-ul desena zero patrate intr-o
+ * camera care se prabusea — adica exact esecul pentru care exista.
+ *
+ * Acum intreaba ce trebuie: **ce se intampla daca sap AICI**, prin aceeasi
+ * propagare pe care o foloseste prabusirea reala. Nu mai exista nici ramura
+ * „tavan deschis → SIGUR": in teren deschis propagarea raspunde singura si
+ * ieftin, fiindca vecinii de la cota z raman asezati si ies din prima citire.
  */
 export const StareSapat = {
   /** Se poate sapa, si ramane loc de inca o sapatura langa. */
@@ -300,11 +340,10 @@ export const StareSapat = {
 
 export function stareSapat(t: Terrain, rules: Rules, wx: number, wy: number, z: number): number {
   if (solLa(t, wx, wy, z) !== Sol.SOLID) return StareSapat.NIMIC
-  const dupa = suportDacaSap(t, rules, wx, wy, z)
-  if (solLa(t, wx, wy, z + 1) !== Sol.SOLID) return StareSapat.SIGUR
-  if (dupa === 0) return StareSapat.CADE
-  if (dupa === 1) return StareSapat.ULTIMA_CELULA
-  return StareSapat.SIGUR
+  const { cazute, minim } = propaga(t, rules, [cellKey(wx, wy, z)])
+  // `cazute` contine mereu celula insasi; orice peste ea chiar s-a prabusit.
+  if (cazute.size > 1) return StareSapat.CADE
+  return minim <= 1 ? StareSapat.ULTIMA_CELULA : StareSapat.SIGUR
 }
 
 /**

@@ -53,12 +53,29 @@ export function cellKey(wx: number, wy: number, z: number): number {
   return ((z + Z_OFFSET) * WORLD_CELLS + wy) * WORLD_CELLS + wx
 }
 
-export function decodeCell(key: number): { wx: number; wy: number; z: number } {
+export interface Celula { wx: number; wy: number; z: number }
+
+export function decodeCell(key: number): Celula {
+  const c: Celula = { wx: 0, wy: 0, z: 0 }
+  decodeCellIn(key, c)
+  return c
+}
+
+/**
+ * Acelasi lucru, intr-un obiect DAT. Pentru bucle fierbinti: `propaga` decodeaza
+ * cate 50 de chei per celula examinata, iar overlay-ul examineaza mii de celule
+ * pe reconstructie — masurat, alocarea per iteratie era jumatate din cost.
+ *
+ * Formula sta intr-un singur loc, aici: doua copii ale ei s-ar desincroniza la
+ * prima schimbare de `Z_OFFSET`.
+ */
+export function decodeCellIn(key: number, out: Celula): void {
   const wx = key % WORLD_CELLS
   const rest = (key - wx) / WORLD_CELLS
   const wy = rest % WORLD_CELLS
-  const z = (rest - wy) / WORLD_CELLS - Z_OFFSET
-  return { wx, wy, z }
+  out.wx = wx
+  out.wy = wy
+  out.z = (rest - wy) / WORLD_CELLS - Z_OFFSET
 }
 
 /**

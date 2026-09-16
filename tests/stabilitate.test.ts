@@ -494,6 +494,50 @@ test('cifra aratata e a TAVANULUI, nu a celulei active', () => {
   assert.ok(langaPerete < R.suportMax, `sapand langa cavitate, tavanul ar avea ${langaPerete}`)
 })
 
+test('stareSapat nu minte: niciun SIGUR nu prabuseste, niciun CADE nu e alarma falsa', () => {
+  // Prima versiune raspundea la ALTA intrebare: se uita la `suportDacaSap`, adica
+  // la suportul UNUI voxel — cel direct deasupra celulei. Dar ce cade cand sapi nu
+  // e, in general, voxelul de deasupra: sapatul rupe si conectivitatea LATERALA,
+  // iar un voxel atarnat de la trei celule distanta isi pierde drumul spre sprijin.
+  // Voxelul de deasupra, in schimb, e prin constructie la un pas de un vecin asezat
+  // imediat ce sapi la marginea unei camere, deci primea suport 3 si iesea SIGUR.
+  //
+  // Masurat pe versiunea veche: intr-o camera de 6x7 TOATE cele 168 de celule
+  // solide din rama spuneau SIGUR, si DOUA dintre ele chiar prabuseau ceva. La 6x9,
+  // sase. La 6x13, paisprezece. Overlay-ul desena zero patrate intr-o camera care
+  // se prabusea — adica exact esecul pentru care exista.
+  //
+  // Fixtura e DREPTUNGHIULARA deliberat. Intr-o camera patrata ce cade chiar e
+  // voxelul de deasupra centrului, deci si versiunea gresita nimerea. Toate
+  // fixturile de pana acum erau patrate — de-aia n-a prins-o niciuna.
+  for (const [lx, ly, asteptatCade] of [[6, 7, 2], [6, 9, 6], [6, 13, 14]] as const) {
+    const { w, wx, wy, g } = sitPlat(12345, Math.max(lx, ly))
+    const z = g - 3
+    for (let dx = 0; dx < lx; dx++) {
+      for (let dy = 0; dy < ly; dy++) assert.ok(applyCommand(w, { kind: 'dig', wx: wx + dx, wy: wy + dy, z }, R).ok)
+    }
+
+    let sigurDarPrabuseste = 0
+    let alarmaFalsa = 0
+    let cade = 0
+    for (let dx = -4; dx < lx + 4; dx++) {
+      for (let dy = -4; dy < ly + 4; dy++) {
+        const x = wx + dx
+        const y = wy + dy
+        if (solLa(w.terrain, x, y, z) !== Sol.SOLID) continue
+        const stare = stareSapat(w.terrain, R, x, y, z)
+        const chiar = cadeDaca(w.terrain, R, [cellKey(x, y, z)]).length
+        if (stare === StareSapat.SIGUR && chiar > 0) sigurDarPrabuseste++
+        if (stare === StareSapat.CADE && chiar === 0) alarmaFalsa++
+        if (stare === StareSapat.CADE) cade++
+      }
+    }
+    assert.equal(sigurDarPrabuseste, 0, `camera ${lx}x${ly}: ${sigurDarPrabuseste} celule spun SIGUR si chiar prabusesc ceva`)
+    assert.equal(alarmaFalsa, 0, `camera ${lx}x${ly}: ${alarmaFalsa} celule spun CADE degeaba`)
+    assert.equal(cade, asteptatCade, `camera ${lx}x${ly}: ${cade} celule CADE, asteptat ${asteptatCade}`)
+  }
+})
+
 test('starea are VERB: SIGUR, ULTIMA CELULA, CADE', () => {
   // Overlay-ul de joburi, livrat tot ca raspuns la K13, arata stari cu actiunea
   // in ele, nu cifre. O masura fara verb nu spune nici cat mai poti sapa, nici
