@@ -98,7 +98,7 @@ import { dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
 import { Material } from './terrain/chunk.ts'
 import { cadeDaca, cotaDeAsezare, multimeaCareCade, Sol, solLa } from './stabilitate.ts'
 import { cellKey, decodeCell } from './path.ts'
-import { Desemnare, desemnareLaCelula, DetaliuMotiv, slotDesemnare, stergeDesemnare } from './desemnari.ts'
+import { Desemnare, desemnareLaCelula, DetaliuMotiv, seSapaLa, slotDesemnare, stergeDesemnare } from './desemnari.ts'
 import type { DesignationStore } from './desemnari.ts'
 import type { Cerere } from './rezervari.ts'
 import { elibereaza, elibereazaTinta, elibereazaUna, poateRezerva, rezervaToate, Strat } from './rezervari.ts'
@@ -456,7 +456,7 @@ export function celulaDeLucru(
         if (comp !== NO_REGION && find(s, r) !== comp) continue
         const cheie = cellKey(nx, ny, zs)
         if (cheie === evita) continue
-        if (d.laCelula.has(cellKey(nx, ny, zs - 1))) continue
+        if (seSapaLa(d, nx, ny, zs - 1)) continue
         if (!isWalkable(t, nx, ny, zs, rules)) continue
         return { wx: nx, wy: ny, z: zs }
       }
@@ -757,6 +757,19 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
     const gPers = 4 ** (persS - 1)
     for (let s = 0; s < d.count; s++) {
       if (d.alive[s] === 0) continue
+      // Poarta pe FEL, si sta in trecerea IEFTINA, nu in cea scumpa.
+      //
+      // Pana la ea, bucla asta nu citea niciodata `d.kind`: cu un singur fel,
+      // `else` era corect. La al doilea devine o presupunere — aceeasi familie
+      // cu cele cinci `else` care presupuneau SAPA, reparate cu tabelul de
+      // drivere in S16-19. Panoul de design a reprodus-o in scenariul standard:
+      // o desemnare de alt fel era luata cu `jobKind = SAPA`, iar la tickul
+      // 3047 desemnarea era stearsa si celula goala. Jucatorul cere un perete,
+      // primeste o groapa, cu zero refuzuri.
+      //
+      // In trecerea ieftina fiindca altfel candidatii de alt fel ar consuma din
+      // `jobScanMaxCandidates` si ar infometa sapatul.
+      if (d.kind[s] !== Desemnare.SAPA) continue
       raport.vizite++
       if (d.reincercaLaTick[s]! > w.tick || esteEvitata(w, slot, d.id[s]!)) { inRacire++; continue }
       const dist0 = Math.abs(d.wx[s]! - ax) + Math.abs(d.wy[s]! - ay) + Math.abs(d.z[s]! - az)
@@ -1338,7 +1351,7 @@ function lucreazaSapa(w: World, rules: Rules, slot: number): void {
   const cy = cellOf(a.y[slot]!)
   const cz = a.z[slot]!
   const peLoc = cx === a.jobWorkX[slot] && cy === a.jobWorkY[slot] && cz === a.jobWorkZ[slot]
-  const pePodeaDesemnata = d.laCelula.has(cellKey(cx, cy, cz - 1))
+  const pePodeaDesemnata = seSapaLa(d, cx, cy, cz - 1)
   if (!peLoc || pePodeaDesemnata) {
     // Nu mai e unde trebuie, sau sta pe ceva ce altcineva urmeaza sa sape. Alt
     // loc de lucru, cu progresul pastrat — dar nu pe regiuni stale.

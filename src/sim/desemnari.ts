@@ -16,6 +16,14 @@ import { cellKey } from './path.ts'
 /** Felurile de desemnare. Un singur fel azi. */
 export const Desemnare = {
   SAPA: 0,
+  /**
+   * Rezervat pentru S20-23 taietura 2. Exista DE PE ACUM fiindca poarta care
+   * il separa de SAPA trebuie sa fie in cod si probata INAINTE sa apara prima
+   * piesa: pana la ea, `cautaJob` nu citea niciodata `kind`, iar o desemnare
+   * de alt fel era luata ca job de sapat si stearsa. Masurat de panoul de
+   * design in scenariul standard: celula goala la tickul 3047.
+   */
+  CONSTRUIESTE: 1,
 } as const
 export type DesemnareKind = (typeof Desemnare)[keyof typeof Desemnare]
 
@@ -143,6 +151,19 @@ export function adaugaDesemnare(
   d.laId.set(id, slot)
   d.vii++
   return accept(slot)
+}
+
+/**
+ * Se va SAPA celula (wx, wy, z)?
+ *
+ * Nu „exista o desemnare aici" — felul conteaza. Doua locuri din `joburi.ts`
+ * intreaba asta ca sa nu puna un pion sa stea pe o podea pe care altcineva
+ * urmeaza s-o sape; pentru o desemnare de CONSTRUIT sensul e invers, podeaua
+ * ramane si chiar se intareste.
+ */
+export function seSapaLa(d: DesignationStore, wx: number, wy: number, z: number): boolean {
+  const slot = d.laCelula.get(cellKey(wx, wy, z))
+  return slot !== undefined && d.alive[slot] === 1 && d.kind[slot] === Desemnare.SAPA
 }
 
 /** Sterge o desemnare vie. Rezervarile de pe ea sunt treaba apelantului. */

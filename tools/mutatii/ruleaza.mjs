@@ -20,12 +20,14 @@ import { MUTATII as carat } from './carat.mjs'
 import { MUTATII as drivere } from './drivere.mjs'
 import { MUTATII as nevoi } from './nevoi.mjs'
 import { MUTATII as stabilitate } from './stabilitate.mjs'
+import { MUTATII as constructie } from './constructie.mjs'
 
 const SUITE = [
   { nume: 'carat', despre: 'taietura 2: iteme, carat, zone pictate', M: carat },
   { nume: 'drivere', despre: 'taietura 3: tabelul de drivere, felul zonei, costul luatului', M: drivere },
   { nume: 'nevoi', despre: 'taietura 3: foame, odihna, dispozitie', M: nevoi },
   { nume: 'stabil', despre: 'S20-23 t.1: stabilitate, prabusire, previzualizare', M: stabilitate },
+  { nume: 'constr', despre: 'S20-23 t.2: constructia (pasul 1: poarta pe fel)', M: constructie },
 ]
 
 const argumente = process.argv.slice(2)
