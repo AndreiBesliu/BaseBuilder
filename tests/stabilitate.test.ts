@@ -21,6 +21,7 @@ import { cadeDaca, celuleAtinse, cotaDeAsezare, esteAsezat, Sol, solLa, StareSap
 import { existaTinta, lastJobReport, prabuseste, prabusireaPrevizualizata } from '../src/sim/joburi.ts'
 import { verificaRezervari } from '../src/sim/rezervari.ts'
 import { isWalkable } from '../src/sim/regions.ts'
+import { itemLaCelula } from '../src/sim/iteme.ts'
 import { decode, encode } from '../src/sim/save.ts'
 import { hashWorld } from '../src/sim/hash.ts'
 import { R, ruleaza } from './fixturi.ts'
@@ -313,6 +314,61 @@ test('un pion ramas fara podea CADE pe ea, si nu ajunge niciodata ingropat', () 
 // ---------------------------------------------------------------------------
 // determinism, save/load
 // ---------------------------------------------------------------------------
+
+test('molozul nu zideste ce gaseste pe cota de ATERIZARE', () => {
+  // Prima versiune aplica cele trei carlige — mormanul, celulele de zona, pionul
+  // — numai pe VARFUL coloanei prabusite. Dar molozul aterizeaza la
+  // `cotaDeAsezare`, care la o cadere de mai multe niveluri e cu totul alta
+  // celula, si acolo nu ajungea niciunul.
+  //
+  // Masurat inainte de reparatie: pionul ramanea la cota lui, cu MOLOZ pe propria
+  // celula, necalcabil, si `pioniCazuti` NU crestea — adica nimeni nu stia. Scapa
+  // doar prin plasa `dezgroapa`, care cauta ±1; la doua niveluri de moloz ar fi
+  // ramas ingropat pe veci. Mormanul ramanea inregistrat pe o celula devenita
+  // solida: marfa nici pe jos, nici numarata pierduta.
+  //
+  // Fixtura: un gol de TREI niveluri sapat la latime sigura (5), apoi doar nivelul
+  // lui de sus largit la 7. Cade un voxel de la varf si aterizeaza tocmai pe
+  // fundul putului — deci cota atinsa de moloz e la trei metri de cea care si-a
+  // pierdut podeaua.
+  function pit(): { w: World; px: number; py: number; jos: number; largeste: () => void } {
+    const { w, wx, wy, g } = sitPlat(4242, 11)
+    for (const z of [g - 9, g - 8, g - 7]) {
+      assert.equal(sapaCavitate(w, wx + 3, wy + 3, z, 5), 0, `golul de la ${z} n-avea voie sa doboare nimic`)
+    }
+    const largeste = (): void => {
+      for (let dx = 0; dx < 7; dx++) {
+        for (let dy = 0; dy < 7; dy++) applyCommand(w, { kind: 'dig', wx: wx + 2 + dx, wy: wy + 2 + dy, z: g - 7 }, R)
+      }
+    }
+    return { w, px: wx + 5, py: wy + 5, jos: g - 9, largeste }
+  }
+
+  // (a) Pionul de pe cota de aterizare URCA, si e numarat.
+  {
+    const { w, px, py, jos, largeste } = pit()
+    const sp = applyCommand(w, { kind: 'spawnAgent', x: px * 1000 + 500, y: py * 1000 + 500, z: jos, faction: 0 }, R)
+    assert.ok(sp.ok, `fixtura: pionul n-a putut fi asezat: ${JSON.stringify(sp)}`)
+    const zInainte = w.agents.z[0]!
+    const cazutiInainte = lastJobReport().pioniCazuti
+    largeste()
+    assert.equal(solLa(w.terrain, px, py, zInainte), Sol.SOLID, 'fixtura: molozul trebuia sa aterizeze chiar pe celula pionului')
+    assert.equal(w.agents.z[0], zInainte + 1, `pionul trebuia sa urce peste moloz, e la ${w.agents.z[0]} fata de ${zInainte}`)
+    assert.ok(isWalkable(w.terrain, px, py, w.agents.z[0]!, R), 'si sa stea pe o celula calcabila')
+    assert.equal(lastJobReport().pioniCazuti - cazutiInainte, 1, 'si sa fie NUMARAT: un pion zidit pe care nu-l stie nimeni e mai rau decat unul cazut')
+  }
+
+  // (b) Mormanul de pe cota de aterizare urca si el, si ramane gasibil.
+  {
+    const { w, px, py, jos, largeste } = pit()
+    const it = itemLaCelula(w.iteme, px, py, jos)
+    assert.notEqual(it, -1, 'fixtura: randamentul sapatului trebuia sa lase un morman pe fundul putului')
+    largeste()
+    assert.equal(solLa(w.terrain, px, py, jos), Sol.SOLID, 'fixtura: molozul trebuia sa aterizeze chiar peste morman')
+    assert.equal(itemLaCelula(w.iteme, px, py, jos), -1, 'mormanul n-are voie sa ramana inregistrat intr-o celula devenita solida')
+    assert.equal(itemLaCelula(w.iteme, px, py, jos + 1), it, 'trebuie sa fie ACELASI morman, urcat peste moloz')
+  }
+})
 
 test('aceeasi prabusire declansata din doua celule diferite da ACELASI hash', () => {
   // Ordinea de depunere intra in hash prin sloturile de iteme: `creeazaItem` ia

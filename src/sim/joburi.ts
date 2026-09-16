@@ -96,7 +96,7 @@ import type { RegionStore } from './regions.ts'
 import type { Terrain } from './terrain/terrain.ts'
 import { dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
 import { Material } from './terrain/chunk.ts'
-import { cadeDaca, cotaDeAsezare, multimeaCareCade } from './stabilitate.ts'
+import { cadeDaca, cotaDeAsezare, multimeaCareCade, Sol, solLa } from './stabilitate.ts'
 import { cellKey, decodeCell } from './path.ts'
 import { Desemnare, desemnareLaCelula, DetaliuMotiv, slotDesemnare, stergeDesemnare } from './desemnari.ts'
 import type { DesignationStore } from './desemnari.ts'
@@ -1606,6 +1606,23 @@ export function prabusireaPrevizualizata(w: World, rules: Rules): number[] {
  * designului. Panoul le-a verificat pe toate patru: toate false. Doua dintre ele
  * rupeau M5.
  */
+/**
+ * Unde ajunge ce se afla la (wx, wy, cota) dupa ce terenul s-a schimbat.
+ *
+ * Doua miscari, in ordinea asta, si amandoua sunt necesare: **iese din solid**,
+ * fiindca molozul poate sa fi aterizat chiar peste el, apoi **cade pana la prima
+ * podea**, fiindca podeaua poate sa-i fi disparut. Cu doar a doua, un pion zidit
+ * primea drept raspuns chiar cota lui si ramanea inchis; cu doar prima, unul
+ * ramas in aer nu cobora.
+ *
+ * Bucla se termina singura: `solLa` raspunde AER deasupra ferestrei de voxeli.
+ */
+function cotaDeRefugiu(t: Terrain, wx: number, wy: number, cota: number): number {
+  let z = cota
+  while (solLa(t, wx, wy, z) === Sol.SOLID) z++
+  return cotaDeAsezare(t, wx, wy, z)
+}
+
 export function prabuseste(w: World, rules: Rules, wx: number, wy: number, z: number): number {
   const chei = multimeaCareCade(w.terrain, rules, wx, wy, z)
   if (chei.length === 0) return 0
@@ -1613,7 +1630,23 @@ export function prabuseste(w: World, rules: Rules, wx: number, wy: number, z: nu
   // Faza 2, in ordinea (z crescator, wx, wy) in care `multimeaCareCade` le-a
   // sortat deja: fundul cade inaintea a ce sta pe el, iar molozul se aseaza peste
   // cel de dedesubt.
-  const coloane = new Map<number, number>()
+  // Per coloana, cotele CELULELOR in care ceva s-a schimbat sub sau peste
+  // picioarele cuiva:
+  //   - `z + 1` pentru fiecare voxel cazut — acea celula si-a pierdut podeaua;
+  //   - cota in care a aterizat molozul — acea celula a devenit SOLIDA.
+  //
+  // Prima versiune retinea doar varful coloanei, si recenzia a masurat ce rateaza:
+  // molozul aterizeaza la `cotaDeAsezare`, care la o cadere de mai multe niveluri
+  // e cu totul alta celula. Acolo ajungea sa se zideasca un morman (marfa nici pe
+  // jos, nici numarata pierduta), o celula de zona ramanea vie pe teren devenit
+  // necalcabil, si un pion ramanea INCHIS in moloz fara sa fie numarat cazut.
+  const afectate = new Map<number, number[]>()
+  const noteaza = (cwx: number, cwy: number, cota: number): void => {
+    const cheieColoana = cwx * WORLD_CELLS + cwy
+    const lista = afectate.get(cheieColoana)
+    if (lista === undefined) afectate.set(cheieColoana, [cota])
+    else lista.push(cota)
+  }
   for (const cheie of chei) {
     const c = decodeCell(cheie)
 
@@ -1629,35 +1662,41 @@ export function prabuseste(w: World, rules: Rules, wx: number, wy: number, z: nu
     const out = dig(w.terrain, c.wx, c.wy, c.z)
     if (!out.ok) continue
     markDirty(w.regions, c.wx, c.wy, c.z, rules)
+    noteaza(c.wx, c.wy, c.z + 1)
     if (jos < c.z) {
       const puneMoloz = fill(w.terrain, c.wx, c.wy, jos, Material.MOLOZ)
-      if (puneMoloz.ok) markDirty(w.regions, c.wx, c.wy, jos, rules)
+      if (puneMoloz.ok) {
+        markDirty(w.regions, c.wx, c.wy, jos, rules)
+        noteaza(c.wx, c.wy, jos)
+      }
     }
     raport.voxeliPrabusiti++
-
-    const cheieColoana = c.wx * WORLD_CELLS + c.wy
-    const sus = coloane.get(cheieColoana)
-    if (sus === undefined || c.z > sus) coloane.set(cheieColoana, c.z)
   }
 
   // Per COLOANA, in ordine fixa pe (wx, wy). Ordinea cheilor unui Map e cea de
   // inserare, deci depinde de istorie — se sorteaza.
   //
   // determinism-ok: cheile sunt numere si se sorteaza explicit inainte de folosire.
-  for (const cheieColoana of [...coloane.keys()].sort((a, b) => a - b)) {
+  for (const cheieColoana of [...afectate.keys()].sort((a, b) => a - b)) {
     const wx2 = Math.floor(cheieColoana / WORLD_CELLS)
     const wy2 = cheieColoana % WORLD_CELLS
-    const zSus = coloane.get(cheieColoana)!
+    // Crescator si fara dubluri: fundul se rezolva inaintea a ce sta pe el.
+    const cote = [...new Set(afectate.get(cheieColoana)!)].sort((p, q) => p - q)
 
-    // (2) Mormanul care si-a pierdut podeaua. Carligul existent muta exact UN
-    // nivel; masurat, la o cadere de 2+ pierderea e 100%, inclusiv hrana
-    // rezervata. Deci cota se calculeaza aici, nu se cauta de `asazaItem`.
-    const it = itemLaCelula(w.iteme, wx2, wy2, zSus + 1)
-    if (it !== -1) mutaItem(w, rules, it, wx2, wy2, cotaDeAsezare(w.terrain, wx2, wy2, zSus + 1))
+    for (const cota of cote) {
+      // (2) Mormanul care si-a pierdut podeaua, SAU peste care a cazut moloz.
+      // Carligul din `asazaItem` muta exact UN nivel; masurat, la o cadere de 2+
+      // pierderea e 100%, inclusiv hrana rezervata. Deci cota se calculeaza aici.
+      const it = itemLaCelula(w.iteme, wx2, wy2, cota)
+      if (it !== -1) {
+        const tinta = cotaDeRefugiu(w.terrain, wx2, wy2, cota)
+        if (tinta !== cota) mutaItem(w, rules, it, wx2, wy2, tinta)
+      }
 
-    // (3) Celulele de zona de deasupra. Argumentul e cota CELULEI, adica varful
-    // prabusirii + 1 — cu cota voxelului cazut, masurat, nu se retrage niciuna.
-    retrageCeluleDeZonaNecalcabile(w, rules, wx2, wy2, zSus + 1)
+      // (3) Celulele de zona de pe cota atinsa. Argumentul e cota CELULEI — cu
+      // cota voxelului cazut, masurat, nu se retrage niciuna.
+      retrageCeluleDeZonaNecalcabile(w, rules, wx2, wy2, cota)
+    }
 
     // (4) Pionul ramas fara podea. NU `dezgroapa`: ala cauta doar ±`maxStepM`,
     // care e 1, deci la o cadere de 2+ pionul ramane in aer PE VECI, iar
@@ -1668,7 +1707,11 @@ export function prabuseste(w: World, rules: Rules, wx: number, wy: number, z: nu
       if (a.alive[i] === 0) continue
       if (cellOf(a.x[i]!) !== wx2 || cellOf(a.y[i]!) !== wy2) continue
       if (isWalkable(w.terrain, wx2, wy2, a.z[i]!, rules)) continue
-      const nou = cotaDeAsezare(w.terrain, wx2, wy2, a.z[i]!)
+      // `cotaDeRefugiu`, nu `cotaDeAsezare`: pionul poate fi si ZIDIT, nu doar
+      // ramas in aer. Cu `cotaDeAsezare` pornita dintr-o celula devenita solida,
+      // raspunsul e chiar cota lui (podeaua e sub el), deci bucla il sarea si
+      // ramanea inchis in moloz, nenumarat. Masurat: `pioniCazuti` nu crestea.
+      const nou = cotaDeRefugiu(w.terrain, wx2, wy2, a.z[i]!)
       if (nou === a.z[i]! || !isWalkable(w.terrain, wx2, wy2, nou, rules)) continue
       // Jobul se incheie INAINTE de mutare, ca marfa din mana sa treaca prin
       // `lasaLaPicioare` pe o celula care inca exista.

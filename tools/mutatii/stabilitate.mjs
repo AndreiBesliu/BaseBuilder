@@ -182,6 +182,29 @@ export const MUTATII = [
     t: 'tests/stabilitate.test.ts', e: 'un pion ramas fara podea CADE pe ea',
   },
 
+  // --- cota de aterizare ---
+  {
+    n: 'cota in care aterizeaza molozul nu se curata (pion zidit, morman ingropat)',
+    f: 'src/sim/joburi.ts',
+    a: '        noteaza(c.wx, c.wy, jos)',
+    b: '        void jos',
+    t: 'tests/stabilitate.test.ts', e: 'molozul nu zideste ce gaseste',
+  },
+  {
+    n: 'refugiul doar COBOARA: un pion zidit primeste chiar cota lui',
+    f: 'src/sim/joburi.ts',
+    a: '  while (solLa(t, wx, wy, z) === Sol.SOLID) z++',
+    b: '  void solLa',
+    t: 'tests/stabilitate.test.ts', e: 'molozul nu zideste ce gaseste',
+  },
+  {
+    n: 'carligele se aplica doar pe VARFUL coloanei, nu pe fiecare cota atinsa',
+    f: 'src/sim/joburi.ts',
+    a: '    const cote = [...new Set(afectate.get(cheieColoana)!)].sort((p, q) => p - q)',
+    b: '    const cote = [Math.max(...afectate.get(cheieColoana)!)]',
+    t: 'tests/stabilitate.test.ts', e: 'molozul nu zideste ce gaseste',
+  },
+
   // --- ce vede jucatorul ---
   {
     n: 'previzualizarea se face pe FIECARE desemnare in parte (K07 in forma pura)',
