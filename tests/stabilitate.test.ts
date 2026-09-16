@@ -190,12 +190,20 @@ test('suportul scade cu exact 1 pe pas lateral, si se opreste la 0', () => {
   const z = g - 3
   sapaCavitate(w, wx, wy, z, 9)
   // Tavanul de deasupra unei cavitati de 9: suportul creste spre pereti.
-  const centru = suportLa(w.terrain, R, wx + 4, wy + 4, z + 1)
-  const laUnu = suportLa(w.terrain, R, wx + 1, wy + 4, z + 1)
-  const laPerete = suportLa(w.terrain, R, wx - 1, wy + 4, z + 1)
-  assert.equal(laPerete, R.suportMax, 'peretele se sprijina pe ce e sub el')
-  assert.ok(laUnu > 0 && laUnu < R.suportMax, `la un pas de perete: ${laUnu}`)
-  assert.equal(centru, 0, 'centrul unei cavitati de 9 e la 5 pasi de sprijin')
+  // Randul INTREG, cifra cu cifra. Versiunea dinainte cerea doar ca valoarea de
+  // langa perete sa fie „intre 0 si 4 exclusiv" — ceea ce accepta la fel de bine
+  // 1, 2 sau 3, deci un gradient de 4,2,2,1,0 trecea neatins. Iar `centru === 0`
+  // nu era despre plafon: voxelul ala CAZUSE, si o gaura are suport 0 oricum.
+  //
+  // Masurat, scara e curata: 4,3,2,1 spre centru, simetric de ambele parti.
+  const rand = Array.from({ length: 11 }, (_, i) => i - 1).map((dx) =>
+    solLa(w.terrain, wx + dx, wy + 4, z + 1) !== Sol.SOLID ? -1 : suportLa(w.terrain, R, wx + dx, wy + 4, z + 1),
+  )
+  assert.deepEqual(
+    rand,
+    [4, 3, 2, 1, -1, -1, -1, 1, 2, 3, 4],
+    `gradientul tavanului peste o cavitate de 9 trebuie sa scada cu exact 1 pe pas: ${rand.join(",")}`,
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -396,6 +404,49 @@ test('aceeasi prabusire declansata din doua celule diferite da ACELASI hash', ()
   const { w: w2, wx: x2, wy: y2, g: g2 } = sitPlat(12345, 7)
   assert.equal(sapaCavitate(w1, x1, y1, g1 - 3, 7), sapaCavitate(w2, x2, y2, g2 - 3, 7))
   assert.equal(hashWorld(w1), hashWorld(w2), 'aceeasi sapatura, acelasi hash')
+})
+
+test('ordinea prabusirii e (z crescator): fundul cade inaintea a ce sta pe el', () => {
+  // `multimeaCareCade` si `prabuseste` declara amandoua in comentariu ca ordinea e
+  // (z crescator, wx, wy), si de ce: „fundul trebuie sa cada inaintea a ce sta pe
+  // el, iar molozul se aseaza peste cel de dedesubt". Pana la recenzie NICIUN test
+  // nu lega asta — comparatorul inversat lasa toate cele 333 de teste verzi.
+  //
+  // Fixtura are nevoie de o prabusire pe DOUA niveluri intr-UN singur eveniment,
+  // si de-aia nu s-a gasit din prima: toate fixturile de pana acum sapau progresiv,
+  // deci fiecare eveniment era de un nivel, iar ordinea nu putea sa conteze. O
+  // camera de 13x13 careia i se lasa STALPUL central tine tavanul cat timp stalpul
+  // e acolo; scos, cade tot deodata.
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  const z = g - 4
+  for (let dx = 0; dx < 13; dx++) {
+    for (let dy = 0; dy < 13; dy++) {
+      if (dx === 6 && dy === 6) continue
+      assert.ok(applyCommand(w, { kind: 'dig', wx: wx + dx, wy: wy + dy, z }, R).ok)
+    }
+  }
+
+  const inainte = lastJobReport().voxeliPrabusiti
+  assert.ok(applyCommand(w, { kind: 'dig', wx: wx + 6, wy: wy + 6, z }, R).ok)
+  const eveniment = lastJobReport().voxeliPrabusiti - inainte
+  assert.equal(eveniment, 26, `scoaterea stalpului trebuia sa doboare 26 de voxeli deodata, a doborat ${eveniment}`)
+
+  // Unde s-a asezat molozul, pe cote. Cele 49 de la cota z sunt voxelii de la z+1.
+  // Cel de la z+1 e INTREAGA garantie: a cazut de la z+2 si s-a asezat peste moloz
+  // deja depus. Cu ordinea inversata coboara si el la z, si dispare de acolo —
+  // tot 26 de voxeli cad, dar lumea arata altfel si hash-ul se muta.
+  let laZ = 0
+  let laZ1 = 0
+  for (let dx = -1; dx <= 13; dx++) {
+    for (let dy = -1; dy <= 13; dy++) {
+      const a = materialAt(w.terrain, wx + dx, wy + dy, z)
+      const b = materialAt(w.terrain, wx + dx, wy + dy, z + 1)
+      if (a.ok && a.value === Material.MOLOZ) laZ++
+      if (b.ok && b.value === Material.MOLOZ) laZ1++
+    }
+  }
+  assert.equal(laZ, 49, `moloz la cota sapata: ${laZ}, asteptat 49`)
+  assert.equal(laZ1, 1, `moloz la z+1: ${laZ1}, asteptat 1 — ala e voxelul care s-a asezat PESTE moloz`)
 })
 
 test('M5 peste o prabusire: save luat EXACT la tickul in care cade tavanul', () => {

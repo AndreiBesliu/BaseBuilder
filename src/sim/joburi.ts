@@ -1718,6 +1718,12 @@ export function prabuseste(w: World, rules: Rules, wx: number, wy: number, z: nu
       terminaJob(w, rules, i, Sfarsit.INTRERUPT)
       a.z[i] = nou
       a.hasGoal[i] = 0
+      // Si progresul din pasul curent: caderea il scoate din pasul ala. Toate
+      // celelalte trei locuri care repozitioneaza un agent (`dezgroapa`,
+      // `spawnAgent`, abandonul din `avanseaza`) il pun explicit pe 0; asta era
+      // singura repozitionare din nucleu care nu o facea, deci pionul ateriza cu
+      // pana la un tic de mers cadou.
+      a.progresMm[i] = 0
       clearPath(w.paths, i)
       raport.pioniCazuti++
     }

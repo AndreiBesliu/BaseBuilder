@@ -145,6 +145,21 @@ export const MUTATII = [
     t: 'tests/stabilitate.test.ts', e: 'previzualizarea se face pe MULTIMEA desemnarilor',
   },
 
+  {
+    n: 'ordinea multimii care cade e inversata (varful cade primul)',
+    f: 'src/sim/stabilitate.ts',
+    a: '    return ca.z - cb.z || ca.wx - cb.wx || ca.wy - cb.wy',
+    b: '    return cb.z - ca.z || ca.wx - cb.wx || ca.wy - cb.wy',
+    t: 'tests/stabilitate.test.ts', e: 'ordinea prabusirii e (z crescator)',
+  },
+  {
+    n: 'multimea care cade nu se sorteaza deloc',
+    f: 'src/sim/stabilitate.ts',
+    a: '    return ca.z - cb.z || ca.wx - cb.wx || ca.wy - cb.wy',
+    b: '    void ca\n    void cb\n    return 0',
+    t: 'tests/stabilitate.test.ts', e: 'ordinea prabusirii e (z crescator)',
+  },
+
   // --- asezarea ---
   {
     n: 'ce cade coboara un SINGUR nivel (maxStepM refolosit ca plafon de cadere)',
