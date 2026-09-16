@@ -191,9 +191,29 @@ export function celuleAtinse(rules: Rules, wx: number, wy: number, z: number, ou
  * ia primul slot liber si hash-ul parcurge itemele in ordinea slotului.
  */
 export function multimeaCareCade(t: Terrain, rules: Rules, wx: number, wy: number, z: number): number[] {
-  const cazute = new Set<number>()
+  return cadeDaca(t, rules, [cellKey(wx, wy, z)], false)
+}
+
+/**
+ * Ce s-ar prabusi daca ar disparea TOATE celulele din `sapate`.
+ *
+ * Asta e forma de care are nevoie PREVIZUALIZAREA, si e motivul pentru care nu
+ * se poate calcula pe o singura comanda. `desemneaza` e per celula: la o pivnita
+ * de 7×7 sunt 49 de comenzi, fiecare evaluata pe lumea neatinsa, in care nicio
+ * celula sapata singura nu doboara nimic. Panoul a masurat: **0 din 49** arata
+ * vreun avertisment, iar tavanul crapa la sapatura 46 din 49 — a unui pion pe
+ * care jucatorul nu-l urmarea. K07 in forma pura.
+ *
+ * `include` spune daca celulele sapate intra si ele in raspuns (la previzualizare
+ * nu ne intereseaza: ele dispar oricum, prin sapat).
+ */
+export function cadeDaca(t: Terrain, rules: Rules, sapate: readonly number[], include = false): number[] {
+  const cazute = new Set<number>(sapate)
   const deVerificat: number[] = []
-  celuleAtinse(rules, wx, wy, z, deVerificat)
+  for (const cheie of sapate) {
+    const c = decodeCell(cheie)
+    celuleAtinse(rules, c.wx, c.wy, c.z, deVerificat)
+  }
 
   for (let i = 0; i < deVerificat.length; i++) {
     const cheie = deVerificat[i]!
@@ -206,13 +226,58 @@ export function multimeaCareCade(t: Terrain, rules: Rules, wx: number, wy: numbe
     celuleAtinse(rules, c.wx, c.wy, c.z, deVerificat)
   }
 
-  const chei = [...cazute]
+  const sapateSet = include ? null : new Set(sapate)
+  const chei = [...cazute].filter((k) => sapateSet === null || !sapateSet.has(k))
   chei.sort((a, b) => {
     const ca = decodeCell(a)
     const cb = decodeCell(b)
     return ca.z - cb.z || ca.wx - cb.wx || ca.wy - cb.wy
   })
   return chei
+}
+
+/**
+ * Ce suport ar avea TAVANUL celulei (wx, wy, z) daca s-ar sapa celula.
+ *
+ * Asta e cifra pe care o vrea jucatorul, si nu e cea pe care o avea designul.
+ * Overlay-ul desena suportul celulei ACTIVE: masurat pe o baza realista, **0%**
+ * dintre voxelii nivelului activ au alta cifra decat 4, fiindca in roca
+ * netulburata fiecare are solid dedesubt. Cifrele care conteaza sunt pe tavan,
+ * adica pe nivelul pe care slice view-ul il taie. Vizualizatorul cerut de
+ * DESIGN §5.2 s-ar fi livrat aratand nimic.
+ */
+export function suportDacaSap(t: Terrain, rules: Rules, wx: number, wy: number, z: number): number {
+  if (solLa(t, wx, wy, z) !== Sol.SOLID) return suportLa(t, rules, wx, wy, z + 1)
+  const ipotetic = new Set<number>([cellKey(wx, wy, z)])
+  return suportLa(t, rules, wx, wy, z + 1, ipotetic)
+}
+
+/**
+ * Ce sa faca jucatorul cu celula asta. Trei stari cu VERB, nu un gradient.
+ *
+ * Overlay-ul de joburi, livrat tot ca raspuns la K13, nu arata cifre — arata
+ * stari cu actiunea in ele. O masura fara verb („1", portocaliu) nu spune nici
+ * cat mai poti sapa, nici unde sa lasi roca. Si DESIGN §9 regula 9 interzice
+ * explicit gradientul rosu→verde ca singur canal.
+ */
+export const StareSapat = {
+  /** Se poate sapa, si ramane loc de inca o sapatura langa. */
+  SIGUR: 0,
+  /** Se poate sapa, dar e ULTIMA: inca una langa si tavanul cade. */
+  ULTIMA_CELULA: 1,
+  /** Daca sapi aici, cade ceva. */
+  CADE: 2,
+  /** Nu e nimic de sapat. */
+  NIMIC: 3,
+} as const
+
+export function stareSapat(t: Terrain, rules: Rules, wx: number, wy: number, z: number): number {
+  if (solLa(t, wx, wy, z) !== Sol.SOLID) return StareSapat.NIMIC
+  const dupa = suportDacaSap(t, rules, wx, wy, z)
+  if (solLa(t, wx, wy, z + 1) !== Sol.SOLID) return StareSapat.SIGUR
+  if (dupa === 0) return StareSapat.CADE
+  if (dupa === 1) return StareSapat.ULTIMA_CELULA
+  return StareSapat.SIGUR
 }
 
 /**

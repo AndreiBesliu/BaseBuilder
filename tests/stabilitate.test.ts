@@ -17,8 +17,8 @@ import { cellOf } from '../src/sim/drumuri.ts'
 import { cellKey } from '../src/sim/path.ts'
 import { isSolid, Material } from '../src/sim/terrain/chunk.ts'
 import { bazaVoxeli, groundLevelM, materialAt, promoteWithApron, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
-import { cotaDeAsezare, esteAsezat, Sol, solLa, suportLa } from '../src/sim/stabilitate.ts'
-import { existaTinta, lastJobReport, prabuseste } from '../src/sim/joburi.ts'
+import { cadeDaca, cotaDeAsezare, esteAsezat, Sol, solLa, StareSapat, stareSapat, suportDacaSap, suportLa } from '../src/sim/stabilitate.ts'
+import { existaTinta, lastJobReport, prabuseste, prabusireaPrevizualizata } from '../src/sim/joburi.ts'
 import { verificaRezervari } from '../src/sim/rezervari.ts'
 import { isWalkable } from '../src/sim/regions.ts'
 import { decode, encode } from '../src/sim/save.ts'
@@ -349,4 +349,87 @@ test('celuleAtinse acopera DOUA cote: z si z+1', async () => {
   assert.equal(laZ, 1, 'celula editata e in multime')
   assert.equal(laZ1, 1, 'si cea de DEASUPRA ei')
   assert.ok(out.includes(cellKey(103, 100, 51)), 'discul de la z+1 se intinde tot 3 celule lateral')
+})
+
+// ---------------------------------------------------------------------------
+// ce vede jucatorul
+// ---------------------------------------------------------------------------
+
+test('previzualizarea se face pe MULTIMEA desemnarilor, nu pe comanda individuala', () => {
+  // Panoul a numarat: la o pivnita de 7x7, `desemneaza` e per celula, deci 49 de
+  // comenzi, fiecare evaluata pe lumea neatinsa — in care nicio celula sapata
+  // singura nu doboara nimic. ZERO din 49 arata vreun avertisment, iar tavanul
+  // crapa la sapatura 46 din 49, a unui pion pe care jucatorul nu-l urmarea.
+  const { w, wx, wy, g } = sitPlat(12345, 7)
+  const z = g - 3
+
+  // Celula cu celula: nimic nu se anunta.
+  for (let dx = 0; dx < 7; dx++) {
+    for (let dy = 0; dy < 7; dy++) {
+      const singura = cadeDaca(w.terrain, R, [cellKey(wx + dx, wy + dy, z)])
+      assert.equal(singura.length, 0, `celula ${dx},${dy} sapata SINGURA n-ar trebui sa doboare nimic`)
+      const out = applyCommand(w, { kind: 'desemneaza', wx: wx + dx, wy: wy + dy, z }, R)
+      assert.ok(out.ok, `desemnarea refuzata: ${JSON.stringify(out)}`)
+    }
+  }
+
+  // Pe multimea intreaga, se anunta exact voxelul care va cadea.
+  const previz = prabusireaPrevizualizata(w, R)
+  assert.equal(previz.length, 1, `previzualizarea trebuia sa anunte 1 voxel, a anuntat ${previz.length}`)
+  assert.equal(previz[0], cellKey(wx + 3, wy + 3, z + 1), 'si anume centrul tavanului')
+
+  // Iar dupa ce se sapa chiar acolo cade.
+  const cazuti = sapaCavitate(w, wx, wy, z, 7)
+  assert.equal(cazuti, 1, 'previzualizarea si realitatea trebuie sa spuna acelasi lucru')
+})
+
+test('cifra aratata e a TAVANULUI, nu a celulei active', () => {
+  // Masurat de panou pe o baza realista: pe nivelul activ, 0% dintre voxeli au
+  // alta cifra decat 4 — in roca netulburata fiecare are solid dedesubt. Cifrele
+  // care conteaza sunt pe tavan, adica pe nivelul pe care slice view-ul il taie.
+  const { w, wx, wy, g } = sitPlat(12345, 9)
+  const z = g - 3
+
+  // In roca neatinsa, suportul celulei e 4 peste tot — zero informatie.
+  let altulDecat4 = 0
+  for (let dx = 0; dx < 9; dx++) for (let dy = 0; dy < 9; dy++) if (suportLa(w.terrain, R, wx + dx, wy + dy, z) !== R.suportMax) altulDecat4++
+  assert.equal(altulDecat4, 0, 'fixtura: in roca neatinsa suportul e 4 peste tot')
+
+  // Cifra VIITOARE, in schimb, spune ceva: ce ar avea tavanul daca sapi.
+  sapaCavitate(w, wx, wy, z, 5)
+  const langaPerete = suportDacaSap(w.terrain, R, wx + 5, wy + 2, z)
+  const departe = suportDacaSap(w.terrain, R, wx + 2, wy + 2, z)
+  void departe
+  assert.ok(langaPerete < R.suportMax, `sapand langa cavitate, tavanul ar avea ${langaPerete}`)
+})
+
+test('starea are VERB: SIGUR, ULTIMA CELULA, CADE', () => {
+  // Overlay-ul de joburi, livrat tot ca raspuns la K13, arata stari cu actiunea
+  // in ele, nu cifre. O masura fara verb nu spune nici cat mai poti sapa, nici
+  // unde sa lasi roca — iar DESIGN §9 regula 9 interzice gradientul rosu→verde
+  // ca singur canal.
+  const { w, wx, wy, g } = sitPlat(12345, 9)
+  const z = g - 3
+  assert.equal(stareSapat(w.terrain, R, wx, wy, z), StareSapat.SIGUR, 'in roca plina se poate sapa')
+  assert.equal(stareSapat(w.terrain, R, wx, wy, g + 5), StareSapat.NIMIC, 'in aer nu e nimic de sapat')
+
+  // O pivnita 7x7 careia ii lipseste CENTRUL. Cat timp centrul e plin, tavanul
+  // de deasupra lui se sprijina pe el si nu cade nimic. Sapand exact acea celula,
+  // tavanul ramane la 4 pasi de orice sprijin.
+  //
+  // Nu merge cu „o celula langa o cavitate de 6": masurat, largirea unui singur
+  // rand nu duce niciun punct din tavan la 4 pasi, fiindca sprijinul vine si pe
+  // directia perpendiculara.
+  for (let dx = 0; dx < 7; dx++) {
+    for (let dy = 0; dy < 7; dy++) {
+      if (dx === 3 && dy === 3) continue
+      assert.ok(applyCommand(w, { kind: 'dig', wx: wx + dx, wy: wy + dy, z }, R).ok)
+    }
+  }
+  assert.equal(stareSapat(w.terrain, R, wx + 3, wy + 3, z), StareSapat.CADE, 'ultima celula a unei pivnite 7x7 trebuie sa spuna CADE')
+
+  // Si chiar cade, daca o sapi.
+  const inainte = lastJobReport().voxeliPrabusiti
+  assert.ok(applyCommand(w, { kind: 'dig', wx: wx + 3, wy: wy + 3, z }, R).ok)
+  assert.equal(lastJobReport().voxeliPrabusiti - inainte, 1, 'starea si realitatea trebuie sa spuna acelasi lucru')
 })

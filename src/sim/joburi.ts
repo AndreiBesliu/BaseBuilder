@@ -96,9 +96,9 @@ import type { RegionStore } from './regions.ts'
 import type { Terrain } from './terrain/terrain.ts'
 import { dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
 import { Material } from './terrain/chunk.ts'
-import { cotaDeAsezare, multimeaCareCade } from './stabilitate.ts'
+import { cadeDaca, cotaDeAsezare, multimeaCareCade } from './stabilitate.ts'
 import { cellKey, decodeCell } from './path.ts'
-import { desemnareLaCelula, DetaliuMotiv, slotDesemnare, stergeDesemnare } from './desemnari.ts'
+import { Desemnare, desemnareLaCelula, DetaliuMotiv, slotDesemnare, stergeDesemnare } from './desemnari.ts'
 import type { DesignationStore } from './desemnari.ts'
 import type { Cerere } from './rezervari.ts'
 import { elibereaza, elibereazaTinta, elibereazaUna, poateRezerva, rezervaToate, Strat } from './rezervari.ts'
@@ -1562,6 +1562,30 @@ export function sapaVoxel(w: World, wx: number, wy: number, z: number, rules: Ru
   // explica.
   prabuseste(w, rules, wx, wy, z)
   return accept()
+}
+
+/**
+ * Ce s-ar prabusi daca s-ar sapa TOATE desemnarile de SAPAT vii.
+ *
+ * Previzualizarea NU se poate calcula pe comanda individuala, si asta e o
+ * constatare masurata, nu o preferinta: `desemneaza` e per celula, deci un
+ * dreptunghi de 7×7 e 49 de comenzi, fiecare evaluata pe lumea neatinsa — in
+ * care nicio celula sapata singura nu doboara nimic. Panoul a numarat: **0 din
+ * 49** arata vreun avertisment, iar tavanul crapa la sapatura 46 din 49. Care
+ * celula e a 46-a depinde de scorul de job si de unde erau pionii, nu de ce a
+ * ales jucatorul.
+ *
+ * Se cheama din overlay, nu din comanda: e o intrebare despre ce s-ar intampla,
+ * nu o schimbare de stare, si costa un BFS marginit per celula atinsa.
+ */
+export function prabusireaPrevizualizata(w: World, rules: Rules): number[] {
+  const d = w.desemnari
+  const celule: number[] = []
+  for (let i = 0; i < d.count; i++) {
+    if (d.alive[i] === 1 && d.kind[i] === Desemnare.SAPA) celule.push(cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!))
+  }
+  if (celule.length === 0) return []
+  return cadeDaca(w.terrain, rules, celule)
 }
 
 /**
