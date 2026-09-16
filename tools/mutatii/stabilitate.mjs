@@ -156,8 +156,8 @@ export const MUTATII = [
   {
     n: 'voxelul cazut nu lasa MOLOZ (prabusirea devine recompensa)',
     f: 'src/sim/joburi.ts',
-    a: '      const puneMoloz = fill(w.terrain, c.wx, c.wy, jos, Material.MOLOZ)\n      if (puneMoloz.ok) markDirty(w.regions, c.wx, c.wy, jos, rules)',
-    b: '      void jos',
+    a: '      const puneMoloz = fill(w.terrain, c.wx, c.wy, jos, Material.MOLOZ)\n      if (puneMoloz.ok) {\n        markDirty(w.regions, c.wx, c.wy, jos, rules)\n        noteaza(c.wx, c.wy, jos)\n      }',
+    b: '      noteaza(c.wx, c.wy, jos)',
     t: 'tests/stabilitate.test.ts', e: 'voxelul cazut lasa MOLOZ pe podea',
   },
   {
@@ -177,7 +177,7 @@ export const MUTATII = [
   {
     n: 'pionul cade cu un singur nivel, apoi ramane in aer pe veci',
     f: 'src/sim/joburi.ts',
-    a: '      const nou = cotaDeAsezare(w.terrain, wx2, wy2, a.z[i]!)',
+    a: '      const nou = cotaDeRefugiu(w.terrain, wx2, wy2, a.z[i]!)',
     b: '      const nou = a.z[i]! - 1',
     t: 'tests/stabilitate.test.ts', e: 'un pion ramas fara podea CADE pe ea',
   },
