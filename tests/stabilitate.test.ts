@@ -413,6 +413,23 @@ test('starea are VERB: SIGUR, ULTIMA CELULA, CADE', () => {
   assert.equal(stareSapat(w.terrain, R, wx, wy, z), StareSapat.SIGUR, 'in roca plina se poate sapa')
   assert.equal(stareSapat(w.terrain, R, wx, wy, g + 5), StareSapat.NIMIC, 'in aer nu e nimic de sapat')
 
+  // ULTIMA_CELULA e starea care da sfatul, deci e cea care trebuie probata, nu
+  // doar cele doua capete. Un stalp singur in mijlocul unei pivnite de 5x5 e la
+  // exact 3 pasi de perete: sapa-l si tavanul ramane cu suport 1 — inca sta, dar
+  // urmatoarea celula scoasa de langa el il doboara.
+  {
+    const s5 = sitPlat(12345, 9)
+    const z5 = s5.g - 3
+    for (let dx = 0; dx < 5; dx++) {
+      for (let dy = 0; dy < 5; dy++) {
+        if (dx === 2 && dy === 2) continue
+        assert.ok(applyCommand(s5.w, { kind: 'dig', wx: s5.wx + dx, wy: s5.wy + dy, z: z5 }, R).ok)
+      }
+    }
+    assert.equal(suportDacaSap(s5.w.terrain, R, s5.wx + 2, s5.wy + 2, z5), 1, 'fixtura: stalpul din 5x5 trebuie sa lase tavanul la suport 1')
+    assert.equal(stareSapat(s5.w.terrain, R, s5.wx + 2, s5.wy + 2, z5), StareSapat.ULTIMA_CELULA, 'stalpul din 5x5 e ULTIMA celula, nu una sigura')
+  }
+
   // O pivnita 7x7 careia ii lipseste CENTRUL. Cat timp centrul e plin, tavanul
   // de deasupra lui se sprijina pe el si nu cade nimic. Sapand exact acea celula,
   // tavanul ramane la 4 pasi de orice sprijin.
