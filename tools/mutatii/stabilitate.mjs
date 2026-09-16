@@ -218,6 +218,13 @@ export const MUTATII = [
     t: 'tests/stabilitate.test.ts', e: 'molozul nu zideste ce gaseste',
   },
   {
+    n: 'celulele de zona nu se retrag de pe cotele atinse',
+    f: 'src/sim/joburi.ts',
+    a: '      retrageCeluleDeZonaNecalcabile(w, rules, wx2, wy2, cota)',
+    b: '      void cota',
+    t: 'tests/stabilitate.test.ts', e: 'molozul nu zideste ce gaseste',
+  },
+  {
     n: 'carligele se aplica doar pe VARFUL coloanei, nu pe fiecare cota atinsa',
     f: 'src/sim/joburi.ts',
     a: '    const cote = [...new Set(afectate.get(cheieColoana)!)].sort((p, q) => p - q)',

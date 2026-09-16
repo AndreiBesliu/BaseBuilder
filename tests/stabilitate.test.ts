@@ -22,6 +22,7 @@ import { existaTinta, lastJobReport, prabuseste, prabusireaPrevizualizata } from
 import { verificaRezervari } from '../src/sim/rezervari.ts'
 import { isWalkable } from '../src/sim/regions.ts'
 import { itemLaCelula } from '../src/sim/iteme.ts'
+import { celulaDeZonaLa, indexZone } from '../src/sim/zone.ts'
 import { decode, encode } from '../src/sim/save.ts'
 import { hashWorld } from '../src/sim/hash.ts'
 import { R, ruleaza } from './fixturi.ts'
@@ -375,6 +376,33 @@ test('molozul nu zideste ce gaseste pe cota de ATERIZARE', () => {
     assert.equal(solLa(w.terrain, px, py, jos), Sol.SOLID, 'fixtura: molozul trebuia sa aterizeze chiar peste morman')
     assert.equal(itemLaCelula(w.iteme, px, py, jos), -1, 'mormanul n-are voie sa ramana inregistrat intr-o celula devenita solida')
     assert.equal(itemLaCelula(w.iteme, px, py, jos + 1), it, 'trebuie sa fie ACELASI morman, urcat peste moloz')
+  }
+
+  // (c) Celula de zona de pe cota de aterizare se RETRAGE, si indexul o vede.
+  //
+  // Fara asta, indexul o numara in continuare drept „libera" si tine
+  // `maxPrioLibera` sus, deci fiecare morman de pe jos ramane candidat pentru o
+  // celula in care nu se mai poate intra — iar cauza FARA_DEPOZIT nu apare
+  // niciodata. E exact scurgerea pentru care carligul geaman exista in `sapaVoxel`.
+  {
+    const { w, px, py, jos, largeste } = pit()
+    const pictat = applyCommand(w, { kind: 'picteazaZona', x0: px, y0: py, x1: px, y1: py, z: jos }, R)
+    assert.ok(pictat.ok, `fixtura: zona n-a putut fi pictata: ${JSON.stringify(pictat)}`)
+    assert.notEqual(celulaDeZonaLa(w.zone, px, py, jos), -1, 'fixtura: trebuia sa existe o celula de zona pe fundul putului')
+    // `libere` e per slot de zona o lista de sloturi de celule, deci se numara.
+    const numaraLibere = (): number => indexZone(w, R).libere.reduce((n, l) => n + (l?.length ?? 0), 0)
+    const libereInainte = numaraLibere()
+    assert.equal(libereInainte, 1, `fixtura: o singura celula libera pictata, indexul vede ${libereInainte}`)
+
+    largeste()
+    assert.equal(solLa(w.terrain, px, py, jos), Sol.SOLID, 'fixtura: molozul trebuia sa aterizeze chiar peste celula de zona')
+    assert.equal(
+      celulaDeZonaLa(w.zone, px, py, jos),
+      -1,
+      'celula de zona n-are voie sa ramana vie pe o celula devenita necalcabila',
+    )
+    const libereDupa = numaraLibere()
+    assert.equal(libereDupa, 0, `indexul trebuie sa vada retragerea: libere ${libereInainte} -> ${libereDupa}`)
   }
 })
 
