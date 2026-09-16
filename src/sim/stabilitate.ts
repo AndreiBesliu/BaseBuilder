@@ -256,9 +256,29 @@ function propaga(t: Terrain, rules: Rules, sapate: readonly number[]): { cazute:
   const deVerificat: number[] = []
   // UN obiect de decodare per apel, nu unul per iteratie.
   const c: Celula = { wx: 0, wy: 0, z: 0 }
+
+  // Seeding-ul initial se DEDUPLICA, cascada nu.
+  //
+  // Discurile a doua celule vecine se suprapun aproape complet, iar
+  // previzualizarea cheama functia asta peste TOATE desemnarile deodata: la o
+  // pivnita de 7x7 sunt 49 de discuri a cate 50 de celule, adica 2450 de intrari
+  // peste ~200 de celule distincte. Fiecare duplicat costa un BFS.
+  //
+  // Deduplicarea e sigura exact cat e si raza de invalidare: daca o celula isi
+  // schimba suportul mai tarziu, o face fiindca a cazut ceva la cel mult
+  // `suportMax − 1` pasi de ea — iar aia o re-pune in coada prin cascada. Deci
+  // cascada NU se deduplica: acolo re-verificarea e scopul.
+  const semanate = new Set<number>()
+  const dinDisc: number[] = []
   for (const cheie of sapate) {
     decodeCellIn(cheie, c)
-    celuleAtinse(rules, c.wx, c.wy, c.z, deVerificat)
+    dinDisc.length = 0
+    celuleAtinse(rules, c.wx, c.wy, c.z, dinDisc)
+    for (const k of dinDisc) {
+      if (semanate.has(k)) continue
+      semanate.add(k)
+      deVerificat.push(k)
+    }
   }
 
   let minim = rules.suportMax
