@@ -152,13 +152,18 @@ export const MUTATII = [
     b: '    return cb.z - ca.z || ca.wx - cb.wx || ca.wy - cb.wy',
     t: 'tests/stabilitate.test.ts', e: 'ordinea prabusirii e (z crescator)',
   },
-  {
-    n: 'multimea care cade nu se sorteaza deloc',
-    f: 'src/sim/stabilitate.ts',
-    a: '    return ca.z - cb.z || ca.wx - cb.wx || ca.wy - cb.wy',
-    b: '    void ca\n    void cb\n    return 0',
-    t: 'tests/stabilitate.test.ts', e: 'ordinea prabusirii e (z crescator)',
-  },
+  // NU exista proba pentru „sortarea scoasa cu totul", si se scrie de ce.
+  //
+  // `sort` e stabil, deci `return 0` lasa ordinea de DESCOPERIRE — iar aia e deja
+  // crescatoare pe z, dintr-un motiv structural: o celula de la z+2 nu e niciodata
+  // in multimea initiala (`celuleAtinse` acopera doar z si z+1), deci poate fi
+  // gasita DOAR prin cascada, adica dupa ce a cazut ceva de la z+1. Masurat pe
+  // patru fixturi, inclusiv una pe doua niveluri: hash identic cu si fara sortare,
+  // si identic chiar si cu ordinea lui `dz` inversata pe langa.
+  //
+  // Ce ramane observabil e o ordine activ GRESITA — descrescatoare — si aia e
+  // probata mai sus. Sortarea ramane fiindca face garantia explicita in loc de
+  // accidentala: daca `celuleAtinse` sau cascada se schimba, ea tine.
 
   // --- asezarea ---
   {

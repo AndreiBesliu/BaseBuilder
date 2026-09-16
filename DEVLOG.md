@@ -2242,3 +2242,125 @@ Ce rămâne din S20-23: blueprints, materiale, multi-etaj, scări, acoperișuri,
 e deja în `rules.json`, neîntrebuințat). Și două lucruri la tine, în OWNER_VERIFY: dacă regula se
 **citește** de pe ecran (punctul 9) și dacă tavanul ferestrei de voxeli se vede ca o linie invizibilă
 într-un perete înalt (punctul 10).
+
+---
+
+## Task Started — recenzia adversarială a tăieturii de stabilitate
+
+**Prompt:** „continua"
+**Model:** Claude Opus 5 · recenzie cu 6 lentile + verificatori adversariali (59 de agenți, 7,2 M
+tokeni), apoi reparațiile, testele și mutațiile de mine.
+
+### Cum s-a putut rula în paralel cu mutațiile
+
+Suita de mutații rula în repo și **rescrie fișiere sursă**, restaurându-le prin `git checkout`. Un
+recenzor care citește din arborele viu ar fi citit, din când în când, o versiune stricată intenționat
+— și ar fi raportat defecte fantomă. Mai devreme în sesiune ciocnirea a și avut loc: comenzile mele
+de `git` peste `git checkout`-ul harnașamentului au dat `.git/index.lock: File exists`, rularea a
+murit după ~15 probe, și a lăsat o mutație **aplicată** în `src/sim/zone.ts`.
+
+Soluția a fost un **instantaneu**: `git archive HEAD | tar -x` într-un director separat. `git
+archive` citește obiecte, nu indexul, deci nu se ciocnește; iar recenzorii au primit o copie fidelă
+a lui HEAD, cu teste care rulează, și interdicție explicită să atingă repo-ul.
+
+### Ce a găsit: 21 de constatări confirmate de doi verificatori independenți
+
+Fiecare constatare a trecut prin doi verificatori adversariali cu unghiuri diferite — unul care
+trebuia s-o **reproducă**, unul care trebuia s-o **respingă citind până la capăt** — și a fost
+păstrată doar dacă amândoi au spus „reală". Două au căzut. Am reprodus eu însumi fiecare constatare
+critică înainte să schimb o linie.
+
+**1. O săpătură la marginea de vest prăbușea un voxel la marginea de EST, la 16 km.**
+`cellKey(wx, wy, z) = ((z + 512) * 16384 + wy) * 16384 + wx` nu are gardă de interval, deci
+`cellKey(-1, 624, 25)` e bit cu bit `cellKey(16383, 623, 25)`. `celuleAtinse` construia cheile
+pentru tot discul fără să verifice limitele: **18 din 50** decodau în celule reale de la capătul
+opus, iar `cadeDaca` le evalua și le prăbușea. Măsurat: rocă ștearsă la 16 km, hash mutat
+(`48d4c8fa` → `3dae6bd4`).
+
+Ce doare aici: **garda exista și era corectă.** `solLa` verifică limitele și răspunde ANCORĂ, iar
+testul „marginea lumii e PERETE" o proba. Numai că nimeni n-o întreba pe drumul ăsta — cheia se
+construia înainte, și după `cellKey` informația „era în afara lumii" nu mai există în ea. De-aia
+garda se pune înainte de `cellKey`, și nicăieri mai jos.
+
+**2. `stareSapat` răspundea la altă întrebare decât cea a jucătorului.** Se uita la suportul UNUI
+voxel — cel direct deasupra celulei. Dar ce cade când sapi nu e, în general, voxelul de deasupra:
+săpatul rupe și conectivitatea **laterală**. Voxelul de deasupra e prin construcție la un pas de un
+vecin așezat imediat ce sapi la marginea unei camere, deci primea suport 3 și răspunsul ieșea SIGUR.
+Reprodus, pe camere **dreptunghiulare**:
+
+| cameră | SIGUR | ULTIMA | CADE | spun SIGUR și chiar prăbușesc |
+|---|---|---|---|---|
+| 6×7 | 168 | 0 | 0 | **2** |
+| 6×9 | 184 | 0 | 0 | **6** |
+| 6×13 | 216 | 0 | 0 | **14** |
+
+Zero pătrate desenate într-o cameră care se prăbușește — exact eșecul pentru care overlay-ul există.
+Acum întreabă ce trebuie („ce se întâmplă dacă sap AICI"), prin aceeași propagare pe care o folosește
+prăbușirea reală: `cadeDaca` și `stareSapat` împart un singur nucleu, `propaga`. După reparație:
+0 minciuni și 0 alarme false în toate trei, și apare în sfârșit ULTIMA CELULĂ (8 în fiecare).
+
+**3. Overlay-ul nu desena nimic, din încă două motive independente.** Pătratele se desenau la
+`zActiv + 1.02`, iar planul de tăiere păstrează `y <= sliceLevel` — erau tăiate din shader. Și
+nivelul judecat era greșit cu unu: voxelul de la nivelul L ocupă `y ∈ [L, L+1]`, deci nivelul
+`sliceLevel` e integral peste plan. Iar cu slice-ul **oprit** — starea implicită — nivelul se lua din
+`camera.position.y`, adică altitudinea camerei, zeci de metri deasupra terenului. Trei cauze
+independente, fiecare suficientă singură.
+
+**4. Prăbușirea curăța doar VÂRFUL coloanei.** Molozul aterizează la `cotaDeAsezare`, care la o
+cădere de mai multe niveluri e cu totul altă celulă — iar acolo nu ajungea niciun cârlig. Un pion de
+pe cota de aterizare rămânea **zidit în moloz**, necalcabil, și `pioniCazuti` **nu creștea**; un
+morman rămânea înregistrat într-o celulă devenită solidă (marfă nici pe jos, nici numărată pierdută);
+o celulă de zonă rămânea vie pe teren necalcabil.
+
+Asta a **mutat hash-ul de referință**: `2d43a7df` → `95dafb4f`. Măsurat cu același instrument pe
+ambele commit-uri: aceleași 8 prăbușiri, **zero** pioni căzuți — și totuși **34 de coloniști vii în
+loc de 30**. Deci nu pionii au mutat-o, ci mormanele și zonele: marfa care rămânea blocată ajunge
+acum unde se poate lua. **Opt voxeli prăbușiți la 100.000 de tickuri costau 10% din colonie.**
+
+**5. Ordinea (z crescător) a mulțimii care cade n-avea niciun test** — comparatorul inversat lăsa
+toate cele 333 de teste verzi. Și lipsea dintr-un motiv pe care nu-l vedeam: toate fixturile săpau
+**progresiv**, deci fiecare eveniment era de un nivel, și ordinea nu putea să conteze.
+
+**6. Gradientul era aproximat, nu asertat** („între 0 și 4 exclusiv" acceptă 1, 2 sau 3), și
+`progresMm` nu se reseta la cădere — singura repoziționare din nucleu care n-o făcea.
+
+### Lecția, și e una nouă
+
+Suita de mutații dăduse **21 din 21**. Toate probele erau valide și toate prindeau. Și codul era
+greșit în cazul general.
+
+Motivul: **o mutație probează că testele leagă codul pe care îl ating fixturile — nu poate inventa un
+caz pe care fixturile nu-l ating niciodată.** Toate fixturile mele erau **pătrate** (7×7, 9×9, stâlp
+în centru), iar într-o cameră pătrată ce cade chiar *e* voxelul de deasupra centrului. Versiunea
+greșită nimerea răspunsul din întâmplare, deci nicio mutație n-avea cum s-o dea în vileag. La fel
+cu ordinea: fixturi progresive ⇒ evenimente de un nivel ⇒ ordinea nu putea conta. Și la fel cu
+marginea lumii: niciun test nu sapă vreodată la `wx = 0`.
+
+Deci mutațiile și recenzia nu sunt redundante — răspund la întrebări diferite. Mutația întreabă „mai
+apără ceva testul ăsta?"; recenzia întreabă „ce n-ai construit niciodată?".
+
+### Ce NU am reparat, și cu ce cifră
+
+- **`fill` nu trece prin stabilitate.** Se poate zidi un bloc în aer, cu suport 0, care nu cade
+  niciodată — deci `suport(c) > 0` e un invariant fals pe starea salvată. DESIGN §5.2 cere explicit
+  „verificare O(1) la plasare", dar asta e **construcția**, adică restul lui S20-23. Îl las cu
+  măsurătoarea, nu îl strecor aici.
+- **Previzualizarea nu se memorează.** Măsurat: 2,9 ms la 49 de desemnări, 16,7 ms la 196, 32 ms la
+  400, și 600–700 ms la 4096. Overlay-ul o recalculează identic la fiecare reconstrucție. Peste ~200
+  de desemnări vii, un cadru se pierde.
+- **Costul real e în stratul de teren.** `stareSapat` costă ~19 µs/celulă, și nu din cauza regulii:
+  `locate` alocă un obiect și cheamă `ensureChunk` la fiecare acces, iar `solLa` o face de două ori.
+  Overlay-ul plătește asta doar lângă goluri (prefiltru cu transformată de distanță), dar reparația
+  adevărată e în cel mai fierbinte strat al proiectului și nu intră într-o tăietură de stabilitate.
+- **Cârligul de retragere a zonelor tot n-are test.** Mormanul și pionul au primit unul; zona nu.
+
+## Task Completed
+
+**Șase commit-uri de reparații.** 337 de teste, 28 de probe de mutație pe stabilitate (117 în total),
+hash de referință **nou**: `95dafb4f`, cu motivul scris în commit și aici. `.github/workflows/ci.yml`
+actualizat.
+
+OWNER_VERIFY punctul 9 rămâne — și e acum o întrebare mai onestă. Prima dată îți ceream să te uiți la
+un overlay pe care nu-l văzusem niciodată pe ecran, și care, măsurat, nu desena nimic. Acum desenează
+ce trebuie, dar tot nu l-am văzut: dacă e **lizibil** rămâne singura întrebare pe care nu pot s-o
+închid din cod.

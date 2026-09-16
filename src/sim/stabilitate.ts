@@ -217,6 +217,13 @@ export function celuleAtinse(rules: Rules, wx: number, wy: number, z: number, ou
  * la APLICARE, nu la calcul: panoul a masurat ca doua depuneri identice in
  * ordine diferita dau hash diferit (fb48760e vs 8ff179be), fiindca `creeazaItem`
  * ia primul slot liber si hash-ul parcurge itemele in ordinea slotului.
+ *
+ * Sortarea face garantia EXPLICITA, nu o creeaza: ordinea de descoperire e deja
+ * crescatoare pe z, fiindca o celula de la z+2 nu e niciodata in multimea
+ * initiala — `celuleAtinse` acopera doar z si z+1 — deci ajunge acolo doar prin
+ * cascada, adica dupa ce a cazut ceva de la z+1. Masurat: scoasa sortarea, hash
+ * identic pe patru fixturi. Ramane fiindca proprietatea aia e un accident al
+ * cascadei, si accidentele se strica tacut.
  */
 export function multimeaCareCade(t: Terrain, rules: Rules, wx: number, wy: number, z: number): number[] {
   return cadeDaca(t, rules, [cellKey(wx, wy, z)], false)

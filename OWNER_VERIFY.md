@@ -158,20 +158,32 @@ defini singure.
 
 ## 9. Stabilitatea — regula se citește de pe ecran, sau doar din text?
 
-**Ce te uiți.** Viewerul, tasta **S**. Overlay-ul desenează DOAR ce e acționabil: contur galben =
-*ultima celulă* (lasă rocă aici sau pune stâlp), contur roșu = *cade*. Ce e sigur rămâne
-nedesenat, deliberat. Portocaliu = ce s-ar prăbuși dacă s-ar săpa toate desemnările vii. Rândul de
-sus arată cifrele. Desemnează o pivniță de 7×7 și uită-te **înainte** să sape cineva.
+**Ce te uiți.** Viewerul, tasta **S** — și ai nevoie de **slice view pornit** (`Q`/`E`, `R` îl
+oprește): fără el nu există un nivel activ de judecat, iar overlay-ul îți spune asta în rândul de
+sus în loc să tacă. Desenează DOAR ce e acționabil: contur galben = *ultima celulă* (lasă rocă aici
+sau pune stâlp), contur roșu = *cade*. Ce e sigur rămâne nedesenat, deliberat. Portocaliu, mai
+strâmt, în interiorul celuilalt = ce s-ar prăbuși dacă s-ar săpa toate desemnările vii. Sapă o
+cameră **lungă** (6×13, nu pătrată) și uită-te pe marginile ei; apoi desemnează o pivniță de 7×7 și
+uită-te **înainte** să sape cineva.
 
 **Cum arată bine.** Portocaliul arată voxelul din centrul tavanului încă de la desemnare — adică
 jocul te-a avertizat înainte, nu la săpătura 46 din 49, a unui pion pe care nu-l urmăreai. Când
 lărgești o cameră, apare galben pe ultimul rând de rocă dinainte să cedeze. **Cum arată rău:**
 ecranul acoperit uniform, sau o prăbușire despre care nu se înțelege ce săpătură a provocat-o.
 
-**De ce nu pot eu.** Corectitudinea o acoperă 18 teste și 21 de mutații: mulțimea care cade,
-cascada, molozul, pionul, previzualizarea. Ce nu pot judeca e dacă **omul înțelege regula uitându-se
-la ecran**, fără s-o citească nicăieri. Ăsta e chiar eșecul reclamat ani întregi la Foxy Voxel:
-regula era corectă și invizibilă, iar jucătorii o trăiau ca arbitrariu.
+**De ce nu pot eu.** Corectitudinea o acoperă acum 22 de teste și 28 de mutații. Dar întrebarea e
+mai onestă decât era: prima versiune a acestui punct îți cerea să te uiți la un overlay pe care nu-l
+văzusem **niciodată** pe ecran — și o recenzie adversarială a măsurat că nu desena nimic, din trei
+motive independente (pătratele cădeau peste planul de tăiere, nivelul era greșit cu unu, iar cu
+slice-ul oprit se lua din altitudinea camerei). Plus unul mai rău: starea se calcula din suportul
+voxelului de deasupra, deci într-o cameră de 6×13 toate cele 216 celule spuneau „sigur" și 14 chiar
+prăbușeau ceva. Toate sunt reparate și legate cu teste.
+
+Ce rămâne, și nu pot închide din cod: dacă **omul înțelege regula uitându-se la ecran**, fără s-o
+citească nicăieri. Ăsta e chiar eșecul reclamat ani întregi la Foxy Voxel — regula era corectă și
+invizibilă, iar jucătorii o trăiau ca arbitrariu. Și, tot vizual: overlay-ul reconstruiește o dată la
+30 de cadre și costă ~19 µs pe celulă scanată; dacă simți un hopa când e pornit, spune-mi — am
+măsurătoarea, dar nu pot judeca cum se simte.
 
 ## 10. Tavanul ferestrei de voxeli diferă între coloane vecine — se vede?
 
