@@ -94,8 +94,10 @@ import { cellOf, clearPath } from './drumuri.ts'
 import { blockOfCell, ensureArea, find, isWalkable, markDirty, NO_REGION, regionAt, REGION_SIZE } from './regions.ts'
 import type { RegionStore } from './regions.ts'
 import type { Terrain } from './terrain/terrain.ts'
-import { dig, materialAt } from './terrain/terrain.ts'
-import { cellKey } from './path.ts'
+import { dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
+import { Material } from './terrain/chunk.ts'
+import { cotaDeAsezare, multimeaCareCade } from './stabilitate.ts'
+import { cellKey, decodeCell } from './path.ts'
 import { desemnareLaCelula, DetaliuMotiv, slotDesemnare, stergeDesemnare } from './desemnari.ts'
 import type { DesignationStore } from './desemnari.ts'
 import type { Cerere } from './rezervari.ts'
@@ -229,6 +231,10 @@ export interface JobTickReport {
   joburiDeNevoie: number
   /** Cate unitati de hrana s-au consumat. Cu ea se poate asserta conservarea mancarii. */
   unitatiMancate: number
+  /** Cati voxeli s-au prabusit (S20-23). */
+  voxeliPrabusiti: number
+  /** Cati pioni au CAZUT odata cu podeaua lor. Nu e acelasi lucru cu `ingropati`. */
+  pioniCazuti: number
   /**
    * Cati pioni au PLECAT din asezare in tickul asta (a treia treapta).
    *
@@ -251,7 +257,7 @@ const raport: JobTickReport = {
   tickuriDeLucru: 0, locuriDeLucruRefacute: 0, refuzuriDrum: 0,
   faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0, faraDepozit: 0,
   evaluariDestinatie: 0, itemeProduse: 0, unitatiProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
-  joburiDeNevoie: 0, unitatiMancate: 0, pasiNevoi: 0, plecati: 0,
+  joburiDeNevoie: 0, unitatiMancate: 0, pasiNevoi: 0, plecati: 0, voxeliPrabusiti: 0, pioniCazuti: 0,
 }
 
 export function lastJobReport(): JobTickReport {
@@ -1536,8 +1542,7 @@ export function sapaVoxel(w: World, wx: number, wy: number, z: number, rules: Ru
   const out = dig(w.terrain, wx, wy, z)
   if (!out.ok) return out
   markDirty(w.regions, wx, wy, z, rules)
-  // Cârligul: mormanul de deasupra si-a pierdut podeaua — cade. Sapatul e
-  // singurul fel in care dispare o podea, deci un cârlig acopera tot.
+  // Cârligul: mormanul de deasupra si-a pierdut podeaua — cade.
   const sus = itemLaCelula(w.iteme, wx, wy, z + 1)
   if (sus !== -1) mutaItem(w, rules, sus, wx, wy, z)
   // Si celulele de DEPOZIT isi pierd podeaua la fel. Fara carligul asta ramaneau
@@ -1551,7 +1556,106 @@ export function sapaVoxel(w: World, wx: number, wy: number, z: number, rules: Ru
     raport.itemeProduse++
     raport.unitatiProduse += y.cantitate
   }
+  // Si abia acum stabilitatea: sapatul a terminat, deci terenul e cel pe care se
+  // judeca. Prabusirea se intampla in ACELASI tick — un tavan care sta un tick
+  // in aer si cade la urmatorul e o stare pe care jucatorul o vede si n-o poate
+  // explica.
+  prabuseste(w, rules, wx, wy, z)
   return accept()
+}
+
+/**
+ * Prabuseste ce si-a pierdut sprijinul dupa o editare la (wx, wy, z).
+ *
+ * DOUA faze, si separarea lor nu e eleganta: multimea care cade e independenta
+ * de ordine (vezi `multimeaCareCade`), DEPUNEREA nu e. Panoul a masurat ca doua
+ * depuneri identice in ordine diferita dau hash diferit — `creeazaItem` ia
+ * primul slot liber, iar hash-ul parcurge itemele in ordinea slotului.
+ *
+ * Voxelul cazut devine AER si lasa MOLOZ pe prima celula cu ceva solid dedesubt.
+ * Molozul e SOLID, deci blocheaza drumul, trebuie sapat, si e el insusi sprijin —
+ * cascada se opreste prin masa, nu doar prin geometrie. Varianta „devine aer si
+ * cade marfa" facea prabusirea o recompensa: primeai camera, o lucarna si piatra
+ * pe deasupra.
+ *
+ * Cele patru carlige de mai jos erau declarate „existente" in prima versiune a
+ * designului. Panoul le-a verificat pe toate patru: toate false. Doua dintre ele
+ * rupeau M5.
+ */
+export function prabuseste(w: World, rules: Rules, wx: number, wy: number, z: number): number {
+  const chei = multimeaCareCade(w.terrain, rules, wx, wy, z)
+  if (chei.length === 0) return 0
+
+  // Faza 2, in ordinea (z crescator, wx, wy) in care `multimeaCareCade` le-a
+  // sortat deja: fundul cade inaintea a ce sta pe el, iar molozul se aseaza peste
+  // cel de dedesubt.
+  const coloane = new Map<number, number>()
+  for (const cheie of chei) {
+    const c = decodeCell(cheie)
+
+    // (1) Desemnarea de pe voxel. `anuleazaDesemnare`, NU `stergeDesemnare`:
+    // prima intrerupe joburile si elibereaza tinta, a doua lasa rezervarea pe un
+    // id mort. Masurat de panou: `verificaRezervari` refuza, iar un save luat in
+    // fereastra aia anuleaza jobul la incarcare in timp ce lumea continua il mai
+    // tine 25 de tickuri — doua hash-uri (9389ec95 vs 622bf8ff).
+    const ds = desemnareLaCelula(w.desemnari, c.wx, c.wy, c.z)
+    if (ds !== -1) anuleazaDesemnare(w, rules, ds)
+
+    const jos = cotaDeAsezare(w.terrain, c.wx, c.wy, c.z)
+    const out = dig(w.terrain, c.wx, c.wy, c.z)
+    if (!out.ok) continue
+    markDirty(w.regions, c.wx, c.wy, c.z, rules)
+    if (jos < c.z) {
+      const puneMoloz = fill(w.terrain, c.wx, c.wy, jos, Material.MOLOZ)
+      if (puneMoloz.ok) markDirty(w.regions, c.wx, c.wy, jos, rules)
+    }
+    raport.voxeliPrabusiti++
+
+    const cheieColoana = c.wx * WORLD_CELLS + c.wy
+    const sus = coloane.get(cheieColoana)
+    if (sus === undefined || c.z > sus) coloane.set(cheieColoana, c.z)
+  }
+
+  // Per COLOANA, in ordine fixa pe (wx, wy). Ordinea cheilor unui Map e cea de
+  // inserare, deci depinde de istorie — se sorteaza.
+  //
+  // determinism-ok: cheile sunt numere si se sorteaza explicit inainte de folosire.
+  for (const cheieColoana of [...coloane.keys()].sort((a, b) => a - b)) {
+    const wx2 = Math.floor(cheieColoana / WORLD_CELLS)
+    const wy2 = cheieColoana % WORLD_CELLS
+    const zSus = coloane.get(cheieColoana)!
+
+    // (2) Mormanul care si-a pierdut podeaua. Carligul existent muta exact UN
+    // nivel; masurat, la o cadere de 2+ pierderea e 100%, inclusiv hrana
+    // rezervata. Deci cota se calculeaza aici, nu se cauta de `asazaItem`.
+    const it = itemLaCelula(w.iteme, wx2, wy2, zSus + 1)
+    if (it !== -1) mutaItem(w, rules, it, wx2, wy2, cotaDeAsezare(w.terrain, wx2, wy2, zSus + 1))
+
+    // (3) Celulele de zona de deasupra. Argumentul e cota CELULEI, adica varful
+    // prabusirii + 1 — cu cota voxelului cazut, masurat, nu se retrage niciuna.
+    retrageCeluleDeZonaNecalcabile(w, rules, wx2, wy2, zSus + 1)
+
+    // (4) Pionul ramas fara podea. NU `dezgroapa`: ala cauta doar ±`maxStepM`,
+    // care e 1, deci la o cadere de 2+ pionul ramane in aer PE VECI, iar
+    // `ingropati` — asertat 0 in acceptanta — nu mai ajunge niciodata la zero.
+    // Caderea nu e un pas de mers, deci n-are plafon de pas.
+    const a = w.agents
+    for (let i = 0; i < a.count; i++) {
+      if (a.alive[i] === 0) continue
+      if (cellOf(a.x[i]!) !== wx2 || cellOf(a.y[i]!) !== wy2) continue
+      if (isWalkable(w.terrain, wx2, wy2, a.z[i]!, rules)) continue
+      const nou = cotaDeAsezare(w.terrain, wx2, wy2, a.z[i]!)
+      if (nou === a.z[i]! || !isWalkable(w.terrain, wx2, wy2, nou, rules)) continue
+      // Jobul se incheie INAINTE de mutare, ca marfa din mana sa treaca prin
+      // `lasaLaPicioare` pe o celula care inca exista.
+      terminaJob(w, rules, i, Sfarsit.INTRERUPT)
+      a.z[i] = nou
+      a.hasGoal[i] = 0
+      clearPath(w.paths, i)
+      raport.pioniCazuti++
+    }
+  }
+  return chei.length
 }
 
 /**

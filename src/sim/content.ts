@@ -192,6 +192,23 @@ export interface Rules {
   /** Randul de tabel al fiecarei nevoi, indexat cu `Nevoie`. */
   readonly nevoi: readonly SpecNevoie[]
 
+  // --- stabilitate (S20-23, taietura 1) ---
+  /**
+   * Suportul unui voxel ASEZAT. Scade cu 1 la fiecare pas lateral; 0 = cade.
+   *
+   * Numarul nu e rotund din intamplare. O camera W×W cade iff ⌈W/2⌉ ≥ `suportMax`,
+   * iar testul literal din PLAN §0.5 — pivnita 5×5 tine, 7×7 se prabuseste — il
+   * fixeaza UNIC la 4. Consecinta pentru jucator se scrie „cel mult 3 celule de
+   * orice sprijin", NU „mai lat de 5": masurat, 6×6 tine si 7×7 cade.
+   */
+  readonly suportMax: number
+  /**
+   * Raza pe care o grinda reintroduce un punct de sprijin (DESIGN §5.2).
+   * VALIDAT dar NEFOLOSIT in taietura 1: grinda e o piesa de constructie si vine
+   * cu blueprints. Sta aici ca sa nu se schimbe conventia cand se adauga.
+   */
+  readonly suportRazaGrinda: number
+
   // --- dispozitia (S16-19, taietura 3) ---
   //
   // O SINGURA scara: bara e 0..dispozitieMax, si valorile gandurilor sunt pe
@@ -289,6 +306,8 @@ const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield' | 'nevoi' | 'nutritie' 
   mancatTicks: { min: 1, max: 1000000 },
   mancatoriPeMorman: { min: 1, max: 64 },
   odihnaPeTicDeNevoie: { min: 1, max: 1000000 },
+  suportMax: { min: 1, max: 64 },
+  suportRazaGrinda: { min: 1, max: 64 },
   dispozitieMax: { min: 1, max: 1000000 },
   dispozitieBaza: { min: 0, max: 1000000 },
   dispozitieTicks: { min: 1, max: 1000000 },
@@ -311,6 +330,7 @@ const NUME_MATERIALE: readonly (readonly [string, number])[] = [
   ['APA', Material.APA],
   ['LEMN_CONSTRUIT', Material.LEMN_CONSTRUIT],
   ['PIATRA_CONSTRUITA', Material.PIATRA_CONSTRUITA],
+  ['MOLOZ', Material.MOLOZ],
 ]
 const NUME_ITEME: readonly (readonly [string, number])[] = [
   ['PIATRA', Item.PIATRA],
@@ -807,6 +827,9 @@ export const DEFAULT_RULES: Rules = {
     { fel: 0, cantitate: 0 },
     { fel: Item.LEMN, cantitate: 5 },
     { fel: Item.PIATRA, cantitate: 20 },
+    // Molozul da inapoi jumatate din ce ar fi dat roca: prabusirea costa munca,
+    // nu materie. Si se sapa mai repede — vezi `digWorkUnitsMoloz`.
+    { fel: Item.PIATRA, cantitate: 10 },
   ],
   // Nevoile. La 20 Hz: FOAME scade 6 la 250 de tickuri, deci 1000/6 × 250 =
   // ~41.700 de tickuri ≈ 35 de minute de la satul la zero; prefera sa manance la
@@ -826,6 +849,10 @@ export const DEFAULT_RULES: Rules = {
   mancatTicks: 60,
   mancatoriPeMorman: 2,
   odihnaPeTicDeNevoie: 60,
+  // 4 e fixat UNIC de testul din PLAN: 5×5 tine, 7×7 cade. Cea mai mare camera
+  // care sta singura e 6×6.
+  suportMax: 4,
+  suportRazaGrinda: 10,
   // Indexat cu `Nevoie`: FOAME, ODIHNA.
   nevoi: [
     { scurgere: 6, prag: 400, pragCritic: 150 },

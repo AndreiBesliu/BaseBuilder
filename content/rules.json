@@ -42,6 +42,8 @@
   "zoneCellCapacity": 4096,
   "zonePriorityLevels": 5,
   "zonePriorityDefault": 3,
+  "suportMax": 4,
+  "suportRazaGrinda": 10,
   "nevoieMax": 1000,
   "nevoiTicks": 250,
   "nevoieFazaPas": 137,
@@ -82,6 +84,7 @@
     "PAMANT": { "fel": "PAMANT", "cantitate": 10 },
     "IARBA": { "fel": "PAMANT", "cantitate": 10 },
     "LEMN_CONSTRUIT": { "fel": "LEMN", "cantitate": 5 },
-    "PIATRA_CONSTRUITA": { "fel": "PIATRA", "cantitate": 20 }
+    "PIATRA_CONSTRUITA": { "fel": "PIATRA", "cantitate": 20 },
+    "MOLOZ": { "fel": "PIATRA", "cantitate": 10 }
   }
 }

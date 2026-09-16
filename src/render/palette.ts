@@ -40,6 +40,9 @@ export const MATERIAL_COLOR: Record<number, Rgb> = {
   [Material.APA]: rgb(0x35566f),
   [Material.LEMN_CONSTRUIT]: rgb(0x8a6a42),
   [Material.PIATRA_CONSTRUITA]: rgb(0x8d8b84),
+  // Mai deschis si mai rece decat roca: molozul trebuie sa se citeasca de la
+  // distanta ca „aici s-a intamplat ceva", nu ca inca un perete.
+  [Material.MOLOZ]: rgb(0x9a958c),
 }
 
 const IMPLICIT: Rgb = rgb(0x999999)

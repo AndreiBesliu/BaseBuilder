@@ -64,7 +64,7 @@ export const NO_REGION = -1
  * In afara lumii intoarce ROCA: marginea lumii e perete, nu prapastie, si asta
  * scuteste fiecare apelant de o verificare de limite.
  */
-function materialFast(t: Terrain, wx: number, wy: number, z: number): number {
+export function materialFast(t: Terrain, wx: number, wy: number, z: number): number {
   if (wx < 0 || wy < 0 || wx >= WORLD_CELLS || wy >= WORLD_CELLS) return Material.ROCA
   const out = materialAt(t, wx, wy, z)
   return out.ok ? out.value : Material.ROCA

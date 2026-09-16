@@ -178,6 +178,24 @@ export function materialAt(t: Terrain, wx: number, wy: number, z: number): Outco
   return accept(Material.ROCA)
 }
 
+/**
+ * Baza ferestrei de voxeli a coloanei (wx, wy), pe calea fierbinte.
+ *
+ * `voxelRangeM` intoarce `Outcome`, adica aloca la fiecare apel — corect la
+ * granita sistemului, gresit intr-un BFS care atinge mii de celule. In afara
+ * lumii intoarce `+Infinity`, deci ORICE cota e sub baza: marginea lumii e
+ * stanca, aceeasi conventie ca `materialFast`.
+ *
+ * Exista fiindca baza e PER CHUNK si difera pe 86,8% dintre granitele vecine
+ * (masurat: medie 3,67 m, maxim 18 m). Cine intreaba despre un vecin lateral
+ * trebuie sa foloseasca baza chunk-ului ALUIA, nu pe a lui — altfel roca de sub
+ * baza vecinului se citeste ca aer si stabilitatea se rupe pe o linie invizibila.
+ */
+export function bazaVoxeli(t: Terrain, wx: number, wy: number): number {
+  const ref = locate(t, wx, wy)
+  return ref ? promotedBaseM(ref.chunk) : Number.POSITIVE_INFINITY
+}
+
 /** Intervalul de cote [min, max] in care chunk-ul de sub (wx, wy) are (sau ar avea) voxeli. */
 export function voxelRangeM(t: Terrain, wx: number, wy: number): Outcome<{ min: number; max: number }> {
   const ref = locate(t, wx, wy)

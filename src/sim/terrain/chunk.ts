@@ -28,6 +28,22 @@ export const Material = {
   APA: 4,
   LEMN_CONSTRUIT: 5,
   PIATRA_CONSTRUITA: 6,
+  /**
+   * Ce ramane dupa o prabusire (S20-23). Solid: blocheaza drumul, trebuie sapat,
+   * si e el insusi sprijin — deci cascada se opreste prin MASA, nu doar prin
+   * geometrie.
+   *
+   * E un MATERIAL, nu un item, si asta e toata ideea. Panoul a masurat ce s-ar
+   * fi intamplat cu varianta „prabusirea lasa marfa": un fel nou de item ar fi
+   * fost schema noua si 980 de unitati pierdute la prima pivnita (podeaua e deja
+   * plina cu piatra din sapat, iar `locPeCelula` intoarce 0 pe alt fel). Iar
+   * varianta „devine AER" facea prabusirea o RECOMPENSA — primeai camera, o
+   * lucarna si piatra pe deasupra — deci jucatorii ar fi incetat s-o evite.
+   *
+   * O valoare noua intr-un `Uint8Array` deja persistat: save-urile vechi nu o
+   * contin, deci nu cere schema noua.
+   */
+  MOLOZ: 7,
 } as const
 export type MaterialId = (typeof Material)[keyof typeof Material]
 
