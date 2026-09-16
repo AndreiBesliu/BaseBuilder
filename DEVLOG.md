@@ -2364,3 +2364,112 @@ OWNER_VERIFY punctul 9 rămâne — și e acum o întrebare mai onestă. Prima d
 un overlay pe care nu-l văzusem niciodată pe ecran, și care, măsurat, nu desena nimic. Acum desenează
 ce trebuie, dar tot nu l-am văzut: dacă e **lizibil** rămâne singura întrebare pe care nu pot s-o
 închid din cod.
+
+---
+
+## Task Started — S20-23, tăietura 2: construcția
+
+**Prompt:** „continua"
+**Model:** Claude Opus 5 · panou de design cu 5 lentile care **măsoară** (44 de agenți, 5,8 M tokeni),
+pe un instantaneu al lui HEAD; apoi implementarea, testele și mutațiile de mine.
+
+Am scris întâi un design v1 — verificare la plasare (ca să închid golul lui `fill` găsit de recenzia
+tăieturii 1), `Desemnare.CONSTRUIESTE` printr-un driver nou, materiale din `rules.json`, și grinda cu
+rază 10 din DESIGN §5.2 — și l-am dat panoului să-l demonteze. **Nu stă în forma scrisă.** Nouă
+constatări critice confirmate de câte doi verificatori independenți, zece respinse la verificare,
+treizeci și două important/minor.
+
+### Cele trei lucruri care schimbă structura
+
+**1. Grinda iese din tăietură.** DESIGN §5.2 cere „grinda reintroduce un punct de sprijin cu rază
+10". Panoul a implementat-o în patru variante și le-a măsurat pe toate:
+
+- *grinda e sursă necondiționat* — ordine-independentă, dar își e propria sursă la d=0, deci suport
+  10 oriunde. Măsurat: **un lanț de 31 de grinzi plutind în cer**, suport minim 10, niciuna nu cade;
+  o podea de 31 de celule zidită peste el are suport 4. O grindă aruncată în aer poartă o fortăreață;
+- *grinda trebuie să fie ea însăși așezată* — un no-op: `suportRazaGrinda` rămâne conținut mort;
+- *grinda e sursă dacă e susținută* — **pierde punctul fix unic**, adică exact defectul de la care a
+  pornit tăietura 1;
+- *surse STRATIFICATE* (nivel 0 = celule așezate, rază 4; nivel 1 = grinzi cu suport > 0 calculat
+  DOAR din nivelul 0, rază 10) — corectă, punct fix unic, verificată pe 8 ordini.
+
+Deci forma corectă există. O amân oricum, pentru un motiv de cost care nu ține de ea: **raza maximă e
+o constantă GLOBALĂ a rezolvatorului.** În clipa în care există o grindă pe hartă, fiecare interogare
+plătește discul de rază 10 — și proba e o grindă **fictivă la 400 de celule** de săpătură, care face o
+previzualizare 9×9 să coste **404,8 ms în loc de 9,4**, fără să schimbe niciun răspuns. Discul de
+invalidare urcă de la **50 la 362 de celule** (×7,24), iar cel mai rău caz măsurat — o singură editare
+lângă o cavitate 21×21 — trece de la 13,3 ms la **173,3 ms**, adică 3,5 tickuri pentru o lovitură de
+târnăcop. E K05 din nou, în altă haină.
+
+Kitul scade de la patru piese la **trei**: PERETE, PODEA, SCARĂ. `suportRazaGrinda: 10` rămâne în
+`rules.json`, dar primește acum un invariant încrucișat `>= suportMax` — azi `RULES_SPEC` le validează
+independent, deci constanta putea fi pusă SUB plafon fără ca nimic să se înroșească.
+
+**2. Validatorul unic e o greșeală, și e exact K07 în oglindă.** Designul propunea un singur
+`poateSustine` per celulă. Măsurat: pe o casă de 9×9 cu trei etaje și podea — 177 de celule — el ar
+refuza **145 din 177 (82%)** la desenare, fiindcă piesele care încă nu există nu se sprijină reciproc.
+Cu adevărat imposibilă e **una**.
+
+Și răspunsul corect nu se poate da nici dintr-o singură trecere peste planul terminat: pe 200 de
+planuri aleatoare, „suport > 0 dacă umplu tot" a promis 85,8 celule din 112 în medie, dar incremental
+se puteau construi 64,5 — **supra-promisiune în 200 din 200 de cazuri**. Răspunsul e un **punct fix**,
+exact ca prăbușirea. Deci `constructiaPosibila` e fratele lui `cadeDaca`, iar verificarea se sparge în
+trei contracte: la desenare doar proprietăți independente de ordine (niciodată sprijinul), peste
+mulțime la mouse-up, și `poateSustine` ca poartă finală la ZIDEȘTE.
+
+Riscul pe care îl scrisesem eu — „aceeași clădire se ridică sau nu, după noroc, fiindcă ordinea e
+emergentă" — e **fals**, și se șterge. Regula e monotonă: a adăuga un voxel poate doar să scadă
+distanțele, deci mulțimea construibilă e o închidere. 85.835 de perechi verificate, 0 încălcări; 300
+de planuri × 4 ordini, 0 diferențe. Se înlocuiește cu un **test de proprietate**: monotonia e o
+garanție, nu un accident.
+
+**3. Felul desemnării nu e citit de nimeni.** `cautaJob` parcurge `desemnari` fără să se uite vreodată
+la `d.kind[s]`; singurul loc din tot `src/` care îl compară cu `Desemnare.SAPA` e
+`prabusireaPrevizualizata`. Reprodus în lumea scenariului standard: o desemnare cu alt fel e luată ca
+job de SĂPAT, `jobKind = SAPA`, iar la tickul 3047 **desemnarea e ștearsă și celula e goală**.
+Jucătorul cere un perete, primește o groapă — zero refuzuri, zero cauze, niciun test înroșit.
+
+Nu e o regresie: cu un singur fel, `else` era corect. E aceeași familie cu tabelul de drivere din
+S16-19 — o presupunere care devine falsă la al doilea membru.
+
+### Ce a mai ieșit, și n-aș fi găsit singur
+
+- **Zidire + săpare = duplicator de piatră.** `piese.cantitate` și `digYield` sunt două tabele care nu
+  se privesc. Măsurat: marfă 0 → `fill PIATRA_CONSTRUITA` → `dig` → **marfă 20**. Cu cifra din propriul
+  meu exemplu (`cantitate: 10`) e un ciclu de tipărit piatră, 2× pe ciclu, fără limită. Reparația e un
+  invariant încrucișat în `parseRules` — tiparul există deja acolo — plus un al treilea termen,
+  `unitatiZidite`, ca invariantul de conservare să rămână verificabil în loc să fie slăbit.
+- **`anuleazaDesemnare` filtrează pe `jobTarget`**, iar șantierul ar sta în `jobDest`. Măsurat: după
+  anulare, jobul rămâne viu spre un id mort, cu o rezervare orfană; `reconstruiesteRezervari` îl aruncă
+  la încărcare în timp ce lumea continuă îl ține — **M5 roșu din prima zidire**.
+- **§5 din designul meu („multi-etaj nu adaugă nimic") e fals.** Măsurat cu închiderea: o podea peste o
+  cameră 9×9 lasă **1 celulă imposibilă** în centru, 15×15 lasă **49**, iar 21×21 pe trei etaje lasă
+  **507 din 2043**. Cu `suportMax = 4`, camera acoperită se plafonează la 9 lat, și un gol în perete la
+  6 celule. Astea nu sunt bug-uri, sunt **regulile jocului** — dar trebuie scrise și arătate prin
+  previzualizare, nu descoperite după ce jucătorul a desenat.
+- **„Verificare O(1) la plasare" din DESIGN §5.2 e falsă și azi**, nu doar cu raza 10: 0,137 µs pe sol
+  (o citire), dar **5,767 µs** pe un refuz în centrul unei podele 9×9, fiindcă e un BFS mărginit. Se
+  schimbă propoziția din DESIGN, nu regula.
+
+### Două cifre pe care sinteza le-a respins, deși veneau de la propriile lentile
+
+Merită scrise, fiindcă arată că verificarea a funcționat în ambele sensuri:
+
+1. „0,249 µs → 35,118 µs pe un voxel AȘEZAT" e adevărată doar dacă renunți la scurtătura
+   `așezat → suportMax`. Cu ea păstrată — ce se va face — calea comună nu se mișcă: **0,153 → 0,172 µs**.
+2. „O grindă scumpește tot jocul de 10×" e prea tare: costul urmărește **cât atârnă**, nu raza. Pe o
+   cavitate 9×9 costul chiar **scade** (1,248 → 0,462 ms), fiindcă la rază 10 nu mai cade nimic.
+   Concluzia rămâne, dar motivul scris e cel corect: cel mai rău caz sparge bugetul unui tick.
+
+### Ordinea de implementare, cu ce se poate rula la fiecare pas
+
+| # | pasul | se poate rula |
+|---|---|---|
+| 1 | **poarta pe fel** — două bucle în trecerea ieftină, `viiSapa`/`viiConstruieste`, a treia categorie, cele trei citiri de `laCelula` | o desemnare cu alt fel stă 1000 de tickuri neatinsă; **mutația care scoate garda** |
+| 2 | **schema 7** — `desemnari.piesa` singurul câmp nou, `Piesa.NICIUNA = 0`, migrare 6→7 cu fixtură golden, re-ancorarea hash-ului **o dată** | cele 4 fixturi golden încarcă; M5 verde cu 0 blueprinturi |
+| 3 | **conținutul** — trei piese, invariantul `cantitate === digYield`, `unitatiZidite`, `suportRazaGrinda >= suportMax` | fiecare invariant cu proba lui negativă |
+| 4 | **stabilitatea la zidire** — `FARA_SPRIJIN`, `CELULA_PLINA`, `suportDacaZidesc`, `fill` trece prin ea | **golul principal se închide**: nu se mai poate zidi la 5 m în aer |
+| 5 | **închiderea + previzualizarea** — `constructiaPosibila`, hartă TRANSIENT cu steag murdar, refuz la desenare | casa 9×9: **176 din 177 construibile, 1 refuzată** |
+| 6 | **driverul** — `FelJob.CONSTRUIESTE`, pionul stă LÂNGĂ nu PE, `jobTarget \|\| jobDest`, scanerul citește harta | casa se ridică; M5 cu o zidire în curs |
+
+Pașii 1–3 sunt reparații pe cod existent și rulează **înainte** să existe o singură piesă zidită.
