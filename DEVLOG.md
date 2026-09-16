@@ -2021,3 +2021,224 @@ Suita de mutații le-a găsit, și fiecare a fost o descoperire, nu o scuză:
   aprovizionată, fiindcă ies din raza aprovizionării. OWNER_VERIFY 8.
 - căutările de nevoie costă **0,11 pași/tick**, indexul de zone **2,19** (garda leagă la 30). Ieftine.
 - producția de hrană nu există: mâncarea din scenariul standard se pune cu comanda.
+
+---
+
+## Task Started — un executabil pentru Windows, și mutațiile mutate în repo
+
+**Prompt:** „care era executabilul?", apoi „poti sa creezi un fisier .bat sau ceva care sa ruleze
+comenzile?", apoi „comite-le si muta si mutatiile in tools/"
+**Model:** Claude Opus 5
+
+Proiectul avea deja `Kinstead.cmd` (viewerul) și `Verifica.cmd` (poarta), dar nimic care să adune
+toate comenzile într-un loc. `kinstead.bat` face amândouă: dublu-click deschide un meniu, iar cu un
+argument (`kinstead.bat check`) rulează o singură comandă și **întoarce codul ei de ieșire**, ca să
+poată fi legat într-un lanț. Comenzi: `check`, `test`, `typecheck`, `ref`, `scurt`, `viewer`,
+`mutatii`, `ajutor`.
+
+Un detaliu care nu e cosmetic: hash-ul așteptat la `ref` se **citește din**
+`.github/workflows/ci.yml`, nu se scrie în `.bat`. Două locuri cu același număr diverg, și cel care
+divergea ar fi fost tocmai ăsta — cel pe care îl rulez eu ca să verific, nu cel pe care îl rulează CI.
+
+Și mutațiile au intrat în repo, în `tools/mutatii/`, cu `npm run mutatii`. Stăteau în scratchpad, cu
+rădăcina repo-ului scrisă **absolut**: o cale de pe mașina mea, într-un repo public, e o garanție că
+nu merge la nimeni altcineva. Acum se deduce din locul fișierului (`import.meta.url`, două niveluri
+în sus).
+
+### Trei lucruri care s-au stricat
+
+1. **Terminatoarele LF au rupt `cmd.exe`.** „Cannot find the batch label" — `goto` nu găsește o
+   etichetă dacă fișierul n-are CRLF. Convertit, și `.gitattributes` cu `*.bat text eol=crlf`, ca să
+   nu se întâmple iar la următorul clon. A șaptea oară când CRLF mușcă în proiectul ăsta.
+2. **Meniul intra în buclă infinită** când stdin e la EOF (adică atunci când îl rulez eu, nu un om):
+   `set /p` nu blochează, întoarce gol, și se reia. Plafonat la 3 citiri goale.
+3. **Backtick-urile dintr-un `git commit -m "…"` au fost executate de bash.** Trei identificatori au
+   dispărut din mesaj și s-a creat un fișier numit `jos`. Reparat cu `--amend -F <fișier>`. E a
+   **noua** formă a aceleiași capcane de escaping; de aici încolo, mesajele de commit trec prin
+   fișier, fără excepție.
+
+Verificarea de arbore curat a suitei ignoră acum liniile `??`: `git checkout -- <fișier>` nu atinge
+niciodată un fișier neurmărit, deci refuzul pe el bloca rularea pentru o ciornă lăsată alături, fără
+să apere nimic.
+
+## Task Completed
+
+Livrat: `kinstead.bat`, `.gitattributes`, `tools/mutatii/` (harnașament + 3 suite, 89 de probe) și
+`npm run mutatii`. Poarta verde, mutațiile 89/89 din locul nou.
+
+---
+
+## Task Started — S20-23, tăietura 1: stabilitatea
+
+**Prompt:** „continua cu urmatoarea taietura"
+**Model:** Claude Opus 5 · panou de design cu 5 lentile (46 de constatări, 17 critice), apoi
+implementarea, testele și mutațiile de mine.
+
+PLAN §0.5 dă testul literal — **pivnița 7×7 se prăbușește, 5×5 nu** — și DESIGN §5.2 dă regula
+într-o propoziție: *4 la sprijin, −1 pe pas, 0 = imposibil*. Părea o tăietură de o zi. Panoul a găsit
+17 probleme critice în ea, aproape toate **măsurate**, nu argumentate.
+
+### Ce a schimbat panoul, înainte de orice linie de cod
+
+**Regula era scrisă ca recurență.** „Suportul unui voxel = maximul vecinilor, minus 1." Panoul a
+implementat-o și a rulat-o în **trei ordini de parcurgere** pe același teren: trei hărți diferite,
+niciuna corectă — 10 din 25 de celule greșite, și **1 voxel prăbușit în loc de 9**. O recurență peste
+un graf cu cicluri nu are punct fix unic, iar ordinea de parcurgere e exact lucrul pe care nu-l putem
+lăsa să decidă. Rescrisă ca **definiție** peste mulțimea surselor — `suport(c) = max(0, suportMax −
+d(c))`, cu `d` distanța minimă laterală prin solid până la un voxel *așezat* — are punct fix unic și
+se implementează ca BFS mărginit. **Nicio funcție de acolo nu citește suportul altui voxel.**
+
+**Constanta nu era fixată de testele din plan.** Perechea (5, 7) e singura care o determină, dar
+testele scrise pentru ea erau tot 5 și 7 — adică exact cele două care **nu disting** între praguri
+vecine. Panoul a măsurat tabelul întreg: 3, 4, 5, **6** țin; 7 dă 1 voxel, 8 dă 4, 9 dă 9. Deci
+propoziția pentru jucător din v1 — „camere mai late de 5 nu stau singure" — e **falsă**. Cine sapă o
+sală de 6×6, nu pățește nimic, și de atunci nu mai crede regula. Propoziția corectă e „cel mult 3
+celule de orice sprijin", iar testul e acum tabelul de la 3 la 9.
+
+**Ancora era citită prin `materialAt`, care minte cu două fețe.** `materialAt` întoarce AER pentru
+orice cotă sub fereastra de voxeli a coloanei, și o face **deliberat** — calea nepromovată trebuie să
+răspundă ce ar răspunde una promovată. Pentru stabilitate, răspunsul ăla e catastrofal:
+
+- **talpa.** Pe un chunk **neatins**, 841 din 1024 de voxeli de pe nivelul de bază ies cu suport 0.
+  Prima săpătură promovează 9 chunkuri, deci ~7.500 de voxeli ar cădea fără ca jucătorul să fi săpat
+  acolo;
+- **cusătura.** `zBaseM` e per chunk și diferă pe **86,8%** dintre perechile de chunkuri vecine
+  (medie 3,67 m, maxim 18 m). Un vecin lateral aflat sub baza chunkului **lui** ar răspunde AER, deci
+  aceeași cameră de 7×7 pierde 1 voxel în interiorul unui chunk și 4 dacă marginea ei atinge o
+  graniță invizibilă de 32 m. Asta **e** K16, apărut de unde nu-l aștepta nimeni.
+
+Stabilitatea citește acum fereastra **coloanei**, printr-un `bazaVoxeli` nou, și tratează ce e sub ea
+ca ancoră absolută. Jumătatea de sus a lui K16 rămâne deschisă și e la OWNER_VERIFY 10 — e o judecată
+vizuală la înălțime, plus o decizie de arhitectură.
+
+**Harta de suport ar fi fost K05 din nou.** Varianta „hartă DERIVED sub steag murdar" părea evidentă,
+fiindcă e tiparul regiunilor și al indexului de zone. Măsurată: reconstrucția în bloc dă **237.408
+intrări / 144,6 ms** pentru cele 9 chunkuri pe care le promovează **o singură** săpătură, și
+**1.332.035 / 1297 ms** la 49 — iar numărul de chunkuri promovate **nu scade niciodată**, deci e un
+cost care crește cu vechimea coloniei. Interogarea pură costă **0,058 µs** pe un voxel așezat (o
+citire) și **4,345 µs** pe unul atârnat (BFS mărginit), iar atârnați sunt **12 în tot scenariul
+standard**. Nu există hartă.
+
+**Invalidarea era de două ori mai mică decât trebuie.** v1 avea „discul de la z, plus un voxel
+deasupra". Panoul a măsurat pe scenariul stâlpului scos: **13 celule se schimbă la z+1 și nouă ajung
+la suport 0**; mulțimea din v1 prinde **una**. Restul ar fi rămas în picioare în lumea continuă și ar
+fi căzut în cea încărcată — **M5 roșu**, dintr-o cauză pe care niciun test de unitate n-o vede.
+Corect: două discuri Manhattan de rază 3, la z **și** z+1 — 50 de celule, nu 25.
+
+**Și legea prăbușirii a fost măsurată, nu presupusă:** **(W−6k)² voxeli la z+k**, total ≈ W³/18. Adică
+o pivniță de 7×7 pierde **un** voxel, nu tavanul; pentru o pâlnie care ajunge la suprafață e nevoie de
+**145×145**. Bun de știut înainte să scrii un sistem de „prăbușiri spectaculoase" care nu se întâmplă.
+
+### Ce s-a livrat
+
+Patru commit-uri, în ordinea asta:
+
+| commit | ce a schimbat |
+|---|---|
+| **regula** | `src/sim/stabilitate.ts` — `solLa` / `esteAsezat` / `suportLa` / `celuleAtinse` / `cadeDaca` / `cotaDeAsezare`; `Material.MOLOZ`; prăbușirea în `sapaVoxel` |
+| **vederea** | `suportDacaSap`, `stareSapat`, `prabusireaPrevizualizata`, `viewer/overlay-stabilitate.ts` (tasta `S`), linia de HUD |
+| **mutațiile** | 21 de probe în `tools/mutatii/stabilitate.mjs`, plus starea care nu era asertată |
+| **reparațiile** | cele patru mutații ratate, fiecare un gol real |
+
+Voxelul căzut devine AER și lasă **`MOLOZ`** pe prima celulă cu ceva solid dedesubt. Molozul e solid:
+blochează drumul, trebuie săpat, și **e el însuși sprijin** — deci cascada se oprește prin masă, nu
+doar prin geometrie. Varianta „devine aer și cade marfă" făcea prăbușirea o **recompensă**: primeai
+camera, o lucarnă și piatra pe deasupra.
+
+Căderea **nu** are plafon de pas. `maxStepM` e cât poate urca sau coborî un pion **mergând**; refolosit
+ca plafon de cădere, cârligul de podea al mormanelor pierde 100% din marfă la 2+ niveluri, iar
+`dezgroapa` lasă pionul în aer pe veci — și `îngropați`, asertat 0 în acceptanță, nu mai ajunge
+niciodată la zero.
+
+Desemnarea de pe un voxel care cade se **anulează**, nu se șterge: ștearsă, rezervarea rămâne pe un id
+mort, `verificaRezervari` refuză, iar un save luat în fereastra aia anulează jobul la încărcare în timp
+ce lumea continuă îl mai ține 25 de tickuri — două hash-uri, `9389ec95` și `622bf8ff`.
+
+### Ce vede jucătorul, și de ce nu e cifra pe care o desena designul
+
+Două lucruri măsurate au schimbat vizualizatorul după ce era deja proiectat.
+
+**Previzualizarea nu se poate face pe o comandă.** `desemnează` e per celulă, deci o pivniță de 7×7 e
+**49 de comenzi**, fiecare evaluată pe lumea neatinsă — în care nicio celulă săpată singură nu doboară
+nimic. **Zero din 49** ar fi arătat vreun avertisment, iar tavanul ar fi crăpat la săpătura **46 din
+49**, a unui pion pe care jucătorul nu-l urmărea. K07 în formă pură. `prabusireaPrevizualizata` rulează
+peste **mulțimea** desemnărilor vii, deodată.
+
+**Cifra nu e a celulei active.** Designul desena suportul voxelului de pe nivelul activ. Măsurat pe o
+bază realistă: **0%** dintre ei au altă cifră decât 4 — în roca netulburată fiecare are solid dedesubt.
+Vizualizatorul s-ar fi livrat arătând **nimic**. Ce contează e **tavanul**, adică nivelul pe care slice
+view-ul îl taie: se desenează `suportDacaSap`, ce ar avea tavanul **dacă** sapi celula.
+
+Iar culoarea poartă **acțiunea**, nu măsura: trei stări cu verb în ele — *sigur*, *ultima celulă* (lasă
+rocă aici sau pune stâlp), *cade*. O măsură fără verb („1", portocaliu) nu spune nici cât mai poți săpa,
+nici unde să lași rocă, iar DESIGN §9 regula 9 interzice oricum gradientul roșu→verde ca singur canal.
+*Sigur* rămâne deliberat **nedesenat**: în rocă netulburată ar acoperi ecranul uniform și ar îngropa
+exact cele câteva celule care contează — aceeași greșeală ca desenarea cifrei pe nivelul activ, cu altă
+față.
+
+### Ce au găsit mutațiile: 17 din 21 la prima rulare
+
+Niciun tipar nu era prost scris. Toate patru arătau **teste care nu exercitau garanția pe care
+pretindeau că o apără**, și trei dintre ele aveau aceeași formă: *repetarea ascunde geometria greșită*.
+
+1. **Pionul cădea „și așa".** Aserțiunea venea după 60 de tickuri, iar `dezgroapa` îl coboară oricum,
+   câte un metru pe tick. Mutată înainte de orice tick — dar tot verde, fiindcă fixtura săpa camera de
+   jos pe **două** niveluri, deci tavanul cădea în două evenimente separate, câte un metru fiecare.
+   Căderea de doi metri ieșea din două căderi de un metru. Fixtura refăcută: un gol de trei niveluri
+   săpat la lățime **sigură** (5), apoi doar nivelul lui de sus lărgit la 7 — cade exact un voxel,
+   podeaua pionului, iar pionul parcurge **trei metri deodată**, numărat o singură dată.
+2. **Desemnările nu erau verificate deloc.** Testul se sprijinea pe `verificaRezervari` într-o lume
+   **fără colonişti** — deci fără nicio rezervare de invalidat. Trecea la fel de verde dacă desemnările
+   rămâneau agățate de voxeli dispăruți. Acum numără desemnările vii.
+3. **Cascada n-avea fixtură.** `celuleAtinse` acoperă z și z+1, deci un voxel de la **z+2** nu ajunge
+   niciodată în mulțimea inițială: singurul drum până la el e re-verificarea vecinătății după ce cade
+   ceva de la z+1. Măsurat: 9×9 dă 9 voxeli pe **un** nivel; 13×13 dă 49 la z+1 și **1 la z+2**; 15×15
+   dă 81 și 9. Testul nou folosește 13 — cea mai ieftină lățime care chiar cere cascada.
+4. **Plafonul din BFS n-avea umbră în comportament.** Scos, nu se schimbă niciun bit — fiindcă ține
+   răspunsul pozitiv, adică exact ce ar trebui să facă `max(0, …)` din definiție. Numai că `max(0, …)`
+   **nu era scris**, deși documentația funcției îl dă ca definiție. Acum sunt amândouă, se acoperă unul
+   pe altul, și se probează **perechea**, prin `e2`. Garanția nu e cosmetică: fără niciuna, un tavan la
+   5 pași dă **−1**, care nu e nici 0 nici 1 — deci `stareSapat` ar răspunde *sigur* exact acolo unde e
+   cel mai periculos.
+
+Plus una găsită **scriind** probele: starea *ultima celulă* nu era asertată nicăieri. Testul verifica
+doar capetele. Cazul care o leagă s-a **căutat**, nu s-a ghicit: măsurat, nicio cavitate
+dreptunghiulară nu produce vreodată starea asta, fiindcă tavanul de lângă un perete rămas e mereu la un
+pas de sprijin. E nevoie de un **stâlp izolat**, la exact 3 pași de perete — centrul unei pivnițe de
+5×5.
+
+### Alte patru lucruri care s-au stricat pe drum
+
+- **Helperul de test minţea.** Prima versiune a lui `sapaCavitate` scana un bloc deasupra cavității și
+  număra aerul — la o săpătură aproape de suprafață, blocul include **cerul**, deci raporta 100 de
+  „prăbușiri" pentru o cameră de 3×3 care nu pierde nimic. Un helper de test care minte e mai rău decât
+  niciun test. Citește acum din raportul de tick.
+- **`itemePierdute === 0` era aserțiunea greșită.** Măsurat: o săpătură de **1×1** subterană pierde
+  toate cele 20 de unități, fiindcă o pungă de un nivel n-are gabarit și `asazaItem` n-are unde să pună
+  randamentul. E o proprietate **veche** a săpatului subteran, nu ceva ce aduce tăietura asta. Garda care
+  chiar leagă e pierderea **per voxel săpat**, aceeași cu și fără prăbușire.
+- **Pivnița din scenariul standard nu se prăbușea niciodată.** Folosea cota solului **sitului**, nu a
+  celulelor ei, deci cavitatea se termina la un metru sub suprafață. Am încercat un helper de teren
+  plat; tot 8 prăbușiri în loc de cifra așteptată. Am **anulat complet** schimbarea: o pivniță pe
+  jumătate funcțională în scenariul standard arată ca acoperire fără să fie.
+- **Testul de acoperire a lui `digYield` a picat** fiindcă MOLOZ e un material solid nou. Nu era o
+  regresie — era invariantul existent funcționând exact cum trebuie: un câmp nou invalidează un
+  catalog vechi.
+
+## Task Completed
+
+**Tăietura 1 din S20-23 e livrată:** stabilitatea, prăbușirea, previzualizarea. **333 de teste**,
+**110 din 110 de mutații** pe patru suite, zero controale invalide, zero tipare lipsă. Hash de
+referință `2d43a7df`, neschimbat față de prima jumătate a tăieturii.
+
+Costul: **89–94 µs/tick** pe scenariul standard. Cifra **nu** se compară cu cele 79–81 µs din
+tăietura 3, și motivul contează mai mult decât numărul: HEAD-ul de **dinaintea** stabilității,
+măsurat azi spate-în-spate pe aceeași mașină, dă **93–98 µs/tick**. Adică mașina merge mai încet, nu
+codul. Scrisă alături de 79–81, cifra de 89 ar fi raportat o regresie de 10% care nu există.
+Măsurată corect, **stabilitatea nu costă nimic**: interogarea e pură și mărginită, iar scenariul
+standard n-are cavități destul de late cât să doboare ceva.
+
+Ce rămâne din S20-23: blueprints, materiale, multi-etaj, scări, acoperișuri, grinzi (`suportRazaGrinda`
+e deja în `rules.json`, neîntrebuințat). Și două lucruri la tine, în OWNER_VERIFY: dacă regula se
+**citește** de pe ecran (punctul 9) și dacă tavanul ferestrei de voxeli se vede ca o linie invizibilă
+într-un perete înalt (punctul 10).

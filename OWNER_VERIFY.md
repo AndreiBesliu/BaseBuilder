@@ -153,3 +153,38 @@ adevărată e **să nu mai hoinărească oriunde**: fie se întorc spre așezare
 de joc, nu de cod: vrei ca un pion fără treabă să se plimbe prin toată valea, sau să rămână pe lângă
 casă? Costul: mic acum (o ancoră în `alegeTinta`), mai mare după ce apar clădirile care ar putea-o
 defini singure.
+
+---
+
+## 9. Stabilitatea — regula se citește de pe ecran, sau doar din text?
+
+**Ce te uiți.** Viewerul, tasta **S**. Overlay-ul desenează DOAR ce e acționabil: contur galben =
+*ultima celulă* (lasă rocă aici sau pune stâlp), contur roșu = *cade*. Ce e sigur rămâne
+nedesenat, deliberat. Portocaliu = ce s-ar prăbuși dacă s-ar săpa toate desemnările vii. Rândul de
+sus arată cifrele. Desemnează o pivniță de 7×7 și uită-te **înainte** să sape cineva.
+
+**Cum arată bine.** Portocaliul arată voxelul din centrul tavanului încă de la desemnare — adică
+jocul te-a avertizat înainte, nu la săpătura 46 din 49, a unui pion pe care nu-l urmăreai. Când
+lărgești o cameră, apare galben pe ultimul rând de rocă dinainte să cedeze. **Cum arată rău:**
+ecranul acoperit uniform, sau o prăbușire despre care nu se înțelege ce săpătură a provocat-o.
+
+**De ce nu pot eu.** Corectitudinea o acoperă 18 teste și 21 de mutații: mulțimea care cade,
+cascada, molozul, pionul, previzualizarea. Ce nu pot judeca e dacă **omul înțelege regula uitându-se
+la ecran**, fără s-o citească nicăieri. Ăsta e chiar eșecul reclamat ani întregi la Foxy Voxel:
+regula era corectă și invizibilă, iar jucătorii o trăiau ca arbitrariu.
+
+## 10. Tavanul ferestrei de voxeli diferă între coloane vecine — se vede?
+
+**Ce te uiți.** Sapă sau construiește **în sus**, până aproape de plafonul zonei de voxeli, peste o
+graniță de chunk (una la fiecare 32 m). Un perete înalt care traversează granița.
+
+**Cum arată bine.** Nu se vede nimic. **Cum arată rău:** peretele e tăiat de o linie invizibilă — pe
+o parte a ei poți construi mai sus decât pe cealaltă, cu până la 18 m diferență.
+
+**De ce nu pot eu.** E o judecată vizuală, și se manifestă numai la înălțime, unde încă nu s-a
+construit nimic. Măsurat: `zBaseM` diferă pe **86,8%** dintre perechile de chunkuri vecine, în medie
+**3,67 m**, maxim **18 m**. Jumătatea de jos a problemei e rezolvată în tăietura asta — stabilitatea
+citește fereastra **coloanei**, nu a chunkului, deci ancora e corectă și aceeași cameră nu mai pierde
+voxeli diferiți după cum cade pe o graniță. Tavanul nu e rezolvat: deasupra ferestrei chiar nu există
+voxel și `setVoxel` refuză pe drept — dar refuzul cade pe cote diferite în coloane vecine. N-am
+reparat fiindcă reparația e o decizie de arhitectură (fereastră globală vs. per coloană), nu un bug.
