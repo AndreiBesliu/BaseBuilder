@@ -14,7 +14,7 @@ import { applyCommand } from '../src/sim/commands.ts'
 import { createWorld } from '../src/sim/world.ts'
 import type { World } from '../src/sim/state.ts'
 import { cellOf } from '../src/sim/drumuri.ts'
-import { cellKey } from '../src/sim/path.ts'
+import { cellKey, decodeCell } from '../src/sim/path.ts'
 import { isSolid, Material } from '../src/sim/terrain/chunk.ts'
 import { bazaVoxeli, groundLevelM, materialAt, promoteWithApron, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 import { cadeDaca, cotaDeAsezare, esteAsezat, Sol, solLa, StareSapat, stareSapat, suportDacaSap, suportLa } from '../src/sim/stabilitate.ts'
@@ -236,6 +236,18 @@ test('un pion ramas fara podea CADE pe ea, si nu ajunge niciodata ingropat', () 
   void cazuti
   assert.ok(solLa(w.terrain, px, py, zPodea) === Sol.AER, `podeaua pionului trebuia sa cada; e ${solLa(w.terrain, px, py, zPodea)}`)
 
+  // IMEDIAT, in tickul prabusirii, fara niciun tick de simulare. Masurat,
+  // pionul coboara DOUA niveluri. Asertiunea nu are voie sa vina dupa `ruleaza`:
+  // cu plafonul de PAS refolosit ca plafon de CADERE, `dezgroapa` il coboara
+  // oricum, dar cate un metru pe tick — deci dupa 60 de tickuri e tot jos, si
+  // testul trece fara sa probeze nimic. Mutatia a aratat-o: „pionul cade cu un
+  // singur nivel" nu inrosea nimic.
+  assert.ok(
+    w.agents.z[0]! <= zInainte - 2,
+    `pionul trebuia sa cada doua niveluri in tickul prabusirii, e la ${w.agents.z[0]} fata de ${zInainte}`,
+  )
+  assert.ok(isWalkable(w.terrain, px, py, w.agents.z[0]!, R), 'si sa aterizeze pe o celula pe care se poate sta')
+
   const t = ruleaza(w, 60)
   assert.equal(w.agents.alive[0], 1, 'pionul trebuie sa ramana viu')
   assert.ok(w.agents.z[0]! < zInainte, `pionul trebuia sa CADA, a ramas la ${w.agents.z[0]}`)
@@ -305,6 +317,15 @@ test('prabusirea nu lasa rezervari pe tinte moarte', () => {
     applyCommand(w, { kind: 'desemneaza', wx: wx + dx, wy: wy + dy, z: z + 1 }, R)
   }
   sapaCavitate(w, wx, wy, z, 9)
+
+  // Zero desemnari vii. Fara asertiunea asta testul nu probeaza anularea:
+  // lumea n-are colonisti, deci nicio rezervare nu exista, si `verificaRezervari`
+  // trece la fel de verde daca desemnarile raman agatate de voxeli disparuti.
+  // Mutatia a aratat-o — „desemnarea nu se anuleaza" nu inrosea nimic.
+  let vii = 0
+  for (let i = 0; i < w.desemnari.count; i++) if (w.desemnari.alive[i] === 1) vii++
+  assert.equal(vii, 0, `${vii} desemnari au ramas vii pe voxeli care nu mai exista`)
+
   const v = verificaRezervari(w.rezervari, w.agents, existaTinta(w))
   assert.ok(v.ok, `rezervari invalide dupa prabusire: ${JSON.stringify(v)}`)
   ruleaza(w, 200, R, (ww) => {
@@ -328,6 +349,29 @@ test('ce cade coboara pana la prima podea, nu cu un singur nivel', () => {
   const jos = cotaDeAsezare(w.terrain, wx + 2, wy + 2, z + 2)
   assert.equal(jos, z, `ce cade de la ${z + 2} trebuie sa ajunga la ${z}, a ajuns la ${jos}`)
   assert.ok(esteAsezat(w.terrain, wx + 2, wy + 2, jos) === false || true)
+})
+
+test('cascada: ce cade trage dupa sine si nivelul de DEASUPRA lui', () => {
+  // `celuleAtinse` acopera doar z si z+1, deci un voxel de la z+2 nu e NICIODATA
+  // in multimea initiala de verificat. Singurul drum pana la el e re-verificarea
+  // vecinatatii dupa ce cade ceva de la z+1 — adica exact linia pe care o probeaza
+  // mutatia „fara cascada".
+  //
+  // Pragul s-a cautat, nu s-a ghicit: masurat, 9x9 da 9 voxeli pe UN singur nivel,
+  // 13x13 da 49 la z+1 si 1 la z+2, 15x15 da 81 si 9. Deci 13 e cea mai ieftina
+  // latime care chiar cere cascada.
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  const z = g - 3
+  const celule: number[] = []
+  for (let dx = 0; dx < 13; dx++) for (let dy = 0; dy < 13; dy++) celule.push(cellKey(wx + dx, wy + dy, z))
+  const cad = cadeDaca(w.terrain, R, celule)
+  const peNivel = new Map<number, number>()
+  for (const k of cad) {
+    const c = decodeCell(k)
+    peNivel.set(c.z, (peNivel.get(c.z) ?? 0) + 1)
+  }
+  assert.equal(peNivel.get(z + 1), 49, `la z+1 trebuiau 49 de voxeli, sunt ${peNivel.get(z + 1)}`)
+  assert.equal(peNivel.get(z + 2), 1, `la z+2 trebuia 1 voxel — al doilea nivel se vede doar prin cascada; sunt ${peNivel.get(z + 2)}`)
 })
 
 test('celuleAtinse acopera DOUA cote: z si z+1', async () => {
@@ -444,6 +488,24 @@ test('starea are VERB: SIGUR, ULTIMA CELULA, CADE', () => {
     }
   }
   assert.equal(stareSapat(w.terrain, R, wx + 3, wy + 3, z), StareSapat.CADE, 'ultima celula a unei pivnite 7x7 trebuie sa spuna CADE')
+
+  // Si un stalp si mai izolat — centrul unei pivnite de 9x9, la 5 pasi de perete
+  // — tot CADE. Nu e redundant: formula e max(0, suportMax − d), iar 5 pasi e
+  // primul caz in care scaderea ar da NEGATIV. Un −1 nu e nici 0, nici 1, deci
+  // `stareSapat` ar cadea pe ramura din urma si ar raspunde SIGUR exact acolo
+  // unde e cel mai periculos. Plafonul din BFS si `max` se acopera unul pe altul,
+  // deci asta e garantia pe care o pierzi doar daca dispar amandoua.
+  {
+    const s9 = sitPlat(12345, 9)
+    const z9 = s9.g - 3
+    for (let dx = 0; dx < 9; dx++) {
+      for (let dy = 0; dy < 9; dy++) {
+        if (dx === 4 && dy === 4) continue
+        assert.ok(applyCommand(s9.w, { kind: 'dig', wx: s9.wx + dx, wy: s9.wy + dy, z: z9 }, R).ok)
+      }
+    }
+    assert.equal(stareSapat(s9.w.terrain, R, s9.wx + 4, s9.wy + 4, z9), StareSapat.CADE, 'stalpul din 9x9 e la 5 pasi de perete: tot CADE, nu SIGUR')
+  }
 
   // Si chiar cade, daca o sapi.
   const inainte = lastJobReport().voxeliPrabusiti

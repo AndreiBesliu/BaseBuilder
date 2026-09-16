@@ -9,10 +9,24 @@
  * „§" si „—", iar un prefix care le include depinde de codificarea cu care
  * `node --test` scrie in pipe. Se taie la ultimul cuvant sigur.
  *
- * Doua garantii de aici au ajuns mutatii abia dupa ce probele le-au aratat
- * neprobate: starea ULTIMA_CELULA nu era asertata nicaieri (testul verifica doar
- * cele doua capete, SIGUR si CADE), si ordinea de depunere n-avea fixtura cu mai
- * multe niveluri. Vezi comentariile de la mutatiile respective.
+ * ## Ce a prins prima rulare: 17 din 21
+ *
+ * Fiecare dintre cele patru RATATE era un gol real, nu un tipar prost scris:
+ *
+ *   - **pionul cadea „si asa".** Asertiunea venea dupa 60 de tickuri, iar
+ *     `dezgroapa` il coboara oricum, cate un metru pe tick. Mutata INAINTE de
+ *     orice tick, masoara ce trebuie: doua niveluri, in tickul prabusirii.
+ *   - **desemnarile nu erau verificate.** Testul se baza pe `verificaRezervari`
+ *     intr-o lume FARA colonisti — deci fara nicio rezervare de invalidat. Acum
+ *     numara desemnarile vii.
+ *   - **cascada n-avea fixtura.** `celuleAtinse` acopera z si z+1, deci un voxel
+ *     de la z+2 nu e niciodata in multimea initiala; la 9x9 nu apare niciunul.
+ *     Masurat: 13x13 e cea mai ieftina latime care chiar produce al doilea nivel.
+ *   - **plafonul din BFS n-avea umbra.** Vezi comentariul de la mutatia lui: el si
+ *     `max(0, ...)` sunt aceeasi garantie de doua ori. Se probeaza perechea.
+ *
+ * Si o a cincea, gasita scriind probele: starea ULTIMA_CELULA nu era asertata
+ * nicaieri — testul verifica doar capetele, SIGUR si CADE.
  */
 
 export const MUTATII = [
@@ -43,8 +57,8 @@ export const MUTATII = [
   {
     n: 'suportul nu scade pe pas lateral (fara −1)',
     f: 'src/sim/stabilitate.ts',
-    a: '      if (esteAsezat(t, nx, ny, z, cazute)) return rules.suportMax - (d + 1)',
-    b: '      if (esteAsezat(t, nx, ny, z, cazute)) return rules.suportMax - d',
+    a: '      if (esteAsezat(t, nx, ny, z, cazute)) return Math.max(0, rules.suportMax - (d + 1))',
+    b: '      if (esteAsezat(t, nx, ny, z, cazute)) return Math.max(0, rules.suportMax - d)',
     t: 'tests/stabilitate.test.ts', e: 'GRANITA: 6 lat TINE, 7 CADE',
   },
   {
@@ -61,12 +75,23 @@ export const MUTATII = [
     b: '  if (esteAsezat(t, wx, wy, z, cazute) && false) return rules.suportMax',
     t: 'tests/stabilitate.test.ts', e: 'suportul scade cu exact 1 pe pas lateral',
   },
+  // Plafonul din BFS si `max(0, ...)` sunt aceeasi garantie scrisa de doua ori, si
+  // se acopera unul pe altul: scos oricare SINGUR, raspunsul nu se schimba cu
+  // niciun bit, si prima versiune a probei a iesit RATATA tocmai de asta. Garantia
+  // exista insa, si e serioasa — fara amandoua, un tavan la 5 pasi da −1, care nu
+  // e nici 0 nici 1, deci `stareSapat` raspunde SIGUR unde e cel mai periculos.
+  // Se probeaza cu DOUA editari, prin `e2`.
   {
-    n: 'BFS-ul nu se opreste la suportMax pasi',
+    n: 'suportul poate deveni NEGATIV (fara plafon si fara max)',
     f: 'src/sim/stabilitate.ts',
     a: '    if (d >= rules.suportMax) continue',
     b: '    if (d >= rules.suportMax * 4) continue',
-    t: 'tests/stabilitate.test.ts', e: 'suportul scade cu exact 1 pe pas lateral',
+    e2: [{
+      f: 'src/sim/stabilitate.ts',
+      a: '      if (esteAsezat(t, nx, ny, z, cazute)) return Math.max(0, rules.suportMax - (d + 1))',
+      b: '      if (esteAsezat(t, nx, ny, z, cazute)) return rules.suportMax - (d + 1)',
+    }],
+    t: 'tests/stabilitate.test.ts', e: 'starea are VERB',
   },
 
   // --- multimea atinsa ---
@@ -89,7 +114,7 @@ export const MUTATII = [
     f: 'src/sim/stabilitate.ts',
     a: '    // Ce cade poate lua cu el ce se sprijinea pe el: se re-verifica vecinatatea.\n    celuleAtinse(rules, c.wx, c.wy, c.z, deVerificat)',
     b: '    // Ce cade poate lua cu el ce se sprijinea pe el: se re-verifica vecinatatea.',
-    t: 'tests/stabilitate.test.ts', e: 'GRANITA: 6 lat TINE, 7 CADE',
+    t: 'tests/stabilitate.test.ts', e: 'cascada: ce cade trage dupa sine',
   },
   {
     n: 'celulele sapate nu intra in multimea „cazute"',

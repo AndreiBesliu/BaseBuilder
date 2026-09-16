@@ -143,7 +143,13 @@ export function suportLa(t: Terrain, rules: Rules, wx: number, wy: number, z: nu
       if (vazute.has(cheie)) continue
       vazute.add(cheie)
       // Primul asezat gasit e la distanta minima: BFS pe muchii de cost 1.
-      if (esteAsezat(t, nx, ny, z, cazute)) return rules.suportMax - (d + 1)
+      //
+      // `max(0, ...)` nu e de prisos, desi plafonul de mai sus pare sa-l faca
+      // imposibil de atins: cele doua sunt aceeasi garantie scrisa de doua ori,
+      // si exact UNA dintre ele tine raspunsul pozitiv la un moment dat. Fara
+      // niciuna, un tavan la 5 pasi da −1 — care nu e nici 0, nici 1, deci
+      // `stareSapat` raspunde SIGUR exact acolo unde e cel mai periculos.
+      if (esteAsezat(t, nx, ny, z, cazute)) return Math.max(0, rules.suportMax - (d + 1))
       coadaX.push(nx)
       coadaY.push(ny)
       coadaD.push(d + 1)
