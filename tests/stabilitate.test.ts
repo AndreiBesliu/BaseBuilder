@@ -206,54 +206,63 @@ test('un pion ramas fara podea CADE pe ea, si nu ajunge niciodata ingropat', () 
   // Cazul real e invers fata de cum il scria v1: podeaua camerei de SUS e tavanul
   // camerei de jos, deci pionul care ramane fara podea e cel de deasupra.
   //
-  // Si `dezgroapa` nu-l acopera: cauta doar ±`maxStepM`, care e 1. Panoul a
-  // masurat ca la o cadere de 2+ pionul ramane in aer PE VECI, iar `ingropati` —
-  // asertat 0 in acceptanta — nu mai ajunge niciodata la zero.
-  // Doua camere suprapuse, cu o podea de un metru intre ele. Cea de JOS e lata
-  // de 9, deci tavanul ei — adica PODEAUA celei de sus — se prabuseste in
-  // centru. Cea de sus e lata de 5, deci tavanul EI nu cade si nu lasa moloz
-  // peste pion.
+  // Si `dezgroapa` nu-l acopera: cauta doar ±`maxStepM`, care e 1. La o cadere de
+  // 2+ pionul ar ramane in aer PE VECI, iar `ingropati` — asertat 0 in acceptanta
+  // — n-ar mai ajunge niciodata la zero.
+  //
+  // ## Fixtura a fost refacuta o data, si mutatia a cerut-o
+  //
+  // Prima versiune sapa camera de jos pe DOUA niveluri, deci tavanul ei cadea in
+  // doua evenimente separate, cate un metru fiecare. Caderea de doi metri iesea
+  // din doua caderi de un metru — si mutatia „pionul cade cu un singur nivel"
+  // ramanea verde, fiindca fiecare eveniment chiar ERA de un nivel. Acelasi tipar
+  // ca la `dezgroapa`, cu alta fata: repetarea ascunde geometria gresita.
+  //
+  // Aici e UN singur eveniment: un gol de trei niveluri sapat la latime SIGURA
+  // (5), apoi doar nivelul lui de sus largit la 7. Cade exact un voxel — podeaua
+  // pionului — iar pionul trebuie sa parcurga trei metri deodata.
   const { w, wx, wy, g } = sitPlat(4242, 11)
-  const zJos = g - 8
-  const zPodea = zJos + 2
-  const zSus = zPodea + 1
+  const px = wx + 5
+  const py = wy + 5
 
-  // Intai camera de sus, 5x5 centrata, DOUA niveluri (un pion are nevoie de
-  // gabarit: intr-o punga de un nivel nici nu se poate naste).
-  sapaCavitate(w, wx + 2, wy + 2, zSus + 1, 5)
-  sapaCavitate(w, wx + 2, wy + 2, zSus, 5)
-
-  const px = wx + 4
-  const py = wy + 4
-  assert.ok(isWalkable(w.terrain, px, py, zSus, R), 'fixtura: centrul camerei de sus trebuie sa fie calcabil')
-  const out = applyCommand(w, { kind: 'spawnAgent', x: px * 1000 + 500, y: py * 1000 + 500, z: zSus, faction: 0 }, R)
+  // Camera de sus: 5 lat, DOUA niveluri. Un pion are nevoie de gabarit — intr-o
+  // punga de un nivel nici nu se poate naste.
+  sapaCavitate(w, wx + 3, wy + 3, g - 4, 5)
+  sapaCavitate(w, wx + 3, wy + 3, g - 5, 5)
+  assert.ok(isWalkable(w.terrain, px, py, g - 5, R), 'fixtura: centrul camerei de sus trebuie sa fie calcabil')
+  const out = applyCommand(w, { kind: 'spawnAgent', x: px * 1000 + 500, y: py * 1000 + 500, z: g - 5, faction: 0 }, R)
   assert.ok(out.ok, `fixtura: pionul n-a putut fi asezat: ${JSON.stringify(out)}`)
   const zInainte = w.agents.z[0]!
 
-  // Apoi camera de JOS, 9x9: tavanul ei e podeaua pionului.
-  sapaCavitate(w, wx, wy, zJos + 1, 9)
-  const cazuti = sapaCavitate(w, wx, wy, zJos, 9)
-  void cazuti
-  assert.ok(solLa(w.terrain, px, py, zPodea) === Sol.AER, `podeaua pionului trebuia sa cada; e ${solLa(w.terrain, px, py, zPodea)}`)
+  // Golul de dedesubt: TREI niveluri, dar 5 lat — latime sigura, nu cade nimic.
+  for (const z of [g - 9, g - 8, g - 7]) {
+    assert.equal(sapaCavitate(w, wx + 3, wy + 3, z, 5), 0, `golul de la ${z} n-avea voie sa doboare nimic`)
+  }
+  assert.equal(w.agents.z[0], zInainte, 'fixtura: pana aici pionul nu s-a clintit')
 
-  // IMEDIAT, in tickul prabusirii, fara niciun tick de simulare. Masurat,
-  // pionul coboara DOUA niveluri. Asertiunea nu are voie sa vina dupa `ruleaza`:
-  // cu plafonul de PAS refolosit ca plafon de CADERE, `dezgroapa` il coboara
-  // oricum, dar cate un metru pe tick — deci dupa 60 de tickuri e tot jos, si
-  // testul trece fara sa probeze nimic. Mutatia a aratat-o: „pionul cade cu un
-  // singur nivel" nu inrosea nimic.
-  assert.ok(
-    w.agents.z[0]! <= zInainte - 2,
-    `pionul trebuia sa cada doua niveluri in tickul prabusirii, e la ${w.agents.z[0]} fata de ${zInainte}`,
-  )
+  // Si abia acum se largeste la 7 DOAR nivelul lui de sus. Tavanul acelui nivel e
+  // podeaua pionului. Sapatul se cheama direct, nu prin `sapaCavitate`: centrul
+  // inelului e deja aer, deci refuzurile de acolo sunt asteptate.
+  const pioniInainte = lastJobReport().pioniCazuti
+  const cazutiInainte = lastJobReport().voxeliPrabusiti
+  for (let dx = 0; dx < 7; dx++) {
+    for (let dy = 0; dy < 7; dy++) applyCommand(w, { kind: 'dig', wx: wx + 2 + dx, wy: wy + 2 + dy, z: g - 7 }, R)
+  }
+  const cazuti = lastJobReport().voxeliPrabusiti - cazutiInainte
+  assert.equal(cazuti, 1, `trebuia sa cada exact podeaua pionului, au cazut ${cazuti}`)
+  assert.equal(solLa(w.terrain, px, py, g - 6), Sol.AER, 'si anume celula de sub pion')
+
+  // IMEDIAT, in tickul prabusirii, fara niciun tick de simulare — si TREI metri
+  // dintr-o data.
+  assert.equal(lastJobReport().pioniCazuti - pioniInainte, 1, 'pionul trebuie numarat cazut O SINGURA data')
+  assert.equal(w.agents.z[0], zInainte - 3, `pionul trebuia sa cada trei metri deodata, e la ${w.agents.z[0]} fata de ${zInainte}`)
   assert.ok(isWalkable(w.terrain, px, py, w.agents.z[0]!, R), 'si sa aterizeze pe o celula pe care se poate sta')
 
   const t = ruleaza(w, 60)
   assert.equal(w.agents.alive[0], 1, 'pionul trebuie sa ramana viu')
-  assert.ok(w.agents.z[0]! < zInainte, `pionul trebuia sa CADA, a ramas la ${w.agents.z[0]}`)
   assert.ok(
     isWalkable(w.terrain, cellOf(w.agents.x[0]!), cellOf(w.agents.y[0]!), w.agents.z[0]!, R),
-    'si sa ajunga pe o celula pe care se poate sta',
+    'si sa ramana pe o celula pe care se poate sta',
   )
   assert.equal(t.refuzuriAgenti >= 0, true)
   void prabuseste
