@@ -31,15 +31,8 @@ export const MUTATII = [
   {
     n: '`seSapaLa` nu se uita la fel: orice desemnare blocheaza locul de lucru',
     f: 'src/sim/desemnari.ts',
-    a: '  return slot !== undefined && d.alive[slot] === 1 && d.kind[slot] === Desemnare.SAPA',
-    b: '  return slot !== undefined && d.alive[slot] === 1',
-    t: 'tests/constructie.test.ts', e: 'podeaua unei desemnari de CONSTRUIT',
-  },
-  {
-    n: '`seSapaLa` ignora `alive`: o desemnare moarta blocheaza in continuare',
-    f: 'src/sim/desemnari.ts',
-    a: '  return slot !== undefined && d.alive[slot] === 1 && d.kind[slot] === Desemnare.SAPA',
-    b: '  return slot !== undefined && d.kind[slot] === Desemnare.SAPA',
+    a: '  return slot !== undefined && d.kind[slot] === Desemnare.SAPA',
+    b: '  return slot !== undefined',
     t: 'tests/constructie.test.ts', e: 'podeaua unei desemnari de CONSTRUIT',
   },
 ]

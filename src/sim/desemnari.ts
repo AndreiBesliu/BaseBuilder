@@ -160,10 +160,15 @@ export function adaugaDesemnare(
  * intreaba asta ca sa nu puna un pion sa stea pe o podea pe care altcineva
  * urmeaza s-o sape; pentru o desemnare de CONSTRUIT sensul e invers, podeaua
  * ramane si chiar se intareste.
+ *
+ * Nu verifica `alive`, si sora ei `desemnareLaCelula` nu o face nici ea: `laCelula`
+ * contine DOAR sloturi vii — `stergeDesemnare` sterge cheia, iar
+ * `reindexeazaDesemnari` sare peste cele moarte. O verificare in plus aici ar arata
+ * ca o garda si n-ar apara nimic; proba ei a iesit RATATA, si asta a fost raspunsul.
  */
 export function seSapaLa(d: DesignationStore, wx: number, wy: number, z: number): boolean {
   const slot = d.laCelula.get(cellKey(wx, wy, z))
-  return slot !== undefined && d.alive[slot] === 1 && d.kind[slot] === Desemnare.SAPA
+  return slot !== undefined && d.kind[slot] === Desemnare.SAPA
 }
 
 /** Sterge o desemnare vie. Rezervarile de pe ea sunt treaba apelantului. */
