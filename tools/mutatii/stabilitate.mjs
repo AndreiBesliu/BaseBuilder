@@ -94,6 +94,27 @@ export const MUTATII = [
     t: 'tests/stabilitate.test.ts', e: 'starea are VERB',
   },
 
+  // --- marginea lumii ---
+  //
+  // Garda din `solLa` era corecta si nu apara nimic: `celuleAtinse` construia cheia
+  // INAINTE s-o intrebe pe ea. Dupa `cellKey`, informatia „era in afara lumii" nu
+  // mai exista, iar cheia decodeaza intr-o celula reala de la capatul opus al
+  // hartii. Doua probe, cate una pe fiecare axa.
+  {
+    n: 'celuleAtinse emite chei cu wx din AFARA lumii (aliaseaza la est)',
+    f: 'src/sim/stabilitate.ts',
+    a: '      if (nx < 0 || nx >= WORLD_CELLS) continue',
+    b: '      if (nx < -99999) continue',
+    t: 'tests/stabilitate.test.ts', e: 'marginea lumii nu ALIASEAZA',
+  },
+  {
+    n: 'celuleAtinse emite chei cu wy din AFARA lumii (aliaseaza pe cota vecina)',
+    f: 'src/sim/stabilitate.ts',
+    a: '        if (ny < 0 || ny >= WORLD_CELLS) continue',
+    b: '        if (ny < -99999) continue',
+    t: 'tests/stabilitate.test.ts', e: 'marginea lumii nu ALIASEAZA',
+  },
+
   // --- multimea atinsa ---
   {
     n: 'celuleAtinse acopera doar cota z, nu si z+1',

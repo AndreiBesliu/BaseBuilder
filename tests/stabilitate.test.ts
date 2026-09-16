@@ -17,7 +17,7 @@ import { cellOf } from '../src/sim/drumuri.ts'
 import { cellKey, decodeCell } from '../src/sim/path.ts'
 import { isSolid, Material } from '../src/sim/terrain/chunk.ts'
 import { bazaVoxeli, groundLevelM, materialAt, promoteWithApron, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
-import { cadeDaca, cotaDeAsezare, esteAsezat, Sol, solLa, StareSapat, stareSapat, suportDacaSap, suportLa } from '../src/sim/stabilitate.ts'
+import { cadeDaca, celuleAtinse, cotaDeAsezare, esteAsezat, Sol, solLa, StareSapat, stareSapat, suportDacaSap, suportLa } from '../src/sim/stabilitate.ts'
 import { existaTinta, lastJobReport, prabuseste, prabusireaPrevizualizata } from '../src/sim/joburi.ts'
 import { verificaRezervari } from '../src/sim/rezervari.ts'
 import { isWalkable } from '../src/sim/regions.ts'
@@ -118,6 +118,48 @@ test('marginea lumii e PERETE, aceeasi conventie ca la regiuni', () => {
 // ---------------------------------------------------------------------------
 // regula — testul literal din PLAN, si GRANITA lui
 // ---------------------------------------------------------------------------
+
+test('marginea lumii nu ALIASEAZA in coltul opus: o sapatura la vest nu atinge estul', () => {
+  // `cellKey` e pozitional pe baza WORLD_CELLS si NU e injectiv in afara lumii:
+  // `cellKey(-1, y, z)` e bit cu bit acelasi numar cu `cellKey(WORLD_CELLS-1, y-1, z)`.
+  // Fara garda din `celuleAtinse`, discul de la marginea de vest emite chei care
+  // DECODEAZA in celule reale de la est, iar `cadeDaca` le evalueaza si le poate
+  // prabusi. Masurat inainte de garda: 18 din 50 de chei gresite, o roca stearsa
+  // la 16 km distanta, si hash-ul lumii mutat (48d4c8fa -> 3dae6bd4).
+  //
+  // Testul de mai sus, „marginea lumii e PERETE", nu prinde asta si nu putea:
+  // `solLa` era corect. Problema era ca nimeni nu-l intreba — cheia se construia
+  // inainte, iar dupa `cellKey` informatia „era in afara lumii" nu mai exista.
+  const Y = 624
+  const Z = 25
+
+  // Nicio cheie din afara lumii, in niciunul dintre cele patru colturi.
+  for (const [wx, wy] of [[0, Y], [WORLD_CELLS - 1, Y], [Y, 0], [Y, WORLD_CELLS - 1]] as const) {
+    const out: number[] = []
+    celuleAtinse(R, wx, wy, Z, out)
+    assert.ok(out.length > 0, `niciun disc la (${wx},${wy})`)
+    for (const cheie of out) {
+      const c = decodeCell(cheie)
+      assert.ok(
+        c.wx >= 0 && c.wx < WORLD_CELLS && c.wy >= 0 && c.wy < WORLD_CELLS,
+        `cheie in afara lumii pornind de la (${wx},${wy}): ${JSON.stringify(c)}`,
+      )
+      assert.ok(
+        Math.abs(c.wx - wx) <= R.suportMax && Math.abs(c.wy - wy) <= R.suportMax,
+        `cheie la distanta imposibila de (${wx},${wy}): ${JSON.stringify(c)}`,
+      )
+    }
+  }
+
+  // Si efectul real: un bloc zidit la EST supravietuieste unei sapaturi la VEST.
+  const w = createWorld(12345)
+  assert.ok(applyCommand(w, { kind: 'fill', wx: WORLD_CELLS - 1, wy: Y - 1, z: Z, material: Material.ROCA }, R).ok)
+  const inainte = lastJobReport().voxeliPrabusiti
+  assert.ok(applyCommand(w, { kind: 'dig', wx: 0, wy: Y, z: Z }, R).ok)
+  assert.equal(lastJobReport().voxeliPrabusiti - inainte, 0, 'o sapatura la vest n-are voie sa prabuseasca nimic la est')
+  const m = materialAt(w.terrain, WORLD_CELLS - 1, Y - 1, Z)
+  assert.ok(m.ok && m.value === Material.ROCA, `blocul de la est a fost sters de o sapatura de la 16 km: ${m.ok ? m.value : 'refuz'}`)
+})
 
 test('ACCEPTANTA (PLAN §0.5): pivnita 7x7 se prabuseste, 5x5 nu', () => {
   for (const [latura, asteptat] of [[5, 0], [7, 1]] as const) {
@@ -383,20 +425,16 @@ test('cascada: ce cade trage dupa sine si nivelul de DEASUPRA lui', () => {
   assert.equal(peNivel.get(z + 2), 1, `la z+2 trebuia 1 voxel — al doilea nivel se vede doar prin cascada; sunt ${peNivel.get(z + 2)}`)
 })
 
-test('celuleAtinse acopera DOUA cote: z si z+1', async () => {
+test('celuleAtinse acopera DOUA cote: z si z+1', () => {
   // v1 avea „discul de la z plus UN voxel deasupra". Panoul a masurat ca rateaza
   // exact voxelul care cade: 13 celule se schimba la z+1 si NOUA ajung la 0,
   // multimea din v1 prinde una.
-  const { celuleAtinse } = await import('../src/sim/stabilitate.ts')
   const out: number[] = []
   celuleAtinse(R, 100, 100, 50, out)
-  const cote = new Set(out.map((k) => {
-    const c = cellKey
-    void c
-    return k
-  }))
-  void cote
   assert.equal(out.length, 50, `${out.length} celule, asteptat 50 (doua discuri de raza 3)`)
+  // Si toate sunt DISTINCTE: doua discuri suprapuse ar da tot 50 de intrari, dar
+  // ar acoperi mai putine celule.
+  assert.equal(new Set(out).size, 50, 'cele 50 de chei trebuie sa fie distincte')
   const laZ = out.filter((k) => k === cellKey(100, 100, 50)).length
   const laZ1 = out.filter((k) => k === cellKey(100, 100, 51)).length
   assert.equal(laZ, 1, 'celula editata e in multime')

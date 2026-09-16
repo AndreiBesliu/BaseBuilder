@@ -171,13 +171,34 @@ export function suportLa(t: Terrain, rules: Rules, wx: number, wy: number, z: nu
  * celule se schimba la z+1 si NOUA ajung la suport 0; multimea aia prinde una.
  * Restul ar fi ramas in picioare in lumea continua si ar fi cazut in cea
  * incarcata — M5 rosu, dintr-o cauza pe care niciun test de unitate n-o vede.
+ *
+ * ## Garda de margine se pune AICI, si nicaieri mai jos
+ *
+ * `cellKey` e pozitional pe baza `WORLD_CELLS` si NU e injectiv in afara lumii:
+ * `cellKey(-1, y, z)` e bit cu bit acelasi numar cu `cellKey(WORLD_CELLS - 1,
+ * y - 1, z)`. Fara garda, discul de la marginea de vest emite chei care
+ * DECODEAZA in celule perfect valide de la marginea de est, iar `cadeDaca` le
+ * evalueaza si le poate prabusi. Masurat: o sapatura la (0, 624, 25) sterge o
+ * roca de la (16383, 623, 25) — 16 km — si muta hash-ul lumii (48d4c8fa →
+ * 3dae6bd4). 18 din cele 50 de chei erau gresite.
+ *
+ * Garda din `solLa` era corecta si nu ajuta cu nimic: nimeni n-o intreba.
+ * Dupa `cellKey`, informatia „era in afara lumii" nu mai exista in cheie — deci
+ * singurul loc in care se poate taia e inainte de ea. BFS-ul din `suportLa` e
+ * deja in siguranta: intreaba `solLa(nx, ny, z)` INAINTE sa construiasca cheia.
  */
 export function celuleAtinse(rules: Rules, wx: number, wy: number, z: number, out: number[]): void {
   const raza = rules.suportMax - 1
   for (const dz of [0, 1]) {
     for (let dx = -raza; dx <= raza; dx++) {
+      const nx = wx + dx
+      if (nx < 0 || nx >= WORLD_CELLS) continue
       const rest = raza - Math.abs(dx)
-      for (let dy = -rest; dy <= rest; dy++) out.push(cellKey(wx + dx, wy + dy, z + dz))
+      for (let dy = -rest; dy <= rest; dy++) {
+        const ny = wy + dy
+        if (ny < 0 || ny >= WORLD_CELLS) continue
+        out.push(cellKey(nx, ny, z + dz))
+      }
     }
   }
 }
