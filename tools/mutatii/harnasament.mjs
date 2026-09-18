@@ -71,17 +71,47 @@ export function aplica(f, a, b) {
   return readFileSync(cale, 'utf8') !== orig
 }
 
-/** Restaureaza fisierele prin git si spune daca au ramas curate. */
+/**
+ * Restaureaza fisierele prin git si spune daca au ramas curate.
+ *
+ * ## De ce se verifica cu `git status`, nu cu `git diff`, si de ce se reincearca
+ *
+ * De DOUA ori intr-o sesiune, suita a raportat `restaurat: da` pe toate probele
+ * si a lasat totusi o mutatie aplicata in arbore — o data in `zone.ts`, o data in
+ * `joburi.ts`. A doua oara s-a si reprodus, si tot intermitent.
+ *
+ * Mecanismul: `git commit` porneste `git gc --auto` in FUNDAL, iar aia tine
+ * lock-ul pe repo o vreme dupa ce comanda mea a iesit. Un `git checkout --` care
+ * cade peste el poate sa nu faca nimic. Verificarea de dupa nu prindea asta,
+ * fiindca `git diff --quiet -- <fisier>` compara arborele de lucru cu INDEXUL, nu
+ * cu HEAD — iar cursa putea lasa indexul intr-o stare in care diferenta nu se
+ * vede. `git status --porcelain` compara cu HEAD si include si ce e staged.
+ *
+ * Si se REINCEARCA o data: daca a fost o cursa, a doua incercare o castiga.
+ *
+ * Un instrument care se raporteaza singur ca reusit cand n-a reusit e mai rau
+ * decat niciun instrument — vezi si nota despre oracolul propriu din antetul
+ * fisierului. Asta e a doua fata a aceleiasi lectii.
+ */
 function restaureaza(fisiere) {
-  for (const f of fisiere) execSync(`git checkout -- ${f}`, { cwd: REPO, stdio: 'pipe' })
-  for (const f of fisiere) {
-    try {
-      execSync(`git diff --quiet -- ${f}`, { cwd: REPO, stdio: 'pipe' })
-    } catch {
+  for (const incercare of [1, 2]) {
+    for (const f of fisiere) {
+      try {
+        execSync(`git checkout -- ${f}`, { cwd: REPO, stdio: 'pipe' })
+      } catch {
+        // Se reincearca la pasul urmator; daca si ala pica, se raporteaza NU.
+      }
+    }
+    const murdare = fisiere.filter(
+      (f) => execSync(`git status --porcelain -- ${f}`, { cwd: REPO, encoding: 'utf8' }).trim() !== '',
+    )
+    if (murdare.length === 0) return true
+    if (incercare === 2) {
+      console.log(`  !! RESTAURARE ESUATA dupa doua incercari: ${murdare.join(', ')}`)
       return false
     }
   }
-  return true
+  return false
 }
 
 /**
