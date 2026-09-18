@@ -121,14 +121,14 @@ export const MUTATII = [
   {
     n: 'suportDacaZidesc crede ca orice celula noua e ASEZATA',
     f: 'src/sim/stabilitate.ts',
-    a: '  if (sub === Sol.SOLID || sub === Sol.ANCORA) return rules.suportMax\n  return caveazaSpreAsezat(t, rules, wx, wy, z, null)',
+    a: '  if (sub === Sol.SOLID || sub === Sol.ANCORA) return rules.suportMax\n  return caveazaSpreAsezat(t, rules, wx, wy, z, null, zidite)',
     b: '  void sub\n  return rules.suportMax',
     t: 'tests/constructie.test.ts', e: 'nu se mai poate zidi in aer',
   },
   {
     n: 'suportDacaZidesc nu cauta lateral (doar asezat sau nimic)',
     f: 'src/sim/stabilitate.ts',
-    a: '  return caveazaSpreAsezat(t, rules, wx, wy, z, null)',
+    a: '  return caveazaSpreAsezat(t, rules, wx, wy, z, null, zidite)',
     b: '  return 0',
     t: 'tests/constructie.test.ts', e: 'consola se intinde exact 3 celule',
   },
