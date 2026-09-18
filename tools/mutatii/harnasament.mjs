@@ -60,12 +60,21 @@ export function testePicate(fisierDeTest) {
  * Scrie o mutatie. Intoarce `false` daca tiparul nu s-a potrivit — adica un
  * control INVALID, nu o mutatie trecuta.
  */
+/**
+ * Tiparul, adaptat la terminatorul de rand al FISIERULUI.
+ *
+ * Cu `core.autocrlf=true`, orice fisier atins de git are CRLF, iar un tipar scris
+ * cu `\n` nu se mai potriveste. A saptea oara cand asta muscă.
+ */
+function potrivit(continut, tipar) {
+  return continut.includes('\r\n') ? tipar.replace(/\n/g, '\r\n') : tipar
+}
+
 export function aplica(f, a, b) {
   const cale = resolve(REPO, f)
   const orig = readFileSync(cale, 'utf8')
-  const crlf = orig.includes('\r\n')
-  const aa = crlf ? a.replace(/\n/g, '\r\n') : a
-  const bb = crlf ? b.replace(/\n/g, '\r\n') : b
+  const aa = potrivit(orig, a)
+  const bb = potrivit(orig, b)
   if (!orig.includes(aa)) return false
   writeFileSync(cale, orig.replace(aa, bb), 'utf8')
   return readFileSync(cale, 'utf8') !== orig
@@ -93,21 +102,27 @@ export function aplica(f, a, b) {
  * decat niciun instrument — vezi si nota despre oracolul propriu din antetul
  * fisierului. Asta e a doua fata a aceleiasi lectii.
  */
-function restaureaza(fisiere) {
-  for (const incercare of [1, 2]) {
+function restaureaza(editari) {
+  const fisiere = [...new Set(editari.map((e) => e.f))]
+  for (const incercare of [1, 2, 3]) {
     for (const f of fisiere) {
       try {
-        execSync(`git checkout -- ${f}`, { cwd: REPO, stdio: 'pipe' })
+        // `HEAD --`, nu doar `--`: al doilea copiaza din INDEX, iar indexul e
+        // exact ce poate fi stricat de cursa descrisa mai sus.
+        execSync(`git checkout HEAD -- ${f}`, { cwd: REPO, stdio: 'pipe' })
       } catch {
-        // Se reincearca la pasul urmator; daca si ala pica, se raporteaza NU.
+        // Se reincearca; daca si a treia pica, se striga.
       }
     }
-    const murdare = fisiere.filter(
-      (f) => execSync(`git status --porcelain -- ${f}`, { cwd: REPO, encoding: 'utf8' }).trim() !== '',
-    )
-    if (murdare.length === 0) return true
-    if (incercare === 2) {
-      console.log(`  !! RESTAURARE ESUATA dupa doua incercari: ${murdare.join(', ')}`)
+    // VERIFICAREA E PE CONTINUT: fiecare tipar cautat trebuie sa fie iar acolo.
+    // Nu se intreaba git — el e chiar partea care poate minti.
+    const rele = editari.filter((e) => {
+      const continut = readFileSync(resolve(REPO, e.f), 'utf8')
+      return !continut.includes(potrivit(continut, e.a))
+    })
+    if (rele.length === 0) return true
+    if (incercare === 3) {
+      console.log(`  !! RESTAURARE ESUATA dupa trei incercari: ${[...new Set(rele.map((e) => e.f))].join(', ')}`)
       return false
     }
   }
@@ -151,14 +166,14 @@ export function ruleazaSuita(nume, mutatii, baza, filtru) {
       }
     }
     if (!ok) {
-      restaureaza(fisiere)
+      restaureaza(editari)
       continue
     }
 
     const picate = testePicate(m.t)
     for (const p of baza.get(m.t) ?? []) picate.delete(p)
     const picat = [...picate].some((p) => p.startsWith(m.e))
-    const curat = restaureaza(fisiere)
+    const curat = restaureaza(editari)
 
     valide++
     if (picat) prinse++
