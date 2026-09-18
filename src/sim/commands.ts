@@ -15,7 +15,8 @@
 import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import type { World, FactionId } from './state.ts'
-import { CATEGORII, Gand, ITEME, NEVOI, nevoiaInitiala, puneGand, slotOf } from './state.ts'
+import { CATEGORII, Gand, ITEME, NEVOI, nevoiaInitiala, Piesa, puneGand, slotOf } from './state.ts'
+import type { PiesaId } from './state.ts'
 import { cellOf, clearPath } from './drumuri.ts'
 import type { Rules } from './content.ts'
 import { DEFAULT_RULES } from './content.ts'
@@ -39,7 +40,7 @@ export type Command =
   /** Umple un voxel gol. */
   | { readonly kind: 'fill'; readonly wx: number; readonly wy: number; readonly z: number; readonly material: MaterialId }
   /** Cere sa se sape un voxel. Un pion liber va veni sa-l sape. `prioritate` lipsa = implicitul din content. */
-  | { readonly kind: 'desemneaza'; readonly wx: number; readonly wy: number; readonly z: number; readonly prioritate?: number | undefined }
+  | { readonly kind: 'desemneaza'; readonly wx: number; readonly wy: number; readonly z: number; readonly prioritate?: number | undefined; readonly piesa?: number | undefined }
   /** Retrage o desemnare. Cine lucra la ea e intrerupt. */
   | { readonly kind: 'anuleazaDesemnarea'; readonly id: number }
   /** Prioritatea personala a unui pion pe o categorie: 0 = niciodata. */
@@ -69,6 +70,36 @@ export interface LoggedCommand {
  * `agentHeadroomM` si `maxStepM` ca sa stie cate niveluri atinge o editare, iar
  * alea sunt continut, nu constante.
  */
+/**
+ * E libera celula (wx, wy, z) pentru ceva SOLID?
+ *
+ * Un pion ocupa `agentHeadroomM` niveluri, deci un zid la inaltimea capului il face
+ * la fel de ingropat ca unul la picioare; si un morman ingropat e inaccesibil pe
+ * veci, plus un candidat fals la fiecare racire. Alternativa la refuz — sa-i
+ * ingropi — produce un singur semnal, `INACCESIBIL`, si ala MINTE: problema nu e ca
+ * nu exista drum, ci ca pionul e in piatra.
+ *
+ * Aceeasi intrebare o pun `fill` (zideste ACUM) si `desemneaza` cu piesa (zideste
+ * mai tarziu). Scrisa de doua ori, s-ar desincroniza — si prima versiune chiar era
+ * asimetrica: verifica doar celula picioarelor pentru pioni, dar tot headroom-ul
+ * pentru mormane.
+ */
+function celulaLibera(w: World, rules: Rules, wx: number, wy: number, z: number): Outcome<void> {
+  const a = w.agents
+  for (let h = 0; h < rules.agentHeadroomM; h++) {
+    for (let i = 0; i < a.count; i++) {
+      if (a.alive[i] === 0) continue
+      if (a.z[i] !== z - h) continue
+      if (cellOf(a.x[i]!) !== wx || cellOf(a.y[i]!) !== wy) continue
+      return refuse(Reason.CELULA_OCUPATA, { id: a.id[i]!, wx, wy, z: z - h })
+    }
+  }
+  for (let h = 0; h < rules.agentHeadroomM; h++) {
+    const it = itemLaCelula(w.iteme, wx, wy, z - h)
+    if (it !== -1) return refuse(Reason.CELULA_OCUPATA, { item: w.iteme.id[it]!, wx, wy, z: z - h })
+  }
+  return accept()
+}
 export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULES): Outcome<number> {
   switch (cmd.kind) {
     case 'spawnAgent': {
@@ -229,6 +260,8 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
     }
 
     case 'fill': {
+      const liber = celulaLibera(w, rules, cmd.wx, cmd.wy, cmd.z)
+      if (!liber.ok) return liber
       // Nu se zideste peste un om.
       //
       // Alternativa e sa-l ingropi: agentul ramane intr-o celula devenita solida,
@@ -240,21 +273,7 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       // deci un zid la inaltimea capului il face la fel de ingropat. Prima
       // versiune verifica doar `a.z[i] === cmd.z` — asimetric fata de garda pe
       // mormane de dedesubt, care parcurgea corect headroom-ul.
-      const a = w.agents
-      for (let h = 0; h < rules.agentHeadroomM; h++) {
-        for (let i = 0; i < a.count; i++) {
-          if (a.alive[i] === 0) continue
-          if (a.z[i] !== cmd.z - h) continue
-          if (cellOf(a.x[i]!) !== cmd.wx || cellOf(a.y[i]!) !== cmd.wy) continue
-          return refuse(Reason.CELULA_OCUPATA, { id: a.id[i], wx: cmd.wx, wy: cmd.wy, z: cmd.z - h })
-        }
-      }
-      // Nici peste un morman, nici deasupra unuia caruia i-ar lua headroom-ul: un
-      // item in piatra e inaccesibil pe veci si un candidat fals la fiecare racire.
-      for (let h = 0; h < rules.agentHeadroomM; h++) {
-        const it = itemLaCelula(w.iteme, cmd.wx, cmd.wy, cmd.z - h)
-        if (it !== -1) return refuse(Reason.CELULA_OCUPATA, { item: w.iteme.id[it]!, wx: cmd.wx, wy: cmd.wy, z: cmd.z - h })
-      }
+
       // Si regula de stabilitate. Pana aici, `fill` NU trecea prin ea deloc: se
       // putea zidi un bloc in aer curat, cu suport 0, care nu cadea niciodata —
       // deci `suport(c) > 0` era un invariant FALS pe starea salvata. Reprodus de
@@ -295,11 +314,37 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       }
       const mat = materialAt(w.terrain, cmd.wx, cmd.wy, cmd.z)
       if (!mat.ok) return mat
-      if (!isSolid(mat.value)) {
-        return refuse(Reason.LIPSA_MATERIAL, { motiv: 'nu e nimic de sapat', material: mat.value, wx: cmd.wx, wy: cmd.wy, z: cmd.z })
+
+      // De aici incolo, felul desemnarii schimba ce se verifica — si intrebarea e
+      // INVERSA: la sapat trebuie sa fie ceva acolo, la construit trebuie sa nu fie.
+      const piesa = cmd.piesa ?? Piesa.NICIUNA
+      if (piesa === Piesa.NICIUNA) {
+        if (!isSolid(mat.value)) {
+          return refuse(Reason.LIPSA_MATERIAL, { motiv: 'nu e nimic de sapat', material: mat.value, wx: cmd.wx, wy: cmd.wy, z: cmd.z })
+        }
+      } else {
+        if (!Number.isInteger(piesa) || piesa < 1 || piesa >= rules.piese.length) {
+          return refuse(Reason.VALOARE_INVALIDA, { camp: 'piesa', valoare: String(piesa), min: 1, max: rules.piese.length - 1 })
+        }
+        if (isSolid(mat.value)) {
+          return refuse(Reason.CELULA_PLINA, { material: mat.value, wx: cmd.wx, wy: cmd.wy, z: cmd.z })
+        }
+        const liber = celulaLibera(w, rules, cmd.wx, cmd.wy, cmd.z)
+        if (!liber.ok) return liber
+        // SI ATAT. Sprijinul NU se verifica aici, si nu e o scapare: un blueprint
+        // e AER pana se construieste, deci judecat singur aproape orice piesa are
+        // suport 0. Panoul de design a masurat: pe o casa de 177 de celule,
+        // validatorul per-celula ar refuza 145 (82%) la desenare, cand cu adevarat
+        // imposibila e UNA. Raspunsul se da pe MULTIME, cu `constructiaPosibila`,
+        // si se arata prin previzualizare. Aici raman doar proprietatile care nu
+        // depind de ordinea in care se construieste.
       }
+
       // Id-ul se consuma DOAR daca desemnarea intra. Un refuz nu muta `nextId`.
-      const out = adaugaDesemnare(w.desemnari, w.nextId, Desemnare.SAPA, cmd.wx, cmd.wy, cmd.z, prioritate)
+      const fel = piesa === Piesa.NICIUNA ? Desemnare.SAPA : Desemnare.CONSTRUIESTE
+      // `as PiesaId` dupa ce intervalul a fost verificat mai sus: validarea e a
+      // COMENZII, care primeste un numar de la jucator, nu a tipului.
+      const out = adaugaDesemnare(w.desemnari, w.nextId, fel, cmd.wx, cmd.wy, cmd.z, prioritate, piesa as PiesaId)
       if (!out.ok) return out
       const id = w.nextId++
       acoperaDesemnarea(w, rules, cmd.wx, cmd.wy, cmd.z)

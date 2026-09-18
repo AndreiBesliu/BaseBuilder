@@ -22,6 +22,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { Desemnare, seSapaLa, slotDesemnare } from '../src/sim/desemnari.ts'
 import { hashWorld } from '../src/sim/hash.ts'
+import { decode, encode } from '../src/sim/save.ts'
+import { cellOf } from '../src/sim/drumuri.ts'
 import { fill, groundLevelM, materialAt } from '../src/sim/terrain/terrain.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
 import { Reason } from '../src/sim/result.ts'
@@ -31,7 +33,9 @@ import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { CATEGORII, Categorie, FelJob, Piesa } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { applyCommand } from '../src/sim/commands.ts'
-import { desemneaza, laSit, R, ruleaza, solidLaDistanta } from './fixturi.ts'
+import { constructiaPrevizualizata } from '../src/sim/joburi.ts'
+import { lasaItem } from './fixturi.ts'
+import { desemneaza, laSit, R, ruleaza, solid, solidLaDistanta } from './fixturi.ts'
 import { createWorld } from '../src/sim/world.ts'
 import { WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 
@@ -444,4 +448,109 @@ test('o celula deja solida nu e nici construibila, nici imposibila', () => {
   const r = constructiaPosibila(w.terrain, R, [subteran, inAer])
   assert.deepEqual(r.construibile, [inAer].sort((a, b) => a - b))
   assert.deepEqual(r.imposibile, [])
+})
+
+// ---------------------------------------------------------------------------
+// desenarea unui blueprint (pasul 5b)
+// ---------------------------------------------------------------------------
+
+/** Deseneaza o casa intreaga ca desemnari de CONSTRUIT. Intoarce cate au intrat. */
+function deseneaza(w: World, plan: readonly number[]): { acceptate: number; refuzuri: string[] } {
+  let acceptate = 0
+  const refuzuri: string[] = []
+  for (const cheie of plan) {
+    const c = decodeCell(cheie)
+    const out = applyCommand(w, { kind: 'desemneaza', wx: c.wx, wy: c.wy, z: c.z, piesa: Piesa.PERETE }, R)
+    if (out.ok) acceptate++
+    else refuzuri.push(out.reason)
+  }
+  return { acceptate, refuzuri }
+}
+
+test('ACCEPTANTA: casa de 177 de piese se DESENEAZA intreaga, si previzualizarea spune care e imposibila', () => {
+  // Cifra pe care o cerea panoul pentru pasul asta: 176 din 177 marcate
+  // construibile la desen, 1 refuzata — nu 32 legale si 145 refuzate, cum ar fi
+  // iesit cu un validator de sprijin per celula.
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  const plan = casa(wx, wy, g, 9, 3)
+
+  const { acceptate, refuzuri } = deseneaza(w, plan)
+  assert.equal(acceptate, 177, `desenarea trebuia sa accepte TOT planul; refuzuri: ${[...new Set(refuzuri)].join(',')}`)
+
+  const previz = constructiaPrevizualizata(w, R)
+  assert.equal(previz.construibile.length, 176)
+  assert.equal(previz.imposibile.length, 1)
+  const c = decodeCell(previz.imposibile[0]!)
+  assert.deepEqual({ dx: c.wx - wx, dy: c.wy - wy, dz: c.z - g }, { dx: 4, dy: 4, dz: 4 })
+})
+
+test('la DESENARE nu se verifica sprijinul, si asta e deliberat', () => {
+  // O piesa singura, la cinci metri in aer: desenarea o ACCEPTA, iar
+  // previzualizarea o da imposibila. Daca desenarea ar refuza-o, jucatorul n-ar
+  // putea desena nicio casa — a doua piesa se sprijina pe prima, care inca nu
+  // exista.
+  const { w, wx, wy, g } = sitPlat(4242, 9)
+  const out = applyCommand(w, { kind: 'desemneaza', wx, wy, z: g + 5, piesa: Piesa.PERETE }, R)
+  assert.ok(out.ok, `desenarea n-are voie sa se uite la sprijin: ${JSON.stringify(out)}`)
+
+  const previz = constructiaPrevizualizata(w, R)
+  assert.equal(previz.construibile.length, 0, 'si totusi nu e construibila')
+  assert.equal(previz.imposibile.length, 1)
+
+  // Iar `fill` tot o refuza: poarta de la ZIDESTE ramane ultima.
+  const zidit = applyCommand(w, { kind: 'fill', wx, wy, z: g + 5, material: Material.PIATRA_CONSTRUITA }, R)
+  assert.equal(zidit.ok, false)
+  if (!zidit.ok) assert.equal(zidit.reason, Reason.FARA_SPRIJIN)
+})
+
+test('ce SE verifica la desenare: celula plina, piesa necunoscuta, pion, morman', () => {
+  // Proprietatile care NU depind de ordinea de constructie. Fiecare cu refuzul ei,
+  // ca panoul „De ce nu?" sa aiba ce arata.
+  const { w, sit } = laSit(506, 1)
+  const cx = sit.wx + 3
+  const cy = sit.wy
+  const g = solid(w, cx, cy)!
+
+  const plina = applyCommand(w, { kind: 'desemneaza', wx: cx, wy: cy, z: g, piesa: Piesa.PERETE }, R)
+  assert.equal(plina.ok, false)
+  if (!plina.ok) assert.equal(plina.reason, Reason.CELULA_PLINA)
+
+  const necunoscuta = applyCommand(w, { kind: 'desemneaza', wx: cx, wy: cy, z: g + 1, piesa: 99 }, R)
+  assert.equal(necunoscuta.ok, false)
+  if (!necunoscuta.ok) {
+    assert.equal(necunoscuta.reason, Reason.VALOARE_INVALIDA)
+    assert.equal(necunoscuta.params.camp, 'piesa')
+  }
+
+  // Peste un morman: aceeasi garda ca la `fill`, si acum chiar e aceeasi functie.
+  const id = lasaItem(w, 0, 10, cx, cy)
+  const pesteMorman = applyCommand(w, { kind: 'desemneaza', wx: cx, wy: cy, z: g + 1, piesa: Piesa.PERETE }, R)
+  assert.equal(pesteMorman.ok, false)
+  if (!pesteMorman.ok) {
+    assert.equal(pesteMorman.reason, Reason.CELULA_OCUPATA)
+    assert.equal(pesteMorman.params.item, id)
+  }
+
+  // Peste un pion.
+  const px = cellOf(w.agents.x[0]!)
+  const py = cellOf(w.agents.y[0]!)
+  const pestePion = applyCommand(w, { kind: 'desemneaza', wx: px, wy: py, z: w.agents.z[0]!, piesa: Piesa.PERETE }, R)
+  assert.equal(pestePion.ok, false)
+  if (!pestePion.ok) assert.equal(pestePion.reason, Reason.CELULA_OCUPATA)
+})
+
+test('o desemnare de CONSTRUIT poarta piesa, si supravietuieste unui save/load', () => {
+  const { w, wx, wy, g } = sitPlat(777, 9)
+  const out = applyCommand(w, { kind: 'desemneaza', wx, wy, z: g + 1, piesa: Piesa.SCARA }, R)
+  assert.ok(out.ok)
+  const slot = slotDesemnare(w.desemnari, out.ok ? out.value : -1)
+  assert.equal(w.desemnari.kind[slot], Desemnare.CONSTRUIESTE)
+  assert.equal(w.desemnari.piesa[slot], Piesa.SCARA)
+
+  const incarcat = decode(encode(w), R)
+  assert.ok(incarcat.ok, `refuzat: ${JSON.stringify(incarcat)}`)
+  if (!incarcat.ok) return
+  const slot2 = slotDesemnare(incarcat.value.desemnari, out.ok ? out.value : -1)
+  assert.equal(incarcat.value.desemnari.piesa[slot2], Piesa.SCARA)
+  assert.equal(hashWorld(incarcat.value), hashWorld(w))
 })

@@ -96,7 +96,7 @@ import type { RegionStore } from './regions.ts'
 import type { Terrain } from './terrain/terrain.ts'
 import { dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
 import { Material } from './terrain/chunk.ts'
-import { cadeDaca, cotaDeAsezare, multimeaCareCade, Sol, solLa } from './stabilitate.ts'
+import { cadeDaca, constructiaPosibila, cotaDeAsezare, multimeaCareCade, Sol, solLa } from './stabilitate.ts'
 import { cellKey, decodeCell } from './path.ts'
 import { Desemnare, desemnareLaCelula, DetaliuMotiv, seSapaLa, slotDesemnare, stergeDesemnare } from './desemnari.ts'
 import type { DesignationStore } from './desemnari.ts'
@@ -1605,6 +1605,24 @@ export function sapaVoxel(w: World, wx: number, wy: number, z: number, rules: Ru
  * Se cheama din overlay, nu din comanda: e o intrebare despre ce s-ar intampla,
  * nu o schimbare de stare, si costa un BFS marginit per celula atinsa.
  */
+/**
+ * Ce se poate si ce NU se poate construi din desemnarile vii, ACUM.
+ *
+ * Sora lui `prabusireaPrevizualizata`, si exista din acelasi motiv: raspunsul se
+ * da pe MULTIME. La desenare, o piesa judecata singura are aproape mereu suport
+ * 0 — blueprintul e aer pana se construieste — deci un refuz per celula ar
+ * respinge 82% dintr-o casa pe care se poate ridica.
+ */
+export function constructiaPrevizualizata(w: World, rules: Rules): { construibile: number[]; imposibile: number[] } {
+  const d = w.desemnari
+  const celule: number[] = []
+  for (let i = 0; i < d.count; i++) {
+    if (d.alive[i] === 1 && d.kind[i] === Desemnare.CONSTRUIESTE) celule.push(cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!))
+  }
+  if (celule.length === 0) return { construibile: [], imposibile: [] }
+  return constructiaPosibila(w.terrain, rules, celule)
+}
+
 export function prabusireaPrevizualizata(w: World, rules: Rules): number[] {
   const d = w.desemnari
   const celule: number[] = []

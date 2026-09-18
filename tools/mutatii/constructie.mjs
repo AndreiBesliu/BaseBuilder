@@ -169,4 +169,52 @@ export const MUTATII = [
     b: '    void c',
     t: 'tests/constructie.test.ts', e: 'o celula deja solida nu e nici',
   },
+
+  // --- pasul 5b: desenarea ---
+  //
+  // Prima proba e cea care conteaza: ea reintroduce EXACT greseala pe care panoul
+  // de design a masurat-o — un validator de sprijin la desenare, care ar refuza 145
+  // din 177 de piese ale unei case pe care se poate ridica.
+  {
+    n: 'desenarea verifica si SPRIJINUL (K07 in oglinda)',
+    f: 'src/sim/commands.ts',
+    a: '        const liber = celulaLibera(w, rules, cmd.wx, cmd.wy, cmd.z)\n        if (!liber.ok) return liber',
+    b: '        const liber = celulaLibera(w, rules, cmd.wx, cmd.wy, cmd.z)\n        if (!liber.ok) return liber\n        const sprijin = poateSustine(w.terrain, rules, cmd.wx, cmd.wy, cmd.z)\n        if (!sprijin.ok) return sprijin',
+    t: 'tests/constructie.test.ts', e: 'ACCEPTANTA: casa de 177 de piese',
+  },
+  {
+    n: 'desenarea accepta o celula deja PLINA',
+    f: 'src/sim/commands.ts',
+    a: '        if (isSolid(mat.value)) {\n          return refuse(Reason.CELULA_PLINA, { material: mat.value, wx: cmd.wx, wy: cmd.wy, z: cmd.z })\n        }',
+    b: '        void mat',
+    t: 'tests/constructie.test.ts', e: 'ce SE verifica la desenare',
+  },
+  {
+    n: 'desenarea nu verifica ocuparea (se deseneaza peste pion si morman)',
+    f: 'src/sim/commands.ts',
+    a: '        const liber = celulaLibera(w, rules, cmd.wx, cmd.wy, cmd.z)\n        if (!liber.ok) return liber',
+    b: '        void celulaLibera',
+    t: 'tests/constructie.test.ts', e: 'ce SE verifica la desenare',
+  },
+  {
+    n: 'piesa nu se valideaza: orice numar trece',
+    f: 'src/sim/commands.ts',
+    a: '        if (!Number.isInteger(piesa) || piesa < 1 || piesa >= rules.piese.length) {',
+    b: '        if (false) {',
+    t: 'tests/constructie.test.ts', e: 'ce SE verifica la desenare',
+  },
+  {
+    n: 'piesa nu se scrie pe desemnare (blueprintul uita ce era)',
+    f: 'src/sim/desemnari.ts',
+    a: '  d.piesa[slot] = piesa',
+    b: '  d.piesa[slot] = Piesa.NICIUNA',
+    t: 'tests/constructie.test.ts', e: 'o desemnare de CONSTRUIT poarta piesa',
+  },
+  {
+    n: 'previzualizarea de constructie nu filtreaza pe fel',
+    f: 'src/sim/joburi.ts',
+    a: '    if (d.alive[i] === 1 && d.kind[i] === Desemnare.CONSTRUIESTE) celule.push(cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!))',
+    b: '    if (d.alive[i] === 1) celule.push(cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!))',
+    t: 'tests/constructie.test.ts', e: 'la DESENARE nu se verifica sprijinul',
+  },
 ]

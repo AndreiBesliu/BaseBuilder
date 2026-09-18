@@ -13,6 +13,7 @@ import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import { cellKey } from './path.ts'
 import { Piesa } from './state.ts'
+import type { PiesaId } from './state.ts'
 
 /** Felurile de desemnare. Un singur fel azi. */
 export const Desemnare = {
@@ -122,6 +123,7 @@ export function adaugaDesemnare(
   wy: number,
   z: number,
   prioritate: number,
+  piesa: PiesaId = Piesa.NICIUNA,
 ): Outcome<number> {
   const key = cellKey(wx, wy, z)
   const existent = d.laCelula.get(key)
@@ -150,10 +152,11 @@ export function adaugaDesemnare(
   d.reincercaLaTick[slot] = 0
   d.ultimulMotiv[slot] = 0
   d.ultimulMotivDetaliu[slot] = 0
-  // Si piesa. `hashWorld` parcurge `subarray(0, count)`, nu doar sloturile vii,
-  // deci un camp ramas de la o desemnare moarta ar muta hash-ul dintr-un slot
-  // pe care nimeni nu-l mai citeste.
-  d.piesa[slot] = Piesa.NICIUNA
+  // Si piesa. Se scrie EXPLICIT chiar si cand e santinela: `hashWorld` parcurge
+  // `subarray(0, count)`, nu doar sloturile vii, deci un camp ramas de la o
+  // desemnare moarta ar muta hash-ul dintr-un slot pe care nimeni nu-l mai
+  // citeste.
+  d.piesa[slot] = piesa
   d.laCelula.set(key, slot)
   d.laId.set(id, slot)
   d.vii++
