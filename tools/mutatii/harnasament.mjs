@@ -155,8 +155,13 @@ export function ruleazaSuita(nume, mutatii, baza, filtru) {
 
   for (const m of alese) {
     const editari = [{ f: m.f, a: m.a, b: m.b }, ...(m.e2 ?? [])]
-    const fisiere = [...new Set(editari.map((e) => e.f))]
     let ok = true
+    // Se retin doar editarile care CHIAR s-au aplicat: restaurarea se verifica pe
+    // continut, cerand tiparul `a` inapoi, iar un tipar care n-a fost gasit
+    // niciodata n-are cum sa reapara. Fara distinctia asta, un TIPAR LIPSA
+    // producea si un fals „RESTAURARE ESUATA" — instrumentul se acuza singur de
+    // ceva ce nu facuse.
+    const aplicate = []
     for (const e of editari) {
       if (!aplica(e.f, e.a, e.b)) {
         ok = false
@@ -164,16 +169,17 @@ export function ruleazaSuita(nume, mutatii, baza, filtru) {
         invalide.push(m.n)
         break
       }
+      aplicate.push(e)
     }
     if (!ok) {
-      restaureaza(editari)
+      restaureaza(aplicate)
       continue
     }
 
     const picate = testePicate(m.t)
     for (const p of baza.get(m.t) ?? []) picate.delete(p)
     const picat = [...picate].some((p) => p.startsWith(m.e))
-    const curat = restaureaza(editari)
+    const curat = restaureaza(aplicate)
 
     valide++
     if (picat) prinse++

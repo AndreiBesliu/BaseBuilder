@@ -54,8 +54,8 @@ export const MUTATII = [
   {
     n: 'slotul reutilizat mosteneste piesa desemnarii moarte',
     f: 'src/sim/desemnari.ts',
-    a: '  d.piesa[slot] = Piesa.NICIUNA',
-    b: '  void Piesa',
+    a: '  d.piesa[slot] = piesa',
+    b: '  void piesa',
     t: 'tests/constructie.test.ts', e: 'slotul reutilizat nu mosten',
   },
   {

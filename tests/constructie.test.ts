@@ -493,9 +493,18 @@ test('la DESENARE nu se verifica sprijinul, si asta e deliberat', () => {
   const out = applyCommand(w, { kind: 'desemneaza', wx, wy, z: g + 5, piesa: Piesa.PERETE }, R)
   assert.ok(out.ok, `desenarea n-are voie sa se uite la sprijin: ${JSON.stringify(out)}`)
 
+  // Si o desemnare de SAPAT alaturi, ca previzualizarea sa aiba ce IGNORA. Fara ea,
+  // filtrul pe fel n-ar fi exercitat de nimic: proba lui a iesit RATATA exact asa.
+  const deSapat = applyCommand(w, { kind: 'desemneaza', wx: wx + 2, wy, z: g - 1 }, R)
+  assert.ok(deSapat.ok, `fixtura: desemnarea de sapat a fost refuzata: ${JSON.stringify(deSapat)}`)
+
   const previz = constructiaPrevizualizata(w, R)
   assert.equal(previz.construibile.length, 0, 'si totusi nu e construibila')
-  assert.equal(previz.imposibile.length, 1)
+  assert.equal(
+    previz.imposibile.length,
+    1,
+    'previzualizarea numara DOAR desemnarile de construit; cea de sapat n-are ce cauta in ea',
+  )
 
   // Iar `fill` tot o refuza: poarta de la ZIDESTE ramane ultima.
   const zidit = applyCommand(w, { kind: 'fill', wx, wy, z: g + 5, material: Material.PIATRA_CONSTRUITA }, R)
