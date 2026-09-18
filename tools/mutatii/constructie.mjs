@@ -139,4 +139,34 @@ export const MUTATII = [
     b: '  if (false) return accept()',
     t: 'tests/constructie.test.ts', e: 'o celula deja plina raspunde CELULA_PLINA',
   },
+
+  // --- pasul 5: inchiderea ---
+  {
+    n: 'inchiderea face O SINGURA trecere (nu mai e punct fix)',
+    f: 'src/sim/stabilitate.ts',
+    a: '  let adaugat = true\n  while (adaugat) {',
+    b: '  let adaugat = true\n  for (let treceri = 0; treceri < 1 && adaugat; treceri++) {',
+    t: 'tests/constructie.test.ts', e: 'ACCEPTANTA: casa de 9x9',
+  },
+  {
+    n: 'canalul ipotetic nu se citeste: nimic nu se sprijina pe ce inca nu exista',
+    f: 'src/sim/stabilitate.ts',
+    a: '  if (zidite !== null && zidite.has(cellKey(wx, wy, z))) return Sol.SOLID',
+    b: '  void zidite',
+    t: 'tests/constructie.test.ts', e: 'ACCEPTANTA: casa de 9x9',
+  },
+  {
+    n: '`suportDacaZidesc` nu duce ipotezele mai departe in BFS',
+    f: 'src/sim/stabilitate.ts',
+    a: '  return caveazaSpreAsezat(t, rules, wx, wy, z, null, zidite)',
+    b: '  return caveazaSpreAsezat(t, rules, wx, wy, z, null, null)',
+    t: 'tests/constructie.test.ts', e: 'ACCEPTANTA: casa de 9x9',
+  },
+  {
+    n: 'celulele deja solide raman in multime (cifrele nu mai inseamna nimic)',
+    f: 'src/sim/stabilitate.ts',
+    a: '    if (solLa(t, c.wx, c.wy, c.z) === Sol.SOLID) ramase.delete(cheie)',
+    b: '    void c',
+    t: 'tests/constructie.test.ts', e: 'o celula deja solida nu e nici',
+  },
 ]

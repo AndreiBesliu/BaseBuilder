@@ -25,7 +25,8 @@ import { hashWorld } from '../src/sim/hash.ts'
 import { fill, groundLevelM, materialAt } from '../src/sim/terrain/terrain.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
 import { Reason } from '../src/sim/result.ts'
-import { poateSustine, suportDacaZidesc, suportLa } from '../src/sim/stabilitate.ts'
+import { constructiaPosibila, poateSustine, suportDacaZidesc, suportLa } from '../src/sim/stabilitate.ts'
+import { cellKey, decodeCell } from '../src/sim/path.ts'
 import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { CATEGORII, Categorie, FelJob, Piesa } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
@@ -312,4 +313,135 @@ test('o celula deja plina raspunde CELULA_PLINA, nu FARA_SPRIJIN', () => {
   const peste = applyCommand(w, { kind: 'fill', wx: sit.wx, wy: sit.wy, z: zPlutitor, material: Material.PIATRA_CONSTRUITA }, R)
   assert.equal(peste.ok, false)
   if (!peste.ok) assert.equal(peste.reason, Reason.CELULA_PLINA, 'pe o celula plina raspunsul e ce E acolo, nu ce ar fi')
+})
+
+// ---------------------------------------------------------------------------
+// inchiderea de constructie (pasul 5)
+// ---------------------------------------------------------------------------
+
+/** Perimetru de LxL pe `etaje` niveluri, plus podea deasupra. */
+function casa(wx: number, wy: number, g: number, L: number, etaje: number): number[] {
+  const out: number[] = []
+  for (let e = 0; e < etaje; e++) {
+    const z = g + 1 + e
+    for (let dx = 0; dx < L; dx++) {
+      for (let dy = 0; dy < L; dy++) {
+        if (dx !== 0 && dx !== L - 1 && dy !== 0 && dy !== L - 1) continue
+        out.push(cellKey(wx + dx, wy + dy, z))
+      }
+    }
+  }
+  for (let dx = 0; dx < L; dx++) {
+    for (let dy = 0; dy < L; dy++) out.push(cellKey(wx + dx, wy + dy, g + 1 + etaje))
+  }
+  return out
+}
+
+test('ACCEPTANTA: casa de 9x9 pe trei etaje — 176 din 177, si imposibila e centrul podelei', () => {
+  // Cifra pe care panoul de design a masurat-o ca argument impotriva validatorului
+  // per-celula: ala ar fi refuzat 145 din 177 la desenare, fiindca piesele care
+  // inca nu exista nu se sprijina reciproc. Cu adevarat imposibila e UNA — centrul
+  // podelei, la 4 pasi de orice perete.
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  const plan = casa(wx, wy, g, 9, 3)
+  assert.equal(plan.length, 177, `fixtura: casa trebuie sa aiba 177 de piese, are ${plan.length}`)
+
+  const r = constructiaPosibila(w.terrain, R, plan)
+  assert.equal(r.construibile.length, 176)
+  assert.equal(r.imposibile.length, 1)
+  const c = decodeCell(r.imposibile[0]!)
+  assert.deepEqual(
+    { dx: c.wx - wx, dy: c.wy - wy, dz: c.z - g },
+    { dx: 4, dy: 4, dz: 4 },
+    'imposibila trebuie sa fie exact centrul podelei'
+  )
+})
+
+test('multi-etajul ARE o limita, si e o regula de joc, nu un accident', () => {
+  // §5 din designul meu spunea „multi-etaj nu adauga nimic". E fals: o podea peste
+  // o camera W×W lasa o gaura in mijloc, si gaura creste cu W. Cifrele astea
+  // plafoneaza camera ACOPERITA la 9 lat — o decizie de joc care trebuie scrisa si
+  // aratata prin previzualizare, nu descoperita dupa ce jucatorul a desenat.
+  const { w, wx, wy, g } = sitPlat(12345, 21)
+  for (const [L, asteptat] of [[9, 1], [15, 49]] as const) {
+    const r = constructiaPosibila(w.terrain, R, casa(wx, wy, g, L, 3))
+    assert.equal(r.imposibile.length, asteptat, `casa ${L}x${L}: ${r.imposibile.length} imposibile, asteptat ${asteptat}`)
+  }
+})
+
+test('monotonia e o GARANTIE: aceeasi multime, patru ordini, acelasi raspuns', () => {
+  // Riscul pe care il scrisesem in design — „aceeasi cladire se ridica sau nu,
+  // dupa noroc, fiindca ordinea in care pionii iau joburile e emergenta" — e FALS,
+  // si asta e testul care il inchide. Regula e monotona: a adauga un voxel poate
+  // doar sa SCADA distantele pana la un sprijin, deci multimea construibila e o
+  // inchidere, si inchiderea e unica.
+  const { w, wx, wy, g } = sitPlat(4242, 13)
+  const plan = casa(wx, wy, g, 9, 3)
+  const ordini = [
+    plan,
+    [...plan].reverse(),
+    [...plan].sort((a, b) => a - b),
+    [...plan].sort((a, b) => (a % 7) - (b % 7) || a - b),
+  ]
+  const raspunsuri = ordini.map((o) => constructiaPosibila(w.terrain, R, o).construibile.join(','))
+  assert.equal(new Set(raspunsuri).size, 1, `${new Set(raspunsuri).size} raspunsuri diferite pe 4 ordini`)
+  assert.ok(raspunsuri[0]!.length > 0, 'fixtura: raspunsul nu poate fi gol')
+})
+
+test('o singura trecere peste planul TERMINAT supra-promite', () => {
+  // Cealalta jumatate a argumentului. Chiar daca judeci planul ca si cum ar fi deja
+  // ridicat tot — „ce suport ar avea fiecare piesa daca toate ar exista" — raspunsul
+  // e prea optimist: promite piese care nu se pot construi INCREMENTAL, fiindca la
+  // momentul lor sprijinul inca nu exista. Panoul a masurat supra-promisiune in 200
+  // din 200 de planuri aleatoare.
+  // Fixtura trebuie sa fie NEREGULATA, si asta am aflat-o gresind: pe o casa cele
+  // doua raspunsuri sunt identice (344 si 344), fiindca o casa e stratificata si
+  // fiecare piesa isi are sprijinul sub ea. Diferenta apare cand planul are goluri
+  // — adica exact cum deseneaza un jucator care nu construieste un cub perfect.
+  //
+  // Masurat pe 200 de planuri pseudo-aleatoare intr-o cutie de 12x12x6: naivul
+  // promite mai mult in 200 din 200 de cazuri, in medie 231,4 celule fata de 168,9,
+  // cu un exces maxim de 138.
+  const { w, wx, wy, g } = sitPlat(12345, 21)
+
+  let maiMult = 0
+  let incercate = 0
+  for (let seed = 1; seed <= 20; seed++) {
+    // Generator intreg DETERMINIST, nu un flux de RNG: e o fixtura de test, nu
+    // stare de simulare.
+    const plan: number[] = []
+    let h = (seed * 2654435761) >>> 0
+    for (let dx = 0; dx < 12; dx++) {
+      for (let dy = 0; dy < 12; dy++) {
+        for (let dz = 1; dz <= 6; dz++) {
+          h = (h * 1664525 + 1013904223) >>> 0
+          if ((h >>> 16) % 100 < 35) plan.push(cellKey(wx + dx, wy + dy, g + dz))
+        }
+      }
+    }
+    if (plan.length === 0) continue
+    const toate = new Set(plan)
+    let naiv = 0
+    for (const cheie of plan) {
+      const c = decodeCell(cheie)
+      if (suportDacaZidesc(w.terrain, R, c.wx, c.wy, c.z, toate) > 0) naiv++
+    }
+    const real = constructiaPosibila(w.terrain, R, plan).construibile.length
+    incercate++
+    assert.ok(naiv >= real, `inchiderea a promis mai mult decat naivul la seed ${seed}: ${real} > ${naiv}`)
+    if (naiv > real) maiMult++
+  }
+  assert.ok(incercate >= 15, `fixtura: doar ${incercate} planuri generate`)
+  assert.equal(maiMult, incercate, `naivul trebuia sa supra-promita pe TOATE: ${maiMult} din ${incercate}`)
+})
+
+test('o celula deja solida nu e nici construibila, nici imposibila', () => {
+  // Iese din multime de la inceput: nu e „de construit". Altfel un plan desenat
+  // peste roca ar raporta cifre care nu inseamna nimic pentru jucator.
+  const { w, wx, wy, g } = sitPlat(12345, 9)
+  const subteran = cellKey(wx, wy, g - 2)
+  const inAer = cellKey(wx, wy, g + 1)
+  const r = constructiaPosibila(w.terrain, R, [subteran, inAer])
+  assert.deepEqual(r.construibile, [inAer].sort((a, b) => a - b))
+  assert.deepEqual(r.imposibile, [])
 })

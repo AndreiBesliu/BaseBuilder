@@ -86,19 +86,38 @@ export const Sol = {
  * exista voxel si `setVoxel` refuza. Ce NU e adevarat e plafonul diferit intre
  * coloane vecine cu acelasi sol — vezi OWNER_VERIFY.
  */
-export function solLa(t: Terrain, wx: number, wy: number, z: number, cazute: Set<number> | null = null): number {
+export function solLa(
+  t: Terrain,
+  wx: number,
+  wy: number,
+  z: number,
+  cazute: ReadonlySet<number> | null = null,
+  zidite: ReadonlySet<number> | null = null,
+): number {
   if (wx < 0 || wy < 0 || wx >= WORLD_CELLS || wy >= WORLD_CELLS) return Sol.ANCORA
   const baza = bazaVoxeli(t, wx, wy)
   if (z < baza) return Sol.ANCORA
   if (z >= baza + VOXEL_LEVELS) return Sol.AER
   if (cazute !== null && cazute.has(cellKey(wx, wy, z))) return Sol.AER
+  // Canalul IPOTETIC, oglinda lui `cazute`: celule pe care intrebarea le trateaza
+  // ca zidite desi terenul le are goale. Se citeste DUPA fereastra de voxeli si
+  // dupa `cazute` — o piesa planificata in afara ferestrei nu devine posibila
+  // fiindca a planificat-o cineva.
+  if (zidite !== null && zidite.has(cellKey(wx, wy, z))) return Sol.SOLID
   return isSolid(materialFast(t, wx, wy, z)) ? Sol.SOLID : Sol.AER
 }
 
 /** Se sprijina voxelul direct pe ceva? Ancora si solidul de dedesubt conteaza la fel. */
-export function esteAsezat(t: Terrain, wx: number, wy: number, z: number, cazute: Set<number> | null = null): boolean {
-  if (solLa(t, wx, wy, z, cazute) !== Sol.SOLID) return false
-  const sub = solLa(t, wx, wy, z - 1, cazute)
+export function esteAsezat(
+  t: Terrain,
+  wx: number,
+  wy: number,
+  z: number,
+  cazute: ReadonlySet<number> | null = null,
+  zidite: ReadonlySet<number> | null = null,
+): boolean {
+  if (solLa(t, wx, wy, z, cazute, zidite) !== Sol.SOLID) return false
+  const sub = solLa(t, wx, wy, z - 1, cazute, zidite)
   return sub === Sol.SOLID || sub === Sol.ANCORA
 }
 
@@ -134,7 +153,15 @@ export function suportLa(t: Terrain, rules: Rules, wx: number, wy: number, z: nu
  * care inca nu. Scris de doua ori, s-ar desincroniza la prima schimbare de
  * regula — si regula asta s-a schimbat deja o data, la recenzie.
  */
-function caveazaSpreAsezat(t: Terrain, rules: Rules, wx: number, wy: number, z: number, cazute: Set<number> | null): number {
+function caveazaSpreAsezat(
+  t: Terrain,
+  rules: Rules,
+  wx: number,
+  wy: number,
+  z: number,
+  cazute: ReadonlySet<number> | null,
+  zidite: ReadonlySet<number> | null = null,
+): number {
   vazute.clear()
   coadaX.length = 0
   coadaY.length = 0
@@ -152,7 +179,7 @@ function caveazaSpreAsezat(t: Terrain, rules: Rules, wx: number, wy: number, z: 
     for (const [dx, dy] of DIRECTII) {
       const nx = x + dx
       const ny = y + dy
-      if (solLa(t, nx, ny, z, cazute) !== Sol.SOLID) continue
+      if (solLa(t, nx, ny, z, cazute, zidite) !== Sol.SOLID) continue
       const cheie = cellKey(nx, ny, z)
       if (vazute.has(cheie)) continue
       vazute.add(cheie)
@@ -163,7 +190,7 @@ function caveazaSpreAsezat(t: Terrain, rules: Rules, wx: number, wy: number, z: 
       // si exact UNA dintre ele tine raspunsul pozitiv la un moment dat. Fara
       // niciuna, un tavan la 5 pasi da −1 — care nu e nici 0, nici 1, deci
       // `stareSapat` raspunde SIGUR exact acolo unde e cel mai periculos.
-      if (esteAsezat(t, nx, ny, z, cazute)) return Math.max(0, rules.suportMax - (d + 1))
+      if (esteAsezat(t, nx, ny, z, cazute, zidite)) return Math.max(0, rules.suportMax - (d + 1))
       coadaX.push(nx)
       coadaY.push(ny)
       coadaD.push(d + 1)
@@ -348,11 +375,24 @@ export function cadeDaca(t: Terrain, rules: Rules, sapate: readonly number[], in
  * in POARTA, nu aici: o masuratoare care minte ca sa fie comoda nu mai e o
  * masuratoare.
  */
-export function suportDacaZidesc(t: Terrain, rules: Rules, wx: number, wy: number, z: number): number {
+export function suportDacaZidesc(
+  t: Terrain,
+  rules: Rules,
+  wx: number,
+  wy: number,
+  z: number,
+  zidite: ReadonlySet<number> | null = null,
+): number {
+  // Intrebarea „e DEJA solida?" se pune TERENULUI, nu ipotezei. Cu `zidite` in ea,
+  // o celula care tocmai a fost presupusa zidita intra pe ramura asta si apoi
+  // pierde ipoteza — deci raspunde 0 pentru ceva ce tocmai am spus ca exista.
+  // Inchiderea nu vede niciodata cazul (celula testata nu e inca in multime), dar
+  // orice alt apelant il vede, si l-a vazut: prima versiune a testului de
+  // supra-promisiune raporta 0 din 393.
   if (solLa(t, wx, wy, z) === Sol.SOLID) return suportLa(t, rules, wx, wy, z)
-  const sub = solLa(t, wx, wy, z - 1)
+  const sub = solLa(t, wx, wy, z - 1, null, zidite)
   if (sub === Sol.SOLID || sub === Sol.ANCORA) return rules.suportMax
-  return caveazaSpreAsezat(t, rules, wx, wy, z, null)
+  return caveazaSpreAsezat(t, rules, wx, wy, z, null, zidite)
 }
 
 /**
@@ -368,6 +408,74 @@ export function suportDacaZidesc(t: Terrain, rules: Rules, wx: number, wy: numbe
  * altfel. Masurat: 0,137 µs pe sol, 5,767 µs pe un refuz in centrul unei podele
  * de 9x9. Marginit, nu constant — propozitia din DESIGN s-a schimbat, nu regula.
  */
+/**
+ * Ce se poate construi din multimea `celule`, si ce nu — ORICUM ai lua-o.
+ *
+ * Fratele lui `cadeDaca`, si la fel ca el trebuie sa fie: un PUNCT FIX peste
+ * multime, nu o verificare pe fiecare celula in parte. Panoul de design a masurat
+ * de ce, in ambele feluri:
+ *
+ *  - **pe celula, la desenare:** o casa de 9x9 cu trei etaje si podea are 177 de
+ *    celule, dintre care validatorul per-celula ar refuza **145 (82%)**, fiindca
+ *    piesele care inca nu exista nu se sprijina reciproc. Cu adevarat imposibila e
+ *    UNA. Jucatorul ar desena o casa si ar primi un ecran rosu;
+ *  - **pe planul TERMINAT, dintr-o singura trecere:** pe 200 de planuri aleatoare,
+ *    „suport > 0 daca umplu tot" a promis 85,8 celule din 112 in medie, dar
+ *    incremental se puteau construi 64,5 — supra-promisiune in **200 din 200** de
+ *    cazuri, cu un excedent maxim de 57 de celule.
+ *
+ * ## De ce raspunsul nu depinde de ordine
+ *
+ * Regula e MONOTONA: a adauga un voxel nu poate decat sa SCADA distantele pana la
+ * un sprijin, niciodata sa le creasca. Deci „ce se poate construi" e o inchidere,
+ * si inchiderea e unica. Asta nu e o presupunere comoda — e o garantie, si are
+ * testul ei de proprietate: aceeasi multime, patru ordini diferite, acelasi
+ * raspuns.
+ *
+ * Costul, masurat: 0,22 ms la 177 de piese, 3,97 ms la 2043. Se cheama la
+ * mouse-up, nu la mouse-move.
+ */
+export function constructiaPosibila(
+  t: Terrain,
+  rules: Rules,
+  celule: readonly number[],
+): { construibile: number[]; imposibile: number[] } {
+  const zidite = new Set<number>()
+  const ramase = new Set<number>(celule)
+  // Celulele deja solide nu sunt „de construit": ies din multime de la inceput,
+  // ca sa nu fie numarate nici construibile, nici imposibile.
+  for (const cheie of ramase) {
+    const c = decodeCell(cheie)
+    if (solLa(t, c.wx, c.wy, c.z) === Sol.SOLID) ramase.delete(cheie)
+  }
+
+  // Punct fix: cat timp o trecere mai adauga ceva, se mai face una. Fiecare
+  // trecere e O(ramase); numarul de treceri e marginit de cate „straturi" are
+  // planul — masurat, 4 pe o casa de trei etaje.
+  let adaugat = true
+  while (adaugat) {
+    adaugat = false
+    // Se itereaza peste o COPIE (se sterge din multime in bucla), dar NU se
+    // sorteaza: ordinea unei treceri nu poate schimba punctul fix — aia e chiar
+    // garantia de monotonie — iar rezultatul se sorteaza oricum la iesire. Cu
+    // sortare la fiecare trecere, o casa de 177 de piese costa 1,44 ms in loc de
+    // 0,59 — masurat, nu estimat.
+    for (const cheie of [...ramase]) {
+      const c = decodeCell(cheie)
+      if (suportDacaZidesc(t, rules, c.wx, c.wy, c.z, zidite) === 0) continue
+      zidite.add(cheie)
+      ramase.delete(cheie)
+      adaugat = true
+    }
+  }
+
+  // determinism-ok: amandoua se sorteaza explicit inainte de a fi intoarse.
+  return {
+    construibile: [...zidite].sort((a, b) => a - b),
+    imposibile: [...ramase].sort((a, b) => a - b),
+  }
+}
+
 export function poateSustine(t: Terrain, rules: Rules, wx: number, wy: number, z: number): Outcome<void> {
   // Pe o celula deja solida nu se PLASEAZA nimic, deci intrebarea despre sprijin
   // nu se pune: refuzul util vine de la teren, cu `CELULA_PLINA`. Fara
