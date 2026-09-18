@@ -135,8 +135,8 @@ export const MUTATII = [
   {
     n: 'poarta refuza si pe o celula deja plina (mesajul devine inutil)',
     f: 'src/sim/stabilitate.ts',
-    a: '  if (solLa(t, wx, wy, z) === Sol.SOLID) return suportLa(t, rules, wx, wy, z)',
-    b: '  if (false) return suportLa(t, rules, wx, wy, z)',
+    a: '  if (solLa(t, wx, wy, z) === Sol.SOLID) return accept()',
+    b: '  if (false) return accept()',
     t: 'tests/constructie.test.ts', e: 'o celula deja plina raspunde CELULA_PLINA',
   },
 ]

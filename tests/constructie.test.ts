@@ -22,7 +22,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { Desemnare, seSapaLa, slotDesemnare } from '../src/sim/desemnari.ts'
 import { hashWorld } from '../src/sim/hash.ts'
-import { groundLevelM, materialAt } from '../src/sim/terrain/terrain.ts'
+import { fill, groundLevelM, materialAt } from '../src/sim/terrain/terrain.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
 import { Reason } from '../src/sim/result.ts'
 import { poateSustine, suportDacaZidesc, suportLa } from '../src/sim/stabilitate.ts'
@@ -301,4 +301,15 @@ test('o celula deja plina raspunde CELULA_PLINA, nu FARA_SPRIJIN', () => {
   const out = applyCommand(w, { kind: 'fill', wx: sit.wx, wy: sit.wy, z: g.value, material: Material.PIATRA_CONSTRUITA }, R)
   assert.equal(out.ok, false)
   if (!out.ok) assert.equal(out.reason, Reason.CELULA_PLINA)
+
+  // Si cazul care CHIAR leaga garda: un bloc deja PLUTITOR. Comanda nu-l mai poate
+  // crea, dar un save de dinaintea taieturii poate sa-l contina — si atunci
+  // raspunsul „n-are sprijin" ar fi adevarat si inutil, fiindca nu se plaseaza
+  // nimic acolo. Se zideste prin editare directa de teren, ca in `carat.test.ts`.
+  const zPlutitor = g.value + 5
+  assert.ok(fill(w.terrain, sit.wx, sit.wy, zPlutitor, Material.PIATRA_CONSTRUITA).ok, 'fixtura: editare directa')
+  assert.equal(suportLa(w.terrain, R, sit.wx, sit.wy, zPlutitor), 0, 'fixtura: blocul chiar atarna in aer')
+  const peste = applyCommand(w, { kind: 'fill', wx: sit.wx, wy: sit.wy, z: zPlutitor, material: Material.PIATRA_CONSTRUITA }, R)
+  assert.equal(peste.ok, false)
+  if (!peste.ok) assert.equal(peste.reason, Reason.CELULA_PLINA, 'pe o celula plina raspunsul e ce E acolo, nu ce ar fi')
 })

@@ -343,7 +343,10 @@ export function cadeDaca(t: Terrain, rules: Rules, sapate: readonly number[], in
  * celula insasi e daca e ASEZATA — si aia se citeste direct, dintr-o citire.
  *
  * Pe o celula deja solida raspunde ce raspunde `suportLa`: nu se zideste nimic
- * acolo, deci intrebarea e despre ce EXISTA.
+ * acolo, deci intrebarea e despre ce EXISTA — inclusiv 0, daca blocul de acolo
+ * chiar atarna in aer. Scurtcircuitul „nu se plaseaza nimic, deci nu intreba" sta
+ * in POARTA, nu aici: o masuratoare care minte ca sa fie comoda nu mai e o
+ * masuratoare.
  */
 export function suportDacaZidesc(t: Terrain, rules: Rules, wx: number, wy: number, z: number): number {
   if (solLa(t, wx, wy, z) === Sol.SOLID) return suportLa(t, rules, wx, wy, z)
@@ -366,6 +369,12 @@ export function suportDacaZidesc(t: Terrain, rules: Rules, wx: number, wy: numbe
  * de 9x9. Marginit, nu constant — propozitia din DESIGN s-a schimbat, nu regula.
  */
 export function poateSustine(t: Terrain, rules: Rules, wx: number, wy: number, z: number): Outcome<void> {
+  // Pe o celula deja solida nu se PLASEAZA nimic, deci intrebarea despre sprijin
+  // nu se pune: refuzul util vine de la teren, cu `CELULA_PLINA`. Fara
+  // scurtcircuitul asta, un bloc deja plutitor — pe care comanda nu-l mai poate
+  // crea, dar un save de dinaintea taieturii poate sa-l contina — ar raspunde
+  // „n-are sprijin": adevarat, si inutil.
+  if (solLa(t, wx, wy, z) === Sol.SOLID) return accept()
   const suport = suportDacaZidesc(t, rules, wx, wy, z)
   if (suport > 0) return accept()
   return refuse(Reason.FARA_SPRIJIN, {
