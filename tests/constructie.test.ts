@@ -24,7 +24,7 @@ import { Desemnare, seSapaLa, slotDesemnare } from '../src/sim/desemnari.ts'
 import { hashWorld } from '../src/sim/hash.ts'
 import { decode, encode } from '../src/sim/save.ts'
 import { cellOf } from '../src/sim/drumuri.ts'
-import { fill, groundLevelM, materialAt } from '../src/sim/terrain/terrain.ts'
+import { dig, fill, groundLevelM, materialAt } from '../src/sim/terrain/terrain.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
 import { Reason } from '../src/sim/result.ts'
 import { constructiaPosibila, poateSustine, suportDacaZidesc, suportLa } from '../src/sim/stabilitate.ts'
@@ -493,10 +493,16 @@ test('la DESENARE nu se verifica sprijinul, si asta e deliberat', () => {
   const out = applyCommand(w, { kind: 'desemneaza', wx, wy, z: g + 5, piesa: Piesa.PERETE }, R)
   assert.ok(out.ok, `desenarea n-are voie sa se uite la sprijin: ${JSON.stringify(out)}`)
 
-  // Si o desemnare de SAPAT alaturi, ca previzualizarea sa aiba ce IGNORA. Fara ea,
-  // filtrul pe fel n-ar fi exercitat de nimic: proba lui a iesit RATATA exact asa.
+  // Si o desemnare de SAPAT alaturi, ca previzualizarea sa aiba ce IGNORA.
+  //
+  // Nu e de ajuns una obisnuita: o desemnare de sapat sta mereu pe o celula SOLIDA,
+  // iar inchiderea scoate celulele solide din multime de la inceput — deci inclusa
+  // din greseala, n-ar schimba niciun numar, si proba filtrului a iesit RATATA
+  // exact asa. Ii sapam celula pe sub ea, prin editare directa de teren: ramane o
+  // desemnare de SAPAT pe AER, adica exact ce ar contamina raspunsul.
   const deSapat = applyCommand(w, { kind: 'desemneaza', wx: wx + 2, wy, z: g - 1 }, R)
   assert.ok(deSapat.ok, `fixtura: desemnarea de sapat a fost refuzata: ${JSON.stringify(deSapat)}`)
+  assert.ok(dig(w.terrain, wx + 2, wy, g - 1).ok, 'fixtura: editare directa, ca desemnarea sa ramana pe aer')
 
   const previz = constructiaPrevizualizata(w, R)
   assert.equal(previz.construibile.length, 0, 'si totusi nu e construibila')
