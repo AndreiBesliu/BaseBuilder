@@ -155,6 +155,15 @@ export interface RatiuneStore {
   joburiFaraProgres: number
   /** ZAVOR, per lume: unitati de marfa care n-au incaput nicaieri. Trebuie sa fie 0. */
   itemePierdute: number
+  /**
+   * Unitati consumate de zidire, pe toata rularea.
+   *
+   * Al TREILEA termen al conservarii: `marfa in lume + itemePierdute +
+   * unitatiZidite == produs`. Fara el, prima zidire ar inrosi noua aserțiuni de
+   * `itemePierdute === 0`, iar tentatia ar fi sa le slabesti — adica sa pierzi
+   * exact plasa care prinde marfa disparuta.
+   */
+  unitatiZidite: number
   /** Tickuri-pion petrecute pe drum spre o tinta de job, pe toata rularea. Cu `tickuriDeLucru`, masura pentru batching. */
   tickuriPeDrum: number
   /** Tickuri-pion petrecute muncind (sapat, ridicat, lasat), pe toata rularea. */
@@ -179,6 +188,7 @@ export function makeRatiuneStore(capacity: number): RatiuneStore {
     motivFinal: new Uint8Array(capacity),
     joburiFaraProgres: 0,
     itemePierdute: 0,
+    unitatiZidite: 0,
     tickuriPeDrum: 0,
     tickuriDeLucru: 0,
     intreruperiDeNevoie: 0,

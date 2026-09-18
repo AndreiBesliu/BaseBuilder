@@ -12,6 +12,7 @@
 import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import { cellKey } from './path.ts'
+import { Piesa } from './state.ts'
 
 /** Felurile de desemnare. Un singur fel azi. */
 export const Desemnare = {
@@ -26,24 +27,6 @@ export const Desemnare = {
   CONSTRUIESTE: 1,
 } as const
 export type DesemnareKind = (typeof Desemnare)[keyof typeof Desemnare]
-
-/**
- * Ce piesa se construieste. Tabelul cu materiale, cantitati si timpi sta in
- * `content/rules.json`; aici e doar indexul lui.
- *
- * **`NICIUNA = 0`, si piesele reale incep de la 1.** Zero e valoare VALIDA in
- * enumerarile vecine (`Item.PIATRA = 0`), deci o migrare care ar umple cu zero
- * ar preface fiecare desemnare de sapat dintr-un save vechi intr-un „perete de
- * piatra" pe care nimic nu l-ar putea detecta. Cu o santinela, contradictia
- * dintre fel si piesa se poate REFUZA la incarcare, si chiar se refuza.
- */
-export const Piesa = {
-  NICIUNA: 0,
-  PERETE: 1,
-  PODEA: 2,
-  SCARA: 3,
-} as const
-export type PiesaId = (typeof Piesa)[keyof typeof Piesa]
 
 /** Detaliul unui refuz INACCESIBIL memorat pe desemnare. Pentru „De ce nu?". */
 export const DetaliuMotiv = {

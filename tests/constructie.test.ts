@@ -20,11 +20,11 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { Desemnare, Piesa, seSapaLa, slotDesemnare } from '../src/sim/desemnari.ts'
+import { Desemnare, seSapaLa, slotDesemnare } from '../src/sim/desemnari.ts'
 import { hashWorld } from '../src/sim/hash.ts'
 import { materialAt } from '../src/sim/terrain/terrain.ts'
 import { isSolid } from '../src/sim/terrain/chunk.ts'
-import { CATEGORII, Categorie, FelJob } from '../src/sim/state.ts'
+import { CATEGORII, Categorie, FelJob, Piesa } from '../src/sim/state.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { desemneaza, laSit, R, ruleaza, solidLaDistanta } from './fixturi.ts'
 

@@ -79,6 +79,11 @@
     "DORMIT_PE_JOS": { "valoare": -70, "durata": 6000 },
     "OPTIMISM_INITIAL": { "valoare": 250, "durata": 20000 }
   },
+  "piese": {
+    "PERETE": { "material": "PIATRA_CONSTRUITA", "cantitate": 20, "lucru": 400 },
+    "PODEA": { "material": "PIATRA_CONSTRUITA", "cantitate": 20, "lucru": 300 },
+    "SCARA": { "material": "LEMN_CONSTRUIT", "cantitate": 5, "lucru": 250 }
+  },
   "digYield": {
     "ROCA": { "fel": "PIATRA", "cantitate": 20 },
     "PAMANT": { "fel": "PAMANT", "cantitate": 10 },

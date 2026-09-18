@@ -14,12 +14,31 @@ import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import { REGION_SIZE } from './regions.ts'
 import { isSolid, Material } from './terrain/chunk.ts'
-import { Gand, GAND_PENTRU_NEVOIE, GANDURI, Item, ITEME, Nevoie, NEVOI } from './state.ts'
+import { Gand, GAND_PENTRU_NEVOIE, GANDURI, Item, ITEME, Nevoie, NEVOI, Piesa } from './state.ts'
 
 /** Ce lasa in urma un voxel sapat: felul de item si cate unitati. `cantitate` 0 = nimic (aer, apa). */
 export interface DigYield {
   readonly fel: number
   readonly cantitate: number
+}
+
+/**
+ * Ce costa si ce produce o piesa de constructie, indexat cu `PiesaId`.
+ *
+ * FELUL materialului consumat NU se scrie aici: se deriva din
+ * `digYield[material].fel`. Scris separat, s-ar putea ajunge la un perete de
+ * piatra platit in lemn si sapat inapoi in piatra.
+ */
+export interface SpecPiesa {
+  /** Materialul care rezulta. Trebuie sa fie SOLID. */
+  readonly material: number
+  /**
+   * Cate unitati se consuma. Invariant verificat la incarcare: EXACT cat da
+   * `digYield` inapoi la sapatul aceluiasi material.
+   */
+  readonly cantitate: number
+  /** Unitati de munca la santier, pe aceeasi scara cu `digWorkUnits`. */
+  readonly lucru: number
 }
 
 /**
@@ -151,6 +170,11 @@ export interface Rules {
    * care pionii le-ar „cara" la nesfarsit.
    */
   readonly digYield: readonly DigYield[]
+  /**
+   * Kitul de constructie, indexat cu `PiesaId`. Intrarea 0 (`Piesa.NICIUNA`) e
+   * santinela si e goala. In fisier e un obiect cu numele pieselor drept chei.
+   */
+  readonly piese: readonly SpecPiesa[]
 
   // --- nevoi (S16-19, taietura 3) ---
   //
@@ -251,7 +275,7 @@ export interface Rules {
 type FieldSpec = { min: number; max: number }
 
 /** Campurile NUMERICE. `digYield`, `nevoi` si `nutritie` sunt tabele si se valideaza separat. */
-const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield' | 'nevoi' | 'nutritie' | 'ganduri'>, FieldSpec> = {
+const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield' | 'piese' | 'nevoi' | 'nutritie' | 'ganduri'>, FieldSpec> = {
   agentCapacity: { min: 1, max: 100000 },
   agentStepMm: { min: 1, max: 100000 },
   ticksPerSecond: { min: 1, max: 240 },
@@ -342,7 +366,68 @@ const NUME_NEVOI: readonly (readonly [string, number])[] = [
   ['FOAME', Nevoie.FOAME],
   ['ODIHNA', Nevoie.ODIHNA],
 ]
+const NUME_PIESE: readonly (readonly [string, number])[] = [
+  ['PERETE', Piesa.PERETE],
+  ['PODEA', Piesa.PODEA],
+  ['SCARA', Piesa.SCARA],
+]
 const MAX_YIELD = 10000
+const MAX_LUCRU = 1000000
+
+/**
+ * Tabelul `piese` din fisier → tablou indexat cu `PiesaId`.
+ *
+ * Santinela `Piesa.NICIUNA` primeste o intrare GOALA, si nu se poate numi in
+ * fisier: e absenta unei piese, nu o piesa.
+ */
+function parsePiese(raw: unknown): Outcome<SpecPiesa[]> {
+  // Forma deja parsata (tablou indexat cu PiesaId), cum e `DEFAULT_RULES`: se
+  // intoarce in forma de fisier si se valideaza cu exact aceleasi reguli.
+  if (Array.isArray(raw)) {
+    if (raw.length !== NUME_PIESE.length + 1) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: 'piese', lungime: raw.length, asteptat: NUME_PIESE.length + 1 })
+    }
+    const obj: Record<string, unknown> = {}
+    for (const [nume, id] of NUME_PIESE) {
+      const e = raw[id] as SpecPiesa | undefined
+      const mat = NUME_MATERIALE.find(([, m]) => m === e?.material)
+      obj[nume] = { material: mat ? mat[0] : String(e?.material), cantitate: e?.cantitate, lucru: e?.lucru }
+    }
+    raw = obj
+  }
+  if (typeof raw !== 'object' || raw === null) {
+    return refuse(Reason.LIPSA_MATERIAL, { camp: 'piese', asteptat: 'obiect', primit: typeof raw })
+  }
+  const obj = raw as Record<string, unknown>
+  const cunoscute = NUME_PIESE.map(([n]) => n)
+  for (const key of Object.keys(obj).sort()) {
+    if (!cunoscute.includes(key)) return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: `piese.${key}`, cunoscute: cunoscute.join(', ') })
+  }
+  const out: SpecPiesa[] = [{ material: 0, cantitate: 0, lucru: 0 }]
+  for (const [nume, id] of NUME_PIESE) {
+    const v = obj[nume]
+    if (v === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: `piese.${nume}` })
+    if (typeof v !== 'object' || v === null) return refuse(Reason.LIPSA_MATERIAL, { camp: `piese.${nume}`, asteptat: 'obiect {material, cantitate, lucru}' })
+    const e = v as Record<string, unknown>
+    const mat = NUME_MATERIALE.find(([n]) => n === e.material)
+    if (!mat) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `piese.${nume}.material`, valoare: String(e.material), cunoscute: NUME_MATERIALE.map(([n]) => n).join(', ') })
+    }
+    if (!isSolid(mat[1])) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `piese.${nume}.material`, valoare: mat[0], motiv: 'o piesa nu poate fi facuta din aer sau apa' })
+    }
+    const c = e.cantitate
+    if (typeof c !== 'number' || !Number.isInteger(c) || c < 1 || c > MAX_YIELD) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `piese.${nume}.cantitate`, valoare: String(c), min: 1, max: MAX_YIELD })
+    }
+    const l = e.lucru
+    if (typeof l !== 'number' || !Number.isInteger(l) || l < 1 || l > MAX_LUCRU) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `piese.${nume}.lucru`, valoare: String(l), min: 1, max: MAX_LUCRU })
+    }
+    out[id] = { material: mat[1], cantitate: c, lucru: l }
+  }
+  return accept(out)
+}
 
 /**
  * Tabelul `nevoi` din fisier → tablou indexat cu `Nevoie`. Fiecare nevoie
@@ -541,13 +626,13 @@ export function parseRules(raw: unknown): Outcome<Rules> {
   // garantata de spec si nu depinde de starea rularii.
   const known = Object.keys(RULES_SPEC)
   for (const key of Object.keys(obj).sort()) {
-    if (key === 'digYield' || key === 'nevoi' || key === 'nutritie' || key === 'ganduri') continue
+    if (key === 'digYield' || key === 'piese' || key === 'nevoi' || key === 'nutritie' || key === 'ganduri') continue
     if (!known.includes(key)) {
-      return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: key, cunoscute: [...known, 'digYield', 'nevoi', 'nutritie', 'ganduri'].join(', ') })
+      return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: key, cunoscute: [...known, 'digYield', 'piese', 'nevoi', 'nutritie', 'ganduri'].join(', ') })
     }
   }
 
-  const out: Record<string, number | readonly DigYield[] | readonly SpecNevoie[] | readonly SpecGand[] | readonly number[]> = {}
+  const out: Record<string, number | readonly DigYield[] | readonly SpecPiesa[] | readonly SpecNevoie[] | readonly SpecGand[] | readonly number[]> = {}
   for (const key of known) {
     const spec = RULES_SPEC[key as keyof typeof RULES_SPEC]
     const v = obj[key]
@@ -566,6 +651,10 @@ export function parseRules(raw: unknown): Outcome<Rules> {
   const yieldOut = parseDigYield(obj.digYield)
   if (!yieldOut.ok) return yieldOut
   out.digYield = yieldOut.value
+  if (obj.piese === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'piese' })
+  const pieseOut = parsePiese(obj.piese)
+  if (!pieseOut.ok) return pieseOut
+  out.piese = pieseOut.value
   if (obj.nevoi === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'nevoi' })
   const nevoiOut = parseNevoi(obj.nevoi, out.nevoieMax as number)
   if (!nevoiOut.ok) return nevoiOut
@@ -643,6 +732,46 @@ export function parseRules(raw: unknown): Outcome<Rules> {
     if (y.cantitate > r.itemStackMax) {
       return refuse(Reason.VALOARE_INVALIDA, { camp: 'digYield', motiv: 'un voxel nu poate da mai mult decat incape intr-un morman', valoare: y.cantitate, max: r.itemStackMax })
     }
+  }
+  // O piesa costa EXACT cat da inapoi la sapat. Cele doua tabele nu se privesc,
+  // iar diferenta dintre ele e un ciclu de tiparit materie: masurat pe codul de
+  // dinaintea invariantului, `fill PIATRA_CONSTRUITA` + `dig` duce marfa din lume
+  // de la 0 la 20. Cu o piesa la 10, ciclul produce 10 unitati pe tura, la
+  // nesfarsit.
+  //
+  // EGALITATE stricta, nu `>=`: o deconstructie cu pierdere e o decizie de joc
+  // care trebuie sa-si scrie cifra in continut, nu sa iasa din doua tabele care
+  // nu se uita unul la altul.
+  for (const [nume, id] of NUME_PIESE) {
+    const p = r.piese[id]!
+    const y = r.digYield[p.material]!
+    if (p.cantitate !== y.cantitate) {
+      return refuse(Reason.VALOARE_INVALIDA, {
+        camp: `piese.${nume}.cantitate`,
+        valoare: p.cantitate,
+        asteptat: y.cantitate,
+        motiv: 'o piesa trebuie sa coste exact cat da inapoi la sapat, altfel zidirea si sapatul tiparesc materie',
+      })
+    }
+    // Si trebuie sa incapa intr-o mana: jobul de constructie are UN pas de
+    // ridicat, deci o piesa mai scumpa decat `haulCarryMax` n-ar putea fi
+    // terminata niciodata — acelasi argument ca la `haulCarryMax`/`itemStackMax`.
+    if (p.cantitate > r.haulCarryMax) {
+      return refuse(Reason.VALOARE_INVALIDA, {
+        camp: `piese.${nume}.cantitate`,
+        valoare: p.cantitate,
+        max: r.haulCarryMax,
+        motiv: 'o piesa care nu incape intr-o mana n-ar putea fi carata la santier',
+      })
+    }
+  }
+  // Grinda REINTRODUCE un punct de sprijin (DESIGN §5.2), deci raza ei nu poate
+  // fi sub plafonul obisnuit — ar micsora tacut regula in loc s-o largeasca.
+  // `RULES_SPEC` le valideaza independent, deci fara invariantul asta constanta
+  // poate fi pusa sub plafon si nimic nu se inroseste. Platit acum, ca sa nu
+  // surprinda cand grinda aterizeaza.
+  if (r.suportRazaGrinda < r.suportMax) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'suportRazaGrinda', valoare: r.suportRazaGrinda, min: r.suportMax, motiv: 'o grinda nu poate sprijini mai putin decat sprijina solul' })
   }
   // O portie trebuie sa incapa intr-un morman, altfel n-ar lega niciodata —
   // acelasi argument ca la `haulCarryMax`.
@@ -830,6 +959,14 @@ export const DEFAULT_RULES: Rules = {
     // Molozul da inapoi jumatate din ce ar fi dat roca: prabusirea costa munca,
     // nu materie. Si se sapa mai repede — vezi `digWorkUnitsMoloz`.
     { fel: Item.PIATRA, cantitate: 10 },
+  ],
+  // Kitul de constructie, indexat cu `PiesaId`. Intrarea 0 e santinela.
+  // `cantitate` e legata de `digYield` printr-un invariant: vezi `parseRules`.
+  piese: [
+    { material: 0, cantitate: 0, lucru: 0 },
+    { material: Material.PIATRA_CONSTRUITA, cantitate: 20, lucru: 400 },
+    { material: Material.PIATRA_CONSTRUITA, cantitate: 20, lucru: 300 },
+    { material: Material.LEMN_CONSTRUIT, cantitate: 5, lucru: 250 },
   ],
   // Nevoile. La 20 Hz: FOAME scade 6 la 250 de tickuri, deci 1000/6 × 250 =
   // ~41.700 de tickuri ≈ 35 de minute de la satul la zero; prefera sa manance la

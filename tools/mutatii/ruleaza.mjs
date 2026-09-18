@@ -27,7 +27,7 @@ const SUITE = [
   { nume: 'drivere', despre: 'taietura 3: tabelul de drivere, felul zonei, costul luatului', M: drivere },
   { nume: 'nevoi', despre: 'taietura 3: foame, odihna, dispozitie', M: nevoi },
   { nume: 'stabil', despre: 'S20-23 t.1: stabilitate, prabusire, previzualizare', M: stabilitate },
-  { nume: 'constr', despre: 'S20-23 t.2: constructia (pasii 1-2: poarta pe fel, schema 7)', M: constructie },
+  { nume: 'constr', despre: 'S20-23 t.2: constructia (pasii 1-3: poarta, schema 7, kitul)', M: constructie },
 ]
 
 const argumente = process.argv.slice(2)

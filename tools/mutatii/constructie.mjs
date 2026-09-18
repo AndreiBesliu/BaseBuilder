@@ -65,4 +65,41 @@ export const MUTATII = [
     b: '  void pB\n  const exclusiv = Math.max(pS, pC) === rules.personalPriorityLevels',
     t: 'tests/constructie.test.ts', e: 'un pion pus EXCLUSIV pe construit',
   },
+
+  // --- pasul 3: continutul ---
+  {
+    n: 'o piesa poate costa altceva decat da inapoi (zidire + sapare tipareste materie)',
+    f: 'src/sim/content.ts',
+    a: '    if (p.cantitate !== y.cantitate) {',
+    b: '    if (false) {',
+    t: 'tests/content.test.ts', e: 'o piesa care nu costa cat da inapoi',
+  },
+  {
+    n: 'invariantul de cantitate devine un PLAFON in loc de egalitate',
+    f: 'src/sim/content.ts',
+    a: '    if (p.cantitate !== y.cantitate) {',
+    b: '    if (p.cantitate < y.cantitate) {',
+    t: 'tests/content.test.ts', e: 'o piesa care nu costa cat da inapoi',
+  },
+  {
+    n: 'o piesa poate fi mai scumpa decat incape intr-o mana',
+    f: 'src/sim/content.ts',
+    a: '    if (p.cantitate > r.haulCarryMax) {',
+    b: '    if (false) {',
+    t: 'tests/content.test.ts', e: 'o piesa care nu incape intr-o mana',
+  },
+  {
+    n: 'grinda poate sprijini mai putin decat solul',
+    f: 'src/sim/content.ts',
+    a: '  if (r.suportRazaGrinda < r.suportMax) {',
+    b: '  if (false) {',
+    t: 'tests/content.test.ts', e: 'o grinda nu poate sprijini mai putin',
+  },
+  {
+    n: 'o piesa se poate face din AER',
+    f: 'src/sim/content.ts',
+    a: '    if (!isSolid(mat[1])) {',
+    b: '    if (false) {',
+    t: 'tests/content.test.ts', e: 'o piesa din AER sau APA',
+  },
 ]
