@@ -35,8 +35,8 @@ export const MUTATII = [
   // o bucla pe headroom, un tipar doar pe antet potrivea prima aparitie si
   // otravea garda gresita — mutatia „trecea" fiindca strica altceva.
   { n: 'fill nu se uita la mormane', f: 'src/sim/commands.ts',
-    a: "      for (let h = 0; h < rules.agentHeadroomM; h++) {\n        const it = itemLaCelula(w.iteme, cmd.wx, cmd.wy, cmd.z - h)",
-    b: "      for (let h = 0; h < 0; h++) {\n        const it = itemLaCelula(w.iteme, cmd.wx, cmd.wy, cmd.z - h)",
+    a: "  for (let h = 0; h < rules.agentHeadroomM; h++) {\n    const it = itemLaCelula(w.iteme, wx, wy, z - h)",
+    b: "  for (let h = 0; h < 0; h++) {\n    const it = itemLaCelula(w.iteme, wx, wy, z - h)",
     t: 'tests/iteme.test.ts', e: 'fill refuza sa zideasca peste un morman' },
   { n: 'sapatul nu verifica plafonul de iteme', f: 'src/sim/joburi.ts',
     a: "  if (w.iteme.vii >= w.iteme.capacity) {", b: "  if (w.iteme.vii < 0) {",
@@ -75,8 +75,8 @@ export const MUTATII = [
     a: "      w.ratiune.itemePierdute += a.caraCantitate[i]!\n", b: "",
     t: 'tests/carat.test.ts', e: 'marfa din mana unui slot MORT' },
   { n: 'fill verifica doar cota picioarelor pionului', f: 'src/sim/commands.ts',
-    a: "      for (let h = 0; h < rules.agentHeadroomM; h++) {\n        for (let i = 0; i < a.count; i++) {\n          if (a.alive[i] === 0) continue\n          if (a.z[i] !== cmd.z - h) continue",
-    b: "      for (let h = 0; h < 1; h++) {\n        for (let i = 0; i < a.count; i++) {\n          if (a.alive[i] === 0) continue\n          if (a.z[i] !== cmd.z - h) continue",
+    a: "  for (let h = 0; h < rules.agentHeadroomM; h++) {\n    for (let i = 0; i < a.count; i++) {\n      if (a.alive[i] === 0) continue\n      if (a.z[i] !== z - h) continue",
+    b: "  for (let h = 0; h < 1; h++) {\n    for (let i = 0; i < a.count; i++) {\n      if (a.alive[i] === 0) continue\n      if (a.z[i] !== z - h) continue",
     t: 'tests/carat.test.ts', e: 'fill nu zideste un pion la inaltimea capului' },
   { n: 'pionul ingropat isi pastreaza jobul', f: 'src/sim/agents.ts',
     a: "        terminaJob(w, rules, i, Sfarsit.INTRERUPT)\n        continue", b: "        continue",

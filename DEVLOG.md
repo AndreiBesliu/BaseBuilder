@@ -2473,3 +2473,98 @@ Merită scrise, fiindcă arată că verificarea a funcționat în ambele sensuri
 | 6 | **driverul** — `FelJob.CONSTRUIESTE`, pionul stă LÂNGĂ nu PE, `jobTarget \|\| jobDest`, scanerul citește harta | casa se ridică; M5 cu o zidire în curs |
 
 Pașii 1–3 sunt reparații pe cod existent și rulează **înainte** să existe o singură piesă zidită.
+
+## Task Completed — cinci pași din șase
+
+**Livrat:** pașii 1–5 din ordinea scrisă de panou. **365 de teste**, **27 de probe de mutație pe
+construcție**, **142 din 142 prinse** pe cinci suite, hash de referință `605e9178`.
+
+Rămâne pasul 6, driverul: `FelJob.CONSTRUIESTE` în tabelul de drivere, pionul care cară materialul
+la șantier și zidește. Casa se poate desena și se poate verifica; încă nu se ridică singură.
+
+### Ce s-a livrat, pas cu pas
+
+| pas | ce | cifra care îl închide |
+|---|---|---|
+| 1 | poarta pe felul desemnării | o desemnare de alt fel stă 1000 de tickuri neatinsă; fără ea, ștearsă la tickul 3047 |
+| 2 | schema 7 (`desemnari.piesa`, a treia categorie) | hash `0ffe0a4e`, mutat **o singură dată**, din două cauze |
+| 3 | kitul de trei piese + invarianții | zidire + săpare producea 20 de unități din nimic |
+| 4 | stabilitatea la zidire | hash `605e9178`; scenariul standard zidea el însuși un bloc plutitor |
+| 5 | închiderea + desenarea + previzualizarea | casa de 177 de piese: 177 desenate, 176 construibile, 1 imposibilă |
+
+### Trei lucruri pe care le-am aflat greșind, și au schimbat codul
+
+**1. Am fost la un pas să simplific închiderea într-o singură trecere.** Demonstrasem în cap că e
+echivalentă cu „ce suport ar avea fiecare piesă dacă toate ar exista", și pe o **casă** chiar este —
+măsurat, 344 și 344, fiindcă o casă e stratificată și fiecare piesă își are sprijinul sub ea. Pe
+planuri neregulate nu: naivul promite mai mult în **200 din 200** de cazuri, 231,4 celule față de
+168,9, cu un exces maxim de 138. Demonstrația trata drumul lateral și uita că așezarea vine de
+**dedesubt** — o piesă planificată sub alta poate fi ea însăși imposibilă.
+
+**2. `suportDacaZidesc` întreba ipoteza dacă celula e deja solidă, apoi arunca ipoteza** — deci
+răspundea 0 pentru ceva ce tocmai i se spusese că există. Închiderea nu vede cazul (celula testată
+nu e încă în mulțime), dar primul apelant din afară l-a văzut imediat.
+
+**3. Scurtcircuitul „celula e deja plină" era în măsurătoare, nu în poartă.** Pe un bloc plutitor,
+măsurătoarea răspunde corect 0, iar poarta îl citea și refuza cu `FARA_SPRIJIN` când informația utilă
+e că celula e plină. O măsurătoare care minte ca să fie comodă nu mai e o măsurătoare.
+
+### Poarta de plasare a prins ceva ce era în cod de la început
+
+`fill` nu trecea **deloc** prin regula de stabilitate, deci `suport(c) > 0` era un invariant fals pe
+starea salvată. Prima dată când poarta a rulat, a refuzat **scenariul standard**: el sapă trei voxeli
+în jos și punea zidul deasupra gropii. Comentariul spunea „garantat gol" — adevărat, și irelevant:
+era gol și *dedesubt*. Hash-ul de referință din CI acoperea, de la început, un bloc care încalcă
+regula de stabilitate a propriului joc.
+
+Și patru fixturi de test zideau în aer, toate corecte până atunci. Două asertau „deasupra
+headroom-ului se poate"; testează acum ce voiau de fapt — că garda de *ocupare* nu se mai aplică.
+Iar fixturile noi aveau nevoie de teren plat **și uscat**: prima variantă a nimerit un sit la −47 m,
+unde celula de la cota solului e apă, deci nu susține nimic.
+
+### Instrumentul care mințea
+
+De două ori suita de mutații a raportat `restaurat: da` pe toate probele și a lăsat totuși o mutație
+**aplicată** în arbore. Prima am găsit-o abia după două zile, când un test fără legătură a picat.
+
+Mecanismul, găsit la a treia reproducere: `git commit` pornește `git gc --auto` în fundal;
+`git checkout -- <fișier>` copiază din **INDEX**, nu din HEAD; un `git status` concurent
+reîmprospătează cache-ul de stat al indexului, iar dacă prinde fișierul *mutat*, git crede că
+arborele îl oglindește deja și **sare peste copiere**. Apoi aceeași minciună răspunde și la
+verificare. Ambele jumătăți se sprijineau pe aceeași stare coruptă.
+
+Reparat: `git checkout HEAD --`, verificare pe **conținut** (se cere tiparul înapoi în fișier, nu se
+întreabă git — el e partea care poate minți), trei încercări, și eșecul se strigă cu numele
+fișierelor. Rulat de patru ori consecutiv imediat după commit — condiția care îl reproducea —
+arbore curat de fiecare dată.
+
+Am contribuit și eu la întârziere: într-o rulare filtrasem ieșirea cu un grep care arunca exact linia
+`restaurat:`. Un instrument care spune adevărul, citit printr-un filtru care îl ascunde.
+
+### Cinci probe ratate, cinci goluri de fixtură
+
+Niciuna n-a fost un tipar prost scris. Cea mai instructivă e ultima: filtrul pe fel din
+previzualizarea de construcție nu putea fi probat, fiindcă o desemnare de **săpat** stă mereu pe o
+celulă solidă, iar închiderea scoate celulele solide din mulțime — deci inclusă din greșeală, n-ar fi
+schimbat niciun număr. Cazul care îl leagă e o desemnare de săpat rămasă pe **aer**, produsă prin
+editare directă de teren. Aceeași lecție ca la recenzia tăieturii 1: **o mutație probează ce ating
+fixturile.**
+
+Și șapte tipare s-au învechit pentru că s-a mutat codul de sub ele — de fiecare dată prinse ca
+`TIPAR LIPSA`, adică raportate ca eșec, nu înghițite. **Trei dintre ele au ieșit abia la rularea
+tuturor suitelor**, în cele vechi: garda de ocupare a ieșit din `fill` în `celulaLibera`, iar BFS-ul
+lateral a primit canalul ipotetic. Exact motivul pentru care regula spune să rulezi TOATE suitele după
+fiecare tranșă, nu doar pe cele noi — tocmai cele vechi putrezesc. Reancorate, probele acoperă acum
+și `desemnează`, nu doar `fill`: aceeași funcție apară ambele comenzi.
+
+### Ce rămâne, cu cifra lui
+
+- **pasul 6, driverul.** `anuleazaDesemnare` filtrează pe `jobTarget`, iar șantierul ar sta în
+  `jobDest` — măsurat de panou: job orfan, rezervare pe id mort, M5 roșu din prima zidire. Se repară
+  în același pas cu primul job de construcție, nu după.
+- **`rang(FARA_SPRIJIN)`** — se adaugă când un scaner chiar îl emite. O cauză pe care nimeni n-o
+  produce nu poate fi legată de nimic.
+- **grinda** (`suportRazaGrinda: 10`), amânată cu cifra ei: o singură editare lângă o cavitate de
+  21×21 trece de la 13,3 la 173,3 ms, iar discul de invalidare de la 50 la 362 de celule.
+- **overlay-ul de construcție** — previzualizarea există în nucleu; desenarea ei pe ecran nu.
+

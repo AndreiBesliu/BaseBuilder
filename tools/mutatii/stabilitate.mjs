@@ -57,8 +57,8 @@ export const MUTATII = [
   {
     n: 'suportul nu scade pe pas lateral (fara −1)',
     f: 'src/sim/stabilitate.ts',
-    a: '      if (esteAsezat(t, nx, ny, z, cazute)) return Math.max(0, rules.suportMax - (d + 1))',
-    b: '      if (esteAsezat(t, nx, ny, z, cazute)) return Math.max(0, rules.suportMax - d)',
+    a: '      if (esteAsezat(t, nx, ny, z, cazute, zidite)) return Math.max(0, rules.suportMax - (d + 1))',
+    b: '      if (esteAsezat(t, nx, ny, z, cazute, zidite)) return Math.max(0, rules.suportMax - d)',
     t: 'tests/stabilitate.test.ts', e: 'GRANITA: 6 lat TINE, 7 CADE',
   },
   {
