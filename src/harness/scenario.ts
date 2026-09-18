@@ -128,6 +128,11 @@ export function standardScenario(seed: number, ticks: number, agents = 20): Scen
     })
   }
 
+  // Celulele pe care scenariul si le-a REZERVAT deja: zidul, mancarea, paturile.
+  // Declarata inaintea buclei de teren fiindca zidul e primul care revendica una,
+  // si fara asta mancarea ateriza peste el (`lasaItem: LOC_NECALCABIL`).
+  const celuleFolosite = new Set<number>()
+
   // Terenul.
   let t = 100
   for (const s of sites) {
@@ -136,8 +141,21 @@ export function standardScenario(seed: number, ticks: number, agents = 20): Scen
     for (let d = 0; d < 3; d++) {
       commands.push({ tick: t + 1 + d, cmd: { kind: 'dig', wx: s.wx, wy: s.wy, z: s.groundM - d } })
     }
-    // Si un zid deasupra: garantat gol.
-    commands.push({ tick: t + 4, cmd: { kind: 'fill', wx: s.wx, wy: s.wy, z: s.groundM + 1, material: Material.PIATRA_CONSTRUITA } })
+    // Si un zid. NU deasupra gropii pe care tocmai am sapat-o: acolo e gol, dar
+    // e gol si DEDESUBT, deci blocul ar atarna in aer. Scenariul zidea asa de la
+    // inceput, iar comentariul de aici spunea „garantat gol" — ceea ce e adevarat
+    // si irelevant. Pana la poarta de plasare din taietura 2 nimic nu se plangea:
+    // hash-ul de referinta din CI acoperea un bloc care incalca regula de
+    // stabilitate a propriului joc.
+    //
+    // Se zideste pe o coloana VECINA, neatinsa de sapaturi si in afara patratului
+    // de 5x5 in care se nasc pionii, pe propriul ei sol — cota se citeste per
+    // celula, niciodata a sitului, exact ca la nasterea agentilor.
+    const zid = celulaBuna(scratch, s.wx - 2, s.wy - 2)
+    if (zid) {
+      celuleFolosite.add(zid.wx * 100000 + zid.wy)
+      commands.push({ tick: t + 4, cmd: { kind: 'fill', wx: zid.wx, wy: zid.wy, z: zid.z, material: Material.PIATRA_CONSTRUITA } })
+    }
     t += 20
   }
 
@@ -150,7 +168,7 @@ export function standardScenario(seed: number, ticks: number, agents = 20): Scen
   // `celulaBuna` cauta in jur, deci doua cereri vecine pot intoarce ACEEASI
   // celula; a doua comanda ar fi refuzata cu CELULA_OCUPATA. Scenariul trebuie sa
   // ramana fara refuzuri, altfel nu se mai vede cand apare unul real.
-  const celuleFolosite = new Set<number>()
+
   for (const s of sites) {
     for (const [dx, dy] of [[2, 0], [-2, 0], [0, 2], [0, -2]] as const) {
       const wx = s.wx + dx

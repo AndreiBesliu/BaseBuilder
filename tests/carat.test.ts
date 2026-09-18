@@ -672,8 +672,13 @@ test('fill nu zideste un pion la inaltimea capului: garda acopera tot headroom-u
     assert.equal(out.ok, false, `zidirea la z+${h} peste pion a trecut`)
     if (!out.ok) assert.equal(out.reason, Reason.CELULA_OCUPATA)
   }
-  // Deasupra headroom-ului se poate.
-  assert.ok(applyCommand(w, { kind: 'fill', wx: cx, wy: cy, z: cz + R.agentHeadroomM, material: Material.PIATRA_CONSTRUITA }, R).ok)
+  // Deasupra headroom-ului, garda de OCUPARE nu se mai aplica — si asta e ce
+  // probeaza testul. Comanda poate fi totusi refuzata, dar din alt motiv: din
+  // taietura 2 incoace `fill` trece si prin regula de stabilitate, iar la doi
+  // metri deasupra solului nu e nimic care sa tina piatra. Ce conteaza aici e ca
+  // motivul S-A SCHIMBAT.
+  const sus = applyCommand(w, { kind: 'fill', wx: cx, wy: cy, z: cz + R.agentHeadroomM, material: Material.PIATRA_CONSTRUITA }, R)
+  if (!sus.ok) assert.notEqual(sus.reason, Reason.CELULA_OCUPATA, 'garda de ocupare s-a intins peste headroom')
 })
 
 test('un pion ingropat din care nu se mai iese isi INCHEIE jobul: marfa iese din mana si rezervarea se elibereaza', () => {

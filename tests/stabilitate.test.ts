@@ -153,14 +153,30 @@ test('marginea lumii nu ALIASEAZA in coltul opus: o sapatura la vest nu atinge e
     }
   }
 
-  // Si efectul real: un bloc zidit la EST supravietuieste unei sapaturi la VEST.
+  // Si efectul real: roca de la EST supravietuieste unei sapaturi la VEST.
+  //
+  // Cota se alege sub AMBELE soluri — cele doua coloane sunt la 16 km una de
+  // alta, deci au cote complet diferite. Prima versiune a testului zidea acolo
+  // un bloc, dar din taietura 2 `fill` trece prin regula de stabilitate si un
+  // bloc in aer curat e refuzat, pe drept. Roca naturala e si mai buna fixtura:
+  // n-are nimic artificial in ea.
   const w = createWorld(12345)
-  assert.ok(applyCommand(w, { kind: 'fill', wx: WORLD_CELLS - 1, wy: Y - 1, z: Z, material: Material.ROCA }, R).ok)
+  const gEst = groundLevelM(w.terrain, WORLD_CELLS - 1, Y - 1)
+  const gVest = groundLevelM(w.terrain, 0, Y)
+  assert.ok(gEst.ok && gVest.ok, 'fixtura: ambele coloane trebuie sa aiba sol')
+  if (!gEst.ok || !gVest.ok) return
+  const Zs = Math.min(gEst.value, gVest.value) - 3
+  const inainteEst = materialAt(w.terrain, WORLD_CELLS - 1, Y - 1, Zs)
+  assert.ok(inainteEst.ok && isSolid(inainteEst.value), 'fixtura: celula de la est trebuie sa fie roca')
+
   const inainte = lastJobReport().voxeliPrabusiti
-  assert.ok(applyCommand(w, { kind: 'dig', wx: 0, wy: Y, z: Z }, R).ok)
+  assert.ok(applyCommand(w, { kind: 'dig', wx: 0, wy: Y, z: Zs }, R).ok)
   assert.equal(lastJobReport().voxeliPrabusiti - inainte, 0, 'o sapatura la vest n-are voie sa prabuseasca nimic la est')
-  const m = materialAt(w.terrain, WORLD_CELLS - 1, Y - 1, Z)
-  assert.ok(m.ok && m.value === Material.ROCA, `blocul de la est a fost sters de o sapatura de la 16 km: ${m.ok ? m.value : 'refuz'}`)
+  const m = materialAt(w.terrain, WORLD_CELLS - 1, Y - 1, Zs)
+  assert.ok(
+    m.ok && m.value === inainteEst.value,
+    `celula de la est a fost schimbata de o sapatura de la 16 km: ${inainteEst.value} -> ${m.ok ? m.value : 'refuz'}`,
+  )
 })
 
 test('ACCEPTANTA (PLAN §0.5): pivnita 7x7 se prabuseste, 5x5 nu', () => {

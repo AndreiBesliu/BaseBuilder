@@ -22,11 +22,52 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { Desemnare, seSapaLa, slotDesemnare } from '../src/sim/desemnari.ts'
 import { hashWorld } from '../src/sim/hash.ts'
-import { materialAt } from '../src/sim/terrain/terrain.ts'
+import { groundLevelM, materialAt } from '../src/sim/terrain/terrain.ts'
+import { Material } from '../src/sim/terrain/chunk.ts'
+import { Reason } from '../src/sim/result.ts'
+import { poateSustine, suportDacaZidesc, suportLa } from '../src/sim/stabilitate.ts'
 import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { CATEGORII, Categorie, FelJob, Piesa } from '../src/sim/state.ts'
+import type { World } from '../src/sim/state.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { desemneaza, laSit, R, ruleaza, solidLaDistanta } from './fixturi.ts'
+import { createWorld } from '../src/sim/world.ts'
+import { WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
+
+/**
+ * Un petec de sol PLAT de `latura` celule, cautat pe mai multe mii de coloane.
+ *
+ * `patratPlat` din fixturi cauta doar pe cele patru directii dintr-un sit dat, si
+ * la 9x9 nu gaseste nimic pe seedurile astea. Terenul plat nu e un moft de
+ * fixtura aici: pe teren inclinat coloanele vecine au propriul lor sol, deci o
+ * consola s-ar sprijini pe pamant in loc sa atarne — prima versiune a testului
+ * n-a cerut-o si a patra celula a trecut, desi regula spune ca nu are voie.
+ */
+function sitPlat(seed: number, latura: number): { w: World; wx: number; wy: number; g: number } {
+  const w = createWorld(seed)
+  for (let k = 1; k <= 8000; k++) {
+    const wx = (k * 1237 + seed) % WORLD_CELLS
+    const wy = (k * 7919 + seed * 31) % WORLD_CELLS
+    const g = groundLevelM(w.terrain, wx, wy)
+    if (!g.ok) continue
+    // Si USCAT. `groundLevelM` intoarce cota solului si sub apa, iar acolo celula
+    // de la `g` e APA — care nu e solida, deci nu sustine nimic. Fara verificarea
+    // asta, fixtura alegea un sit la -47 m si primul nivel al stalpului iesea
+    // FARA_SPRIJIN. E aceeasi capcana pe care `pickSites` din scenariu o are deja
+    // scrisa: „sub apa nu se sapa; situl se alege pe uscat".
+    const sus = materialAt(w.terrain, wx, wy, g.value)
+    if (!sus.ok || !isSolid(sus.value)) continue
+    let plat = true
+    for (let dx = -2; dx <= latura + 2 && plat; dx++) {
+      for (let dy = -2; dy <= latura + 2; dy++) {
+        const gg = groundLevelM(w.terrain, wx + dx, wy + dy)
+        if (!gg.ok || gg.value !== g.value) { plat = false; break }
+      }
+    }
+    if (plat) return { w, wx, wy, g: g.value }
+  }
+  assert.fail(`niciun sit plat de ${latura} la seed ${seed}`)
+}
 
 test('o desemnare care NU e de sapat nu e luata niciodata ca job de sapat', () => {
   const { w, sit } = laSit(12345, 4, [0, 0, 0, 0])
@@ -144,4 +185,120 @@ test('slotul reutilizat nu mostenește piesa desemnarii moarte', () => {
   assert.ok(applyCommand(curata.w, { kind: 'anuleazaDesemnarea', id: p1.id }, R).ok)
   desemneaza(curata.w, tintaCurata.wx, tintaCurata.wy)
   assert.equal(hashWorld(w), hashWorld(curata.w), 'o piesa ramasa intr-un slot mort muta hash-ul')
+})
+
+// ---------------------------------------------------------------------------
+// stabilitatea la ZIDIRE (pasul 4)
+// ---------------------------------------------------------------------------
+
+test('nu se mai poate zidi in aer: golul principal al designului', () => {
+  // Pana aici `fill` nu trecea DELOC prin regula de stabilitate. Panoul de design
+  // a reprodus-o: un bloc la cinci metri deasupra solului, suport 0, supravietuia
+  // si la 200 de tickuri si la save/load. Adica `suport(c) > 0` era un invariant
+  // FALS pe starea salvata, iar momentul in care o piesa cadea ajungea sa depinda
+  // de ce atinsese cineva alaturi, nu de teren.
+  const { w, sit } = laSit(12345, 0)
+  const g = groundLevelM(w.terrain, sit.wx, sit.wy)
+  assert.ok(g.ok)
+  if (!g.ok) return
+
+  const sus = applyCommand(w, { kind: 'fill', wx: sit.wx, wy: sit.wy, z: g.value + 5, material: Material.PIATRA_CONSTRUITA }, R)
+  assert.equal(sus.ok, false, 'un bloc la cinci metri in aer trebuie REFUZAT')
+  if (!sus.ok) {
+    assert.equal(sus.reason, Reason.FARA_SPRIJIN)
+    assert.equal(sus.params.z, g.value + 5, 'refuzul poarta celula, ca sa se poata arata in „De ce nu?"')
+    assert.equal(sus.params.raza, R.suportMax)
+  }
+
+  // CONTROLUL NEGATIV: pe sol se poate. Fara el, testul ar trece si daca poarta
+  // ar refuza absolut orice zidire.
+  const jos = applyCommand(w, { kind: 'fill', wx: sit.wx, wy: sit.wy, z: g.value + 1, material: Material.PIATRA_CONSTRUITA }, R)
+  assert.ok(jos.ok, `zidirea pe sol a fost refuzata: ${JSON.stringify(jos)}`)
+})
+
+test('consola se intinde exact 3 celule, apoi cade: regula scrisa pentru jucator', () => {
+  // „Cel mult 3 celule de orice sprijin" e propozitia pe care o citeste jucatorul,
+  // si asta e testul ei pe partea de ZIDIRE (perechea 5-tine / 7-cade o probeaza
+  // pe partea de sapat). Se ridica un stalp de doi, apoi se iese lateral in aer:
+  // a patra celula e la distanta 4 de orice sprijin, deci suport 0.
+  // Terenul trebuie sa fie PLAT, si nu e un amanunt de fixtura: pe teren inclinat
+  // coloanele vecine au propriul lor sol, deci consola s-ar sprijini pe pamant, nu
+  // pe ea insasi. Prima versiune a testului n-a cerut-o si a patra celula a trecut.
+  const { w, wx, wy, g } = sitPlat(4242, 9)
+  const cx = wx + 1
+  const cy = wy + 4
+  const z = g + 2
+
+  assert.ok(applyCommand(w, { kind: 'fill', wx: cx, wy: cy, z: g + 1, material: Material.PIATRA_CONSTRUITA }, R).ok, 'fixtura: primul nivel al stalpului')
+  assert.ok(applyCommand(w, { kind: 'fill', wx: cx, wy: cy, z, material: Material.PIATRA_CONSTRUITA }, R).ok, 'fixtura: al doilea nivel')
+
+  for (let d = 1; d <= 3; d++) {
+    const out = applyCommand(w, { kind: 'fill', wx: cx + d, wy: cy, z, material: Material.PIATRA_CONSTRUITA }, R)
+    assert.ok(out.ok, `celula ${d} a consolei trebuia sa se poata zidi: ${JSON.stringify(out)}`)
+    assert.equal(suportLa(w.terrain, R, cx + d, cy, z), R.suportMax - d, `suportul la ${d} pasi`)
+  }
+  const aPatra = applyCommand(w, { kind: 'fill', wx: cx + 4, wy: cy, z, material: Material.PIATRA_CONSTRUITA }, R)
+  assert.equal(aPatra.ok, false, 'a patra celula a consolei e la distanta 4: n-are voie')
+  if (!aPatra.ok) assert.equal(aPatra.reason, Reason.FARA_SPRIJIN)
+})
+
+test('`suportDacaZidesc` e OGLINDA: aceeasi cifra ca `suportLa` dupa ce chiar zidesti', () => {
+  // Proprietatea care leaga cele doua functii. Fara ea, poarta ar putea raspunde
+  // consecvent si GRESIT: ar refuza ce sta in picioare, sau ar lasa sa treaca ce
+  // cade in acelasi tick.
+  const s7 = sitPlat(777, 9)
+  const w = s7.w
+  const cx = s7.wx + 4
+  const cy = s7.wy + 4
+  const z = s7.g + 2
+
+  // Un stalp, ca sa existe si celule cu suport PARTIAL in jur, nu doar 4 si 0.
+  assert.ok(applyCommand(w, { kind: 'fill', wx: cx, wy: cy, z: z - 1, material: Material.PIATRA_CONSTRUITA }, R).ok)
+  assert.ok(applyCommand(w, { kind: 'fill', wx: cx, wy: cy, z, material: Material.PIATRA_CONSTRUITA }, R).ok)
+
+  let verificate = 0
+  let partiale = 0
+  for (let dx = -3; dx <= 3; dx++) {
+    for (let dy = -3; dy <= 3; dy++) {
+      const wx = cx + dx
+      const wy = cy + dy
+      const prezis = suportDacaZidesc(w.terrain, R, wx, wy, z)
+      const poarta = poateSustine(w.terrain, R, wx, wy, z)
+      assert.equal(poarta.ok, prezis > 0, `poarta si cifra nu spun acelasi lucru la ${dx},${dy}`)
+
+      const zidit = applyCommand(w, { kind: 'fill', wx, wy, z, material: Material.PIATRA_CONSTRUITA }, R)
+      if (!zidit.ok) {
+        // Refuzul poate veni si din alt motiv decat sprijinul (celula deja plina).
+        // Ce trebuie sa fie adevarat e ca FARA_SPRIJIN apare EXACT cand cifra e 0.
+        assert.equal(zidit.reason === Reason.FARA_SPRIJIN, prezis === 0, `refuz ${zidit.reason} la prezis ${prezis}, la ${dx},${dy}`)
+        continue
+      }
+      const real = suportLa(w.terrain, R, wx, wy, z)
+      assert.equal(real, prezis, `la ${dx},${dy}: prezis ${prezis}, real ${real}`)
+      if (real > 0 && real < R.suportMax) partiale++
+      verificate++
+      // NU se sapa inapoi: sapatul lasa un morman, iar urmatorul `fill` pe celula
+      // aia ar fi refuzat cu CELULA_OCUPATA. Terenul se aduna, si e mai bine asa —
+      // fiecare celula e judecata pe lumea reala din momentul ei, nu pe una
+      // artificial curatata.
+    }
+  }
+  // 15 din 49: restul sunt refuzate pe drept, fiindca nu se pot construi in ordinea
+  // in care le scaneaza bucla. Ce conteaza e ca printre cele construite sa existe
+  // si suporturi PARTIALE — altfel proprietatea s-ar verifica doar pe 4 si 0.
+  assert.ok(verificate >= 12, `fixtura: doar ${verificate} celule verificate`)
+  assert.ok(partiale > 0, 'fixtura: trebuie sa existe si celule cu suport PARTIAL, nu doar 4 si 0')
+})
+
+test('o celula deja plina raspunde CELULA_PLINA, nu FARA_SPRIJIN', () => {
+  // Poarta de sprijin spune „da" pe ce e deja solid: nu se plaseaza nimic acolo,
+  // deci refuzul trebuie sa vina de la teren, cu informatia utila. Un depozit plin
+  // si o celula de roca cer actiuni complet diferite de la jucator.
+  const { w, sit } = laSit(12345, 0)
+  const g = groundLevelM(w.terrain, sit.wx, sit.wy)
+  assert.ok(g.ok)
+  if (!g.ok) return
+  const out = applyCommand(w, { kind: 'fill', wx: sit.wx, wy: sit.wy, z: g.value, material: Material.PIATRA_CONSTRUITA }, R)
+  assert.equal(out.ok, false)
+  if (!out.ok) assert.equal(out.reason, Reason.CELULA_PLINA)
 })

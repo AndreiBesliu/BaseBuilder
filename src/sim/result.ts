@@ -42,6 +42,18 @@ export const Reason = {
   INVARIANT_INCALCAT: 'INVARIANT_INCALCAT',
   /** N-are unde sa fie dus: nicio zona pictata care sa primeasca felul asta, sau toate pline. Actionabil: picteaza / mareste. */
   FARA_DEPOZIT: 'FARA_DEPOZIT',
+  /**
+   * Piesa n-ar sta in picioare acolo: la mai putin de `suportMax` pasi nu e nimic
+   * asezat. Actionabil: zideste mai aproape de ceva, sau lasa roca.
+   */
+  FARA_SPRIJIN: 'FARA_SPRIJIN',
+  /**
+   * E deja ceva solid acolo. Separat de `CAPACITATE_DEPASITA`, care inseamna „o
+   * limita a fost atinsa" — un depozit plin si o celula de roca cer actiuni
+   * complet diferite de la jucator, iar panoul „De ce nu?" nu le poate deosebi
+   * daca poarta acelasi cod.
+   */
+  CELULA_PLINA: 'CELULA_PLINA',
 } as const
 
 export type ReasonCode = (typeof Reason)[keyof typeof Reason]
@@ -73,6 +85,8 @@ export const MOTIVE: readonly ReasonCode[] = [
   Reason.DEJA_DESEMNATA,
   Reason.INVARIANT_INCALCAT,
   Reason.FARA_DEPOZIT,
+  Reason.FARA_SPRIJIN,
+  Reason.CELULA_PLINA,
 ]
 
 /** Codul (1-based) al unei cauze. 0 = niciuna. */

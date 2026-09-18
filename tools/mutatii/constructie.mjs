@@ -102,4 +102,41 @@ export const MUTATII = [
     b: '    if (false) {',
     t: 'tests/content.test.ts', e: 'o piesa din AER sau APA',
   },
+
+  // --- pasul 4: stabilitatea la zidire ---
+  {
+    n: '`fill` nu mai trece prin regula de stabilitate (se zideste in aer)',
+    f: 'src/sim/commands.ts',
+    a: '      const sprijin = poateSustine(w.terrain, rules, cmd.wx, cmd.wy, cmd.z)\n      if (!sprijin.ok) return sprijin',
+    b: '      void poateSustine',
+    t: 'tests/constructie.test.ts', e: 'nu se mai poate zidi in aer',
+  },
+  {
+    n: 'poarta accepta si suportul ZERO',
+    f: 'src/sim/stabilitate.ts',
+    a: '  if (suport > 0) return accept()',
+    b: '  if (suport >= 0) return accept()',
+    t: 'tests/constructie.test.ts', e: 'nu se mai poate zidi in aer',
+  },
+  {
+    n: 'suportDacaZidesc crede ca orice celula noua e ASEZATA',
+    f: 'src/sim/stabilitate.ts',
+    a: '  if (sub === Sol.SOLID || sub === Sol.ANCORA) return rules.suportMax\n  return caveazaSpreAsezat(t, rules, wx, wy, z, null)',
+    b: '  void sub\n  return rules.suportMax',
+    t: 'tests/constructie.test.ts', e: 'nu se mai poate zidi in aer',
+  },
+  {
+    n: 'suportDacaZidesc nu cauta lateral (doar asezat sau nimic)',
+    f: 'src/sim/stabilitate.ts',
+    a: '  return caveazaSpreAsezat(t, rules, wx, wy, z, null)',
+    b: '  return 0',
+    t: 'tests/constructie.test.ts', e: 'consola se intinde exact 3 celule',
+  },
+  {
+    n: 'poarta refuza si pe o celula deja plina (mesajul devine inutil)',
+    f: 'src/sim/stabilitate.ts',
+    a: '  if (solLa(t, wx, wy, z) === Sol.SOLID) return suportLa(t, rules, wx, wy, z)',
+    b: '  if (false) return suportLa(t, rules, wx, wy, z)',
+    t: 'tests/constructie.test.ts', e: 'o celula deja plina raspunde CELULA_PLINA',
+  },
 ]

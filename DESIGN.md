@@ -145,8 +145,12 @@ agricultură + pathfinding + randare deodată).
 ### 5.2. Construcția verticală
 
 - **Stabilitatea** e un întreg mic propagat prin BFS de la sol: **4 la sol, −1 pe pas, 0 = imposibil**,
-  grinda reintroduce un punct de sprijin cu rază 10. Nu simulare de forțe. Verificare O(1) la plasare,
-  regulă explicabilă într-o propoziție, același rezolvator pentru rocă, pământ terraformat și ziduri.
+  grinda reintroduce un punct de sprijin cu rază 10. Nu simulare de forțe. **Verificare MĂRGINITĂ la
+  plasare** — o citire pe calea așezată, BFS de cel mult `suportMax` pași altfel; măsurat, 0,137 µs pe
+  sol și 5,767 µs pe un refuz în centrul unei podele de 9×9. *(Propoziția spunea „O(1)". Panoul de design
+  al construcției a măsurat că e falsă — și era falsă și înainte de grindă, doar ieftină. S-a schimbat
+  propoziția, nu regula.)* Regulă explicabilă într-o propoziție, același rezolvator pentru rocă, pământ
+  terraformat și ziduri.
 - **Vizualizatorul numeric se livrează în aceeași sarcină cu regula.** La Foxy Voxel absența lui a fost
   reclamată ani întregi — sistemul arăta doar un mesaj de eroare la eșec.
 - **Clădirile sunt un kit modular** pe aceeași grilă cu terenul, cu un contract unic de conexiune

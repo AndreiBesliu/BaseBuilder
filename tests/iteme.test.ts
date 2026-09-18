@@ -178,8 +178,11 @@ test('fill refuza sa zideasca peste un morman, si peste celula care i-ar lua hea
   const cap = applyCommand(w, { kind: 'fill', wx: cx, wy: cy, z: g + 2, material: Material.PIATRA_CONSTRUITA }, R)
   assert.equal(cap.ok, false)
   if (!cap.ok) assert.equal(cap.reason, Reason.CELULA_OCUPATA)
-  // Deasupra headroom-ului se poate.
-  assert.ok(applyCommand(w, { kind: 'fill', wx: cx, wy: cy, z: g + 3, material: Material.PIATRA_CONSTRUITA }, R).ok)
+  // Deasupra headroom-ului, garda de OCUPARE nu se mai aplica. Refuzul poate
+  // veni acum din regula de stabilitate (`fill` trece prin ea din taietura 2),
+  // dar nu mai are voie sa fie despre morman.
+  const sus = applyCommand(w, { kind: 'fill', wx: cx, wy: cy, z: g + 3, material: Material.PIATRA_CONSTRUITA }, R)
+  if (!sus.ok) assert.notEqual(sus.reason, Reason.CELULA_OCUPATA, 'garda de ocupare s-a intins peste headroom')
 })
 
 test('plafonul de iteme: sapatul REFUZA cand nu mai incape niciun morman — voxelul ramane, marfa nu se pierde', () => {

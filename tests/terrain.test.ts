@@ -317,7 +317,10 @@ test('nu poti sapa aerul si nu poti umple o celula plina', () => {
 
   const fillSolid = fill(t, wx, wy, ground.value, Material.PIATRA_CONSTRUITA)
   assert.equal(fillSolid.ok, false)
-  if (!fillSolid.ok) assert.equal(fillSolid.reason, Reason.CAPACITATE_DEPASITA)
+  // `CELULA_PLINA`, nu `CAPACITATE_DEPASITA`: al doilea inseamna „o limita a fost
+  // atinsa" si e folosit pentru depozite pline si versiuni de schema. Un depozit
+  // plin si o celula de roca cer actiuni complet diferite de la jucator.
+  if (!fillSolid.ok) assert.equal(fillSolid.reason, Reason.CELULA_PLINA)
 
   const fillAir = fill(t, wx, wy, ground.value + 1, Material.AER)
   assert.equal(fillAir.ok, false)

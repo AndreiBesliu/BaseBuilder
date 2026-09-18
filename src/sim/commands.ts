@@ -25,6 +25,7 @@ import { CHUNK_GRID, fill, inWorld, materialAt, setFocus, voxelRangeM, WORLD_CEL
 import { adaugaDesemnare, Desemnare, slotDesemnare } from './desemnari.ts'
 import { acoperaDesemnarea, anuleazaCelulaDeZona, anuleazaDesemnare, retrageCeluleDeZonaNecalcabile, sapaManual, Sfarsit, terminaJob, uitaRacirileDeMarfa, uitaTintele } from './joburi.ts'
 import { asazaItem, itemLaCelula } from './iteme.ts'
+import { poateSustine } from './stabilitate.ts'
 import { adaugaCelulaDeZona, celulaDeZonaLa, creeazaZona, marcheazaZoneMurdare, slotZona, stergeCelulaDeZona, stergeZona, Zona, ZONE_FELURI } from './zone.ts'
 
 export type Command =
@@ -254,6 +255,18 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
         const it = itemLaCelula(w.iteme, cmd.wx, cmd.wy, cmd.z - h)
         if (it !== -1) return refuse(Reason.CELULA_OCUPATA, { item: w.iteme.id[it]!, wx: cmd.wx, wy: cmd.wy, z: cmd.z - h })
       }
+      // Si regula de stabilitate. Pana aici, `fill` NU trecea prin ea deloc: se
+      // putea zidi un bloc in aer curat, cu suport 0, care nu cadea niciodata —
+      // deci `suport(c) > 0` era un invariant FALS pe starea salvata. Reprodus de
+      // panoul de design: `fill` la cinci metri deasupra solului, suport 0, blocul
+      // supravietuia la 200 de tickuri SI la save/load. Iar momentul in care cadea
+      // ajungea sa depinda de ce atinsese cineva alaturi, nu de teren.
+      //
+      // Se cheama DUPA gardile de ocupare (alea sunt despre a rani pe cineva) si
+      // INAINTE de editare. Pe o celula deja plina raspunde „da", ca refuzul sa
+      // vina de la teren cu `CELULA_PLINA`, care e informatia utila.
+      const sprijin = poateSustine(w.terrain, rules, cmd.wx, cmd.wy, cmd.z)
+      if (!sprijin.ok) return sprijin
       const out = fill(w.terrain, cmd.wx, cmd.wy, cmd.z, cmd.material)
       if (!out.ok) return out
       markDirty(w.regions, cmd.wx, cmd.wy, cmd.z, rules)

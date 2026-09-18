@@ -40,6 +40,8 @@
  */
 
 import type { Rules } from './content.ts'
+import type { Outcome } from './result.ts'
+import { accept, refuse, Reason } from './result.ts'
 import { cellKey, decodeCell, decodeCellIn } from './path.ts'
 import type { Celula } from './path.ts'
 import { materialFast } from './regions.ts'
@@ -121,7 +123,18 @@ const DIRECTII: readonly (readonly [number, number])[] = [[1, 0], [-1, 0], [0, 1
 export function suportLa(t: Terrain, rules: Rules, wx: number, wy: number, z: number, cazute: Set<number> | null = null): number {
   if (solLa(t, wx, wy, z, cazute) !== Sol.SOLID) return 0
   if (esteAsezat(t, wx, wy, z, cazute)) return rules.suportMax
+  return caveazaSpreAsezat(t, rules, wx, wy, z, cazute)
+}
 
+/**
+ * BFS-ul lateral propriu-zis, fara nicio presupunere despre celula de PLECARE.
+ *
+ * Sta separat fiindca are DOI apelanti care difera exact prin celula aia:
+ * `suportLa` intreaba despre un voxel care exista, `suportDacaZidesc` despre unul
+ * care inca nu. Scris de doua ori, s-ar desincroniza la prima schimbare de
+ * regula — si regula asta s-a schimbat deja o data, la recenzie.
+ */
+function caveazaSpreAsezat(t: Terrain, rules: Rules, wx: number, wy: number, z: number, cazute: Set<number> | null): number {
   vazute.clear()
   coadaX.length = 0
   coadaY.length = 0
@@ -321,6 +334,49 @@ export function cadeDaca(t: Terrain, rules: Rules, sapate: readonly number[], in
  * adica pe nivelul pe care slice view-ul il taie. Vizualizatorul cerut de
  * DESIGN §5.2 s-ar fi livrat aratand nimic.
  */
+/**
+ * Ce suport ar avea celula (wx, wy, z) DACA s-ar zidi acolo. Oglinda lui
+ * `suportDacaSap`.
+ *
+ * Nu e nevoie de un canal „ipotetic solid" ca `cazute`: BFS-ul lateral nu se uita
+ * niciodata la celula de plecare, doar la vecinii ei. Singurul lucru care tine de
+ * celula insasi e daca e ASEZATA — si aia se citeste direct, dintr-o citire.
+ *
+ * Pe o celula deja solida raspunde ce raspunde `suportLa`: nu se zideste nimic
+ * acolo, deci intrebarea e despre ce EXISTA.
+ */
+export function suportDacaZidesc(t: Terrain, rules: Rules, wx: number, wy: number, z: number): number {
+  if (solLa(t, wx, wy, z) === Sol.SOLID) return suportLa(t, rules, wx, wy, z)
+  const sub = solLa(t, wx, wy, z - 1)
+  if (sub === Sol.SOLID || sub === Sol.ANCORA) return rules.suportMax
+  return caveazaSpreAsezat(t, rules, wx, wy, z, null)
+}
+
+/**
+ * Poarta de PLASARE: se poate zidi ceva la (wx, wy, z)?
+ *
+ * Pana la ea, `fill` nu trecea deloc prin regula de stabilitate — deci se putea
+ * zidi un bloc in aer curat, cu suport 0, care nu cadea niciodata. Adica
+ * `suport(c) > 0` era un invariant FALS pe starea salvata, iar momentul in care
+ * o piesa cade ajungea sa depinda de istoria editarilor, nu de teren.
+ *
+ * DESIGN §5.2 o numeste „verificare O(1) la plasare". Nu e O(1) si n-a fost
+ * niciodata: e o citire pe calea asezata si un BFS de cel mult `suportMax` pasi
+ * altfel. Masurat: 0,137 µs pe sol, 5,767 µs pe un refuz in centrul unei podele
+ * de 9x9. Marginit, nu constant — propozitia din DESIGN s-a schimbat, nu regula.
+ */
+export function poateSustine(t: Terrain, rules: Rules, wx: number, wy: number, z: number): Outcome<void> {
+  const suport = suportDacaZidesc(t, rules, wx, wy, z)
+  if (suport > 0) return accept()
+  return refuse(Reason.FARA_SPRIJIN, {
+    wx,
+    wy,
+    z,
+    raza: rules.suportMax,
+    motiv: 'nimic asezat la mai putin de suportMax pasi: piesa ar cadea in acelasi tick',
+  })
+}
+
 export function suportDacaSap(t: Terrain, rules: Rules, wx: number, wy: number, z: number): number {
   if (solLa(t, wx, wy, z) !== Sol.SOLID) return suportLa(t, rules, wx, wy, z + 1)
   const ipotetic = new Set<number>([cellKey(wx, wy, z)])

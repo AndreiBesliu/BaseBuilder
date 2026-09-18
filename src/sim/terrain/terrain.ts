@@ -214,7 +214,7 @@ function editAt(t: Terrain, wx: number, wy: number, z: number, material: Materia
     return refuse(Reason.LIPSA_MATERIAL, { motiv: 'nu e nimic de sapat', material: current.value })
   }
   if (!expectSolid && isSolid(current.value)) {
-    return refuse(Reason.CAPACITATE_DEPASITA, { motiv: 'celula e deja plina', material: current.value })
+    return refuse(Reason.CELULA_PLINA, { motiv: 'celula e deja plina', material: current.value })
   }
 
   promoteWithApron(t, ref.chunk.cx, ref.chunk.cy)
