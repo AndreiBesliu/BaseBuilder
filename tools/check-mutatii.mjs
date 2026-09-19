@@ -79,14 +79,33 @@ function verificaSuita(nume, M) {
     // in suite. Prima varianta a verificatorului le-a raportat pe toate ca lipsa —
     // instrumentul gresea, nu datele.
     if (typeof m.b !== 'string') { erori.push(`${unde}: campul \`b\` nu e un sir`); return }
-    if (m.a === m.b) erori.push(`${unde}: \`a\` si \`b\` sunt identice — mutatia nu schimba nimic`)
+    // Editarea principala SI cele suplimentare. `e2` era ignorat cu totul de prima
+    // versiune: 6 tipare din suite erau invizibile pentru poarta scrisa anume ca sa
+    // prinda tipare invechite. Exact esecul pe care verificatorul il muta in
+    // `npm run check`, lasat sa treaca prin el.
+    const editari = [{ f: m.f, a: m.a, b: m.b, unde: '' }]
+    if (m.e2 !== undefined) {
+      if (!Array.isArray(m.e2)) { erori.push(`${unde}: \`e2\` exista dar nu e un tablou`); return }
+      for (let k = 0; k < m.e2.length; k++) {
+        const e = m.e2[k]
+        if (typeof e?.f !== 'string' || typeof e?.a !== 'string' || typeof e?.b !== 'string') {
+          erori.push(`${unde}: \`e2[${k}]\` n-are f, a si b ca siruri`)
+          continue
+        }
+        editari.push({ f: e.f, a: e.a, b: e.b, unde: ` [e2[${k}]]` })
+      }
+    }
 
-    const sursa = fisier(m.f)
-    if (sursa === null) { erori.push(`${unde}: fisierul \`${m.f}\` nu exista`); return }
-    const tipar = potrivit(sursa, m.a)
-    const cate = sursa.split(tipar).length - 1
-    if (cate === 0) erori.push(`${unde}: TIPAR LIPSA in \`${m.f}\` — codul de sub proba s-a mutat`)
-    if (cate > 1) erori.push(`${unde}: TIPAR AMBIGUU in \`${m.f}\` (${cate} potriviri) — \`replace\` ia PRIMA`)
+    for (const e of editari) {
+      const loc = `${unde}${e.unde}`
+      if (e.a === e.b) erori.push(`${loc}: \`a\` si \`b\` sunt identice — mutatia nu schimba nimic`)
+      const sursa = fisier(e.f)
+      if (sursa === null) { erori.push(`${loc}: fisierul \`${e.f}\` nu exista`); continue }
+      const tipar = potrivit(sursa, e.a)
+      const cate = sursa.split(tipar).length - 1
+      if (cate === 0) erori.push(`${loc}: TIPAR LIPSA in \`${e.f}\` — codul de sub proba s-a mutat`)
+      if (cate > 1) erori.push(`${loc}: TIPAR AMBIGUU in \`${e.f}\` (${cate} potriviri) — \`replace\` ia PRIMA`)
+    }
 
     const testul = fisier(m.t)
     if (testul === null) { erori.push(`${unde}: fisierul de test \`${m.t}\` nu exista`); return }
