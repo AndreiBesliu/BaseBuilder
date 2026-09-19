@@ -1343,10 +1343,40 @@ export function drumRefuzat(w: World, rules: Rules, slot: number, motiv: ReasonC
  * daca gaseste una o scrie si retinteste. Progresul ramane. Intoarce `false`
  * daca nu mai exista.
  */
-function refaLoculDeLucru(w: World, rules: Rules, slot: number, evita = -1): boolean {
+/**
+ * Alt loc de lucru langa ACEEASI desemnare, cu progresul pastrat.
+ *
+ * ## De ce desemnarea si pasul vin din AFARA
+ *
+ * Functia asta a presupus SAPA in doua feluri deodata, si niciunul nu se vedea
+ * de la locul apelului: citea desemnarea din `jobTarget` (adevarat DOAR la sapat,
+ * unde tinta E desemnarea — la construit `jobTarget` e mormanul-sursa, iar
+ * santierul sta in `jobDest`), si punea `jobStep = PasJob.MERGE`, adica 0, care
+ * pentru un job de construit inseamna `MERGE_SURSA` — pionul trimis inapoi dupa
+ * material pe care il are deja in mana.
+ *
+ * Masurat inainte de reparatie: un constructor mutat de pe locul de lucru la
+ * tickul 37 avea `slotDesemnare(jobTarget) === -1`, deci refacerea intorcea
+ * `false` din prima linie; jobul se abandona intr-un singur tick, iar santierul
+ * primea 100 de tickuri de racire cu o cauza care MINTE (`INACCESIBIL` +
+ * `FARA_LOC_DE_LUCRU`, cand adevarul era ca ajutorul cauta in alt camp).
+ *
+ * A sasea din familia „cele cinci `else` care presupuneau SAPA" — dar ascunsa
+ * intr-un ajutor, nu intr-o ramura. De asta amandoua vin acum ca argumente:
+ * presupunerea sta la fiecare apelant, unde se vede, si un fel nou de job nu o
+ * poate mosteni din greseala.
+ */
+function refaLoculDeLucru(
+  w: World,
+  rules: Rules,
+  slot: number,
+  idDesemnare: number,
+  pasMerge: number,
+  evita = -1,
+): boolean {
   const a = w.agents
   const d = w.desemnari
-  const ds = slotDesemnare(d, a.jobTarget[slot]!)
+  const ds = slotDesemnare(d, idDesemnare)
   if (ds === -1) return false
   const comp = find(w.regions, regionAt(w.regions, cellOf(a.x[slot]!), cellOf(a.y[slot]!), a.z[slot]!))
   const work = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, comp, evita)
@@ -1354,7 +1384,7 @@ function refaLoculDeLucru(w: World, rules: Rules, slot: number, evita = -1): boo
   a.jobWorkX[slot] = work.wx
   a.jobWorkY[slot] = work.wy
   a.jobWorkZ[slot] = work.z
-  a.jobStep[slot] = PasJob.MERGE
+  a.jobStep[slot] = pasMerge
   tintesteLocDeLucru(w, slot)
   raport.locuriDeLucruRefacute++
   return true
@@ -1445,7 +1475,7 @@ function lucreazaSapa(w: World, rules: Rules, slot: number): void {
     // Nu mai e unde trebuie, sau sta pe ceva ce altcineva urmeaza sa sape. Alt
     // loc de lucru, cu progresul pastrat — dar nu pe regiuni stale.
     if (w.regions.dirty.size > 0) return
-    if (!refaLoculDeLucru(w, rules, slot)) {
+    if (!refaLoculDeLucru(w, rules, slot, a.jobTarget[slot]!, PasJob.MERGE)) {
       terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.INACCESIBIL, Racire.TINTA)
     }
     return
@@ -1503,7 +1533,8 @@ function zideste(w: World, rules: Rules, slot: number): void {
   const peLoc = cx === a.jobWorkX[slot] && cy === a.jobWorkY[slot] && cz === a.jobWorkZ[slot]
   if (!peLoc || seSapaLa(d, cx, cy, cz - 1)) {
     if (w.regions.dirty.size > 0) return
-    if (!refaLoculDeLucru(w, rules, slot)) {
+    // Santierul sta in `jobDest`, si se revine la pasul de mers al CONSTRUITULUI.
+    if (!refaLoculDeLucru(w, rules, slot, a.jobDest[slot]!, PasConstruieste.MERGE_SANTIER)) {
       terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.INACCESIBIL, Racire.TINTA)
     }
     return
@@ -1731,15 +1762,25 @@ export function retrageCeluleDeZonaNecalcabile(w: World, rules: Rules, wx: numbe
 /**
  * Re-alege locul de lucru, EVITAND cel curent.
  *
- * Impartit de SAPA si de CONSTRUIESTE: amandoua lucreaza de pe o celula vecina
- * tintei, deci „alta celula de lucru" inseamna acelasi lucru pentru amandoua.
- * Scris de doua ori, ar fi fost doua adevaruri — si a si fost, pret de un pas:
- * doua metode `refaTinta` octet cu octet identice, destule cat sa faca ambiguu
- * tiparul unei probe de mutatie vechi de doua taieturi.
+ * Impartit de SAPA si de CONSTRUIESTE, dar NUMAI pentru partea care chiar e
+ * comuna: „celula de evitat e cea pe care stau acum". Desemnarea si pasul la care
+ * se revine difera intre feluri si vin de la apelant.
+ *
+ * Cele doua metode `refaTinta` erau octet cu octet identice cand le-am unit, si
+ * am luat asta drept dovada ca spun acelasi lucru. Nu era: erau identice fiindca
+ * una era o COPIE a celeilalte, iar copia carase cu ea presupunerea de sapat.
+ * „O functie, un adevar" presupune ca exista UN adevar; aici erau doua, si unul
+ * era gresit. Doua implementari identice pot fi identice fiindca una e gresita.
  */
-function refaLoculDeLucruEvitandCurentul(w: World, rules: Rules, slot: number): boolean {
+function refaLoculDeLucruEvitandCurentul(
+  w: World,
+  rules: Rules,
+  slot: number,
+  idDesemnare: number,
+  pasMerge: number,
+): boolean {
   const a = w.agents
-  return refaLoculDeLucru(w, rules, slot, cellKey(a.jobWorkX[slot]!, a.jobWorkY[slot]!, a.jobWorkZ[slot]!))
+  return refaLoculDeLucru(w, rules, slot, idDesemnare, pasMerge, cellKey(a.jobWorkX[slot]!, a.jobWorkY[slot]!, a.jobWorkZ[slot]!))
 }
 
 /**
@@ -2694,7 +2735,8 @@ const DRIVER_SAPA: DriverJob = {
     }
   },
   refaTinta(w, rules, slot) {
-    return refaLoculDeLucruEvitandCurentul(w, rules, slot)
+    const a = w.agents
+    return refaLoculDeLucruEvitandCurentul(w, rules, slot, a.jobTarget[slot]!, PasJob.MERGE)
   },
 }
 
@@ -2889,7 +2931,9 @@ const DRIVER_CONSTRUIESTE: DriverJob = {
     }
   },
   refaTinta(w, rules, slot) {
-    return refaLoculDeLucruEvitandCurentul(w, rules, slot)
+    const a = w.agents
+    // La construit santierul e in `jobDest`, nu in `jobTarget` — acolo e sursa.
+    return refaLoculDeLucruEvitandCurentul(w, rules, slot, a.jobDest[slot]!, PasConstruieste.MERGE_SANTIER)
   },
 }
 

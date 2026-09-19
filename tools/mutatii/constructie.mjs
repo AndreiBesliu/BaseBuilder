@@ -319,4 +319,27 @@ export const MUTATII = [
     b: "  a.caraCantitate[slot] = a.caraCantitate[slot]! + spec.cantitate",
     t: 'tests/constructie.test.ts', e: "ACCEPTANTA: pionul cara materialul si RIDICA peretele",
   },
+
+  // --- blocantul gasit de panoul pasului 6c, in codul pasului 6b ---
+  {
+    n: "`refaLoculDeLucru` cauta desemnarea in `jobTarget` (adevarat doar la SAPAT)",
+    f: "src/sim/joburi.ts",
+    a: "  const ds = slotDesemnare(d, idDesemnare)",
+    b: "  const ds = slotDesemnare(d, a.jobTarget[slot]!)",
+    t: 'tests/constructie.test.ts', e: 'pionul mutat de pe locul de lucru nu zideste de la distanta',
+  },
+  {
+    n: "constructorul refacut revine la pasul de mers al SAPATULUI (MERGE_SURSA)",
+    f: "src/sim/joburi.ts",
+    a: "    if (!refaLoculDeLucru(w, rules, slot, a.jobDest[slot]!, PasConstruieste.MERGE_SANTIER)) {",
+    b: "    if (!refaLoculDeLucru(w, rules, slot, a.jobDest[slot]!, PasJob.MERGE)) {",
+    t: 'tests/constructie.test.ts', e: 'pionul mutat de pe locul de lucru nu zideste de la distanta',
+  },
+  {
+    n: "`DRIVER_CONSTRUIESTE.refaTinta` isi cauta santierul in `jobTarget`",
+    f: "src/sim/joburi.ts",
+    a: "    return refaLoculDeLucruEvitandCurentul(w, rules, slot, a.jobDest[slot]!, PasConstruieste.MERGE_SANTIER)",
+    b: "    return refaLoculDeLucruEvitandCurentul(w, rules, slot, a.jobTarget[slot]!, PasConstruieste.MERGE_SANTIER)",
+    t: 'tests/constructie.test.ts', e: 'constructorul cu locul de lucru ocupat de un ostil',
+  },
 ]

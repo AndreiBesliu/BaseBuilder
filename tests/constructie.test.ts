@@ -35,7 +35,7 @@ import type { World } from '../src/sim/state.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { anuleazaDesemnare, constructiaPrevizualizata, pornesteConstruieste, unitatiDeMunca } from '../src/sim/joburi.ts'
 import { slotItem } from '../src/sim/iteme.ts'
-import { Item } from '../src/sim/state.ts'
+import { Faction, Item } from '../src/sim/state.ts'
 import { panaCand } from './fixturi.ts'
 import { PasCara, PasConstruieste } from '../src/sim/state.ts'
 import { asazaItem, itemLaCelula } from '../src/sim/iteme.ts'
@@ -734,6 +734,13 @@ test('pionul mutat de pe locul de lucru nu zideste de la distanta', () => {
   //
   // Se scrie direct pe agent fiindca exact asta face si lumea: `prabuseste` muta
   // pioni fara sa treaca prin vreun job.
+  //
+  // Prima varianta a testului punea asertiunea de distanta sub un
+  // `if (peretele s-a ridicat)`. Peretele NU se ridica — `refaLoculDeLucru` cauta
+  // desemnarea in `jobTarget`, care la construit e MORMANUL — deci ramura nu rula
+  // niciodata si testul trecea in gol. O asertiune sub un `if` e o asertiune care
+  // poate sa nu se intample; aici chiar nu se intampla, si nicio mutatie n-o
+  // putea arata, fiindca mutatiile probeaza ce ating fixturile.
   const { w, sx, sy, sz, ds, is } = santier(12345)
   assert.ok(pornesteConstruieste(w, R, 0, ds, is).ok)
   const la = panaCand(w, 2000, (ww) => ww.agents.jobStep[0] === PasConstruieste.ZIDESTE && ww.agents.jobProgres[0]! > 0)
@@ -744,15 +751,54 @@ test('pionul mutat de pe locul de lucru nu zideste de la distanta', () => {
   const n = panaCand(w, 3000, (ww) => ww.agents.jobKind[0] === 0)
   assert.ok(n >= 0, 'jobul trebuia sa se incheie intr-un fel')
 
+  // Pionul trebuie sa se REFACA, nu sa abandoneze: alt loc de lucru langa ACELASI
+  // santier, si peretele se ridica.
   const m = materialAt(w.terrain, sx, sy, sz)
-  if (m.ok && isSolid(m.value)) {
-    const px = cellOf(w.agents.x[0]!)
-    const py = cellOf(w.agents.y[0]!)
-    assert.equal(
-      Math.max(Math.abs(px - sx), Math.abs(py - sy)), 1,
-      `peretele s-a ridicat cu pionul la (${px},${py}), iar santierul e la (${sx},${sy})`,
-    )
+  assert.ok(m.ok && isSolid(m.value), `pionul mutat de pe loc a abandonat santierul in loc sa-si refaca locul de lucru (material ${m.ok ? m.value : 'refuz'})`)
+  assert.equal(w.ratiune.unitatiZidite, R.piese[Piesa.PERETE]!.cantitate)
+
+  const px = cellOf(w.agents.x[0]!)
+  const py = cellOf(w.agents.y[0]!)
+  assert.equal(
+    Math.max(Math.abs(px - sx), Math.abs(py - sy)), 1,
+    `peretele s-a ridicat cu pionul la (${px},${py}), iar santierul e la (${sx},${sy})`,
+  )
+})
+
+test('constructorul cu locul de lucru ocupat de un ostil isi alege altul', () => {
+  // A doua cale de recuperare, si singura care trece prin `DRIVER_CONSTRUIESTE.refaTinta`:
+  // drumul e REFUZAT (nu pionul e mutat), iar dispecerul cere driverului alta tinta.
+  // Pana la reparatie, si calea asta cauta santierul in `jobTarget`, adica in morman.
+  const { w, sx, sy, sz, ds, is } = santier(12345)
+  assert.ok(pornesteConstruieste(w, R, 0, ds, is).ok)
+  const la = panaCand(w, 2000, (ww) => ww.agents.jobStep[0] === PasConstruieste.MERGE_SANTIER)
+  assert.ok(la >= 0, 'fixtura: pionul n-a pornit spre santier')
+  const lx = w.agents.jobWorkX[0]!
+  const ly = w.agents.jobWorkY[0]!
+  const lz = w.agents.jobWorkZ[0]!
+
+  const ostil = applyCommand(w, { kind: 'spawnAgent', x: lx * 1000 + 500, y: ly * 1000 + 500, z: lz, faction: Faction.SALBATIC }, R)
+  assert.ok(ostil.ok, `fixtura: ostilul: ${JSON.stringify(ostil)}`)
+
+  let n = -1
+  for (let i = 0; i < 4000; i++) {
+    // Ostilul nu pleaca. Fara pinuire, el se plimba, drumul se elibereaza singur,
+    // si testul ar trece si pe codul nereparat — refuzul trebuie sa fie REPETAT,
+    // ca `refaTinta` sa fie chemat, nu doar atins o data.
+    w.agents.x[1] = lx * 1000 + 500
+    w.agents.y[1] = ly * 1000 + 500
+    w.agents.z[1] = lz
+    if (w.agents.jobKind[0] === 0) { n = i; break }
+    ruleaza(w, 1)
   }
+  assert.notEqual(n, -1, 'jobul trebuia sa se incheie')
+
+  const m2 = materialAt(w.terrain, sx, sy, sz)
+  assert.ok(m2.ok && isSolid(m2.value), 'constructorul a abandonat santierul in loc sa-si aleaga alt loc de lucru')
+  const fx = cellOf(w.agents.x[0]!)
+  const fy = cellOf(w.agents.y[0]!)
+  assert.ok(fx !== lx || fy !== ly, 'a zidit de pe celula pe care statea ostilul')
+  assert.equal(Math.max(Math.abs(fx - sx), Math.abs(fy - sy)), 1, `a zidit de la (${fx},${fy}), santierul e la (${sx},${sy})`)
 })
 
 test('materialul disparut din mana nu se zideste din nimic', () => {
