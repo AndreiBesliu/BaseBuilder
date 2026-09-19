@@ -2962,7 +2962,14 @@ Peste jumătate primesc ocluzie.
 - **Variația de culoare per poziție** — tot în `src/render/`, tot portabilă, **zero cost în
   quaduri** fiindcă se calculează din poziția vârfului, deci e continuă peste quaduri și peste
   granițe de chunk.
-- **Terenul ne-promovat nu primește AO.** Heightfield-ul are propriul drum (`src/render/heightfield.ts`),
-  deci la granița promovat/ne-promovat modelul de iluminare diferă. Nu s-a măsurat cât se vede.
+- **Terenul ne-promovat nu primește AO**, și asta e o discontinuitate pe care am introdus-o eu.
+  Măsurat: pe fețele de sus — singurele pe care heightfield-ul le arată — factorul mediu ponderat
+  pe arie e **0,957**, deci partea promovată e cu **4,3%** mai închisă. Pentru context, variația
+  naturală a luminanței pe teren e ~8,7% (abatere standard 11,9 pe o medie de 137,7), deci saltul
+  e sub jumătate din zgomotul existent — dar granița e o **linie dreaptă**, iar aia se vede altfel
+  decât un gradient. Într-un cadru privit la granița de est a zonei promovate nu s-a văzut. Se
+  consemnează cu cifra, nu se repară cu o înmulțire ghicită: a întuneca heightfield-ul cu 0,957 ca
+  să se potrivească media ar fi o potrivire pe corpus, nu o ocluzie. Reparația adevărată e AO
+  derivat din diferențele de înălțime, și e alt arc.
 - **Predicția „NU pică pe GPU" din GATE.md e acum mai GREA**, nu mai ușoară: 172.142 → 399.680 de
   triunghiuri. Singurul indiciu e timpul de *submit*, nu de completare — nu înlocuiește sweep-ul.
