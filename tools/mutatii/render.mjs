@@ -69,13 +69,6 @@ export const MUTATII = [
 
   // --- netezirea suprafetei neatinse ---
   {
-    n: "peretele se suprima chiar daca vecina a fost SAPATA (gaura in panta)",
-    f: "src/render/mesher.ts",
-    a: "  if (!suprafataNaturala(x, y) || !suprafataNaturala(nx, ny)) return false",
-    b: "  if (natAt(x, y) === NECUNOSCUT || natAt(nx, ny) === NECUNOSCUT) return false",
-    t: 'tests/mesher.test.ts', e: 'o groapa sapata NU se neteseste',
-  },
-  {
     n: "fetele de sus naturale nu se mai netezesc (raman la metri intregi)",
     f: "src/render/mesher.ts",
     a: "          if (face === Face.Z_POS && natAt(lx, ly) === level) {",

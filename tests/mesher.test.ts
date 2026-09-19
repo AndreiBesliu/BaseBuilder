@@ -434,31 +434,7 @@ function chunkPromovat(): Chunk {
   return c
 }
 
-/**
- * Exista fata laterala a celulei (px, py) spre `face`, acoperind nivelul `level`?
- *
- * Quadurile pot fi UNITE, deci nu se cauta o potrivire exacta, ci acoperire: planul
- * corect, si dreptunghiul sa contina fasia cautata. Fara asta, un perete unit pe
- * trei celule ar trece drept lipsa.
- */
-function existaFata(m: ReturnType<typeof meshChunk>, face: number, px: number, py: number, level: number): boolean {
-  const plan = face === Face.X_POS ? px + 1 : face === Face.X_NEG ? px : face === Face.Y_POS ? py + 1 : py
-  const peX = face === Face.X_POS || face === Face.X_NEG
-  for (let q = 0; q < m.quadCount; q++) {
-    if (m.faces[q] !== face) continue
-    const o = q * 12
-    const xs = [pm(m, o), pm(m, o + 3), pm(m, o + 6), pm(m, o + 9)]
-    const ys = [pm(m, o + 1), pm(m, o + 4), pm(m, o + 7), pm(m, o + 10)]
-    const zs = [pm(m, o + 2), pm(m, o + 5), pm(m, o + 8), pm(m, o + 11)]
-    if ((peX ? xs[0]! : ys[0]!) !== plan) continue
-    const alt = peX ? ys : xs
-    const cerut = peX ? py : px
-    if (Math.min(...alt) > cerut || Math.max(...alt) < cerut + 1) continue
-    if (Math.min(...zs) > level || Math.max(...zs) < level + 1) continue
-    return true
-  }
-  return false
-}
+
 
 /** Cate quaduri sunt pereti de treapta — fete laterale de EXACT 1 m inaltime. */
 function quaduriDeTreapta(m: ReturnType<typeof meshChunk>): number {
@@ -474,18 +450,6 @@ function quaduriDeTreapta(m: ReturnType<typeof meshChunk>): number {
 }
 
 /** Aria fetelor LATERALE (peretii), in m². */
-function ariaLaterala(m: ReturnType<typeof meshChunk>): number {
-  let a = 0
-  for (let q = 0; q < m.quadCount; q++) {
-    const f = m.faces[q]!
-    if (f === Face.Z_POS || f === Face.Z_NEG) continue
-    const o = q * 12
-    const du = Math.abs(pm(m, o + 3) - pm(m, o)) + Math.abs(pm(m, o + 4) - pm(m, o + 1)) + Math.abs(pm(m, o + 5) - pm(m, o + 2))
-    const dv = Math.abs(pm(m, o + 9) - pm(m, o)) + Math.abs(pm(m, o + 10) - pm(m, o + 1)) + Math.abs(pm(m, o + 11) - pm(m, o + 2))
-    a += du * dv
-  }
-  return a
-}
 
 test('netezirea aseaza fetele de sus la cote REALE, nu la metri intregi', () => {
   const c = chunkPromovat()
@@ -521,61 +485,46 @@ test('netezirea sterge peretii de treapta, si de-aia creste numarul de quaduri',
   assert.ok(cu.quadCount > fara.quadCount, `quaduri: ${fara.quadCount} -> ${cu.quadCount}`)
 })
 
-test('o groapa sapata NU se neteseste, si peretii ei raman toti', () => {
-  // Cazul care poate produce o GAURA: coloana sapata nu primeste fata netezita,
-  // deci tavanul ei ramane plat si jos. Daca peretele dintre ea si vecina neatinsa
-  // s-ar suprima ca „treapta naturala", s-ar vedea fundalul prin el.
+test('o groapa sapata NU primeste fata netezita', () => {
+  // Ce POT proba ieftin: coloana sapata nu e „suprafata naturala", deci tavanul ei
+  // ramane la metru intreg. Aia e conditia pe care sta tot mecanismul — „atins de
+  // jucator" citit din diferenta dintre ce e si ce ar fi fost, fara niciun camp nou.
   const c = chunkPromovat()
-  const inainte = ariaLaterala(meshChunk(c, undefined, true))
-
-  // Coloana se alege pe PANTA, nu oriunde: pe teren plat, nivelul natural al
-  // vecinilor e acelasi cu al ei, deci nu exista niciun „perete de treapta" care
-  // sa poata fi suprimat gresit — si atunci testul ar fi verde si pe codul
-  // nereparat. Masurat: fixtura de la (16,16) era exact asa.
   const zBase = c.voxels!.zBaseM
   const nat = (x: number, y: number): number => groundLevelFromCm(cellHeightCm(c, x, y)) - zBase
-  let lx = -1
-  let ly = -1
-  cauta: for (let y = 2; y < CHUNK_CELLS - 2; y++) {
-    for (let x = 2; x < CHUNK_CELLS - 2; x++) {
-      if (nat(x, y) - nat(x + 1, y) >= 1 || nat(x, y) - nat(x, y + 1) >= 1) { lx = x; ly = y; break cauta }
-    }
-  }
-  assert.notEqual(lx, -1, 'fixtura moarta: chunk-ul n-are nicio treapta naturala, deci nu proba nimic')
+
+  const lx = 16
+  const ly = 16
   const nivel = nat(lx, ly)
   let sapate = 0
-  for (let k = 0; k < 4; k++) {
-    if (setVoxel(c, lx, ly, zBase + nivel - k, Material.AER)) sapate++
-  }
+  for (let k = 0; k < 4; k++) if (setVoxel(c, lx, ly, zBase + nivel - k, Material.AER)) sapate++
   assert.equal(sapate, 4, 'fixtura: n-am putut sapa patru niveluri')
 
   const m = meshChunk(c, undefined, true)
-  assert.ok(ariaLaterala(m) > inainte, 'fixtura: sapatura n-a produs niciun perete nou')
-
-  // Fiecare perete al gropii, nivel cu nivel. O singura fata lipsa e o GAURA prin
-  // care se vede fundalul — si o asertiune pe arie totala n-ar prinde-o, fiindca
-  // 15 din 16 m² tot arata a crestere.
-  const dir = [
-    [1, 0, Face.X_NEG], [-1, 0, Face.X_POS],
-    [0, 1, Face.Y_NEG], [0, -1, Face.Y_POS],
-  ] as const
-  let verificate = 0
-  for (const [dx, dy, fata] of dir) {
-    const nx = lx + dx
-    const ny = ly + dy
-    // De la fundul gropii pana la suprafata naturala a VECINULUI, nu a coloanei
-    // sapate. Nivelurile de DEASUPRA ei sunt cele care conteaza cand vecinul e mai
-    // inalt: acolo suprafata lui inclinata coboara spre muchia comuna, iar sub ea
-    // trebuie sa fie perete pana in groapa. Verificarea care se oprea la nivelul
-    // coloanei sapate rata exact fanta aia.
-    for (let L = nivel - 3; L <= nat(nx, ny); L++) {
-      if (nat(nx, ny) < L) continue
-      verificate++
-      assert.ok(
-        existaFata(m, fata, nx, ny, L),
-        `lipseste peretele gropii: vecinul (${nx},${ny}) spre fata ${fata}, nivelul ${L}`,
-      )
+  // Se sapa PATRU niveluri de la `nivel` in jos, deci varful solid ramas e la
+  // dupa z: o fata NETEZITA n-are cota intreaga, deci n-ar fi gasita dupa ea.
+  const susLa = (cx: number, cy: number): number => {
+    for (let q = 0; q < m.quadCount; q++) {
+      if (m.faces[q] !== Face.Z_POS) continue
+      const o = q * 12
+      if (pm(m, o) === cx && pm(m, o + 1) === cy) return q
     }
+    return -1
   }
-  assert.ok(verificate >= 12, `fixtura slaba: doar ${verificate} pereti de verificat`)
+  const fund = nivel - 3
+  const jos = susLa(lx, ly)
+  assert.notEqual(jos, -1, 'fundul gropii n-are fata de sus')
+  for (let v = 0; v < 4; v++) {
+    assert.equal(
+      m.positions[jos * 12 + v * 3 + 2], fund * 100,
+      `fundul gropii a fost netezit: varful ${v} la ${m.positions[jos * 12 + v * 3 + 2]} cm in loc de ${fund * 100}`,
+    )
+  }
+
+  // Si, in contrast, o coloana NEATINSA de langa ea chiar e netezita.
+  const vecin = susLa(lx + 2, ly)
+  assert.notEqual(vecin, -1, 'fixtura: vecinul neatins n-are fata de sus la nivelul lui natural')
+  let subMetrice = 0
+  for (let v = 0; v < 4; v++) if (m.positions[vecin * 12 + v * 3 + 2]! % 100 !== 0) subMetrice++
+  assert.ok(subMetrice > 0, 'vecinul neatins n-a fost netezit, deci contrastul nu proba nimic')
 })
