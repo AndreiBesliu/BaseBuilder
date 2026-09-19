@@ -217,4 +217,20 @@ export const MUTATII = [
     b: '    if (d.alive[i] === 1) celule.push(cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!))',
     t: 'tests/constructie.test.ts', e: 'la DESENARE nu se verifica sprijinul',
   },
+
+  // --- pasul 6a: vocabularul si carligele ---
+  {
+    n: '`anuleazaDesemnare` filtreaza doar pe `jobTarget` (job orfan, M5 rosu)',
+    f: 'src/sim/joburi.ts',
+    a: '    if (a.jobTarget[i] !== id && a.jobDest[i] !== id) continue',
+    b: '    if (a.jobTarget[i] !== id) continue',
+    t: 'tests/constructie.test.ts', e: '`anuleazaDesemnare` intrerupe si jobul',
+  },
+  {
+    n: 'marfa se lasa si PE un santier (zidirea se blocheaza singura)',
+    f: 'src/sim/iteme.ts',
+    a: '          if (santier !== -1 && w.desemnari.kind[santier] === Desemnare.CONSTRUIESTE) continue',
+    b: '          void santier',
+    t: 'tests/constructie.test.ts', e: 'marfa nu se lasa PE un santier',
+  },
 ]

@@ -35,6 +35,7 @@ import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import type { World } from './state.ts'
 import { cellKey } from './path.ts'
+import { Desemnare, desemnareLaCelula, seSapaLa } from './desemnari.ts'
 import { isWalkable } from './regions.ts'
 import { rezervariPentru, Strat } from './rezervari.ts'
 import { celulaDeZonaLa, marcheazaZoneMurdare } from './zone.ts'
@@ -250,7 +251,16 @@ export function asazaItem(w: World, rules: Rules, kind: number, cantitate: numbe
           const nx = wx + dx
           const ny = wy + dy
           if (nx < 0 || ny < 0) continue
-          const podeaDesemnata = w.desemnari.laCelula.has(cellKey(nx, ny, zs - 1))
+          // „Se SAPA sub ea?", nu „exista o desemnare acolo": pentru o desemnare de
+          // CONSTRUIT podeaua ramane, si chiar se intareste. Al treilea cititor cu
+          // problema asta; celelalte doua s-au reparat la pasul 1.
+          const podeaDesemnata = seSapaLa(w.desemnari, nx, ny, zs - 1)
+          // Si nu se lasa marfa PE un santier: constructorul sta langa celula pe
+          // care o zideste, deci celula aia e in ordinea de cautare a lui
+          // `lasaLaPicioare` — iar apoi zidirea ar fi refuzata cu CELULA_OCUPATA de
+          // propria lui marfa.
+          const santier = desemnareLaCelula(w.desemnari, nx, ny, zs)
+          if (santier !== -1 && w.desemnari.kind[santier] === Desemnare.CONSTRUIESTE) continue
           if (trecere === 0 && podeaDesemnata) continue
           if (trecere === 1 && !podeaDesemnata) continue
           const loc = locPeCelula(w, rules, kind, nx, ny, zs)

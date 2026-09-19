@@ -89,7 +89,7 @@ import type { Rules } from './content.ts'
 import type { Outcome, ReasonCode } from './result.ts'
 import { accept, codMotiv, refuse, Reason } from './result.ts'
 import type { FelJobId, World } from './state.ts'
-import { Categorie, CATEGORII, FelJob, Gand, GAND_PENTRU_NEVOIE, ITEME, Nevoie, NEVOI, PasCara, PasJob, pasDeMers, PasNevoie, puneGand } from './state.ts'
+import { Categorie, CATEGORII, FelJob, Gand, GAND_PENTRU_NEVOIE, ITEME, Nevoie, NEVOI, PasCara, PasConstruieste, PasJob, pasDeMers, PasNevoie, puneGand } from './state.ts'
 import { cellOf, clearPath } from './drumuri.ts'
 import { blockOfCell, ensureArea, find, isWalkable, markDirty, NO_REGION, regionAt, REGION_SIZE } from './regions.ts'
 import type { RegionStore } from './regions.ts'
@@ -323,6 +323,21 @@ export function cereriSapa(targetId: number): readonly Cerere[] {
 export function cereriCara(rules: Rules, itemId: number, destId: number, cant: number, step: number): readonly Cerere[] {
   const cereri: Cerere[] = [{ targetId: destId, layer: Strat.LUCRU, count: cant, maxCount: rules.itemStackMax, maxClaimants: 1 }]
   if (step <= PasCara.RIDICA) cereri.push({ targetId: itemId, layer: Strat.CARAT, count: cant, maxCount: cant, maxClaimants: 1 })
+  return cereri
+}
+
+/**
+ * Construitul: desemnarea (santierul) se tine TOT jobul, sursa doar pana la
+ * ridicare inclusiv — exact ca la carat, cu aceeasi orientare a tuplului.
+ *
+ * Orientarea NU se inverseaza, desi ar parea ca scapa de reparatia din
+ * `anuleazaDesemnare`: `mutaItem` intrerupe pe `jobTarget === id` cu id-ul
+ * ITEMULUI, deci cu desemnarea in `jobTarget` constructorul n-ar mai fi intrerupt
+ * cand mormanul-sursa se muta. Ar muta defectul dintr-un loc in altul.
+ */
+export function cereriConstruieste(itemId: number, desemnareId: number, cant: number, step: number): readonly Cerere[] {
+  const cereri: Cerere[] = [{ targetId: desemnareId, layer: Strat.LUCRU, count: 1, maxCount: 1, maxClaimants: 1 }]
+  if (step <= PasConstruieste.RIDICA) cereri.push({ targetId: itemId, layer: Strat.CARAT, count: cant, maxCount: cant, maxClaimants: 1 })
   return cereri
 }
 
@@ -1796,7 +1811,15 @@ export function anuleazaDesemnare(w: World, rules: Rules, ds: number): void {
   const a = w.agents
   const id = w.desemnari.id[ds]!
   for (let i = 0; i < a.count; i++) {
-    if (a.alive[i] === 0 || a.jobKind[i] === 0 || a.jobTarget[i] !== id) continue
+    // AMBELE campuri, exact ca la `anuleazaCelulaDeZona` si din acelasi motiv:
+    // `jobDest` e 0 pentru cine nu foloseste o a doua tinta, iar un id viu nu e
+    // niciodata 0. Un job de CONSTRUIT tine desemnarea in `jobDest` (sursa e in
+    // `jobTarget`, ca la carat), deci cu filtrul doar pe `jobTarget` constructorul
+    // ramanea cu un job viu spre un id mort si o rezervare orfana pe sursa — iar
+    // `reconstruiesteRezervari` il arunca la incarcare in timp ce lumea continua il
+    // tine. M5 rosu din prima zidire, masurat de panoul de design.
+    if (a.alive[i] === 0 || a.jobKind[i] === 0) continue
+    if (a.jobTarget[i] !== id && a.jobDest[i] !== id) continue
     terminaJob(w, rules, i, Sfarsit.INTRERUPT)
   }
   elibereazaTinta(w.rezervari, id)

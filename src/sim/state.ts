@@ -87,6 +87,7 @@ export const FelJob = {
   CARA: 2,
   MANANCA: 3,
   DOARME: 4,
+  CONSTRUIESTE: 5,
 } as const
 export type FelJobId = (typeof FelJob)[keyof typeof FelJob]
 
@@ -166,6 +167,23 @@ export const PasCara = {
   LASA: 3,
 } as const
 export type PasCaraId = (typeof PasCara)[keyof typeof PasCara]
+
+/**
+ * Pasii unui job de CONSTRUIT.
+ *
+ * Aceleasi NUMERE ca `PasCara`, si nu din lene: masina de stare e literalmente
+ * aceeasi — mergi, ia, mergi, lucreaza — iar `pasDeMers` raspunde pe PARITATE.
+ * Ce difera e locul, si de-aia numele sunt proprii: ultimul pas zideste, nu
+ * depune. Egalitatea numerelor e probata de un test; daca cineva le desincronizeaza,
+ * un pion de construit ar fi crezut in mers cand munceste.
+ */
+export const PasConstruieste = {
+  MERGE_SURSA: 0,
+  RIDICA: 1,
+  MERGE_SANTIER: 2,
+  ZIDESTE: 3,
+} as const
+export type PasConstruiesteId = (typeof PasConstruieste)[keyof typeof PasConstruieste]
 
 /**
  * E pasul unul de MERS (tinta e `jobWork*`) sau unul de oprire (se munceste pe

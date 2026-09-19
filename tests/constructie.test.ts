@@ -33,7 +33,9 @@ import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { CATEGORII, Categorie, FelJob, Piesa } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { applyCommand } from '../src/sim/commands.ts'
-import { constructiaPrevizualizata } from '../src/sim/joburi.ts'
+import { anuleazaDesemnare, constructiaPrevizualizata } from '../src/sim/joburi.ts'
+import { PasCara, PasConstruieste } from '../src/sim/state.ts'
+import { asazaItem, itemLaCelula } from '../src/sim/iteme.ts'
 import { lasaItem } from './fixturi.ts'
 import { desemneaza, laSit, R, ruleaza, solid, solidLaDistanta } from './fixturi.ts'
 import { createWorld } from '../src/sim/world.ts'
@@ -568,4 +570,63 @@ test('o desemnare de CONSTRUIT poarta piesa, si supravietuieste unui save/load',
   const slot2 = slotDesemnare(incarcat.value.desemnari, out.ok ? out.value : -1)
   assert.equal(incarcat.value.desemnari.piesa[slot2], Piesa.SCARA)
   assert.equal(hashWorld(incarcat.value), hashWorld(w))
+})
+
+// ---------------------------------------------------------------------------
+// jobul de construit — vocabularul si cârligele (pasul 6a)
+// ---------------------------------------------------------------------------
+
+test('pasii de construit au ACELEASI numere ca cei de carat', () => {
+  // `pasDeMers` raspunde pe PARITATE, deci numerele nu sunt decorative: daca
+  // cineva le desincronizeaza, un pion care zideste ar fi crezut in mers, iar
+  // tinta lui ar fi citita din alt camp.
+  assert.equal(PasConstruieste.MERGE_SURSA, PasCara.MERGE_SURSA)
+  assert.equal(PasConstruieste.RIDICA, PasCara.RIDICA)
+  assert.equal(PasConstruieste.MERGE_SANTIER, PasCara.MERGE_DEST)
+  assert.equal(PasConstruieste.ZIDESTE, PasCara.LASA)
+  assert.equal(PasConstruieste.ZIDESTE % 2, 1, 'ultimul pas trebuie sa fie unul de OPRIRE')
+})
+
+test('`anuleazaDesemnare` intrerupe si jobul care tine desemnarea in `jobDest`', () => {
+  // Un job de CONSTRUIT tine sursa in `jobTarget` si santierul in `jobDest` —
+  // aceeasi orientare ca la carat, pastrata deliberat (altfel `mutaItem` n-ar mai
+  // intrerupe constructorul cand mormanul-sursa se muta).
+  //
+  // Cu filtrul doar pe `jobTarget`, constructorul ramanea cu un job viu spre un id
+  // MORT si o rezervare orfana; `reconstruiesteRezervari` il arunca la incarcare
+  // in timp ce lumea continua il tine — adica M5 rosu din prima zidire.
+  //
+  // Tuplul se pune DIRECT pe agent: driverul vine in 6b, iar garda trebuie probata
+  // inainte sa existe ce apara. Aceeasi metoda ca la poarta pe fel.
+  const { w, sit } = laSit(12345, 1, [0])
+  const tinta = solidLaDistanta(w, sit.wx, sit.wy, sit.g, 3, 8)
+  const { id } = desemneaza(w, tinta.wx, tinta.wy)
+  const ds = slotDesemnare(w.desemnari, id)
+  assert.notEqual(ds, -1)
+
+  const a = w.agents
+  a.jobKind[0] = FelJob.CARA
+  a.jobTarget[0] = 999999
+  a.jobDest[0] = id
+
+  anuleazaDesemnare(w, R, ds)
+  assert.equal(a.jobKind[0], 0, `jobul care tinea desemnarea in jobDest a ramas viu (jobKind ${a.jobKind[0]})`)
+})
+
+test('marfa nu se lasa PE un santier', () => {
+  // Constructorul sta LANGA celula pe care o zideste, deci celula aia e in ordinea
+  // de cautare a lui `lasaLaPicioare`. Daca marfa ateriza acolo, propria lui
+  // zidire ar fi refuzata cu CELULA_OCUPATA — de propriul lui material.
+  const { w, wx, wy, g } = sitPlat(12345, 9)
+  const santier = applyCommand(w, { kind: 'desemneaza', wx, wy, z: g + 1, piesa: Piesa.PERETE }, R)
+  assert.ok(santier.ok, `fixtura: ${JSON.stringify(santier)}`)
+
+  // Se incearca depunerea EXACT pe santier.
+  const pus = asazaItem(w, R, 0, 10, wx, wy, g + 1)
+  assert.equal(itemLaCelula(w.iteme, wx, wy, g + 1), -1, 'nimic n-are voie sa stea pe santier')
+  assert.equal(pus.pus, 10, `marfa trebuia sa ajunga alaturi, nu sa se piarda: ${JSON.stringify(pus)}`)
+
+  // Si chiar se poate zidi acolo dupa aceea.
+  const zidit = applyCommand(w, { kind: 'fill', wx, wy, z: g + 1, material: Material.PIATRA_CONSTRUITA }, R)
+  assert.ok(zidit.ok, `zidirea a fost blocata de propriul material: ${JSON.stringify(zidit)}`)
 })
