@@ -144,6 +144,13 @@ export function encode(w: World): string {
         jobEfect: Array.from(a.jobEfect.subarray(0, a.count)),
         caraKind: Array.from(a.caraKind.subarray(0, a.count)),
         caraCantitate: Array.from(a.caraCantitate.subarray(0, a.count)),
+        // `jobConsumat` era HASHUIT si citit de `decode`, dar nu se scria niciodata:
+        // `decode` il punea pe 0, deci `decode(encode(w))` dadea alt hash decat `w`
+        // INAINTE de orice tick, ori de cate ori un pion era in mijlocul mesei.
+        // Masurat la gasire: consumat 20 la salvare, 0 dupa incarcare, si divergenta
+        // dupa 500 de tickuri. A supravietuit fiindca fixtura pe care sta M5 nu
+        // ajunge niciodata sa manance — vezi testul de mai jos in saveload.test.ts.
+        jobConsumat: Array.from(a.jobConsumat.subarray(0, a.count)),
         evitaSloturi: a.evitaSloturi,
         evitaTinta: Array.from(a.evitaTinta.subarray(0, a.count * a.evitaSloturi)),
         evitaPanaLa: Array.from(a.evitaPanaLa.subarray(0, a.count * a.evitaSloturi)),

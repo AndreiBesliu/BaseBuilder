@@ -232,4 +232,11 @@ export const MUTATII = [
     b: '',
     t: 'tests/nevoi.test.ts', e: 'nevoile intra in hash',
   },
+  {
+    n: 'encode nu scrie jobConsumat (pionul la masa isi pierde ce a mancat deja)',
+    f: 'src/sim/save.ts',
+    a: "        jobConsumat: Array.from(a.jobConsumat.subarray(0, a.count)),\n",
+    b: "",
+    t: 'tests/saveload.test.ts', e: 'M5 pe o lume in care chiar se intampla ceva',
+  },
 ]
