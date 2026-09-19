@@ -183,9 +183,9 @@ ce construiește un jucător.
 | **Chunk-uri promovate** | **225** (PLAN bugeta ~200) |
 | Chunk-uri rezidente | 473 |
 | Construcție | ~700 ms |
-| Quaduri / triunghiuri | 347.229 / **694.458** |
-| Meshing complet | **219 ms** · mediana din 10 · verificat mecanic de `tools/check-gate-numbers.mjs` |
-| &nbsp;&nbsp;per chunk | **973 µs** · derivat din meshingul complet / 225 |
+| Quaduri / triunghiuri | 350.913 / **701.826** |
+| Meshing complet | **205 ms** · mediana din 10 · verificat mecanic de `tools/check-gate-numbers.mjs` |
+| &nbsp;&nbsp;per chunk | **911 µs** · derivat din meshingul complet / 225 |
 | Memorie voxeli (RLE) | 2,34 MB (față de 14,1 MB necomprimat) |
 
 > **Re-etalonare, 14.09.2026, ÎNAINTE de orice rulare de gate.** Două lucruri s-au schimbat, niciunul
@@ -264,6 +264,25 @@ ce construiește un jucător.
 > acoperă exact aceleași fețe ca numărarea naivă") se poate proba. Cu ea, mesher-ul devine o
 > REDARE — șterge pereți care există în date și mută vârfuri sub cota lor. Ambele întrebări merită
 > răspuns, deci ambele moduri rămân. Poarta măsoară modul RANDAT.
+>
+> **A șasea schimbare, 19.09.2026: fusta.** Netezirea a fost livrată cu o gaură, găsită de o
+> recenzie adversarială și reprodusă: mutând vârfurile feței de sus la cotele reale, acolo unde
+> vecina NU e netezită — apa, o groapă, o coloană zidită — tavanul ei rămâne plat, iar între cele
+> două cote nu emitea nimeni geometrie. Peretele de voxel acoperă exact un metru; restul era fundal.
+> **Măsurat pe 12 chunk-uri VIRGINE, fără nicio săpătură: 26 de găuri, 5,44 m².** Apar pe linia de
+> mal, fiindcă apa nu e solidă, deci coloana ei n-are suprafață naturală și nu se netezește.
+>
+> Costul geometriei e mic — **347.229 → 350.913 quaduri, +1,1%** — dar prima variantă costa **+22,9%
+> din timpul de meshing**, fiindcă `pushFusta` întreba `suprafataNaturala` de patru ori per față,
+> adică ~690.000 de apeluri cu verificări de margine. Răspunsul se calculează acum **o dată pe
+> coloană**, în `natSuprafata`, iar cache-ul accelerează și `treaptaNaturala` din buclele de fețe
+> laterale: net, meshingul SCADE de la 219 la 205 ms. Măsurat în PERECHE, în același proces, cu o
+> copie fără fustă — mașina era zgomotoasă (serverul de dev rula), deci o cifră absolută n-ar fi
+> spus nimic.
+>
+> Asta a închis și golul consemnat mai sus: garda `suprafataNaturala(x,y) && suprafataNaturala(nx,ny)`
+> are acum probă de mutație. Nu lipsea formularea testului — **lipsea fusta**: gaura masca diferența
+> dintre garda strictă și cea slabă, deci orice asertiune ieșea comparativă în loc de binară.
 
 **Validarea fixturii NU se face prin raportul de reducere al mesher-ului.** Criteriul ăla e
 auto-referențial: selectează fixturi *ieftine de meshuit*, adică exact fixturile pe care un motor slab
@@ -323,7 +342,7 @@ bine decât va fi în joc.
 
 **Slice-ul, declarat în scris înainte de rulare:** azi e implementat prin `renderer.clippingPlanes`,
 adică discard în shader — **NU** re-mesh. PLAN prognozează ~87 ms pentru re-mesh pe 200 de chunk-uri;
-măsurat azi, remesh-ul complet al fixturii e **192 ms**, adică 11 cadre pierdute la fiecare schimbare
+măsurat azi, remesh-ul complet al fixturii e **205 ms**, adică 12 cadre pierdute la fiecare schimbare
 de nivel. Sunt două jocuri diferite, cu 20× între ele. Dacă implementarea livrată se schimbă vreodată
 în re-mesh, toate cifrele de gate se re-rulează.
 
@@ -552,7 +571,7 @@ Baza: măsurători făcute azi în Node, pe fixtura M10 și pe teren proaspăt.
 | `dig` în sim, fără mesh | 4,8 µs |
 | `setFocus` o graniță de chunk | 0,62 ms · **23 de chunk-uri noi** |
 | Chunk-uri rezidente la rază 11 | 377 |
-| Fixtura completă, meshing | 192 ms |
+| Fixtura completă, meshing | 205 ms |
 
 **Prezic:**
 
