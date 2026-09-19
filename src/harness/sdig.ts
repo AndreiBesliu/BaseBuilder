@@ -1,0 +1,111 @@
+/**
+ * Pozitiile scenariului de gate S-DIG.
+ *
+ * Sta aici, si nu in `viewer/main.ts`, fiindca e aritmetica pura si fiindca exact
+ * asta a fost greseala: o functie de doua linii ingropata intr-un modul de browser
+ * n-are cum sa aiba test, iar fara test a mintit doua lucruri deodata.
+ *
+ * ## Ce mintea
+ *
+ * Varianta veche scria `wx` si `wy` amandoua din ACELASI contor, reduse modulo
+ * ACELASI span:
+ *
+ *     wx = base + (c * 1237) % span
+ *     wy = base + (c * 7919) % span
+ *
+ * Comentariul de langa ea spunea „pozitii deterministe, imprastiate peste asezare
+ * cu doua numere prime". Nu erau imprastiate: perechea `(wx, wy)` e o functie de
+ * `c mod span`, deci are cel mult `span` valori — nu `span²`. Masurat pe scenariul
+ * de 60 s: **416 coloane distincte dintr-o asezare de 416x416**, adica 0,24% din
+ * ea, re-sapate de aproape trei ori. De acolo veneau si **415 refuzuri din 1200**:
+ * a doua oara pe aceeasi coloana, la aceeasi adancime, nu mai e ce sapa. Gate-ul
+ * declara 20 de sapaturi/s si facea 13,1.
+ *
+ * Acum indexul intra intr-un patrat de `span²` si se sparge in x si y de acolo,
+ * deci e o permutare adevarata a planului. `PAS` e prim si nu divide `span²`
+ * (544² = 2¹⁰ × 17²), deci perioada e intreaga: fiecare celula o data, si abia apoi
+ * se reia. Proba e in `tests/sdig.test.ts` si merge pe perioada COMPLETA, nu pe un
+ * esantion.
+ *
+ * ## De ce patratul nu mai e cel al asezarii
+ *
+ * `SPAN_CHUNKS` era 13, adica exact `SETTLEMENT_CHUNKS` — acelasi numar, acelasi
+ * colt. Pentru ca promovarea vine cu apron de 1 chunk, dreptunghiul promovat de
+ * fixtura e `-1..13` fata de focus, deci patratul sapat statea STRICT inauntru, cu
+ * marginea de apron intreaga. Nicio sapatura nu promova un chunk nou, deci ramura
+ * scumpa din `remeshAfterEdit` — promovare + apron = 9 chunk-uri remeshate — nu se
+ * executa NICIODATA intr-o rulare de gate. Masurat: 0 promovari din 1200.
+ *
+ * Patratul incepe acum cu 3 chunk-uri inainte de focus, deci exista o banda de
+ * frontiera. Masurat pe aceeasi rulare: **52 de promovari din 897 de sapaturi
+ * acceptate (5,8%)**, iar ramura de 9 apare de 4 ori — era invizibila.
+ *
+ * Banda e doar pe latura negativa, si asta e o proprietate a fixturii, nu o
+ * scapare: `buildM10` ancoreaza asezarea in COLTUL focusului, iar streamingul e un
+ * cerc de raza 11 in jurul lui. Coltul departat al asezarii (+13, +13) e deja in
+ * afara cercului — se pastreaza doar fiindca e promovat. Pe latura pozitiva nu e
+ * teren streamuit in care sa se poata sapa.
+ */
+
+import { CHUNK_CELLS } from '../sim/terrain/chunk.ts'
+
+/** Coltul patratului, in chunk-uri fata de focus. Negativ = banda de frontiera. */
+export const SDIG_OFFSET_CHUNKS = -3
+/** Latura patratului, in chunk-uri. */
+export const SDIG_SPAN_CHUNKS = 17
+/** Pasul permutarii. Prim, si nu divide `(SPAN_CHUNKS * CHUNK_CELLS)²`. */
+export const SDIG_PAS = 1237
+/**
+ * Cate pozitii se incearca pentru O sapatura.
+ *
+ * „20 de sapaturi/s" e un parametru al scenariului, deci trebuie sa fie 20
+ * EFECTUATE. Fixtura si-a sapat deja camerele, deci o pozitie din patru cade pe
+ * aer si comanda se refuza: masurat, 303 refuzuri din 1200. Numarate ca sapaturi,
+ * gate-ul facea 13,1/s si scria 20 in propriul tabel.
+ *
+ * O pozitie refuzata costa o citire de cota si o comanda respinsa, nu un remesh.
+ */
+export const SDIG_MAX_INCERCARI = 16
+
+/** Latura patratului in celule. */
+export const sdigSpanCelule = (): number => SDIG_SPAN_CHUNKS * CHUNK_CELLS
+
+/**
+ * A `i`-a pozitie a scenariului. Deterministă, si bijectiva pe patrat pe toata
+ * perioada `span²`.
+ */
+export function pozitiaSapaturii(i: number, focusCx: number, focusCy: number): { wx: number; wy: number } {
+  const span = sdigSpanCelule()
+  const baza = SDIG_OFFSET_CHUNKS * CHUNK_CELLS
+  const idx = (i * SDIG_PAS) % (span * span)
+  return {
+    wx: focusCx * CHUNK_CELLS + baza + (idx % span),
+    wy: focusCy * CHUNK_CELLS + baza + Math.floor(idx / span),
+  }
+}
+
+/**
+ * Urmatoarea sapatura care CHIAR se face, sau `null` daca nu s-a gasit niciuna in
+ * `SDIG_MAX_INCERCARI` pozitii.
+ *
+ * Terenul si comanda intra prin doua functii, nu prin `World`: aici e cod de banc,
+ * si asa proba din `tests/sdig.test.ts` foloseste ACEASTA cautare, nu o copie a ei.
+ * Bucla de reincercare e singurul loc in care „20 de sapaturi/s" devine adevarat,
+ * deci ea e ce trebuie probat — nu o rescriere a ei in test.
+ */
+export function sapaturaUrmatoare(
+  cursor: number,
+  focusCx: number,
+  focusCy: number,
+  cotaSolului: (wx: number, wy: number) => number | null,
+  incearca: (wx: number, wy: number, z: number) => boolean,
+): { wx: number; wy: number; cursor: number } | null {
+  for (let k = 0; k < SDIG_MAX_INCERCARI; k++) {
+    const c = cursor + k
+    const { wx, wy } = pozitiaSapaturii(c, focusCx, focusCy)
+    const cota = cotaSolului(wx, wy)
+    if (cota === null) continue
+    if (incearca(wx, wy, cota - (c % 5))) return { wx, wy, cursor: c + 1 }
+  }
+  return null
+}

@@ -135,4 +135,41 @@ export const MUTATII = [
     b: "            pushFataNetezita(cheie & 0xff, lx, ly, varfBuf)",
     t: 'tests/mesher.test.ts', e: "fetele NETEZITE primesc ocluzie",
   },
+
+  // --- scenariul de gate S-DIG: constatarea 7 a recenziei adversariale ---
+  {
+    n: 'generatorul de pozitii revine la forma 1D (x si y din acelasi contor)',
+    f: 'src/harness/sdig.ts',
+    a: "  const idx = (i * SDIG_PAS) % (span * span)\n  return {\n    wx: focusCx * CHUNK_CELLS + baza + (idx % span),\n    wy: focusCy * CHUNK_CELLS + baza + Math.floor(idx / span),\n  }",
+    b: "  return {\n    wx: focusCx * CHUNK_CELLS + baza + ((i * SDIG_PAS) % span),\n    wy: focusCy * CHUNK_CELLS + baza + ((i * 7919) % span),\n  }",
+    t: 'tests/sdig.test.ts', e: 'pozitiile acopera patratul EXACT o data',
+  },
+  {
+    n: 'pasul permutarii imparte span patrat (perioada se scurteaza tacut)',
+    f: 'src/harness/sdig.ts',
+    a: "export const SDIG_PAS = 1237",
+    b: "export const SDIG_PAS = 1234",
+    t: 'tests/sdig.test.ts', e: 'pozitiile acopera patratul EXACT o data',
+  },
+  {
+    n: 'patratul sapat revine peste asezare, fara banda de frontiera (0 promovari)',
+    f: 'src/harness/sdig.ts',
+    a: "export const SDIG_OFFSET_CHUNKS = -3",
+    b: "export const SDIG_OFFSET_CHUNKS = 0",
+    t: 'tests/sdig.test.ts', e: 'o parte din sapaturi cad in AFARA',
+  },
+  {
+    n: 'reincercarea dispare (o pozitie refuzata devine o sapatura pierduta)',
+    f: 'src/harness/sdig.ts',
+    a: "export const SDIG_MAX_INCERCARI = 16",
+    b: "export const SDIG_MAX_INCERCARI = 1",
+    t: 'tests/sdig.test.ts', e: 'cele 1200 de sapaturi ale unei rulari se FAC',
+  },
+  {
+    n: 'cursorul nu trece peste pozitiile respinse (se reincearca aceleasi la nesfarsit)',
+    f: 'src/harness/sdig.ts',
+    a: "    if (incearca(wx, wy, cota - (c % 5))) return { wx, wy, cursor: c + 1 }",
+    b: "    if (incearca(wx, wy, cota - (c % 5))) return { wx, wy, cursor: cursor + 1 }",
+    t: 'tests/sdig.test.ts', e: 'cele 1200 de sapaturi ale unei rulari se FAC',
+  },
 ]

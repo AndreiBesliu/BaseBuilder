@@ -37,6 +37,7 @@ import { DEFAULT_RULES } from '../src/sim/content.ts'
 import { meshHeightfield } from '../src/render/heightfield.ts'
 import { createAgentLayer, spawnNear, stepSim, updateAgentLayer } from './agenti.ts'
 import { buildM10 } from '../src/harness/fixture-m10.ts'
+import { SDIG_MAX_INCERCARI, sapaturaUrmatoare } from '../src/harness/sdig.ts'
 
 const SEED = 20260913
 /** Cate chunk-uri in jurul focusului se deseneaza. 11 = discul rezident intreg. */
@@ -984,21 +985,32 @@ function driveScenario(frame: number): void {
   if (SCENARIO === 'dig') {
     // Camera sta; se masoara bucla de constructie, nu cea de privit.
     if (frame % Math.round(60 / DIGS_PER_SECOND) !== 0) return
-    // Pozitii deterministe, imprastiate peste asezare cu doua numere prime.
-    const span = 13 * CHUNK_CELLS
-    const wx = FOCUS_CX * CHUNK_CELLS + ((digCursor * 1237) % span)
-    const wy = FOCUS_CY * CHUNK_CELLS + ((digCursor * 7919) % span)
-    digCursor++
-    const g = groundLevelM(world.terrain, wx, wy)
-    if (!g.ok) return
-    // INAINTE de comanda, nu dupa. Varianta care citea multimea DUPA `dig` punea
-    // in ea si chunk-urile tocmai promovate, deci `!promotedBefore.has(key)` nu se
-    // declansa niciodata si apron-ul nou nu-si primea primul mesh. Adica S-DIG —
-    // un scenariu de GATE — masura mai putina munca decat face jocul.
-    const promotedBefore = promotedKeys()
-    const out = applyCommand(world, { kind: 'dig', wx, wy, z: g.value - (digCursor % 5) })
-    if (!out.ok) return
-    remeshAfterEdit(wx, wy, promotedBefore)
+
+    // „20 de sapaturi/s" inseamna 20 EFECTUATE, nu 20 incercate. Fixtura si-a sapat
+    // deja camerele, deci o pozitie din patru cade pe aer si comanda se refuza —
+    // masurat, 415 din 1200. Numarate ca sapaturi, gate-ul facea 13,1/s si raporta
+    // 20, adica masura cu o treime mai putina munca decat scrie in propriul tabel.
+    // Se reincearca, marginit: o pozitie refuzata costa un `groundLevelM` si o
+    // comanda respinsa, nu un remesh.
+    //
+    // Pozitiile vin din `src/harness/sdig.ts`, ca sa poata avea test — vezi acolo
+    // ce mintea varianta care statea aici.
+    // Multimea promovata se ia INAINTE de comanda, nu dupa. Varianta care o citea
+    // DUPA `dig` punea in ea si chunk-urile tocmai promovate, deci
+    // `!promotedBefore.has(key)` nu se declansa niciodata si apron-ul nou nu-si
+    // primea primul mesh. Adica S-DIG — un scenariu de GATE — masura mai putina
+    // munca decat face jocul.
+    let promotedBefore = new Set<number>()
+    const facut = sapaturaUrmatoare(
+      digCursor, FOCUS_CX, FOCUS_CY,
+      (wx, wy) => { const g = groundLevelM(world.terrain, wx, wy); return g.ok ? g.value : null },
+      (wx, wy, z) => {
+        promotedBefore = promotedKeys()
+        return applyCommand(world, { kind: 'dig', wx, wy, z }).ok
+      },
+    )
+    digCursor = facut ? facut.cursor : digCursor + SDIG_MAX_INCERCARI
+    if (facut) remeshAfterEdit(facut.wx, facut.wy, promotedBefore)
     return
   }
 
