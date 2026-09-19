@@ -395,4 +395,13 @@ export const MUTATII = [
     b: "    construieste: true,",
     t: 'tests/constructie.test.ts', e: "un pion cu CONSTRUIESTE pe 0 nu ia niciodata un santier",
   },
+
+  // --- blocantul gasit de recenzia adversariala ---
+  {
+    n: "racirea de componenta se scrie pe MORMAN (un pion izolat opreste colonia)",
+    f: "src/sim/joburi.ts",
+    a: "        evitaTinta(w, slot, it.id[im]!, w.tick + rules.jobRetryTicks)",
+    b: "        memoreazaPeItem(w, rules, im, Reason.INACCESIBIL, DetaliuItem.COMPONENTE_DIFERITE)",
+    t: 'tests/constructie.test.ts', e: 'un pion IZOLAT nu are voie sa inghete materialul',
+  },
 ]

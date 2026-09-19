@@ -1057,3 +1057,71 @@ test('un santier peste care a cazut MOLOZ nu mai e candidat', () => {
   const m = materialAt(w.terrain, wx + 5, wy + 6, g + 1)
   assert.ok(m.ok && m.value === Material.MOLOZ, 'molozul a fost inlocuit')
 })
+
+/** Sigileaza celula (px, py) cu zid de DOUA niveluri pe toate cele opt vecinatati. */
+function sigileaza(w: World, px: number, py: number, g: number): void {
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
+    for (const dz of [1, 2]) {
+      const out = applyCommand(w, { kind: 'fill', wx: px + dx, wy: py + dy, z: g + dz, material: Material.PIATRA_CONSTRUITA }, R)
+      assert.ok(out.ok, `fixtura: zidul la (${px + dx},${py + dy},${g + dz}): ${JSON.stringify(out)}`)
+    }
+  }
+}
+
+/**
+ * Un pion liber cu material si santier, plus unul SIGILAT care vede mormanul dar
+ * nu ajunge la el. `prioIzolat` e prioritatea personala pe CONSTRUIESTE a celui
+ * sigilat — controlul negativ o pune pe 0.
+ */
+function coloniaCuUnIzolat(seed: number, prioIzolat: number): { w: World; sx: number; sy: number; sz: number } {
+  const { w, wx, wy, g } = sitPlat(seed, 13)
+  const sx = wx + 6
+  const sy = wy + 6
+  const sz = g + 1
+  assert.ok(applyCommand(w, { kind: 'desemneaza', wx: sx, wy: sy, z: sz, piesa: Piesa.PERETE }, R).ok)
+  lasaItem(w, Item.PIATRA, R.piese[Piesa.PERETE]!.cantitate, wx + 4, wy + 6)
+
+  // Pionul LIBER se naste PRIMUL, deci are id mai mic.
+  assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (wx + 5) * 1000 + 500, y: (wy + 6) * 1000 + 500, z: g + 1, faction: Faction.ASEZARE }, R).ok)
+
+  // Cel SIGILAT se naste ULTIMUL, si ordinea conteaza: `stepAgents` scaneaza la
+  // `(tick + id) % jobRescanTicks === 0`, iar ciclul de re-inghetare lasa o fereastra
+  // calda de 20 de tickuri pe care un id MAI MARE o castiga de fiecare data. Cu
+  // izolatul nascut primul, testul da fals-verde chiar pe codul stricat.
+  const px = wx + 1
+  const py = wy + 1
+  sigileaza(w, px, py, g)
+  const sp = applyCommand(w, { kind: 'spawnAgent', x: px * 1000 + 500, y: py * 1000 + 500, z: g + 1, faction: Faction.ASEZARE }, R)
+  assert.ok(sp.ok, `fixtura: pionul sigilat: ${JSON.stringify(sp)}`)
+  const idIzolat = sp.ok ? sp.value : -1
+  assert.ok(applyCommand(w, { kind: 'setPrioritatePersonala', id: idIzolat, categorie: Categorie.CONSTRUIESTE, nivel: prioIzolat }, R).ok)
+
+  ruleaza(w, 5)
+  return { w, sx, sy, sz }
+}
+
+test('un pion IZOLAT nu are voie sa inghete materialul intregii colonii', () => {
+  // Racirea pentru „mormanul nu e in componenta MEA" e o proprietate a PERECHII.
+  // Scrisa pe morman, ea ascunde mormanul de toti — si fiindca `rezumatMaterial`
+  // retine UN SINGUR morman per piesa si sare peste cele in racire, sterge tot
+  // felul. Iar racirea (100) fiind mai lunga decat rescanarea (30), pionul blocat
+  // o reinnoieste inainte sa expire: blocajul e PERMANENT, si pe un camp hasuit.
+  const { w, sx, sy, sz } = coloniaCuUnIzolat(12345, R.personalPriorityDefault)
+  const spec = R.piese[Piesa.PERETE]!
+
+  const n = panaCand(w, 1500, (ww) => ww.ratiune.unitatiZidite >= spec.cantitate)
+  assert.ok(n >= 0, `un pion sigilat a oprit constructia: ${w.ratiune.unitatiZidite} din ${spec.cantitate} de unitati in 1500 de tickuri`)
+  const m = materialAt(w.terrain, sx, sy, sz)
+  assert.ok(m.ok && m.value === spec.material, 'peretele nu s-a ridicat')
+})
+
+test('CONTROLUL NEGATIV: acelasi pion sigilat, dar fara categoria CONSTRUIESTE', () => {
+  // Aceiasi pereti, aceleasi id-uri, acelasi seed — doar categoria stinsa. Daca si
+  // asta ar pica, vinovata ar fi geometria fixturii, nu scanarea. Izoleaza cauza.
+  const { w, sx, sy, sz } = coloniaCuUnIzolat(12345, 0)
+  const spec = R.piese[Piesa.PERETE]!
+  const n = panaCand(w, 1500, (ww) => ww.ratiune.unitatiZidite >= spec.cantitate)
+  assert.ok(n >= 0, `fixtura e stricata, nu codul: nici cu categoria stinsa nu se zideste (${w.ratiune.unitatiZidite})`)
+  const m = materialAt(w.terrain, sx, sy, sz)
+  assert.ok(m.ok && m.value === spec.material)
+})

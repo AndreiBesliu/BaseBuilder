@@ -1145,16 +1145,37 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       // apelantul dupa bucla.
       if (m.slot === -1) continue
 
-      // (a) mormanul: in componenta pionului? Aceeasi intrebare ca la carat, si din
-      // acelasi motiv — un morman exista numai unde a umblat cineva, deci nu se
-      // intinde coridor spre el. Cu un singur morman retinut per piesa, refuzul se
-      // memoreaza PE MORMAN, ca scanarea urmatoare sa-l aleaga pe urmatorul.
+      // (a) mormanul: in componenta pionului? Aceeasi intrebare ca la carat, si nu
+      // se intinde coridor spre el — un morman exista numai unde a umblat cineva.
+      //
+      // ## Dar racirea merge pe PERECHE, spre deosebire de carat
+      //
+      // Bucla de CARAT cheama aici `memoreazaPeItem`, si acolo e apararabil: comen-
+      // tariul ei spune „ce ramane in alta componenta e o groapa din care nu se iese".
+      // Diferenta nu e in apel, e in CE STA IN AVAL de el.
+      //
+      // La carat, `ix.deMutat` e lista INTREAGA: un morman racit nu-i ascunde pe
+      // ceilalti. La construit, `rezumatMaterial` retine UN SINGUR morman per piesa
+      // si sare peste cele in racire — deci un morman racit sterge tot felul, pentru
+      // TOTI pionii. Si fiindca racirea (100 de tickuri) e mai lunga decat rescanarea
+      // (30), pionul blocat il re-raceste inainte sa se incalzeasca: starea de rece
+      // devine permanenta.
+      //
+      // Masurat cu `memoreazaPeItem`: un singur pion sigilat intr-o celula opreste
+      // constructia INTREGII colonii — 0 din 20 de unitati zidite in 1500 de tickuri,
+      // cu mormanul rece 1222 dintre ele, si fara auto-recuperare in 4000. Mai multi
+      // pioni nu ajuta: campul e global. Iar `reincercaLaTick` e HASUIT si PERSISTAT,
+      // deci nu e debit pierdut, e stare.
+      //
+      // E a patra oara cand greseala asta intra prin alta tinta. Vezi nota din
+      // `DRIVER_MANANCA.incheie`: „exact greseala platita la taietura 2, reintrata
+      // prin a treia tinta". Aceeasi lectie, acelasi fisier.
       const im = m.slot
       const rm = regionAt(w.regions, it.wx[im]!, it.wy[im]!, it.z[im]!)
       if (rm === NO_REGION && w.regions.dirty.size > 0) continue
       if (rm === NO_REGION || find(w.regions, rm) !== compAgent) {
         raport.inaccesibil++
-        memoreazaPeItem(w, rules, im, Reason.INACCESIBIL, DetaliuItem.COMPONENTE_DIFERITE)
+        evitaTinta(w, slot, it.id[im]!, w.tick + rules.jobRetryTicks)
         noteaza(Reason.INACCESIBIL)
         continue
       }
