@@ -55,8 +55,8 @@ export const MUTATII = [
   {
     n: 'AO nu intra in cheia de unire pe fetele orizontale (ocluzia se intinde gresit)',
     f: 'src/render/mesher.ts',
-    a: '          grid[gbase + lx] = (row & (1 << lx)) !== 0\n            ? dense[denseIndex(lx, ly, level)]! | (aoPattern(face, lx, ly, level) << 8)\n            : 0',
-    b: '          grid[gbase + lx] = (row & (1 << lx)) !== 0 ? dense[denseIndex(lx, ly, level)]! : 0',
+    a: '          const cheie = dense[denseIndex(lx, ly, level)]! | (aoPattern(face, lx, ly, level) << 8)',
+    b: '          const cheie = dense[denseIndex(lx, ly, level)]!',
     t: 'tests/mesher.test.ts', e: 'tiparul de AO intra in cheia de unire',
   },
   {

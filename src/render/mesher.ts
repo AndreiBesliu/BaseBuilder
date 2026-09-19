@@ -367,6 +367,24 @@ function ensureCapacity(needed: number): void {
   outAo = a
 }
 
+/**
+ * Despacheteaza tiparul de AO in cele patru varfuri ale quadului curent.
+ *
+ * Era scris de doua ori, in `pushQuad` si in `pushFataNetezita`, si de data asta
+ * cele doua copii chiar spuneau acelasi lucru — ambele cai emit varfurile in
+ * ordinea (u,v), (u+,v), (u+,v+), (u,v+), deci si colturile tiparului merg la fel.
+ * S-au unit dupa ce suita de mutatii a raportat TIPAR AMBIGUU: un tipar care se
+ * potriveste in doua locuri ar fi editat alt loc decat cel gandit.
+ */
+function scrieAo(cheie: number): void {
+  const tipar = cheie >>> 8
+  const a = quadCount * 4
+  outAo[a] = tipar & 3
+  outAo[a + 1] = (tipar >>> 2) & 3
+  outAo[a + 2] = (tipar >>> 4) & 3
+  outAo[a + 3] = (tipar >>> 6) & 3
+}
+
 /** Metri de grila → centimetri. Un singur loc care stie factorul. */
 const CM = 100
 
@@ -387,12 +405,7 @@ function pushFataNetezita(cheie: number, lx: number, ly: number, cm: Int32Array)
   outPositions[o + 9] = x0; outPositions[o + 10] = y1; outPositions[o + 11] = cm[3]!
   outMaterials[quadCount] = cheie & 0xff
   outFaces[quadCount] = Face.Z_POS
-  const tipar = cheie >>> 8
-  const a = quadCount * 4
-  outAo[a] = tipar & 3
-  outAo[a + 1] = (tipar >>> 2) & 3
-  outAo[a + 2] = (tipar >>> 4) & 3
-  outAo[a + 3] = (tipar >>> 6) & 3
+  scrieAo(cheie)
   quadCount++
 }
 
@@ -412,12 +425,7 @@ function pushQuad(
   outPositions[o + 9] = dx * CM; outPositions[o + 10] = dy * CM; outPositions[o + 11] = dz * CM
   outMaterials[quadCount] = cheie & 0xff
   outFaces[quadCount] = face
-  const tipar = cheie >>> 8
-  const a = quadCount * 4
-  outAo[a] = tipar & 3
-  outAo[a + 1] = (tipar >>> 2) & 3
-  outAo[a + 2] = (tipar >>> 4) & 3
-  outAo[a + 3] = (tipar >>> 6) & 3
+  scrieAo(cheie)
   quadCount++
 }
 
