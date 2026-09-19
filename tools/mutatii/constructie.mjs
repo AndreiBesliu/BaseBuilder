@@ -342,4 +342,13 @@ export const MUTATII = [
     b: "    return refaLoculDeLucruEvitandCurentul(w, rules, slot, a.jobTarget[slot]!, PasConstruieste.MERGE_SANTIER)",
     t: 'tests/constructie.test.ts', e: 'constructorul cu locul de lucru ocupat de un ostil',
   },
+
+  // --- 6c, pasii pregatitori ---
+  {
+    n: "locul de lucru de la santier se cauta in ORICE componenta",
+    f: "src/sim/joburi.ts",
+    a: "    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, comp)",
+    b: "    void comp\n    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules)",
+    t: 'tests/constructie.test.ts', e: 'santierul de necontactat se refuza PE LOC',
+  },
 ]

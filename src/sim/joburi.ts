@@ -590,6 +590,15 @@ function memoreazaPeItem(w: World, rules: Rules, is: number, motiv: ReasonCode, 
 /** Cine e sursa unui candidat de scanare. */
 const CAND_SAPA = 0
 const CAND_CARA = 1
+/**
+ * Felurile de candidat, ca UNIUNE — nu `number`.
+ *
+ * Tipul e ce face exhaustivitatea din `pornesteCandidatul` sa lege cu adevarat:
+ * cu `fel: number`, `const x: never = fel as never` compileaza mereu si nu apara
+ * nimic. Adaugarea unui membru aici FARA ramura lui in dispecerizare e eroare de
+ * compilare, adica exact ce n-a existat cand s-au scris cele doua ternare.
+ */
+type CandFel = typeof CAND_SAPA | typeof CAND_CARA
 
 /**
  * Unde se duce o marfa de felul `kind`, `cant` unitati, care sta la (fx, fy, fz)
@@ -702,11 +711,24 @@ export function cautaDestinatie(
 // ---------------------------------------------------------------------------
 
 /** Buffere de candidati, refolosite intre scanari. Zero alocari in regim stabil. */
-let candFel: number[] = []
+let candFel: CandFel[] = []
 let candSlot: number[] = []
 let candDist: number[] = []
 let candG: number[] = []
 let candId: number[] = []
+/** Prioritatea personala a CATEGORIEI din care vine candidatul. */
+let candPers: number[] = []
+/**
+ * Marginea superioara a prioritatii candidatului — pentru desemnari chiar
+ * prioritatea lor, pentru marfa cea mai buna prioritate libera a felului.
+ *
+ * Amandoua se scriu la NASTEREA candidatului, in trecerea ieftina, fiindca acolo
+ * se stiu. Se calculau in trecerea scumpa, cu cate un
+ * `fel === CAND_SAPA ? persS : persC` — adica „daca nu e sapat, e carat", care e
+ * adevarat exact cat timp exista doua feluri. Al treilea fel ar fi cazut tacut pe
+ * ramura caratului, cu prioritatea altcuiva.
+ */
+let candPrio: number[] = []
 
 /**
  * Categoriile pe care le scaneaza un pion, dupa prioritatile lui personale.
@@ -824,6 +846,8 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       candDist[n] = Math.max(0, dist0 - margine)
       candG[n] = 2 ** d.prioritate[s]! * gPers
       candId[n] = d.id[s]!
+      candPers[n] = persS
+      candPrio[n] = d.prioritate[s]!
       n++
     }
   }
@@ -850,6 +874,8 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       candDist[n] = dist0
       candG[n] = 2 ** ix.maxPrioLibera[it.kind[s]!]! * gPers
       candId[n] = it.id[s]!
+      candPers[n] = persC
+      candPrio[n] = ix.maxPrioLibera[it.kind[s]!]!
       n++
     }
   }
@@ -893,9 +919,9 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
   for (let k = 0; k < n; k++) {
     const i = ordine[k]!
     const s = candSlot[i]!
-    const fel = candFel[i]!
-    const persCand = fel === CAND_SAPA ? persS : persC
-    const prioBound = fel === CAND_SAPA ? d.prioritate[s]! : ix.maxPrioLibera[it.kind[s]!]!
+    const fel: CandFel = candFel[i]!
+    const persCand = candPers[i]!
+    const prioBound = candPrio[i]!
 
     // Nimeni de aici incolo nu mai poate intrece cel mai bun scor real: marginea
     // lui e sub el, si urmatorii au margini si mai mici.
@@ -951,7 +977,12 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       continue
     }
 
-    // CARA. (a) itemul e intr-o regiune, in componenta pionului?
+    // De aici incolo e CARA, si ramane singurul fel fara `if` propriu fiindca e
+    // ULTIMUL. Un fel nou NU se adauga sub comentariul asta — isi ia propriul
+    // `if (fel === CAND_X) { ... continue }` deasupra, altfel mosteneste tacut
+    // toata evaluarea marfii.
+    //
+    // (a) itemul e intr-o regiune, in componenta pionului?
     const ixx = it.wx[s]!
     const iy = it.wy[s]!
     const iz = it.z[s]!
@@ -1034,9 +1065,7 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
     return false
   }
 
-  const out = candFel[best] === CAND_SAPA
-    ? pornesteSapa(w, slot, candSlot[best]!, bestWork!)
-    : pornesteCara(w, rules, slot, candSlot[best]!, bestCs, bestCant)
+  const out = pornesteCandidatul(w, rules, slot, candFel[best]!, candSlot[best]!, bestWork, bestCs, bestCant)
   if (!out.ok) {
     // Verificat la scan, refuzat la start: intre ele nu s-a schimbat nimic pe
     // un singur fir, deci nu se intampla. Dar contractul cere re-verificarea,
@@ -1048,6 +1077,39 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
   }
   rat.stare[slot] = StareRatiune.JOB
   return true
+}
+
+/**
+ * Porneste jobul candidatului castigator, pe FEL.
+ *
+ * Exhaustiva prin `never`: un fel nou care n-are ramura aici nu compileaza. Pana
+ * la ea, dispecerizarea era un ternar `=== CAND_SAPA ? sapa : cara`, deci al
+ * treilea fel ar fi pornit un job de CARAT cu slotul unei desemnari — adica
+ * exact familia de defecte pe care tabelul de drivere a inchis-o la executie, dar
+ * lasata deschisa la ALEGERE.
+ */
+function pornesteCandidatul(
+  w: World,
+  rules: Rules,
+  slot: number,
+  fel: CandFel,
+  s: number,
+  work: { wx: number; wy: number; z: number } | null,
+  cs: number,
+  cant: number,
+): Outcome<void> {
+  switch (fel) {
+    case CAND_SAPA: return pornesteSapa(w, slot, s, work!)
+    case CAND_CARA: return pornesteCara(w, rules, slot, s, cs, cant)
+    default: {
+      // Nu se poate atinge cat timp `CandFel` e uniunea de mai sus: daca cineva ii
+      // adauga un membru fara ramura, linia asta NU compileaza. Refuzul de dedesubt
+      // e pentru cazul in care tipul e ocolit cu un cast.
+      const nestiut: never = fel
+      void nestiut
+      return refuse(Reason.VALOARE_INVALIDA, { camp: 'candFel', valoare: fel })
+    }
+  }
 }
 
 /**
@@ -1628,7 +1690,18 @@ function ridica(w: World, rules: Rules, slot: number): void {
       terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
       return
     }
-    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules)
+    // IN COMPONENTA pionului, care acum sta pe morman. Fara ea, `celulaDeLucru`
+    // intoarce prima celula calcabila in ordinea fixa, indiferent daca pionul
+    // ajunge la ea — si atunci el pleaca spre o tinta imposibila, arde plafonul de
+    // incercari pe refuzuri de drum, si abia dupa aia afla.
+    //
+    // Masurat cat NU face: `DIRECTII` e 4-directionala, deci toti vecinii calcabili
+    // ai unui santier calcabil sunt conectati INTRE EI prin celula santierului.
+    // Filtrul nu poate deci alege alta celula cand pionul ajunge la vreuna; schimba
+    // doar cazul in care nu ajunge la NICIUNA — dintr-o plimbare inutila intr-un
+    // refuz imediat, cu cauza corecta pe tinta. Fail-fast, nu alegere reparata.
+    const comp = find(w.regions, regionAt(w.regions, cellOf(a.x[slot]!), cellOf(a.y[slot]!), a.z[slot]!))
+    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, comp)
     if (loc === null) {
       terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.INACCESIBIL, Racire.TINTA)
       return

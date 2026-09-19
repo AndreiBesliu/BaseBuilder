@@ -801,6 +801,55 @@ test('constructorul cu locul de lucru ocupat de un ostil isi alege altul', () =>
   assert.equal(Math.max(Math.abs(fx - sx), Math.abs(fy - sy)), 1, `a zidit de la (${fx},${fy}), santierul e la (${sx},${sy})`)
 })
 
+test('santierul de necontactat se refuza PE LOC, nu dupa o plimbare inutila', () => {
+  // Pionul si mormanul sunt sigilati intr-o camera de o celula; santierul e afara.
+  // Zidul are DOUA niveluri fiindca `maxStepM = 1`: cu unul singur pionul ar urca
+  // pe el.
+  //
+  // Ce probeaza: la trecerea spre santier, locul de lucru se cauta in COMPONENTA
+  // pionului. Fara filtru, `celulaDeLucru` intoarce prima celula calcabila din
+  // ordinea fixa — una de afara — si pionul pleaca spre ea, arzand refuzuri de
+  // drum. Cu filtru, nu exista niciuna si jobul se incheie pe loc.
+  const { w, wx, wy, g } = sitPlat(12345, 11)
+  const px = wx + 1
+  const py = wy + 5
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
+    for (const dz of [1, 2]) {
+      const out = applyCommand(w, { kind: 'fill', wx: px + dx, wy: py + dy, z: g + dz, material: Material.PIATRA_CONSTRUITA }, R)
+      assert.ok(out.ok, `fixtura: zidul la (${px + dx},${py + dy},${g + dz}): ${JSON.stringify(out)}`)
+    }
+  }
+
+  const idItem = lasaItem(w, Item.PIATRA, R.piese[Piesa.PERETE]!.cantitate, px, py)
+  const sp = applyCommand(w, { kind: 'spawnAgent', x: px * 1000 + 500, y: py * 1000 + 500, z: g + 1, faction: 0 }, R)
+  assert.ok(sp.ok, `fixtura: pionul: ${JSON.stringify(sp)}`)
+
+  const sx = wx + 6
+  const sy = wy + 5
+  const sant = applyCommand(w, { kind: 'desemneaza', wx: sx, wy: sy, z: g + 1, piesa: Piesa.PERETE }, R)
+  assert.ok(sant.ok, `fixtura: santierul: ${JSON.stringify(sant)}`)
+
+  ruleaza(w, 5) // regiunile se aseaza dupa ziduri
+  const ds2 = slotDesemnare(w.desemnari, sant.ok ? sant.value : -1)
+  const is2 = slotItem(w.iteme, idItem)
+  assert.ok(pornesteConstruieste(w, R, 0, ds2, is2).ok)
+
+  // Fixtura trebuie sa fie VIE: pionul chiar ridica materialul, altfel testul ar
+  // trece si daca jobul murea inainte sa ajunga la trecerea pe care o probam.
+  let refuzuri = 0
+  let n = -1
+  for (let i = 0; i < 2000; i++) {
+    if (w.agents.jobKind[0] === 0) { n = i; break }
+    refuzuri += ruleaza(w, 1).refuzuriDrum
+  }
+  assert.notEqual(n, -1, 'jobul trebuia sa se incheie')
+  // Fixtura VIE: mormanul original trebuie sa fi fost consumat, altfel jobul a murit
+  // inainte de trecerea pe care o probam. Nu se poate observa pe `caraCantitate`:
+  // ridicarea si incheierea se intampla in ACELASI tick, deci intre tickuri e mereu 0.
+  assert.equal(slotItem(w.iteme, idItem), -1, 'fixtura moarta: pionul n-a apucat sa ridice mormanul')
+  assert.equal(refuzuri, 0, `pionul a plecat spre un santier de necontactat si a ars ${refuzuri} refuzuri de drum`)
+})
+
 test('materialul disparut din mana nu se zideste din nimic', () => {
   // Garda e defensiva: intre RIDICA si ZIDESTE nimeni n-are cum sa ia marfa din
   // mana unui pion. Dar „n-are cum" e o presupunere despre restul sistemului, si
