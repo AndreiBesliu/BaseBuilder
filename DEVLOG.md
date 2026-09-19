@@ -2568,3 +2568,93 @@ fiecare tranșă, nu doar pe cele noi — tocmai cele vechi putrezesc. Reancorat
   21×21 trece de la 13,3 la 173,3 ms, iar discul de invalidare de la 50 la 362 de celule.
 - **overlay-ul de construcție** — previzualizarea există în nucleu; desenarea ei pe ecran nu.
 
+---
+
+## Tăietura 2, pasul 6b — driverul de construit, și un instrument care mințea
+
+**Prompt:** `continua`
+**Model:** Claude Opus 5
+
+Un pion cară materialul și ridică peretele, cap-coadă. `DRIVER_CONSTRUIESTE` intră în tabel cu
+cele cinci metode de contract, deci felul nou nu mai are niciun `else` care să-l presupună altceva.
+
+### Unde „reutilizează mașinăria de CARA" NU se aplică
+
+La carat, destinația e o celulă de ZONĂ și pionul trebuie să fie **pe** ea. La construit,
+destinația **devine solidă**. Luată literal, mașinăria l-ar fi trimis exact pe celula pe care
+urmează s-o zidească, iar `celulaLibera` l-ar fi refuzat — pionul și-ar fi blocat singur șantierul.
+Deci locul de lucru e un vecin calcabil, ales ca la săpat.
+
+Corolarul, verificat de panoul de design: poziția de lucru iese **gratis** din regula de
+stabilitate. O celulă cu suport > 0 are ori solid dedesubt, ori un vecin lateral solid la aceeași
+cotă. Nu e nevoie de o regulă separată de accesibilitate.
+
+Zidirea trece acum printr-o **singură** funcție, `zidesteVoxel`: celulă liberă, sprijin, teren.
+Comanda `fill` și jobul o cheamă pe aceeași — scrise de două ori, un pion ar fi putut face ce
+jucătorului i se refuză.
+
+Două gărzi la PORNIRE, și amândouă există pentru că `ridica` ia `min(cerut, găsit)`: un morman de
+alt fel sau prea mic nu produce niciun refuz, produce un pion care merge, ridică ce e, muncește 400
+de tickuri și abia atunci descoperă că n-are din ce zidi.
+
+Măsurat pe fixtură: **76 de tickuri** cap-coadă — 5 mers la morman, 10 ridicat, 21 mers la șantier,
+40 zidit. Pionul termină la 16112, adică **lângă** șantierul de la 16111, nu pe el.
+
+### Instrumentul edita altundeva decât credea
+
+Prima rulare de mutații: 35 din 39, patru RATATE. Una dintre ele — „șantierul rămâne după ce piesa
+e pusă" — mi-a atras atenția, fiindcă testul pentru ea **exista** și verifica exact asta. Aplicată
+cu mâna, mutația era prinsă imediat.
+
+`aplica` folosea `String.replace` cu tipar-șir, care înlocuiește **prima** apariție. Tiparul meu,
+`terminaJob(…TERMINAT)` + `stergeDesemnare(d, ds)`, apărea identic la 1473–1474 (în `sapa`) și la
+1541–1542 (în `zideste`). Harnașamentul scotea ștergerea desemnării din **săpat**, apoi rula
+testele de construcție — care nu sapă. Ieșea RATATA.
+
+**Asta e mai rău decât o ratare oarecare: te trimite să scrii un test pentru o gardă care era deja
+probată.**
+
+Un audit peste toate cele 158 de probe a găsit trei tipare ambigue — **toate trei născute în
+aceeași zi**, de pasul 6b, care dublase trei forme de cod în `joburi.ts`. Două dintre ele erau
+probe de **carat**, verzi de la tăietura 2, care de azi mutau codul de construit și rămâneau verzi
+fiindcă nimeni nu le mai măsura ținta. Plus trei tipare învechite de mutarea codului în
+`celulaLibera`/`zidesteVoxel`.
+
+`aplica` întoarce acum motivul, nu un boolean: `lipsa`, `ambiguu:N`, `nula` (o editare care nu
+schimbă nimic e tot un control invalid) sau `ok`. Ambiguitatea **nu** se rezolvă alegând a doua
+apariție: care dintre ele e cea gândită e o întrebare la care doar autorul probei poate răspunde.
+
+Una dintre cele trei duplicări nu trebuia să existe: `DRIVER_SAPA.refaTinta` și
+`DRIVER_CONSTRUIESTE.refaTinta` erau octet cu octet identice. O funcție, un adevăr.
+
+### Celelalte două RATATE erau goluri adevărate
+
+**Conservarea.** Acceptanța verifica `caraCantitate === 0` — care arată la fel și când materialul
+se consumă, și când nu se consumă deloc: `terminaJob` lasă orice mână plină jos, deci cele 20 de
+unități aterizau lângă perete și contorul din mână era tot zero. Materia se tipărea în tăcere.
+Un proxy în locul invariantului, exact tiparul de la „un câmp nou invalidează un invariant vechi".
+Acum se verifică `marfaTotala + unitatiZidite`, și că nu rămân mormane pe jos.
+
+**Paza de poziție.** Pasul ZIDEȘTE e un pas de **oprire**, deci pionul ajunge acolo prin mașinăria
+de mers și e pe poziție din prima — fixtura nu-l scotea niciodată de acolo, deci `if (false)` nu
+schimba nimic. Verificarea apără altceva: clipa în care pionul **nu mai e** unde era, fiindcă i s-a
+săpat podeaua de sub picioare sau l-a mutat o prăbușire. Testul nou îl mută, exact cum face lumea.
+
+A patra RATATĂ nu era nici gaură, nici defect de instrument: declarasem testul greșit. `tinteVii` e
+consultat **doar** la reconstrucția rezervărilor, adică la încărcare — deci testul care o probează
+e M5, nu acceptanța. M5 chiar se înroșise; eu mă uitam în altă parte.
+
+### Cifre
+
+- **374 de teste**, 27 în `tests/constructie.test.ts`.
+- **159 de probe** de mutație, 0 tipare lipsă, 0 ambigue, 0 controale invalide.
+- **Toate** cele cinci suite: construcție 41/41, carat 46/46, drivere 12/12, nevoi 31/31,
+  stabilitate 29/29. Nu doar cele noi — tocmai cele vechi putrezesc, și azi s-a văzut de ce.
+
+### Ce rămâne
+
+- **pasul 6c, scanerul.** Alegerea automată a blueprinturilor, citind închiderea, ca să nu propună
+  niciodată o piesă nezidibilă — panoul D4 a măsurat 1,2 drumuri irosite pe piesă altfel.
+- **`rang(FARA_SPRIJIN)`** — se adaugă când scanerul chiar îl emite.
+- **grinda** (`suportRazaGrinda: 10`), amânată cu cifra ei.
+- **overlay-ul de construcție** — previzualizarea există în nucleu; desenarea ei pe ecran nu.

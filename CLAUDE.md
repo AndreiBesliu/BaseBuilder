@@ -71,7 +71,7 @@ Pe Windows, `kinstead.bat` le adună pe toate: dublu-click deschide un meniu, ia
 
 ```bash
 npm run mutatii -- --lista      # ce suite există
-npm run mutatii                 # toate cele 110, ~50 de minute
+npm run mutatii                 # toate cele 159, ~50 de minute
 npm run mutatii -- nevoi        # o singură suită
 npm run mutatii -- nevoi podeaua  # doar mutațiile al căror nume conține „podeaua"
 ```
@@ -81,7 +81,10 @@ ea. Asta e proba negativă a suitei; fără ea, un test care nu mai exercită ni
 care apără ceva. **Cere arborele curat** — restaurarea se face prin `git checkout --`, deci ordinea e
 commit → mutații → reparații → commit. Un `TIPAR LIPSA` e eșec, nu „prinsă": tiparele se învechesc
 când codul de sub ele se mută, deci se rulează **toate** suitele după fiecare tranșă, nu doar cele
-noi. Nu intră în `npm run check` și nici în CI: modifică fișiere sursă.
+noi. La fel un `TIPAR AMBIGUU`: `String.replace` ia PRIMA apariție, deci un tipar care se
+potrivește în două locuri editează altul decât cel gândit, rulează testele celui gândit și iese
+„RATATĂ" — adică te trimite să scrii un test pentru o gardă deja probată. Nu intră în
+`npm run check` și nici în CI: modifică fișiere sursă.
 
 ## Metodă
 
