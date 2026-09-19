@@ -1136,16 +1136,20 @@ test('CONTROLUL NEGATIV: acelasi pion sigilat, dar fara categoria CONSTRUIESTE',
  * e o proprietate permanenta a lumii finale, nu una tranzitorie pe care testul ar
  * trebui s-o prinda la tickul potrivit.
  */
-function douaSantiere(seed: number, intaiDeparte: boolean, doarDeparte = false): {
+function douaSantiere(seed: number, intaiDeparte: boolean, doarDeparte = false, sapaturaLa?: { dx: number; dy: number }): {
   w: World; aproape: { wx: number; wy: number }; departe: { wx: number; wy: number }; g: number
 } {
   const { w, wx, wy, g } = sitPlat(seed, 13)
   const aproape = { wx: wx + 7, wy: wy + 6 }
   const departe = { wx: wx + 1, wy: wy + 6 }
   const ordine = doarDeparte ? [departe] : intaiDeparte ? [departe, aproape] : [aproape, departe]
-  for (const c of ordine) {
+  for (let k = 0; k < ordine.length; k++) {
+    const c = ordine[k]!
     const out = applyCommand(w, { kind: 'desemneaza', wx: c.wx, wy: c.wy, z: g + 1, piesa: Piesa.PERETE }, R)
     assert.ok(out.ok, `fixtura: santierul la ${c.wx},${c.wy}: ${JSON.stringify(out)}`)
+    // Sapatura se deseneaza INTRE cele doua santiere, deci primeste un id intre
+    // ale lor. Ea e al treilea candidat, de alt FEL, si de ea atarna tot testul.
+    if (sapaturaLa && k === 0) desemneaza(w, wx + sapaturaLa.dx, wy + sapaturaLa.dy)
   }
   lasaItem(w, Item.PIATRA, R.piese[Piesa.PERETE]!.cantitate, wx + 8, wy + 6)
   const sp = applyCommand(w, { kind: 'spawnAgent', x: (wx + 4) * 1000 + 500, y: (wy + 10) * 1000 + 500, z: g + 1, faction: Faction.ASEZARE }, R)
@@ -1303,4 +1307,48 @@ test('mormanul evitat de pioni nu e „lipsa material" pe SANTIER', () => {
   const sm = slotItem(w.iteme, idMorman)
   assert.notEqual(sm, -1, 'fixtura: mormanul a disparut din lume')
   assert.ok(w.iteme.cantitate[sm]! >= spec.cantitate, 'fixtura: mormanul s-a subtiat sub cat cere piesa')
+})
+
+test('o SAPATURA desenata intre doua santiere nu are voie sa schimbe raspunsul', () => {
+  // Comparatorul de candidati trebuie sa fie o ordine TOTALA. Prima varianta a
+  // departajarii pe al doilea picior statea in comparator, cu garda „doar intre
+  // candidati de acelasi fel" — si o departajare CONDITIONATA nu e tranzitiva:
+  // cu trei candidati legati pe scor, iese X < S, S < Y si Y < X. `Array.sort` pe
+  // un comparator inconsecvent da un rezultat definit de implementare, iar aici
+  // dadea exact santierul departat de morman — adica fix regresia pe care
+  // departajarea fusese scrisa s-o inchida.
+  //
+  // Testul nu cere tranzitivitatea, care nu se vede din afara. Cere consecinta ei:
+  // o desemnare de ALT FEL, care n-are nicio legatura cu niciun santier, nu poate
+  // schimba ce santier se ridica.
+  const spec = R.piese[Piesa.PERETE]!
+  const POZITII = [
+    { dx: 4, dy: 1 }, { dx: 3, dy: 0 }, { dx: 8, dy: 5 }, { dx: 2, dy: 4 },
+    { dx: 5, dy: 9 }, { dx: 10, dy: 2 }, { dx: 6, dy: 11 }, { dx: 11, dy: 8 },
+  ]
+  let verificate = 0
+  for (const p of POZITII) {
+    const { w, aproape, departe, g } = douaSantiere(12345, true, false, p)
+    const n = panaCand(w, 6000, (ww) => ww.ratiune.unitatiZidite >= spec.cantitate)
+    assert.ok(n >= 0, `sapatura la ${p.dx},${p.dy}: nu s-a zidit nimic in 6000 de tickuri`)
+    const ma = materialAt(w.terrain, aproape.wx, aproape.wy, g + 1)
+    const md = materialAt(w.terrain, departe.wx, departe.wy, g + 1)
+    assert.ok(ma.ok && ma.value === spec.material,
+      `sapatura la ${p.dx},${p.dy}: s-a ridicat santierul DEPARTE — o desemnare straina a rasturnat departajarea`)
+    assert.ok(md.ok && !isSolid(md.value), `sapatura la ${p.dx},${p.dy}: s-au ridicat amandoua`)
+    verificate++
+  }
+  assert.equal(verificate, POZITII.length)
+
+  // Controlul de VIATA: sapaturile alea chiar exista si chiar sunt luate in seama.
+  // Fara el, testul ar trece la fel de bine daca `desemneaza` ar fi fost refuzata
+  // tacut si n-ar fi existat niciodata al treilea candidat.
+  const { w } = douaSantiere(12345, true, false, POZITII[0]!)
+  let sapaturiVii = 0
+  for (let i = 0; i < w.desemnari.count; i++) {
+    if (w.desemnari.alive[i] === 1 && w.desemnari.kind[i] === Desemnare.SAPA) sapaturiVii++
+  }
+  assert.equal(sapaturiVii, 1, 'fixtura moarta: sapatura nu exista, deci nu e al treilea candidat')
+  const t = ruleaza(w, 200)
+  assert.ok(t.candidatiExaminati > 0, 'fixtura moarta: nicio scanare n-a evaluat vreun candidat')
 })

@@ -409,9 +409,16 @@ export const MUTATII = [
   {
     n: "santierul se alege dupa ordinea desenarii (departajarea pe al doilea picior dispare)",
     f: "src/sim/joburi.ts",
-    a: "    if (candFel[i] === candFel[j] && candDist2[i] !== candDist2[j]) return candDist2[i]! - candDist2[j]!",
-    b: "    void candDist2",
+    a: "      const maiAproapeDeMorman = egal",
+    b: "      const maiAproapeDeMorman = false && egal",
     t: 'tests/constructie.test.ts', e: 'intre doua santiere la fel de bune',
+  },
+  {
+    n: "departajarea se intoarce in COMPARATOR, unde rupe tranzitivitatea",
+    f: "src/sim/joburi.ts",
+    a: "    return candId[i]! - candId[j]!\n  })",
+    b: "    if (candFel[i] === candFel[j] && candDist2[i] !== candDist2[j]) return candDist2[i]! - candDist2[j]!\n    return candId[i]! - candId[j]!\n  })",
+    t: 'tests/constructie.test.ts', e: 'o SAPATURA desenata intre doua santiere',
   },
   {
     n: "al doilea picior se raporteaza 0 la constructie (departajarea ramane, dar oarba)",

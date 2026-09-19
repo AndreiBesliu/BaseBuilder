@@ -834,6 +834,26 @@ let candDist: number[] = []
  * sapat 0 e adevarat (nu exista al doilea picior); la carat e „nu se stie ieftin"
  * — destinatia se alege abia in trecerea scumpa. Comparat intre categorii, zeroul
  * ala ar fi o minciuna care inclina sistematic balanta impotriva constructiei.
+ *
+ * ## Unde se compara, si de ce NU in comparator
+ *
+ * Prima varianta punea departajarea in `ordine.sort`, cu garda
+ * `candFel[i] === candFel[j]`. Arata ca exprima exact intentia de mai sus, dar o
+ * departajare CONDITIONATA nu e tranzitiva: cu trei candidati legati pe scor, doi
+ * de acelasi fel si unul de alt fel cu id-ul intre ei, iese X < S (dupa id),
+ * S < Y (dupa id) si Y < X (dupa al doilea picior). Un comparator inconsecvent da
+ * un rezultat definit de implementare — si `Array.prototype.sort` alegea exact
+ * santierul departat de morman, adica regresia pe care departajarea fusese scrisa
+ * s-o inchida. Masurat pe situl plat: 12 pozitii de sapatura din 166 o rastoarna.
+ *
+ * Acum se compara in bucla scumpa, la locul deciziei: acolo sunt doi candidati
+ * anume, iar „acelasi fel" e o conditie pe o pereche, nu o relatie de ordine.
+ *
+ * Conditia `candFel[best] === CAND_CONSTRUIESTE` de acolo e REDUNDANTA azi: la
+ * SAPA si la CARA `candDist2` e 0, iar nimic nu e mai mic decat 0. Ramane scrisa
+ * fiindca devine purtatoare de sarcina in clipa in care un fel nou primeste al
+ * doilea picior — si atunci absenta ei ar fi tacuta. Deci nu are proba de mutatie,
+ * si asta e spus aici ca sa nu para o scapare.
  */
 let candDist2: number[] = []
 let candG: number[] = []
@@ -1118,8 +1138,18 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
     const li = candG[i]! * (1 + candDist[j]!)
     const lj = candG[j]! * (1 + candDist[i]!)
     if (li !== lj) return li > lj ? -1 : 1
-    // Doar in interiorul categoriei: vezi `candDist2`.
-    if (candFel[i] === candFel[j] && candDist2[i] !== candDist2[j]) return candDist2[i]! - candDist2[j]!
+    // Aici NU intra al doilea picior. Prima varianta il punea, cu garda
+    // `candFel[i] === candFel[j]` — si o departajare CONDITIONATA rupe
+    // tranzitivitatea: cu trei candidati legati pe scor, doi de acelasi fel si unul
+    // de alt fel cu id-ul intre ei, iese X < S (dupa id), S < Y (dupa id), Y < X
+    // (dupa al doilea picior). Un comparator inconsecvent da un rezultat definit de
+    // implementare, iar `Array.prototype.sort` alegea exact santierul departat de
+    // morman — adica regresia pe care `candDist2` fusese introdus s-o inchida.
+    // Masurat pe situl plat: 12 pozitii de sapatura din 166 rastoarna alegerea.
+    //
+    // Departajarea sta acum in bucla scumpa, la locul deciziei, unde se compara
+    // doi candidati anume si unde „acelasi fel" e o conditie, nu o relatie de
+    // ordine. Ordinea de aici ramane ce era inainte: totala pe date persistate.
     return candId[i]! - candId[j]!
   })
 
@@ -1269,7 +1299,19 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       }
 
       const dist = candDist[i]!
-      if (best === -1 || maiBun(prio, persB, dist, bestPrio, bestPers, bestDist)) {
+      // La scor EGAL, castiga santierul mai aproape de morman. `maiBun` nu e strict,
+      // deci fara asta ar castiga primul examinat — ordinea sortarii, adica ordinea
+      // in care jucatorul a desenat santierele. Comparatia are voie sa se uite la
+      // `candDist2` numai fiindca ambii candidati sunt de acelasi fel: la constructie
+      // al doilea picior e morman -> santier si se stie ieftin, la carat destinatia
+      // se afla abia aici, iar la sapat nu exista al doilea picior.
+      const egal = best !== -1
+        && !maiBun(prio, persB, dist, bestPrio, bestPers, bestDist)
+        && !maiBun(bestPrio, bestPers, bestDist, prio, persB, dist)
+      const maiAproapeDeMorman = egal
+        && candFel[best]! === CAND_CONSTRUIESTE
+        && candDist2[i]! < candDist2[best]!
+      if (best === -1 || maiBun(prio, persB, dist, bestPrio, bestPers, bestDist) || maiAproapeDeMorman) {
         best = i
         bestPrio = prio
         bestPers = persB
