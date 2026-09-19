@@ -435,7 +435,7 @@ export const MUTATII = [
     t: 'tests/constructie.test.ts', e: 'materialul rezervat de ALT pion',
   },
   {
-    n: "„exista in lume" se afla DUPA portile per-pion (evitarea sterge felul)",
+    n: 'exista in lume se afla DUPA portile per-pion (evitarea sterge felul)',
     f: "src/sim/joburi.ts",
     a: "      matOriunde[p] = true\n      if (!alMeu) continue",
     b: "      if (!alMeu) continue\n      matOriunde[p] = true",
