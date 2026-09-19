@@ -183,9 +183,9 @@ ce construiește un jucător.
 | **Chunk-uri promovate** | **225** (PLAN bugeta ~200) |
 | Chunk-uri rezidente | 473 |
 | Construcție | ~700 ms |
-| Quaduri / triunghiuri | 86.071 / **172.142** |
-| Meshing complet | **88 ms** · mediana din 10 · verificat mecanic de `tools/check-gate-numbers.mjs` |
-| &nbsp;&nbsp;per chunk | **490 µs** · mediana din 10 · CV 16,4% ⚠ |
+| Quaduri / triunghiuri | 199.840 / **399.680** |
+| Meshing complet | **192 ms** · mediana din 10 · verificat mecanic de `tools/check-gate-numbers.mjs` |
+| &nbsp;&nbsp;per chunk | **854 µs** · derivat din meshingul complet / 225 |
 | Memorie voxeli (RLE) | 2,34 MB (față de 14,1 MB necomprimat) |
 
 > **Re-etalonare, 14.09.2026, ÎNAINTE de orice rulare de gate.** Două lucruri s-au schimbat, niciunul
@@ -212,6 +212,32 @@ ce construiește un jucător.
 > **−5,3% quaduri** (90.932 → 86.071), exact și determinist. Costul, măsurat corect prin mediane în
 > **procese separate** (398 → 409 µs/chunk, DMD 42 µs): **nedecis** — sub pragul de detecție.
 > Rulările de gate se fac pe geometria cu tăiere, adică pe cea care chiar se randează.
+>
+> **A patra schimbare, 19.09.2026: ocluzia ambientală.** E singura de până acum care scumpește
+> deliberat geometria, deci se consemnează cu prețul în față, nu cu câștigul.
+>
+> AO se calculează per vârf în mesher și intră în **cheia de unire lacomă** — două celule cu
+> tipare diferite nu se mai unesc. Costul a fost măsurat **înainte de a scrie codul**, pe aceeași
+> fixtură: 90.932 → 200.216 de dreptunghiuri, **+120%**. Codul livrat dă 199.840 (diferența e
+> tăierea fețelor de graniță, pe care bancul de estimare n-o făcea), adică **86.071 → 199.840,
+> +132%** față de geometria de dinainte. Meshingul complet: **99 → 192 ms**, median din trei
+> rulări în procese separate (192,5 / 192,1 / 195,6).
+>
+> Două variante mai ieftine au fost măsurate și respinse: AO cuantizat la două niveluri dă +107%
+> (deci **cuantizarea aproape nu ajută** — ce rupe unirea e orice variație, nu numărul de
+> niveluri), iar AO doar pe fețele orizontale dă +69% dar lasă neocluzate exact colțurile
+> perete/podea, adică jumătate din motivul pentru care se face AO.
+>
+> **Apronul nu e o rafinare, e o condiție.** AO citește trei vecini în jurul fiecărui colț, deci
+> pentru celulele de pe marginea chunk-ului citește în afara lui. Măsurat: dacă vecinii lipsesc,
+> **51,2% dintre vârfurile de la graniță** (55.124 din 107.736) își schimbă AO — adică o cusătură
+> de iluminare pe toată granița, exact clasa K16. Mesher-ul primește acum și cele patru
+> **diagonale**, fiindcă colțul (−1,−1) nu vine de la niciunul dintre vecinii de latură; ele
+> schimbă 390 de quaduri și, corect calculate, se unesc chiar mai bine (199.840 cu diagonale față
+> de 200.230 fără).
+>
+> Distribuția: 11,2% dintre vârfuri la nivelul 0 (cel mai închis), 27,1% la 1, 13,6% la 2, 48,1%
+> neocluzate — deci peste jumătate din vârfuri primesc ocluzie. Nu e un efect decorativ.
 
 **Validarea fixturii NU se face prin raportul de reducere al mesher-ului.** Criteriul ăla e
 auto-referențial: selectează fixturi *ieftine de meshuit*, adică exact fixturile pe care un motor slab
@@ -271,9 +297,13 @@ bine decât va fi în joc.
 
 **Slice-ul, declarat în scris înainte de rulare:** azi e implementat prin `renderer.clippingPlanes`,
 adică discard în shader — **NU** re-mesh. PLAN prognozează ~87 ms pentru re-mesh pe 200 de chunk-uri;
-măsurat azi, remesh-ul complet al fixturii e **88 ms**, adică 5 cadre pierdute la fiecare schimbare
+măsurat azi, remesh-ul complet al fixturii e **192 ms**, adică 11 cadre pierdute la fiecare schimbare
 de nivel. Sunt două jocuri diferite, cu 20× între ele. Dacă implementarea livrată se schimbă vreodată
 în re-mesh, toate cifrele de gate se re-rulează.
+
+> Cifra era 88 ms până la ocluzia ambientală (19.09.2026) și argumentul se ÎNTĂREȘTE, nu slăbește:
+> distanța dintre „discard în shader" și „re-mesh" a crescut de la 20× la ~44×. Prognoza din PLAN,
+> ~87 ms, a fost scrisă pe o geometrie fără AO și nu mai e comparabilă cu măsurătoarea.
 
 Planul de clipping e **mereu activ**, și când slice-ul e oprit (împins la 1e6). Numărul de clipping
 planes intră în cheia de program a shaderului, deci comutarea 0↔1 forțează o recompilare — un cadru
@@ -406,7 +436,7 @@ sarcina următoare.
 ### 2 · SCOPE — ambiția de geometrie, nu motorul
 Sweep-ul de rezoluție arată **GPU-bound** după benzile calibrate (frametime scade proporțional cu
 pixelii).
-Același GPU, aceleași 172.142 de triunghiuri, aceleași shadere: **Unity nu-mi dă hardware nou.**
+Același GPU, aceleași triunghiuri, aceleași shadere: **Unity nu-mi dă hardware nou.**
 Remediile sunt LOD, instancing, reducere de fill, buget de draw calls — adică **PUNCT DE DECIZIE #1**
 din plan, nu portarea. Portarea aici pierde 2–4 luni și păstrează problema.
 
@@ -496,16 +526,21 @@ Baza: măsurători făcute azi în Node, pe fixtura M10 și pe teren proaspăt.
 | `dig` în sim, fără mesh | 4,8 µs |
 | `setFocus` o graniță de chunk | 0,62 ms · **23 de chunk-uri noi** |
 | Chunk-uri rezidente la rază 11 | 377 |
-| Fixtura completă, meshing | 88 ms |
+| Fixtura completă, meshing | 192 ms |
 
 **Prezic:**
 
-1. **NU pică pe GPU.** 172.142 de triunghiuri, un singur material, ~225 de draw calls pentru partea
+1. **NU pică pe GPU.** 399.680 de triunghiuri, un singur material, ~225 de draw calls pentru partea
    de voxeli — sub orice prag al unui 3060 și, scalat, sub al unui 1050 Ti. Sweep-ul de rezoluție va
    arăta **CPU-bound**: la 25% din pixeli, frametime-ul scade cu **sub 15%**.
    *(Predicția a fost scrisă pe 229.172 de triunghiuri, în lumea dinainte de re-etalonare.
    Raționamentul nu se schimbă — cifra a scăzut, deci predicția devine mai ușor de îndeplinit,
    nu mai grea. Se consemnează, nu se rescrie în tăcere.)*
+   *(19.09.2026, ocluzia ambientală: cifra a URCAT la 399.680, deci de data asta predicția devine
+   mai GREA, nu mai ușoară — și de-aia se consemnează separat. Un prim indiciu, măsurat în viewer
+   pe 373.540 de triunghiuri înainte de AO: **0,5 ms median de submit CPU pe cadru**, p95 1 ms, 188
+   de draw calls. Nu e o măsurătoare de GPU — e timpul de submit, nu de completare — deci nu
+   înlocuiește sweep-ul, dar nu arată nimic care să contrazică predicția.)*
 2. **S-TRAVERSE pică primul.** O graniță de chunk la 40 m/s = 1,25 treceri/s, fiecare aducând 23 de
    chunk-uri noi × (209 µs mesh + BufferGeometry + upload) ≈ **5–7 ms de lucru, în rafală**. Prezic
    **X_max între 6 și 10 ms** pe S-TRAVERSE cu ceas real, și **cel puțin un cadru peste 33 ms** la
