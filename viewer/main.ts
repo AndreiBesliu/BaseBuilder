@@ -21,7 +21,7 @@ import { groundLevelM, inWorld } from '../src/sim/terrain/terrain.ts'
 import { Biome, MACRO_METERS, sampleMacro } from '../src/sim/terrain/macro.ts'
 import { Face, meshChunk } from '../src/render/mesher.ts'
 import type { ChunkNeighbours } from '../src/render/mesher.ts'
-import { quadColor } from '../src/render/palette.ts'
+import { AO_FACTOR, quadColor } from '../src/render/palette.ts'
 import { writeQuadIndices } from '../src/render/winding.ts'
 import { Ballast, Bisector, checkGuards, clockGranularityMs, FrameProbe, heapMB } from './probe.ts'
 import { createRegionOverlay, rebuildRegionOverlay } from './overlay-regions.ts'
@@ -223,6 +223,13 @@ function neighboursOf(chunk: Chunk): ChunkNeighbours {
     xPos: at(chunk.cx + 1, chunk.cy),
     yNeg: at(chunk.cx, chunk.cy - 1),
     yPos: at(chunk.cx, chunk.cy + 1),
+    // Diagonalele sunt DOAR pentru AO: coltul (-1,-1) al chunk-ului nu vine de la
+    // niciunul dintre cei patru vecini de latura, iar fara el raman patru coloane
+    // de colt mai luminoase decat trebuie — o cusatura, doar mai rara.
+    xNegYNeg: at(chunk.cx - 1, chunk.cy - 1),
+    xPosYNeg: at(chunk.cx + 1, chunk.cy - 1),
+    xNegYPos: at(chunk.cx - 1, chunk.cy + 1),
+    xPosYPos: at(chunk.cx + 1, chunk.cy + 1),
   }
 }
 
@@ -256,9 +263,13 @@ function buildVoxelGeometry(chunk: Chunk): THREE.BufferGeometry | null {
     const ny = face === Face.Z_POS ? 1 : face === Face.Z_NEG ? -1 : 0
     const nz = face === Face.Y_POS ? 1 : face === Face.Y_NEG ? -1 : 0
     for (let v = 0; v < 4; v++) {
-      colors[dst + v * 3] = r
-      colors[dst + v * 3 + 1] = g
-      colors[dst + v * 3 + 2] = b
+      // Ocluzia inmulteste culoarea, nu o inlocuieste: e o proprietate a
+      // GEOMETRIEI, nu a materialului, deci trebuie sa se vada la fel pe piatra si
+      // pe iarba. Vine gata calculata din mesher, per varf.
+      const k = AO_FACTOR[mesh.ao[q * 4 + v]!]!
+      colors[dst + v * 3] = r * k
+      colors[dst + v * 3 + 1] = g * k
+      colors[dst + v * 3 + 2] = b * k
       normals[dst + v * 3] = nx
       normals[dst + v * 3 + 1] = ny
       normals[dst + v * 3 + 2] = nz

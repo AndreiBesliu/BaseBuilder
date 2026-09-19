@@ -265,3 +265,95 @@ test('fiecare quad are infasurarea care il face sa arate in AFARA', () => {
   }
   assert.equal(verificate, mesh.quadCount)
 })
+
+// ---------------------------------------------------------------------------
+// ocluzia ambientala
+// ---------------------------------------------------------------------------
+
+/** Indicele quadului de fel `face` al carui PRIM varf e exact (x, y, z). */
+function indiceFata(m: ReturnType<typeof meshChunk>, face: number, x: number, y: number, z: number): number {
+  for (let q = 0; q < m.quadCount; q++) {
+    if (m.faces[q] !== face) continue
+    const o = q * 12
+    if (m.positions[o] === x && m.positions[o + 1] === y && m.positions[o + 2] === z) return q
+  }
+  return -1
+}
+test('un cub izolat n-are nicio ocluzie: toate varfurile la maxim', () => {
+  // Controlul de jos al scarii. Daca un cub singur primeste ocluzie, regula vede
+  // vecini care nu exista, si atunci nimic din ce urmeaza nu inseamna nimic.
+  const c = emptyChunk()
+  setVoxel(c, 5, 5, 5, Material.ROCA)
+  const m = meshChunk(c)
+  assert.equal(m.quadCount, 6, 'un cub izolat are exact sase fete')
+  for (let i = 0; i < m.ao.length; i++) {
+    assert.equal(m.ao[i], 3, `varful ${i} al cubului izolat e ocluzat (${m.ao[i]})`)
+  }
+})
+
+test('un vecin lateral intuneca exact doua varfuri din patru', () => {
+  // Cazul care conteaza cel mai des: o treapta de 1 m langa o suprafata plata.
+  // Fata de SUS a cubului de jos are doua varfuri langa peretele vecinului.
+  const c = emptyChunk()
+  setVoxel(c, 5, 5, 5, Material.ROCA)
+  setVoxel(c, 6, 5, 6, Material.ROCA) // treapta, deasupra si lateral
+  const m = meshChunk(c)
+  const sus = indiceFata(m, Face.Z_POS, 5, 5, 6)
+  assert.notEqual(sus, -1, 'fixtura: nu gasesc fata de sus a cubului de jos')
+  const ao = [...m.ao.slice(sus * 4, sus * 4 + 4)]
+  const ocluzate = ao.filter((v) => v < 3).length
+  assert.equal(ocluzate, 2, `asteptam doua varfuri ocluzate, am gasit ${ocluzate} (${ao.join(",")})`)
+})
+
+test('doua laturi ocupate inchid coltul COMPLET, nu partial', () => {
+  // Regula clasica, si e cea care face ca un colt interior sa se citeasca drept
+  // colt. Fara ea, coltul ar fi doar „putin mai inchis decat o latura".
+  const c = emptyChunk()
+  setVoxel(c, 5, 5, 5, Material.ROCA)
+  setVoxel(c, 6, 5, 6, Material.ROCA)
+  setVoxel(c, 5, 6, 6, Material.ROCA)
+  const m = meshChunk(c)
+  const sus = indiceFata(m, Face.Z_POS, 5, 5, 6)
+  assert.notEqual(sus, -1)
+  const ao = [...m.ao.slice(sus * 4, sus * 4 + 4)]
+  assert.ok(ao.includes(0), `niciun varf complet ocluzat: ${ao.join(',')}`)
+})
+
+test('AO se opreste la granita chunk-ului daca nu se dau vecini, si NU daca se dau', () => {
+  // Cusatura de iluminare, probata direct. Un perete lipit de marginea chunk-ului
+  // vede sau nu vede vecinul, dupa cum i se da sau nu.
+  const stanga = emptyChunk()
+  const dreapta = emptyChunk()
+  // Un bloc pe ultima coloana a chunk-ului din stanga si pe prima a celui din dreapta,
+  // plus unul deasupra in dreapta, ca sa ocluzeze peste granita.
+  setVoxel(stanga, 31, 5, 5, Material.ROCA)
+  setVoxel(dreapta, 0, 5, 6, Material.ROCA)
+
+  const fara = meshChunk(stanga)
+  const cu = meshChunk(stanga, { xPos: dreapta })
+  const iFara = indiceFata(fara, Face.Z_POS, 31, 5, 6)
+  const iCu = indiceFata(cu, Face.Z_POS, 31, 5, 6)
+  assert.notEqual(iFara, -1, 'fixtura: fata de sus lipseste fara vecini')
+  assert.notEqual(iCu, -1, 'fixtura: fata de sus lipseste cu vecini')
+
+  const aoFara = [...fara.ao.slice(iFara * 4, iFara * 4 + 4)]
+  const aoCu = [...cu.ao.slice(iCu * 4, iCu * 4 + 4)]
+  assert.deepEqual(aoFara, [3, 3, 3, 3], `fara vecin nu se poate sti nimic: ${aoFara.join(',')}`)
+  assert.ok(aoCu.some((v) => v < 3), `cu vecin, blocul de dincolo trebuie sa ocluzeze: ${aoCu.join(',')}`)
+})
+
+test('tiparul de AO intra in cheia de unire: doua celule cu ocluzii diferite NU se unesc', () => {
+  // Asta e tot designul. Fara AO in cheie, cele doua fete de sus s-ar uni intr-un
+  // singur quad si ocluzia s-ar intinde gresit peste amandoua.
+  const c = emptyChunk()
+  setVoxel(c, 5, 5, 5, Material.ROCA)
+  setVoxel(c, 6, 5, 5, Material.ROCA)
+  // Un singur vecin deasupra, lipit doar de PRIMA celula.
+  setVoxel(c, 4, 5, 6, Material.ROCA)
+  const m = meshChunk(c)
+  const a = indiceFata(m, Face.Z_POS, 5, 5, 6)
+  const b = indiceFata(m, Face.Z_POS, 6, 5, 6)
+  assert.notEqual(a, -1, 'fixtura: prima fata de sus lipseste')
+  assert.notEqual(b, -1, 'fixtura: a doua fata de sus lipseste')
+  assert.notEqual(a, b, 'cele doua fete s-au unit desi au ocluzii diferite')
+})

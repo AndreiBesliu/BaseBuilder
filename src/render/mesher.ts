@@ -51,6 +51,11 @@ export interface ChunkMesh {
   materials: Uint8Array
   /** Directia fetei fiecarui quad, 0-5. */
   faces: Uint8Array
+  /**
+   * Ocluzia ambientala, 4 varfuri per quad, valori 0-3 (0 = cel mai inchis).
+   * Aceeasi ordine ca varfurile din `positions`.
+   */
+  ao: Uint8Array
 }
 
 // Buffere de lucru, reutilizate intre chunk-uri. Zero alocari in bucla fierbinte.
@@ -64,16 +69,58 @@ const vis: Uint32Array[] = [
   new Uint32Array(ROWS),
   new Uint32Array(ROWS),
 ]
-const grid = new Uint8Array(Math.max(SY * SZ, SX * SZ, SX * SY))
+/**
+ * Cheia de unire: `material | (tiparAO << 8)`.
+ *
+ * AO intra in CHEIE, nu intr-un atribut separat, si asta e tot designul: `greedy`
+ * ramane neatins si uneste doar celule cu acelasi material SI acelasi tipar.
+ * Regula iese si corecta, nu doar comoda — o dunga lunga cu ocluzie uniforma
+ * TREBUIE sa fie un singur quad, iar una in care ocluzia variaza de-a lungul ei
+ * are tipare diferite si nu se uneste oricum.
+ *
+ * Pretul, masurat pe fixtura M10 inainte de a scrie codul: 90.932 -> 200.216 de
+ * dreptunghiuri, +120%. Cuantizarea la doua niveluri ar scadea doar la +107% —
+ * ce rupe unirea e ORICE variatie, nu numarul de niveluri.
+ */
+const grid = new Uint16Array(Math.max(SY * SZ, SX * SZ, SX * SY))
 const column = new Uint8Array(SZ)
 
 const denseIndex = (lx: number, ly: number, level: number): number => level * SX * SY + ly * SX + lx
+
+/**
+ * Ocuparea, cu un APRON de o celula pe X si Y.
+ *
+ * AO citeste trei vecini in jurul fiecarui colt, deci pentru o celula de pe
+ * marginea chunk-ului citeste in afara lui. Fara apron, fiecare chunk si-ar
+ * calcula singur colturile ca neocluzate, iar vecinul la fel — adica o cusatura
+ * de ILUMINARE pe toata granita, exact clasa de defect pe care K16 a inchis-o
+ * pentru culoare si geometrie.
+ *
+ * Apronul are nevoie si de DIAGONALE: coltul (-1,-1) al chunk-ului nu vine de la
+ * niciunul dintre cei patru vecini de latura. Fara ele ar ramane patru coloane
+ * de colt gresite per chunk — adica tot o cusatura, doar mai rara.
+ *
+ * Pe Z nu exista apron: in afara ferestrei de voxeli se considera AER, exact ca
+ * in `computeVisibility`. Consecventa cu vizibilitatea conteaza mai mult decat
+ * fidelitatea fizica — altfel AO ar intuneca o fata care nici nu se emite.
+ */
+const OX = SX + 2
+const OY = SY + 2
+const occ = new Uint8Array(OX * OY * SZ)
+const occIndex = (x: number, y: number, level: number): number => level * OX * OY + (y + 1) * OX + (x + 1)
+
+function occAt(x: number, y: number, level: number): number {
+  if (level < 0 || level >= SZ) return 0
+  if (x < -1 || y < -1 || x > SX || y > SY) return 0
+  return occ[occIndex(x, y, level)]!
+}
 
 /** Desface chunk-ul in materiale dense si in masti de solid pe linii de 32. */
 function expand(chunk: Chunk): void {
   const v = chunk.voxels
   if (!v) throw new Error('mesh pe un chunk ne-promovat')
   solid.fill(0)
+  occ.fill(0)
 
   for (let ly = 0; ly < SY; ly++) {
     for (let lx = 0; lx < SX; lx++) {
@@ -82,10 +129,89 @@ function expand(chunk: Chunk): void {
       for (let level = 0; level < SZ; level++) {
         const m = column[level]!
         dense[denseIndex(lx, ly, level)] = m
-        if (isSolid(m)) solid[level * SY + ly]! |= bit
+        if (isSolid(m)) {
+          solid[level * SY + ly]! |= bit
+          occ[occIndex(lx, ly, level)] = 1
+        }
       }
     }
   }
+}
+
+/** O coloana din vecin in apron, cu decalajul de stiva aplicat. */
+function apronColumn(own: Chunk, neighbour: Chunk | null | undefined, nLx: number, nLy: number, x: number, y: number): void {
+  const nv = neighbour?.voxels
+  if (!nv) return
+  const dz = own.voxels!.zBaseM - nv.zBaseM
+  decodeColumn(nv, nLy * SX + nLx, column)
+  for (let level = 0; level < SZ; level++) {
+    const nl = level + dz
+    if (nl < 0 || nl >= SZ) continue
+    if (isSolid(column[nl]!)) occ[occIndex(x, y, level)] = 1
+  }
+}
+
+/**
+ * Umple apronul din vecini. Un vecin lipsa lasa apronul pe zero, adica „dincolo
+ * e aer" — aceeasi presupunere sigura ca la taierea fetelor de granita.
+ */
+function expandApron(chunk: Chunk, n: ChunkNeighbours): void {
+  for (let ly = 0; ly < SY; ly++) {
+    apronColumn(chunk, n.xNeg, SX - 1, ly, -1, ly)
+    apronColumn(chunk, n.xPos, 0, ly, SX, ly)
+  }
+  for (let lx = 0; lx < SX; lx++) {
+    apronColumn(chunk, n.yNeg, lx, SY - 1, lx, -1)
+    apronColumn(chunk, n.yPos, lx, 0, lx, SY)
+  }
+  apronColumn(chunk, n.xNegYNeg, SX - 1, SY - 1, -1, -1)
+  apronColumn(chunk, n.xPosYNeg, 0, SY - 1, SX, -1)
+  apronColumn(chunk, n.xNegYPos, SX - 1, 0, -1, SY)
+  apronColumn(chunk, n.xPosYPos, 0, 0, SX, SY)
+}
+
+/**
+ * Axele fiecarei fete: normala, apoi cele doua tangente (u, v), in ORDINEA in
+ * care `meshChunk` le foloseste la emiterea quadului. Ordinea conteaza: coltul 0
+ * al tiparului trebuie sa fie varful 0 al quadului.
+ */
+const AO_AXE: readonly (readonly number[])[] = [
+  [1, 0, 0, 0, 1, 0, 0, 0, 1], // X_POS: n=+X, u=Y, v=Z
+  [-1, 0, 0, 0, 1, 0, 0, 0, 1], // X_NEG
+  [0, 1, 0, 1, 0, 0, 0, 0, 1], // Y_POS: n=+Y, u=X, v=Z
+  [0, -1, 0, 1, 0, 0, 0, 0, 1], // Y_NEG
+  [0, 0, 1, 1, 0, 0, 0, 1, 0], // Z_POS: n=+Z, u=X, v=Y
+  [0, 0, -1, 1, 0, 0, 0, 1, 0], // Z_NEG
+]
+
+/** Semnele celor patru colturi, in ordinea varfurilor: (u,v), (u+,v), (u+,v+), (u,v+). */
+const AO_COLTURI: readonly (readonly number[])[] = [[-1, -1], [1, -1], [1, 1], [-1, 1]]
+
+/**
+ * Tiparul de AO al unei fete: patru colturi × doua biti, 0 = cel mai inchis.
+ *
+ * Regula clasica: doua laturi ocupate inchid coltul complet, altfel se scade
+ * fiecare vecin ocupat. Nu e o aproximare a unei integrale de lumina, e o regula
+ * de LIZIBILITATE: face ca o imbinare concava sa se vada ca imbinare.
+ */
+function aoPattern(face: number, lx: number, ly: number, level: number): number {
+  const a = AO_AXE[face]!
+  const px = lx + a[0]!
+  const py = ly + a[1]!
+  const pz = level + a[2]!
+  let tipar = 0
+  for (let c = 0; c < 4; c++) {
+    const su = AO_COLTURI[c]![0]!
+    const sv = AO_COLTURI[c]![1]!
+    const ux = su * a[3]!, uy = su * a[4]!, uz = su * a[5]!
+    const vx = sv * a[6]!, vy = sv * a[7]!, vz = sv * a[8]!
+    const s1 = occAt(px + ux, py + uy, pz + uz)
+    const s2 = occAt(px + vx, py + vy, pz + vz)
+    const colt = occAt(px + ux + vx, py + uy + vy, pz + uz + vz)
+    const ao = s1 !== 0 && s2 !== 0 ? 0 : 3 - (s1 + s2 + colt)
+    tipar |= ao << (c * 2)
+  }
+  return tipar
 }
 
 /** Mastile de vizibilitate, toate sase, din operatii pe cuvinte intregi. */
@@ -118,6 +244,7 @@ function computeVisibility(): void {
 let outPositions = new Int16Array(4 * 3 * 4096)
 let outMaterials = new Uint8Array(4096)
 let outFaces = new Uint8Array(4096)
+let outAo = new Uint8Array(4 * 4096)
 let quadCount = 0
 
 function ensureCapacity(needed: number): void {
@@ -133,11 +260,14 @@ function ensureCapacity(needed: number): void {
   const f = new Uint8Array(cap)
   f.set(outFaces)
   outFaces = f
+  const a = new Uint8Array(4 * cap)
+  a.set(outAo)
+  outAo = a
 }
 
 function pushQuad(
   face: number,
-  material: number,
+  cheie: number,
   ax: number, ay: number, az: number,
   bx: number, by: number, bz: number,
   cx: number, cy: number, cz: number,
@@ -149,8 +279,14 @@ function pushQuad(
   outPositions[o + 3] = bx; outPositions[o + 4] = by; outPositions[o + 5] = bz
   outPositions[o + 6] = cx; outPositions[o + 7] = cy; outPositions[o + 8] = cz
   outPositions[o + 9] = dx; outPositions[o + 10] = dy; outPositions[o + 11] = dz
-  outMaterials[quadCount] = material
+  outMaterials[quadCount] = cheie & 0xff
   outFaces[quadCount] = face
+  const tipar = cheie >>> 8
+  const a = quadCount * 4
+  outAo[a] = tipar & 3
+  outAo[a + 1] = (tipar >>> 2) & 3
+  outAo[a + 2] = (tipar >>> 4) & 3
+  outAo[a + 3] = (tipar >>> 6) & 3
   quadCount++
 }
 
@@ -165,7 +301,7 @@ const rowUsed = new Uint8Array(Math.max(SZ, SY))
  * Unirea lacoma in dreptunghiuri. Consuma `grid` (o goleste pe masura ce uneste).
  * `emit` primeste dreptunghiul in coordonatele (u, v) ale feliei.
  */
-function greedy(w: number, h: number, emit: (u: number, v: number, du: number, dv: number, material: number) => void): void {
+function greedy(w: number, h: number, emit: (u: number, v: number, du: number, dv: number, cheie: number) => void): void {
   for (let v = 0; v < h; v++) {
     if (rowUsed[v] === 0) continue
     let u = 0
@@ -215,6 +351,15 @@ export interface ChunkNeighbours {
   readonly xPos?: Chunk | null
   readonly yNeg?: Chunk | null
   readonly yPos?: Chunk | null
+  /**
+   * Diagonalele. NU sunt folosite la taierea fetelor — o fata de granita e
+   * acoperita doar de vecinul de LATURA. Exista pentru AO, al carui colt
+   * (-1,-1) nu vine de la niciunul dintre cei patru.
+   */
+  readonly xNegYNeg?: Chunk | null
+  readonly xPosYNeg?: Chunk | null
+  readonly xNegYPos?: Chunk | null
+  readonly xPosYPos?: Chunk | null
 }
 
 /** Masca de solid a unei linii de granita din vecin, per nivel. */
@@ -285,6 +430,9 @@ function cullChunkBorders(chunk: Chunk, n: ChunkNeighbours): void {
 
 export function meshChunk(chunk: Chunk, neighbours?: ChunkNeighbours): ChunkMesh {
   expand(chunk)
+  // Apronul INAINTE de orice citire de AO. Fara vecini ramane zero, adica
+  // „dincolo e aer" — comportamentul de dinainte, si tot el e cel testat.
+  if (neighbours) expandApron(chunk, neighbours)
   computeVisibility()
   if (neighbours) cullChunkBorders(chunk, neighbours)
   quadCount = 0
@@ -308,7 +456,9 @@ export function meshChunk(chunk: Chunk, neighbours?: ChunkNeighbours): ChunkMesh
         let used = 0
         const base = level * SY
         for (let ly = 0; ly < SY; ly++) {
-          const m = (mask[base + ly]! & bit) !== 0 ? dense[denseIndex(lx, ly, level)]! : 0
+          const m = (mask[base + ly]! & bit) !== 0
+            ? dense[denseIndex(lx, ly, level)]! | (aoPattern(face, lx, ly, level) << 8)
+            : 0
           grid[base + ly] = m
           used |= m
         }
@@ -347,7 +497,9 @@ export function meshChunk(chunk: Chunk, neighbours?: ChunkNeighbours): ChunkMesh
         }
         rowUsed[level] = 1
         for (let lx = 0; lx < SX; lx++) {
-          grid[base + lx] = (row & (1 << lx)) !== 0 ? dense[denseIndex(lx, ly, level)]! : 0
+          grid[base + lx] = (row & (1 << lx)) !== 0
+            ? dense[denseIndex(lx, ly, level)]! | (aoPattern(face, lx, ly, level) << 8)
+            : 0
         }
       }
       const y = ly + plane
@@ -377,7 +529,9 @@ export function meshChunk(chunk: Chunk, neighbours?: ChunkNeighbours): ChunkMesh
         }
         rowUsed[ly] = 1
         for (let lx = 0; lx < SX; lx++) {
-          grid[gbase + lx] = (row & (1 << lx)) !== 0 ? dense[denseIndex(lx, ly, level)]! : 0
+          grid[gbase + lx] = (row & (1 << lx)) !== 0
+            ? dense[denseIndex(lx, ly, level)]! | (aoPattern(face, lx, ly, level) << 8)
+            : 0
         }
       }
       const z = level + plane
@@ -392,6 +546,7 @@ export function meshChunk(chunk: Chunk, neighbours?: ChunkNeighbours): ChunkMesh
     positions: outPositions.slice(0, quadCount * 12),
     materials: outMaterials.slice(0, quadCount),
     faces: outFaces.slice(0, quadCount),
+    ao: outAo.slice(0, quadCount * 4),
   }
 }
 

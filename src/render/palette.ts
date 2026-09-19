@@ -83,6 +83,19 @@ export function biomeColor(biome: BiomeId): Rgb {
   }
 }
 
+/**
+ * Cat se intuneca un varf pentru fiecare nivel de ocluzie (0 = cel mai inchis).
+ *
+ * Sta aici, nu in viewer, fiindca e o decizie de PALETA: ocluzia si culoarea se
+ * inmultesc, deci scara asta decide cat de mult din gama unui material se
+ * cheltuieste pe umbra. Si, ca tot ce e in `src/render/`, supravietuieste
+ * schimbarii de motor.
+ *
+ * Nu e liniara: saltul de la „deloc ocluzat" la „un vecin" trebuie sa se vada,
+ * fiindca ala e cazul cel mai des — o treapta de 1 m langa o suprafata plata.
+ */
+export const AO_FACTOR: readonly number[] = [0.52, 0.70, 0.86, 1.0]
+
 export function scale(c: Rgb, k: number): Rgb {
   return [c[0] * k, c[1] * k, c[2] * k]
 }

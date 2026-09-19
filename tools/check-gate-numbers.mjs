@@ -38,6 +38,13 @@ function meshAll() {
       xPos: at(c.cx + 1, c.cy),
       yNeg: at(c.cx, c.cy - 1),
       yPos: at(c.cx, c.cy + 1),
+      // Diagonalele, ca sa se masoare ce RANDEAZA viewerul. Fara ele poarta
+      // inregistra o configuratie pe care n-o foloseste nimeni: 200.230 de quaduri
+      // in loc de 199.840, fiindca AO gresit la colturi se uneste mai prost.
+      xNegYNeg: at(c.cx - 1, c.cy - 1),
+      xPosYNeg: at(c.cx + 1, c.cy - 1),
+      xNegYPos: at(c.cx - 1, c.cy + 1),
+      xPosYPos: at(c.cx + 1, c.cy + 1),
     }).quadCount
   }
   return quads
