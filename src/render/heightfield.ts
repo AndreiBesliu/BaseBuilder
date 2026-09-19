@@ -12,7 +12,7 @@
 import type { Chunk } from '../sim/terrain/chunk.ts'
 import { CHUNK_CELLS } from '../sim/terrain/chunk.ts'
 import { MACRO_METERS, sampleMacro, WATER_LEVEL_DM } from '../sim/terrain/macro.ts'
-import { biomeColor } from './palette.ts'
+import { biomeColor, variatiaLocului } from './palette.ts'
 
 export interface HeightfieldMesh {
   /** 3 componente per varf, in metri, relativ la coltul chunk-ului. */
@@ -86,9 +86,13 @@ export function meshHeightfield(seed: number, chunk: Chunk): HeightfieldMesh {
       const c = biomeColor(s.biome)
       // Variatie mica dupa altitudine, ca peisajul sa nu fie plat ca o harta politica.
       const shade = 0.88 + Math.min(0.24, Math.max(-0.12, (s.heightDm - WATER_LEVEL_DM) / 6000))
-      colors[i * 3] = c[0] * shade
-      colors[i * 3 + 1] = c[1] * shade
-      colors[i * 3 + 2] = c[2] * shade
+      // Si variatia de loc, ACEEASI functie ca la voxeli. Daca ar primi-o doar
+      // unul dintre cele doua randoare, granita promovat/ne-promovat ar capata un
+      // al doilea salt de culoare — peste cel de 4,3% pe care AO il lasa deja.
+      const varLoc = variatiaLocului(originX + vx, originY + vy)
+      colors[i * 3] = c[0] * shade * varLoc
+      colors[i * 3 + 1] = c[1] * shade * varLoc
+      colors[i * 3 + 2] = c[2] * shade * varLoc
     }
   }
 

@@ -96,6 +96,79 @@ export function biomeColor(biome: BiomeId): Rgb {
  */
 export const AO_FACTOR: readonly number[] = [0.52, 0.70, 0.86, 1.0]
 
+/**
+ * Variatia de teren: cat se schimba culoarea in functie de POZITIA in lume.
+ *
+ * ## Ce repara
+ *
+ * Terenul promovat e cuantizat la 1 m, deci pe o panta lina contururile devin
+ * terase paralele. Masurat pe fixtura M10: peretii de treapta de exact 1 m sunt
+ * **22% din toata aria**, iar cele 4,9% dintre ei care au 8 m sau mai mult duc
+ * **31,3%** din aria lor — alea sunt „liniile drepte".
+ *
+ * Problema nu e ca exista trepte: alea sunt reale, se sapa in ele. Problema e ca
+ * sunt IDENTICE — acelasi verde pe fiecare tavan, acelasi maro pe fiecare perete,
+ * deci ochiul citeste un tipar repetat in loc de un deal. Variatia rupe repetitia
+ * fara sa mute un singur varf.
+ *
+ * ## De ce din pozitia in LUME, si nu din nimic altceva
+ *
+ * Trebuie sa fie o functie PURA de (x, y), din trei motive care se leaga:
+ *
+ * - **continuitate**: doua quaduri care se ating in acelasi punct primesc aceeasi
+ *   valoare, deci nu apare nicio cusatura intre ele si nici intre chunk-uri;
+ * - **stabilitate**: nu depinde de cum s-a intamplat mesher-ul sa uneasca
+ *   dreptunghiurile, deci o sapatura care re-meshuieste vecinii nu schimba culoarea
+ *   terenului din jur;
+ * - **portabilitate**: e aritmetica intreaga, ca tot ce sta in `src/render/`.
+ *
+ * Pe Z NU variaza deliberat: un perete de treapta ar capata gradient pe verticala,
+ * adica exact tiparul regulat pe care il combatem, doar rotit.
+ */
+const VAR_PERIOADA = 23
+const VAR_AMPLITUDINE = 0.085
+
+/** Zgomot valoric pe o grila, cu interpolare neteda. Determinist, fara stare. */
+function hash2(x: number, y: number): number {
+  let h = Math.imul(x | 0, 0x27d4eb2d) ^ Math.imul(y | 0, 0x165667b1)
+  h = Math.imul(h ^ (h >>> 15), 0x2545f491)
+  h ^= h >>> 13
+  return ((h >>> 0) % 4096) / 4095
+}
+
+function neted(t: number): number {
+  return t * t * (3 - 2 * t)
+}
+
+/**
+ * Multiplicatorul de culoare al unui punct din lume. In jurul lui 1.
+ *
+ * Doua octave: una larga, care face pete de dealuri, si una de trei ori mai fina,
+ * la un sfert din amplitudine, care rupe marginile petelor. Fara a doua, petele
+ * insele devin un tipar — mai mare, dar tot tipar.
+ */
+export function variatiaLocului(wx: number, wy: number): number {
+  let suma = 0
+  let greutate = 0
+  for (const [perioada, pondere] of [[VAR_PERIOADA, 1], [VAR_PERIOADA / 3, 0.25]] as const) {
+    const fx = wx / perioada
+    const fy = wy / perioada
+    const x0 = Math.floor(fx)
+    const y0 = Math.floor(fy)
+    const tx = neted(fx - x0)
+    const ty = neted(fy - y0)
+    const a = hash2(x0, y0)
+    const b = hash2(x0 + 1, y0)
+    const c = hash2(x0, y0 + 1)
+    const d = hash2(x0 + 1, y0 + 1)
+    const sus = a + (b - a) * tx
+    const jos = c + (d - c) * tx
+    suma += (sus + (jos - sus) * ty) * pondere
+    greutate += pondere
+  }
+  return 1 + (suma / greutate - 0.5) * 2 * VAR_AMPLITUDINE
+}
+
 export function scale(c: Rgb, k: number): Rgb {
   return [c[0] * k, c[1] * k, c[2] * k]
 }

@@ -21,7 +21,7 @@ import { groundLevelM, inWorld } from '../src/sim/terrain/terrain.ts'
 import { Biome, MACRO_METERS, sampleMacro } from '../src/sim/terrain/macro.ts'
 import { Face, meshChunk } from '../src/render/mesher.ts'
 import type { ChunkNeighbours } from '../src/render/mesher.ts'
-import { AO_FACTOR, quadColor } from '../src/render/palette.ts'
+import { AO_FACTOR, quadColor, variatiaLocului } from '../src/render/palette.ts'
 import { writeQuadIndices } from '../src/render/winding.ts'
 import { Ballast, Bisector, checkGuards, clockGranularityMs, FrameProbe, heapMB } from './probe.ts'
 import { createRegionOverlay, rebuildRegionOverlay } from './overlay-regions.ts'
@@ -243,6 +243,10 @@ function buildVoxelGeometry(chunk: Chunk): THREE.BufferGeometry | null {
   const normals = new Float32Array(mesh.quadCount * 4 * 3)
   const indices = new Uint32Array(mesh.quadCount * 6)
   const zBase = chunk.voxels!.zBaseM
+  // Coltul chunk-ului in CELULE de lume: variatia se citeste din pozitia absoluta,
+  // altfel s-ar repeta identic in fiecare chunk — adica exact tiparul pe care il combate.
+  const originX = chunk.cx * CHUNK_CELLS
+  const originY = chunk.cy * CHUNK_CELLS
 
   for (let q = 0; q < mesh.quadCount; q++) {
     const src = q * 12
@@ -266,7 +270,12 @@ function buildVoxelGeometry(chunk: Chunk): THREE.BufferGeometry | null {
       // Ocluzia inmulteste culoarea, nu o inlocuieste: e o proprietate a
       // GEOMETRIEI, nu a materialului, deci trebuie sa se vada la fel pe piatra si
       // pe iarba. Vine gata calculata din mesher, per varf.
+      //
+      // Variatia locului se inmulteste la fel, si se citeste din pozitia ABSOLUTA
+      // a varfului — deci doua quaduri care se ating primesc aceeasi valoare, si
+      // terasele vecine inceteaza sa mai fie identice.
       const k = AO_FACTOR[mesh.ao[q * 4 + v]!]!
+        * variatiaLocului(originX + mesh.positions[src + v * 3]!, originY + mesh.positions[src + v * 3 + 1]!)
       colors[dst + v * 3] = r * k
       colors[dst + v * 3 + 1] = g * k
       colors[dst + v * 3 + 2] = b * k
