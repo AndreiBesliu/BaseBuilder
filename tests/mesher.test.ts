@@ -301,8 +301,19 @@ test('un vecin lateral intuneca exact doua varfuri din patru', () => {
   const sus = indiceFata(m, Face.Z_POS, 5, 5, 6)
   assert.notEqual(sus, -1, 'fixtura: nu gasesc fata de sus a cubului de jos')
   const ao = [...m.ao.slice(sus * 4, sus * 4 + 4)]
-  const ocluzate = ao.filter((v) => v < 3).length
-  assert.equal(ocluzate, 2, `asteptam doua varfuri ocluzate, am gasit ${ocluzate} (${ao.join(",")})`)
+
+  // Exact, nu „doua din patru": asa leaga si ORDINEA varfurilor. Socotit pe hartie
+  // — blocul e la x = 6, deci se intuneca fix cele doua varfuri de pe muchia aia,
+  // si fiecare pierde un singur vecin din trei.
+  assert.deepEqual(ao, [3, 2, 2, 3], `tiparul de AO: ${ao.join(",")}`)
+
+  // Si ca varfurile intunecate sunt CHIAR cele de langa bloc, nu doua oarecare.
+  const o = sus * 12
+  for (let v = 0; v < 4; v++) {
+    const x = m.positions[o + v * 3]!
+    const asteptat = x === 6 ? 2 : 3
+    assert.equal(m.ao[sus * 4 + v], asteptat, `varful ${v} e la x=${x} si are ao=${m.ao[sus * 4 + v]}`)
+  }
 })
 
 test('doua laturi ocupate inchid coltul COMPLET, nu partial', () => {
@@ -316,7 +327,8 @@ test('doua laturi ocupate inchid coltul COMPLET, nu partial', () => {
   const sus = indiceFata(m, Face.Z_POS, 5, 5, 6)
   assert.notEqual(sus, -1)
   const ao = [...m.ao.slice(sus * 4, sus * 4 + 4)]
-  assert.ok(ao.includes(0), `niciun varf complet ocluzat: ${ao.join(',')}`)
+  // Varful 2 e coltul (+1,+1), singurul care are AMANDOUA laturile ocupate.
+  assert.deepEqual(ao, [3, 2, 0, 2], `tiparul de AO: ${ao.join(',')}`)
 })
 
 test('AO se opreste la granita chunk-ului daca nu se dau vecini, si NU daca se dau', () => {
@@ -356,4 +368,29 @@ test('tiparul de AO intra in cheia de unire: doua celule cu ocluzii diferite NU 
   assert.notEqual(a, -1, 'fixtura: prima fata de sus lipseste')
   assert.notEqual(b, -1, 'fixtura: a doua fata de sus lipseste')
   assert.notEqual(a, b, 'cele doua fete s-au unit desi au ocluzii diferite')
+})
+
+test('coltul chunk-ului are nevoie de vecinul DIAGONAL, nu doar de cele patru laturi', () => {
+  // Coltul (-1,-1) al unui chunk nu vine de la niciunul dintre vecinii de latura.
+  // Fara diagonale ar ramane patru coloane de colt mai luminoase decat trebuie —
+  // tot o cusatura, doar mai rara decat cea de pe toata granita.
+  const c = emptyChunk()
+  const diag = emptyChunk()
+  setVoxel(c, 31, 31, 5, Material.ROCA)
+  setVoxel(diag, 0, 0, 6, Material.ROCA)
+
+  const fara = meshChunk(c, { xPos: null, yPos: null })
+  const cu = meshChunk(c, { xPosYPos: diag })
+  const iF = indiceFata(fara, Face.Z_POS, 31, 31, 6)
+  const iC = indiceFata(cu, Face.Z_POS, 31, 31, 6)
+  assert.notEqual(iF, -1, 'fixtura: fata de sus lipseste fara diagonala')
+  assert.notEqual(iC, -1, 'fixtura: fata de sus lipseste cu diagonala')
+
+  // Varful 2 e coltul (+1,+1), adica exact cel care se sprijina pe diagonala.
+  assert.equal(fara.ao[iF * 4 + 2], 3, 'fara diagonala nu se poate sti nimic despre colt')
+  assert.equal(cu.ao[iC * 4 + 2], 2, 'cu diagonala, blocul de dincolo de colt trebuie sa ocluzeze')
+  // Celelalte trei varfuri nu au ce sa afle de la diagonala.
+  for (const v of [0, 1, 3]) {
+    assert.equal(cu.ao[iC * 4 + v], 3, `varful ${v} n-avea de ce sa se schimbe`)
+  }
 })
