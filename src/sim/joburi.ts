@@ -1729,6 +1729,20 @@ export function retrageCeluleDeZonaNecalcabile(w: World, rules: Rules, wx: numbe
 }
 
 /**
+ * Re-alege locul de lucru, EVITAND cel curent.
+ *
+ * Impartit de SAPA si de CONSTRUIESTE: amandoua lucreaza de pe o celula vecina
+ * tintei, deci „alta celula de lucru" inseamna acelasi lucru pentru amandoua.
+ * Scris de doua ori, ar fi fost doua adevaruri — si a si fost, pret de un pas:
+ * doua metode `refaTinta` octet cu octet identice, destule cat sa faca ambiguu
+ * tiparul unei probe de mutatie vechi de doua taieturi.
+ */
+function refaLoculDeLucruEvitandCurentul(w: World, rules: Rules, slot: number): boolean {
+  const a = w.agents
+  return refaLoculDeLucru(w, rules, slot, cellKey(a.jobWorkX[slot]!, a.jobWorkY[slot]!, a.jobWorkZ[slot]!))
+}
+
+/**
  * E libera celula (wx, wy, z) pentru ceva SOLID?
  *
  * Un pion ocupa `agentHeadroomM` niveluri, deci un zid la inaltimea capului il
@@ -2680,8 +2694,7 @@ const DRIVER_SAPA: DriverJob = {
     }
   },
   refaTinta(w, rules, slot) {
-    const a = w.agents
-    return refaLoculDeLucru(w, rules, slot, cellKey(a.jobWorkX[slot]!, a.jobWorkY[slot]!, a.jobWorkZ[slot]!))
+    return refaLoculDeLucruEvitandCurentul(w, rules, slot)
   },
 }
 
@@ -2876,8 +2889,7 @@ const DRIVER_CONSTRUIESTE: DriverJob = {
     }
   },
   refaTinta(w, rules, slot) {
-    const a = w.agents
-    return refaLoculDeLucru(w, rules, slot, cellKey(a.jobWorkX[slot]!, a.jobWorkY[slot]!, a.jobWorkZ[slot]!))
+    return refaLoculDeLucruEvitandCurentul(w, rules, slot)
   },
 }
 

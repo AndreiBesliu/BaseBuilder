@@ -106,9 +106,9 @@ export const MUTATII = [
   // --- pasul 4: stabilitatea la zidire ---
   {
     n: '`fill` nu mai trece prin regula de stabilitate (se zideste in aer)',
-    f: 'src/sim/commands.ts',
-    a: '      const sprijin = poateSustine(w.terrain, rules, cmd.wx, cmd.wy, cmd.z)\n      if (!sprijin.ok) return sprijin',
-    b: '      void poateSustine',
+    f: 'src/sim/joburi.ts',
+    a: '  const sprijin = poateSustine(w.terrain, rules, wx, wy, z)\n  if (!sprijin.ok) return sprijin',
+    b: '  void poateSustine',
     t: 'tests/constructie.test.ts', e: 'nu se mai poate zidi in aer',
   },
   {
@@ -266,8 +266,8 @@ export const MUTATII = [
   {
     n: "santierul ramane dupa ce piesa e pusa",
     f: "src/sim/joburi.ts",
-    a: "  terminaJob(w, rules, slot, Sfarsit.TERMINAT)\n  stergeDesemnare(d, ds)",
-    b: "  terminaJob(w, rules, slot, Sfarsit.TERMINAT)",
+    a: "  raport.pieseZidite++\n  marcheazaZoneMurdare(w)\n  terminaJob(w, rules, slot, Sfarsit.TERMINAT)\n  stergeDesemnare(d, ds)",
+    b: "  raport.pieseZidite++\n  marcheazaZoneMurdare(w)\n  terminaJob(w, rules, slot, Sfarsit.TERMINAT)",
     t: 'tests/constructie.test.ts', e: "ACCEPTANTA: pionul cara materialul si RIDICA peretele",
   },
   {
@@ -282,7 +282,7 @@ export const MUTATII = [
     f: "src/sim/joburi.ts",
     a: "  if (!peLoc || seSapaLa(d, cx, cy, cz - 1)) {",
     b: "  if (false) {",
-    t: 'tests/constructie.test.ts', e: "ACCEPTANTA: pionul cara materialul si RIDICA peretele",
+    t: 'tests/constructie.test.ts', e: "pionul mutat de pe locul de lucru nu zideste de la distanta",
   },
   {
     n: "mormanul de alt fel e acceptat (perete de piatra din lemn)",
@@ -303,13 +303,20 @@ export const MUTATII = [
     f: "src/sim/joburi.ts",
     a: "    if (a.jobStep[slot]! <= PasConstruieste.RIDICA && slotItem(w.iteme, a.jobTarget[slot]!) === -1) {",
     b: "    if (slotItem(w.iteme, a.jobTarget[slot]!) === -1) {",
-    t: 'tests/constructie.test.ts', e: "ACCEPTANTA: pionul cara materialul si RIDICA peretele",
+    t: 'tests/constructie.test.ts', e: "M5 peste o zidire in curs: save luat cu materialul in mana",
   },
   {
     n: "pasul RIDICA cade pe `zideste` (dispecerizarea pe pas e inversata)",
     f: "src/sim/joburi.ts",
     a: "    if (w.agents.jobStep[slot] === PasConstruieste.RIDICA) ridica(w, rules, slot)",
     b: "    if (w.agents.jobStep[slot] === PasConstruieste.ZIDESTE) ridica(w, rules, slot)",
+    t: 'tests/constructie.test.ts', e: "ACCEPTANTA: pionul cara materialul si RIDICA peretele",
+  },
+  {
+    n: "zidirea nu consuma mormanul sursa (materia se tipareste)",
+    f: "src/sim/joburi.ts",
+    a: "  if (a.caraCantitate[slot] === 0) a.caraKind[slot] = 0",
+    b: "  a.caraCantitate[slot] = a.caraCantitate[slot]! + spec.cantitate",
     t: 'tests/constructie.test.ts', e: "ACCEPTANTA: pionul cara materialul si RIDICA peretele",
   },
 ]

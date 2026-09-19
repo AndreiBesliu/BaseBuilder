@@ -34,7 +34,7 @@ export const MUTATII = [
   // Tiparul include si prima liniedin corp: de cand garda pentru PIONI are si ea
   // o bucla pe headroom, un tipar doar pe antet potrivea prima aparitie si
   // otravea garda gresita — mutatia „trecea" fiindca strica altceva.
-  { n: 'fill nu se uita la mormane', f: 'src/sim/commands.ts',
+  { n: 'fill nu se uita la mormane', f: 'src/sim/joburi.ts',
     a: "  for (let h = 0; h < rules.agentHeadroomM; h++) {\n    const it = itemLaCelula(w.iteme, wx, wy, z - h)",
     b: "  for (let h = 0; h < 0; h++) {\n    const it = itemLaCelula(w.iteme, wx, wy, z - h)",
     t: 'tests/iteme.test.ts', e: 'fill refuza sa zideasca peste un morman' },
@@ -62,8 +62,8 @@ export const MUTATII = [
     t: 'tests/joburi.test.ts', e: 'INACCESIBIL numara o incercare' },
   { n: 're-alegerea nu sare peste tinta curenta', f: 'src/sim/joburi.ts',
     // Re-ancorata: codul s-a mutat in `DRIVER_SAPA.refaTinta` (tabelul de drivere).
-    a: "    return refaLoculDeLucru(w, rules, slot, cellKey(a.jobWorkX[slot]!, a.jobWorkY[slot]!, a.jobWorkZ[slot]!))",
-    b: "    void cellKey\n    return refaLoculDeLucru(w, rules, slot)",
+    a: "  return refaLoculDeLucru(w, rules, slot, cellKey(a.jobWorkX[slot]!, a.jobWorkY[slot]!, a.jobWorkZ[slot]!))",
+    b: "  void cellKey\n  return refaLoculDeLucru(w, rules, slot)",
     // Prinsa de testul cu ostilul, nu de cel de INACCESIBIL: contorul singur
     // asigura terminarea, iar `evita` e o proprietate separata („refacut inseamna
     // ALTA celula"), pe care testul ostilului o probeaza de la taietura 1.
@@ -74,7 +74,7 @@ export const MUTATII = [
   { n: 'marfa unui slot mort nu se numara', f: 'src/sim/joburi.ts',
     a: "      w.ratiune.itemePierdute += a.caraCantitate[i]!\n", b: "",
     t: 'tests/carat.test.ts', e: 'marfa din mana unui slot MORT' },
-  { n: 'fill verifica doar cota picioarelor pionului', f: 'src/sim/commands.ts',
+  { n: 'fill verifica doar cota picioarelor pionului', f: 'src/sim/joburi.ts',
     a: "  for (let h = 0; h < rules.agentHeadroomM; h++) {\n    for (let i = 0; i < a.count; i++) {\n      if (a.alive[i] === 0) continue\n      if (a.z[i] !== z - h) continue",
     b: "  for (let h = 0; h < 1; h++) {\n    for (let i = 0; i < a.count; i++) {\n      if (a.alive[i] === 0) continue\n      if (a.z[i] !== z - h) continue",
     t: 'tests/carat.test.ts', e: 'fill nu zideste un pion la inaltimea capului' },
@@ -99,10 +99,10 @@ export const MUTATII = [
     e2: [{ f: 'src/sim/joburi.ts', a: "      if (locPeCelula(w, rules, kind, cx, cy, cz) < cant) continue\n      // Aici NU se intinde niciun coridor de acoperire.", b: "      if (locPeCelula(w, rules, kind, cx, cy, cz) < cant) continue\n      vizitate++\n      raport.evaluariDestinatie++\n      // Aici NU se intinde niciun coridor de acoperire." }],
     t: 'tests/carat.test.ts', e: 'plafonul de destinatie numara INTRARI' },
   { n: 'celula de zona nu se retrage cand isi pierde podeaua', f: 'src/sim/joburi.ts',
-    a: "  retrageCeluleDeZonaNecalcabile(w, rules, wx, wy, z + 1)\n", b: "",
+    a: "  // iar cauza afisata („leaga zonele\") mintea — jucatorul isi sapase depozitul.\n  retrageCeluleDeZonaNecalcabile(w, rules, wx, wy, z + 1)\n", b: "",
     t: 'tests/carat.test.ts', e: 'o celula de depozit careia i se sapa podeaua' },
   { n: 'racirile de pe marfa supravietuiesc comenzii de zona', f: 'src/sim/commands.ts',
-    a: '      // Premisa oricarui „n-are unde" tocmai s-a schimbat.\n      uitaRacirileDeMarfa(w)\n', b: '',
+    a: '      // Premisa oricarui „n-are unde" tocmai s-a schimbat.\n      uitaRacirileDeMarfa(w)\n', b: '  // iar cauza afisata („leaga zonele") mintea — jucatorul isi sapase depozitul.\n',
     t: 'tests/carat.test.ts', e: 'o comanda de zona sterge racirile' },
   { n: 'racirea pe marfa derivata din TOATE mormanele', f: 'src/sim/joburi.ts',
     a: "  return racireTinta(indexZone(w, rules).deMutat.length, rules)", b: "  return racireTinta(w.iteme.vii, rules)",

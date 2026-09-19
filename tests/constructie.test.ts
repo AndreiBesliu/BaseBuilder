@@ -40,7 +40,7 @@ import { panaCand } from './fixturi.ts'
 import { PasCara, PasConstruieste } from '../src/sim/state.ts'
 import { asazaItem, itemLaCelula } from '../src/sim/iteme.ts'
 import { lasaItem } from './fixturi.ts'
-import { desemneaza, laSit, R, ruleaza, solid, solidLaDistanta } from './fixturi.ts'
+import { desemneaza, laSit, marfaTotala, R, ruleaza, solid, solidLaDistanta } from './fixturi.ts'
 import { createWorld } from '../src/sim/world.ts'
 import { WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 
@@ -689,6 +689,14 @@ test('ACCEPTANTA: pionul cara materialul si RIDICA peretele', () => {
   assert.equal(w.ratiune.unitatiZidite, spec.cantitate, 'materialul se CONSUMA, si se numara')
   assert.equal(w.ratiune.itemePierdute, 0, 'si nimic nu se pierde pe drum')
   assert.equal(w.agents.caraCantitate[0], 0, 'pionul nu ramane cu marfa in mana')
+
+  // CONSERVAREA, nu un inlocuitor al ei. `caraCantitate === 0` arata la fel si
+  // cand materialul se CONSUMA, si cand nu se consuma deloc: `terminaJob` lasa
+  // orice mana plina jos, deci cele 20 de unitati ar ateriza langa perete si
+  // contorul din mana ar fi tot zero. Materia s-ar tipari, si nimic nu s-ar
+  // inrosi — masurat, exact asta a scapat de prima varianta a testului.
+  assert.equal(marfaTotala(w) + w.ratiune.unitatiZidite, spec.cantitate, 'materia s-a tiparit sau s-a evaporat')
+  assert.equal(w.iteme.vii, 0, `au ramas ${w.iteme.vii} mormane pe jos dupa ce peretele s-a ridicat`)
   assert.equal(w.rezervari.total, 0, 'si nicio rezervare nu ramane pe id-uri moarte')
 
   // Pionul NU e ingropat in propriul perete...
@@ -715,6 +723,36 @@ test('un morman de alt fel, sau prea mic, se refuza la PORNIRE', () => {
   assert.equal(r2.ok, false, 'un perete nu se zideste din jumatate de morman')
   assert.equal(r2.ok ? '' : r2.reason, Reason.LIPSA_MATERIAL)
   assert.equal(b.w.rezervari.total, 0, 'si un refuz nu lasa rezervari in urma')
+})
+
+test('pionul mutat de pe locul de lucru nu zideste de la distanta', () => {
+  // Pasul ZIDESTE e un pas de OPRIRE, deci pionul ajunge acolo prin masinaria de
+  // mers si e pe pozitie din prima. Verificarea de pozitie din `zideste` apara
+  // altceva: clipa in care pionul NU mai e unde era — i s-a sapat podeaua de sub
+  // picioare, a cazut cu o prabusire, a fost impins. Fara ea, progresul curge mai
+  // departe si peretele se ridica de la patru celule distanta.
+  //
+  // Se scrie direct pe agent fiindca exact asta face si lumea: `prabuseste` muta
+  // pioni fara sa treaca prin vreun job.
+  const { w, sx, sy, sz, ds, is } = santier(12345)
+  assert.ok(pornesteConstruieste(w, R, 0, ds, is).ok)
+  const la = panaCand(w, 2000, (ww) => ww.agents.jobStep[0] === PasConstruieste.ZIDESTE && ww.agents.jobProgres[0]! > 0)
+  assert.ok(la >= 0, 'fixtura: pionul n-a ajuns sa zideasca')
+
+  w.agents.x[0] = (sx - 2) * 1000 + 500
+  w.agents.y[0] = sy * 1000 + 500
+  const n = panaCand(w, 3000, (ww) => ww.agents.jobKind[0] === 0)
+  assert.ok(n >= 0, 'jobul trebuia sa se incheie intr-un fel')
+
+  const m = materialAt(w.terrain, sx, sy, sz)
+  if (m.ok && isSolid(m.value)) {
+    const px = cellOf(w.agents.x[0]!)
+    const py = cellOf(w.agents.y[0]!)
+    assert.equal(
+      Math.max(Math.abs(px - sx), Math.abs(py - sy)), 1,
+      `peretele s-a ridicat cu pionul la (${px},${py}), iar santierul e la (${sx},${sy})`,
+    )
+  }
 })
 
 test('materialul disparut din mana nu se zideste din nimic', () => {

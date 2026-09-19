@@ -70,14 +70,43 @@ function potrivit(continut, tipar) {
   return continut.includes('\r\n') ? tipar.replace(/\n/g, '\r\n') : tipar
 }
 
+/**
+ * Aplica o editare. Intoarce `ok`, sau motivul pentru care controlul e INVALID.
+ *
+ * ## De ce se numara aparitiile, nu doar se cauta una
+ *
+ * `String.replace` cu tipar-sir inlocuieste PRIMA aparitie. Un tipar care se
+ * potriveste in doua locuri editeaza deci alt loc decat cel gandit, apoi ruleaza
+ * testele locului gandit — si iese `RATATA`. Adica exact semnalul care spune
+ * „garda asta nu e probata" cand adevarul e „instrumentul a editat altundeva".
+ * Mai rau decat o ratare oarecare: te trimite sa scrii un test pentru o garda
+ * care era deja probata.
+ *
+ * Masurat: pasul 6b al taieturii 2 a dublat trei forme de cod in `joburi.ts`
+ * (`refaTinta` in doua drivere, retragerea celulelor de zona la sapat si la
+ * zidit, `terminaJob` + `stergeDesemnare`). Doua probe de CARAT, verzi de la
+ * taietura 2, au inceput sa mute codul de construit — si au ramas verzi, fiindca
+ * nimeni nu le mai masura tinta. A treia a iesit `RATATA` si m-a trimis dupa un
+ * test care exista deja.
+ *
+ * Un tipar ambiguu nu se „rezolva" alegand a doua aparitie: care dintre ele e cea
+ * gandita e o intrebare la care doar autorul probei poate raspunde. Deci se
+ * refuza, ca `TIPAR LIPSA`.
+ */
 export function aplica(f, a, b) {
   const cale = resolve(REPO, f)
   const orig = readFileSync(cale, 'utf8')
   const aa = potrivit(orig, a)
   const bb = potrivit(orig, b)
-  if (!orig.includes(aa)) return false
-  writeFileSync(cale, orig.replace(aa, bb), 'utf8')
-  return readFileSync(cale, 'utf8') !== orig
+  const aparitii = orig.split(aa).length - 1
+  if (aparitii === 0) return 'lipsa'
+  if (aparitii > 1) return `ambiguu:${aparitii}`
+  const dupa = orig.replace(aa, bb)
+  // O editare care nu schimba nimic e tot un control invalid: testele ruleaza pe
+  // cod NEMUTAT, si orice ar spune ele nu e despre garda.
+  if (dupa === orig) return 'nula'
+  writeFileSync(cale, dupa, 'utf8')
+  return 'ok'
 }
 
 /**
@@ -146,6 +175,14 @@ export function arboreCurat() {
  * Ruleaza o suita. `baza` e o hartă fisierDeTest → testele care picau DEJA,
  * ca sa nu se puna in seama mutatiei un test rosu dinainte.
  */
+/** Numele omenesc al motivului pentru care un control e invalid. */
+function ETICHETA(stare) {
+  if (stare === 'lipsa') return 'TIPAR LIPSA'
+  if (stare === 'nula') return 'MUTATIE NULA (editarea nu schimba nimic)'
+  const n = stare.split(':')[1]
+  return `TIPAR AMBIGUU (se potriveste in ${n} locuri — ar edita altul decat cel gandit)`
+}
+
 export function ruleazaSuita(nume, mutatii, baza, filtru) {
   const alese = filtru ? mutatii.filter((m) => filtru.some((d) => m.n.includes(d))) : mutatii
   let prinse = 0
@@ -163,9 +200,10 @@ export function ruleazaSuita(nume, mutatii, baza, filtru) {
     // ceva ce nu facuse.
     const aplicate = []
     for (const e of editari) {
-      if (!aplica(e.f, e.a, e.b)) {
+      const stare = aplica(e.f, e.a, e.b)
+      if (stare !== 'ok') {
         ok = false
-        console.log(`  ?? ${m.n}: TIPAR LIPSA in ${e.f} — control invalid`)
+        console.log(`  ?? ${m.n}: ${ETICHETA(stare)} in ${e.f} — control invalid`)
         invalide.push(m.n)
         break
       }
