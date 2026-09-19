@@ -62,8 +62,8 @@ export const MUTATII = [
     t: 'tests/joburi.test.ts', e: 'INACCESIBIL numara o incercare' },
   { n: 're-alegerea nu sare peste tinta curenta', f: 'src/sim/joburi.ts',
     // Re-ancorata: codul s-a mutat in `DRIVER_SAPA.refaTinta` (tabelul de drivere).
-    a: "  return refaLoculDeLucru(w, rules, slot, cellKey(a.jobWorkX[slot]!, a.jobWorkY[slot]!, a.jobWorkZ[slot]!))",
-    b: "  void cellKey\n  return refaLoculDeLucru(w, rules, slot)",
+    a: "  return refaLoculDeLucru(w, rules, slot, idDesemnare, pasMerge, cellKey(a.jobWorkX[slot]!, a.jobWorkY[slot]!, a.jobWorkZ[slot]!))",
+    b: "  void cellKey\n  return refaLoculDeLucru(w, rules, slot, idDesemnare, pasMerge)",
     // Prinsa de testul cu ostilul, nu de cel de INACCESIBIL: contorul singur
     // asigura terminarea, iar `evita` e o proprietate separata („refacut inseamna
     // ALTA celula"), pe care testul ostilului o probeaza de la taietura 1.

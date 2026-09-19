@@ -2763,3 +2763,105 @@ fiindcă worldgen scrie doar APA, IARBA, PAMANT și ROCA.
 - **375 de teste**, 28 în `tests/constructie.test.ts`.
 - **162 de probe** de mutație; cele trei noi verificate una câte una că leagă, fiecare prinsă de
   exact testul declarat.
+
+---
+
+## Tăietura 2, pasul 6c — scanerul alege singur șantiere
+
+**Prompt:** `continua`
+**Model:** Claude Opus 5
+
+Un pion liber care vede un blueprint zidibil și un morman potrivit pornește singur un job de
+construit. Cu asta construcția e un sistem întreg: desenezi, și se ridică. Măsurat pe un șir de 5
+pereți cu 3 pioni: primul job la **tickul 18**, toți cinci ridicați la **324**, conservare exactă
+(`marfaTotala + unitatiZidite = 100`), zero rezervări rămase.
+
+### Închiderea nu intră în buclă
+
+Poarta de selecție e terenul **real** — `solLa !== SOLID && poateSustine` — nu apartenența la
+`constructiaPosibila`. Argumentul e în intrarea panoului de mai sus; ce s-a livrat aici e
+consecința: fără cache, fără canal de invalidare, fără steag murdar. O clasă întreagă de defecte
+dispare prin construcție, inclusiv una pe care M5 rămâne verde și n-o poate prinde.
+
+Conjuncția, nu `poateSustine` singur: pe o celulă deja solidă el răspunde `ok` prin scurtcircuit,
+iar `zidesteVoxel` refuză cu `CELULA_PLINA`. Cazul e real — prăbușirea depune moloz peste
+blueprinturi desenate.
+
+Un șantier nezidibil **acum** nu primește nici răcire, nici cauză: e o poziție în coadă, nu un
+refuz. `racireDesemnare` dă 100–510 tickuri, un job durează 76 — construcția ar avansa la viteza
+răcirii, nu a muncii. Și `reincercaLaTick` e hașuit, deci un parcaj greșit e stare divergentă.
+
+### Materialul: un rezumat, o baleiere pe scanare
+
+`rezumatMaterial` produce per piesă `{ exista, dMin, slot }` dintr-o singură trecere peste
+`w.iteme`. Varianta per-șantier e `O(candidați × iteme)` fără plafon — ~1,3 ms pe scanare la plafon,
+~2,8 ms/tick la 64 de pioni. Predicatul e **identic** cu cel din `pornesteConstruieste`, altfel
+„verificat la scan, refuzat la start" nu mai e adevărat. Departajarea la distanță egală e explicit
+pe `it.id`, nu pe ordinea sloturilor — aia e o proprietate a formatului de save, nu o regulă.
+
+Distanța de scor e **primul picior** (pion → morman), ca la săpat și la cărat. Distanța până la
+șantier ar fi o margine validă pe drumul total, dar sub altă metrică — și atunci construcția ar
+raporta sistematic distanțe mai mari pentru aceeași cantitate de mers, adică o schimbare de
+comportament pentru SAPA și CARA strecurată printr-o categorie nouă.
+
+`rang(LIPSA_MATERIAL) = 2` se adaugă **acum**, fiindcă de acum scanerul chiar o emite.
+`FARA_SPRIJIN` **nu** primește rang: designul ăsta nu-l emite din scaner, și o gardă pe care nicio
+fixtură n-o poate atinge nu se adaugă.
+
+### Alegerea nu mai e scrisă pe două feluri
+
+Trecerea scumpă avea trei `fel === CAND_SAPA ? … : …` — adevărate exact cât timp există două
+feluri. Al treilea ar fi căzut tăcut pe ramura căratului: cu prioritatea altcuiva la tăierea
+devreme, și pornind un job de **cărat** cu slotul unei **desemnări**.
+
+Cele două mărimi se știu deja în trecerea ieftină, deci se scriu acolo (`candPers`, `candPrio`).
+Dispecerizarea devine `pornesteCandidatul`, exhaustivă pe un tip-**uniune**, nu pe `number` — cu
+`fel: number` un `as never` compilează mereu și nu apără nimic. Verificarea a și tras în producție:
+la adăugarea lui `CAND_CONSTRUIESTE` typecheck-ul a picat cu
+`Type '2' is not assignable to type 'never'` înainte să existe ramura.
+
+Hash-ul scenariului standard a rămas **neschimbat** peste tot arcul (seed 12345 ×5000 ×40 =
+`4941e350`, seed 777 ×3000 ×20 = `e2e5a39b`): nimic din astea nu perturbă lumile fără șantiere.
+
+### Ce au mai arătat mutațiile
+
+Suita a ieșit întâi **49/51**, și ambele RATATE erau fixturi moarte, nu cod greșit:
+
+- **Șantierul „în aer" era prea sus.** La g+5 `celulaDeLucru` nu găsește niciun vecin calcabil,
+  deci accesibilitatea refuză prima și poarta de sprijin nu apucă să conteze. Măsurat: la g+1
+  suport 4; la **g+2** suport 0 **și** loc de lucru la g+1; de la g+3 în sus, loc de lucru null.
+  Singura cotă la care poarta chiar decide e g+2. Fixtura are acum două asertiuni de viață.
+- **Poarta de material nu schimbă rezultatul, doar costul.** Fără scurtcircuit, șantierele fără
+  piatră intră în tablou dar trecerea scumpă le refuză oricum. Observabilul corect e
+  `candidatiExaminati` — care e chiar rostul porții.
+
+Și avertismentul panoului s-a adeverit literal: cu scanerul montat integral, toate cele **376 de
+teste de dinainte au rămas verzi**. Scenariul standard n-are nicio desemnare de construit. Fiecare
+test nou are propria asertiune de fixtură vie, și una chiar a prins o fixtură moartă — observam
+`caraCantitate > 0` între tickuri, care e mereu 0, fiindcă ridicarea și încheierea se întâmplă în
+același tick.
+
+### Cifre
+
+- **381 de teste**, 34 în `tests/constructie.test.ts`.
+- **169 de probe**; construcție **51/51**.
+- 6 joburi distincte pentru 5 pereți — unul s-a pierdut într-o cursă între pioni. De privit dacă se
+  repetă la scară, nu e un defect cunoscut.
+
+### Ce rămâne
+
+- **Prioritățile personale asimetrice sunt netestate.** `spawnAgent` scrie
+  `personalPriorityDefault` în toate categoriile, deci în orice fixtură `persS === persC === persB`
+  și tăierea devreme nu e probată pe cazul în care ele diferă. Era așa și înainte de 6c.
+- **Plafonul piciorului doi** (morman → șantier) nu există: un pion poate lua un morman la 90 de
+  celule într-o direcție pentru un șantier la 90 în cealaltă. `haulDestRadiusCells = 96`, deci
+  fixtura evidentă nu ar lega — are nevoie de una construită pe cifra ei.
+- **`racireDesemnare` numără `vii` peste toate felurile**: 4096 de șantiere fac ca un refuz de
+  săpat să răcească 540 de tickuri în loc de 100.
+- **Un morman hrănește un singur constructor** (`maxClaimants: 1` pe `Strat.CARAT`), deși unul de
+  75 ține trei pereți.
+- **Fragmentarea**: după o prăbușire, 300 de unități în 30 de mormane de câte 10 nu ridică niciun
+  perete. Răspunsul de azi e „le consolidează căratul", deci o colonie cu CARA pe 0 se blochează.
+- **Gaura de conținut SCARA/LEMN** — blocaj circular permanent; costul de a-l suferi e zero,
+  reparația e o decizie de conținut.
+- **Overlay-ul de construcție** — previzualizarea există în nucleu; desenarea ei pe ecran nu.
