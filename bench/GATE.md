@@ -183,9 +183,9 @@ ce construiește un jucător.
 | **Chunk-uri promovate** | **225** (PLAN bugeta ~200) |
 | Chunk-uri rezidente | 473 |
 | Construcție | ~700 ms |
-| Quaduri / triunghiuri | 199.840 / **399.680** |
-| Meshing complet | **192 ms** · mediana din 10 · verificat mecanic de `tools/check-gate-numbers.mjs` |
-| &nbsp;&nbsp;per chunk | **854 µs** · derivat din meshingul complet / 225 |
+| Quaduri / triunghiuri | 347.229 / **694.458** |
+| Meshing complet | **219 ms** · mediana din 10 · verificat mecanic de `tools/check-gate-numbers.mjs` |
+| &nbsp;&nbsp;per chunk | **973 µs** · derivat din meshingul complet / 225 |
 | Memorie voxeli (RLE) | 2,34 MB (față de 14,1 MB necomprimat) |
 
 > **Re-etalonare, 14.09.2026, ÎNAINTE de orice rulare de gate.** Două lucruri s-au schimbat, niciunul
@@ -238,6 +238,32 @@ ce construiește un jucător.
 >
 > Distribuția: 11,2% dintre vârfuri la nivelul 0 (cel mai închis), 27,1% la 1, 13,6% la 2, 48,1%
 > neocluzate — deci peste jumătate din vârfuri primesc ocluzie. Nu e un efect decorativ.
+>
+> **A cincea schimbare, 19.09.2026: netezirea suprafeței neatinse.** Terenul promovat e cuantizat
+> la 1 m, deci pe o pantă lină contururile deveneau terase paralele — și se întâmpla pe TOT
+> chunk-ul, nu doar unde s-a săpat. Măsurat: abaterea cuantizării e **0,25 m în medie, 0,5 m
+> maxim**, pură rotunjire.
+>
+> Fața de sus a unui voxel de suprafață **neatinsă** se așază acum la cotele reale din `vertexCm`,
+> iar peretele de treaptă dintre două coloane neatinse se suprimă — cele două fețe înclinate se
+> întâlnesc pe muchia comună, având literalmente aceleași vârfuri. Condiția e o funcție pură de
+> date care există deja: o coloană e „neatinsă" dacă are solid exact la nivelul pe care
+> generatorul l-ar produce și aer deasupra. Niciun câmp nou de stare.
+>
+> Prețul: **199.840 → 347.229 de quaduri (+74%)**. Estimarea dinainte de cod spunea +64%; a fost
+> greșită fiindcă presupunea că TOȚI pereții de 1 m dispar, când de fapt dispar doar cei dintre
+> două coloane neatinse. Meshingul complet: **192 → 219 ms**, median din trei rulări în procese
+> separate (219,2 / 217,9 / 223,9) — deci +74% quaduri costă doar **+14%** timp, fiindcă partea
+> scumpă e calculul de AO per celulă, nu numărul de dreptunghiuri.
+>
+> `positions` a trecut din metri în **centimetri** ca să poată purta cotele reale; pasul zgomotului
+> e de 18 cm, deci decimetrii ar fi reintrodus terase de zece ori mai mici.
+>
+> Netezirea e **opțională** (`meshChunk(chunk, vecini, netezire)`), și nu din prudență: fără ea,
+> mesher-ul rămâne o enumerare FIDELĂ a fețelor voxelilor, iar invariantul central („unirea lacomă
+> acoperă exact aceleași fețe ca numărarea naivă") se poate proba. Cu ea, mesher-ul devine o
+> REDARE — șterge pereți care există în date și mută vârfuri sub cota lor. Ambele întrebări merită
+> răspuns, deci ambele moduri rămân. Poarta măsoară modul RANDAT.
 
 **Validarea fixturii NU se face prin raportul de reducere al mesher-ului.** Criteriul ăla e
 auto-referențial: selectează fixturi *ieftine de meshuit*, adică exact fixturile pe care un motor slab
@@ -541,6 +567,9 @@ Baza: măsurători făcute azi în Node, pe fixtura M10 și pe teren proaspăt.
    pe 373.540 de triunghiuri înainte de AO: **0,5 ms median de submit CPU pe cadru**, p95 1 ms, 188
    de draw calls. Nu e o măsurătoare de GPU — e timpul de submit, nu de completare — deci nu
    înlocuiește sweep-ul, dar nu arată nimic care să contrazică predicția.)*
+   *(19.09.2026, netezirea: **694.458**, adică de patru ori cifra pe care a fost scrisă predicția.
+   Rămâne o predicție, nu o măsurătoare, și devine a treia oară mai greu de îndeplinit. Sweep-ul de
+   rezoluție se rulează pe geometria ASTA, nu pe una istorică.)*
 2. **S-TRAVERSE pică primul.** O graniță de chunk la 40 m/s = 1,25 treceri/s, fiecare aducând 23 de
    chunk-uri noi × (209 µs mesh + BufferGeometry + upload) ≈ **5–7 ms de lucru, în rafală**. Prezic
    **X_max între 6 și 10 ms** pe S-TRAVERSE cu ceas real, și **cel puțin un cadru peste 33 ms** la
