@@ -322,12 +322,43 @@ compilare la cadrul 900.
 | | ce face | de ce |
 |---|---|---|
 | **S-FORTRESS** | orbită peste cele 225 de chunk-uri, slice comutat la cadrele 900/1800/2700 | 95% din timpul de joc |
-| **S-DIG** | 20 de săpături/s timp de 60 s peste fixtura M10 | bucla de construcție |
+| **S-DIG** | 20 de săpături/s timp de 60 s, pe un pătrat care **iese din așezare** | bucla de construcție |
 | **S-TRAVERSE** | 40 m/s, `setFocus` la fiecare graniță de chunk, build/dispose cu buget de 2 chunk-uri/cadru | **criteriul scris în PLAN** |
 
 **Toate trei sunt implementate** (`?scenario=fortress|dig|traverse`) și încarcă **fixtura M10**, nu
 fortăreața de 12 chunk-uri a viewerului — verificat: 225 de chunk-uri promovate la pornire. Fără asta
 gate-ul ar fi fost fals pozitiv prin construcție, indiferent ce stivă.
+
+> **Re-etalonarea scenariului S-DIG, 19.09.2026.** Chiar cele 225 de chunk-uri promovate de mai sus
+> erau motivul pentru care scenariul măsura mai puțin decât credea. Două defecte, găsite plecând de
+> la o constatare a recenziei adversariale și reproduse headless pe 1200 de săpături:
+>
+> **(a) Pătratul săpat era pătratul așezării.** Latura era scrisă `13`, adică exact
+> `SETTLEMENT_CHUNKS`, cu același colț. Pentru că promovarea vine cu apron de 1 chunk, dreptunghiul
+> promovat e `-1..13` față de focus, deci pătratul stătea STRICT înăuntru, cu marginea întreagă.
+> **0 promovări din 1200 de săpături** — adică ramura scumpă din `remeshAfterEdit` (chunk nou +
+> apron = 9 chunk-uri remeshate) nu s-a executat NICIODATĂ într-o rulare de gate. Histograma era
+> `1×690, 2×69, 3×26`.
+>
+> **(b) Pozițiile nu erau împrăștiate, erau o linie.** `wx` și `wy` se calculau amândouă din ACELAȘI
+> contor, reduse modulo ACELAȘI span, deci perechea era o funcție de `c mod span`: cel mult `span`
+> valori, nu `span²`. Măsurat: **416 coloane distincte dintr-o așezare de 416×416**, 0,24% din ea,
+> re-săpate de aproape trei ori. De acolo veneau și **415 refuzuri din 1200**: a doua oară pe aceeași
+> coloană, la aceeași adâncime, nu mai e ce săpa. Gate-ul scria 20 de săpături/s în tabelul de mai
+> sus și făcea **13,1**.
+>
+> Pătratul începe acum cu 3 chunk-uri înaintea focusului, pozițiile vin dintr-o permutare adevărată
+> a planului, iar bucla reîncearcă până când o săpătură chiar se face. Măsurat pe configurația
+> livrată: **1200 din 1200 de săpături efectuate** (1400 de poziții încercate), **52 de promovări**,
+> **1,24 remesh-uri/săpătură**, histograma `1×996, 2×168, 3×13, 4×14, 5×2, 6×3, 9×4`.
+>
+> Banda de frontieră e doar pe latura negativă, și asta e o proprietate a fixturii, nu o scăpare:
+> `buildM10` ancorează așezarea în COLȚUL focusului, iar colțul ei depărtat (+13, +13) e deja în
+> afara cercului de streaming de rază 11 — se păstrează doar fiindcă e promovat.
+>
+> Codul a ieșit din `viewer/main.ts` în `src/harness/sdig.ts`, fiindcă exact asta ținea defectul în
+> viață: două linii într-un modul de browser nu pot fi rulate de `npm test`, iar singurul lor
+> consumator raporta cadre, nu acoperire. Are acum 5 teste și 5 probe de mutație.
 
 **S-TRAVERSE cerea cod care nu exista. Acum există** (commit `streaming`): coadă de build cu buget de
 2 chunk-uri/cadru, evacuare de mesh pe rază de desen, traversare pe șine la 40 m/s cu ambele ceasuri
@@ -567,7 +598,7 @@ Baza: măsurători făcute azi în Node, pe fixtura M10 și pe teren proaspăt.
 |---|---|
 | `generateChunk` | 22 µs |
 | `meshHeightfield` (chunk ne-promovat) | 209 µs |
-| `meshChunk` (chunk de așezare) | 484 µs |
+| `meshChunk` (chunk de așezare) | **720 µs** · mediană per chunk · p90 850 µs · max 1130 µs |
 | `dig` în sim, fără mesh | 4,8 µs |
 | `setFocus` o graniță de chunk | 0,62 ms · **23 de chunk-uri noi** |
 | Chunk-uri rezidente la rază 11 | 377 |
@@ -594,8 +625,15 @@ Baza: măsurători făcute azi în Node, pe fixtura M10 și pe teren proaspăt.
    **X_max între 6 și 10 ms** pe S-TRAVERSE cu ceas real, și **cel puțin un cadru peste 33 ms** la
    fiecare a doua trecere de graniță, dacă bugetul de 2 chunk-uri/cadru nu e respectat.
 3. **S-FORTRESS trece confortabil:** X_max **între 12 și 15 ms**.
-4. **S-DIG trece:** 20 de săpături/s × 484 µs = 9,2 ms/s ≈ 0,15 ms/cadru amortizat. X_max **între 11
-   și 14 ms**. Riscul e rafala, nu media.
+4. **S-DIG trece:** 20 de săpături/s × **1,24 remesh-uri/săpătură** × 720 µs = **17,9 ms/s ≈ 0,30
+   ms/cadru** amortizat. X_max **între 11 și 14 ms**. Riscul e rafala, nu media — și acum rafala e
+   cifrată: o săpătură care promovează un chunk nou remeshează 9, adică **6,5 ms într-un singur
+   cadru** (7,7 ms la p90). Se întâmplă de 4 ori în 60 de secunde.
+
+   *(19.09.2026: aritmetica de dinainte era `20 × 484 µs`, adică presupunea tăcut **un** remesh per
+   săpătură — și 484 µs era măsurat înainte de netezire. Presupunerea era chiar defectul: scenariul
+   nu promova nimic, deci nu putea remesha mai mult de un chunk plus muchiile atinse. Intervalul
+   X_max rămâne neschimbat: media s-a mutat cu 0,15 ms pe un buget de peste 11. Vezi §5.)*
 5. **Zero cadre peste 100 ms** pe toate trei scenariile.
 6. **Verdictul cel mai probabil al zilei: GREY sau FAIL-CANDIDAT pe S-TRAVERSE**, cu cauza atribuită
    la streaming, nu la mesher. Și **atribuită unui cod pe care nu l-am scris încă** — ceea ce
