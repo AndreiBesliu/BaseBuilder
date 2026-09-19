@@ -3183,3 +3183,132 @@ separat, cu motivul scris.
 - **Prioritățile personale asimetrice**, plafonul pe al doilea picior, și `racireDesemnare` care
   numără `vii` peste toate felurile — netestate, de la recenzia dinainte.
 - **Deadlock-ul de conținut SCARA/LEMN** — acum măcar se vede în panou, portocaliu.
+
+---
+
+## A doua recenzie adversarială — două blocante, o regresie a mea, și un instrument de recenzie stricat
+
+**Prompt:** `continua` (×5) · **Model:** Opus 5
+
+Recenzie a celor cinci reparații livrate mai devreme în aceeași zi: 50 de agenți, 7,67M tokeni,
+60 de minute. **20 de constatări confirmate și 5 goluri.** Zece commit-uri de atunci.
+
+### Recenzia și-a găsit propriul instrument stricat — și avea dreptate
+
+**26 din 37 de worktree-uri au fost provizionate pe `d3bd38a`**, un commit de acum 64 de commit-uri,
+din care lipsește tot ce trebuia recenzat. Un cititor care nu verifică `HEAD` găsește totul verde —
+`npm run check` trece și acolo — și raportează „nimic de semnalat" despre o zi de muncă pe care
+n-a citit-o. Unul dintre verificatori a prins-o singur (`grep candDist2` → 0 potriviri, fișierul
+cu 2499 de linii în loc de 3335) și și-a făcut `checkout --detach` înainte să măsoare.
+
+De aceea **fiecare constatare a fost reprodusă de mine pe HEAD-ul real înainte să ating codul.**
+Una singură n-a rezistat: „cele trei cifre de meshing nu pot fi toate adevărate, media maximă
+posibilă e 877 µs". Pe starea mașinii mele maximul per chunk era 1492 µs. Era corectă pe mașina lor.
+
+### Cele două blocante
+
+**`jobConsumat` se hashuia și se citea, dar `encode` nu-l scria niciodată.** `decode(encode(w))`
+dădea alt hash înainte de orice tick, ori de câte ori un pion era la masă. A supraviețuit fiindcă
+fixtura pe care stă M5 nu mănâncă: în 2000 de tickuri singurul job e DOARME, zero desemnări, zero
+iteme, zero zone. Adică **orice** câmp PERSISTED al tăieturilor 2 și 3 putea lipsi din `encode`.
+
+Reparația a dezvelit un al doilea strat, pe care l-am lăsat CONSEMNAT, nu ascuns: la granița de
+salvare un pion poate avea job pe un morman tocmai terminat; lumea continuă îl încheie la tickul
+următor, cea încărcată îl anulează pe loc. O defazare de un tick. Invariantul per-tick e mai tare
+decât ce pretinde proiectul, deci am livrat enunțul real („N + save + load + N == 2N") pe o lume
+bogată, cu contoare de viață separate.
+
+**Fereastra de încălzire a gate-ului înghițea exact evenimentul pe care S-DIG fusese reparat să-l
+măsoare.** Cele 4 valuri de 9 remesh-uri cad la săpăturile 0–3; încălzirea e de 100 de săpături.
+Cauza nu e fereastra, e fizica scenariului: un val de 9 cere un chunk cu toți cei 8 vecini
+nepromovați, și asta există doar cât timp banda de frontieră e neatinsă. Încălzirea sapă acum în
+pătratul de dinainte de reparație — cel probat că nu promovează nimic.
+
+> O fereastră de încălzire nu e neutră. Ea consumă starea lumii, iar dacă evenimentul rar al
+> scenariului se naște din starea INIȚIALĂ, încălzirea e exact lucrul care îl face invizibil.
+
+### Regresia mea: comparatorul nu era o ordine totală
+
+Departajarea pe al doilea picior, livrată dimineața, stătea în `ordine.sort` cu garda
+`candFel[i] === candFel[j]`. Arăta ca exprimă intenția — „doar în interiorul categoriei" — dar o
+departajare CONDIȚIONATĂ nu e tranzitivă: cu trei candidați legați pe scor, iese X < S (după id),
+S < Y (după id) și Y < X (după al doilea picior). `Array.prototype.sort` pe un comparator
+inconsecvent dă un rezultat definit de implementare — și alegea exact șantierul DEPĂRTAT de morman,
+adică regresia pe care departajarea fusese scrisă s-o închidă. **12 poziții de săpătură din 166.**
+
+Reparația nu e o gardă mai tare: o condiție în comparator nu poate fi tranzitivă, oricât ai
+întări-o. Departajarea a ieșit din comparator și a intrat la locul deciziei. Iar comparatorul a
+ieșit din închiderea inline într-o funcție pură exportată, a cărei semnătură **nu primește `fel`** —
+deci forma greșită nu se mai poate nici scrie. Proprietatea se verifică exhaustiv pe 60 de
+candidați: antisimetrie pe toate cele 3600 de perechi, tranzitivitate pe toate lanțurile.
+
+### Fustele netezirii erau quaduri „papion"
+
+Când cele două cote ale muchiei cad de o parte și de alta a cotei plate, quadul se
+auto-intersectează: cele două triunghiuri ies cu înfășurări opuse, iar culling-ul îl șterge pe cel
+dorsal. **15 triunghiuri dorsale, 0,680 m²** — găuri, în geometria pusă acolo anume ca să închidă
+găuri. Trei încercări până la zero: prima a presupus greșit că partea de deasupra n-are nevoie de
+fustă (testul de etanșeitate s-a înroșit); a doua a pus vârfurile suprapuse pe pozițiile greșite,
+iar `quadFlipped` citește doar PRIMUL triunghi ca să afle înfășurarea; a treia a uitat capătul care
+cade exact pe cotă.
+
+Oracolul de înfășurare exista din S6-8, dar verifica doar primul triunghi al fiecărui quad — la un
+papion ăla e cel corect — și rula doar pe meshul fidel.
+
+### Poarta pe care o construisem avea propriile ei găuri
+
+`check-mutatii.mjs` ignora complet editările suplimentare `e2`: șase tipare din suitele reale erau
+invizibile pentru poarta scrisă anume ca să prindă tipare învechite. Iar cele șapte probe negative
+ale ei asertau doar codul de ieșire — pe care îl dă și o excepție neprinsă, deci nu deosebeau
+„garda a vorbit" de „verificatorul a crăpat". Fiecare caz își cere acum mesajul.
+
+Și `check-gate-numbers` avea aceeași formă: eticheta „verificat mecanic" stătea lângă o cifră de
+timp pe care nimeni n-o compara cu nimic măsurat — doar cele două apariții între ele. 999 ms în
+ambele locuri trecea.
+
+### Două cifre măsurate care schimbă argumente
+
+**Mutațiile durează 5 min 31 s, nu „~50 de minute".** Cifra veche n-a fost măsurată niciodată; era
+o impresie dintr-o rulare în timpul căreia se lucra altceva, și era singurul argument pentru care
+poarta negativă reală stă în afara CI-ului.
+
+**Mașina variază cu 27% între cinci mediane consecutive** (195–258 ms; mai devreme în aceeași zi,
+166–190). De-aia banda noii verificări de timp e 40% și nu mai strânsă: o bandă strânsă ar înroși
+poarta după cât de ocupată e mașina, nu după ce s-a schimbat în cod. GATE.md spune acum explicit
+că `205 ms` și `911 µs` sunt cifre de o singură măsurătoare, nu constante ale codului.
+
+### Șase instrumente ale mele, toate prinse
+
+Tiparul zilei, a doua oară: nu codul, ci verificarea lui.
+
+1. Scanul „ce câmp e hashuit dar nesalvat" a raportat și `agents.jobKind` — stare imposibilă, pe
+   care `reconstruiesteRezervari` o anulează deliberat. Iar listele lui „nehashuite" arătau iteme,
+   desemnări și zone doar fiindcă fixtura lui n-avea niciunul: aceeași deadness, în propriul
+   instrument.
+2. Testul de ordine totală a picat pe un candidat comparat cu el însuși: sub `assert/strict`
+   egalitatea e `Object.is`, iar `Object.is(0, -0)` e FALS.
+3. Invariantul de continuitate a ocluziei a picat pe cod corect: AO se calculează la nivelul FEȚEI,
+   deci două fețe vecine pe niveluri diferite au voie să difere în același colț (x,y).
+4. Un script de editare cu perechea scrisă ca două elemente separate — ar fi scris „undefined" în
+   `ruleaza.mjs` dacă n-ar fi aruncat înainte de `writeFileSync`.
+5. Un heredoc a colapsat `\\n` în linie nouă reală, exact capcana scrisă în memorie.
+6. Prima versiune a verificatorului de suite a raportat 18 probe ca având câmpul `b` lipsă — `b: ""`
+   e mutația care ȘTERGE linia.
+
+### Cifre finale
+
+**418 teste** · **212 probe**, 212/212 prinse, 0 controale invalide, 0 tipare lipsă sau ambigue ·
+`npm run check` verde · GATE.md re-etalonat o dată (a șaptea), în commit separat.
+
+### Ce rămâne
+
+- **Defazarea de un tick la granița de salvare** — un job pe o țintă tocmai dispărută. Lumea
+  continuă îl încheie la tickul următor, cea încărcată îl anulează pe loc. Cere o decizie de
+  design: se reconciliază la moartea țintei, sau se acceptă și se scrie în contract?
+- **Mutațiile pot intra în CI** acum că se știe că sunt ieftine. În `npm run check` tot nu pot:
+  cer arborele curat, iar `check` se rulează tocmai cu modificări necomise.
+- **`AO_FACTOR`** — tot singurul număr al arcului de grafică ieșit dintr-o judecată vizuală.
+- **`remeshAfterEdit`** rămâne cod de browser fără test; `sapaturaUrmatoare` e probat, ce face
+  viewerul cu rezultatul ei nu.
+- **Prioritățile personale asimetrice** și `racireDesemnare` care numără `vii` peste toate felurile
+  — netestate, de la prima recenzie.
