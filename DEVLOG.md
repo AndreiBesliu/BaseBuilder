@@ -2865,3 +2865,104 @@ același tick.
 - **Gaura de conținut SCARA/LEMN** — blocaj circular permanent; costul de a-l suferi e zero,
   reparația e o decizie de conținut.
 - **Overlay-ul de construcție** — previzualizarea există în nucleu; desenarea ei pe ecran nu.
+
+---
+
+## Grafică — ocluzie ambientală, și o reparație pe care măsurătoarea a respins-o
+
+**Prompt:** `se poate sa imbunatatim putin grafica inca de acum` · `da, mergi pe varianta completa`
+**Model:** Claude Opus 5
+
+Prima atingere de grafică de la meshing încoace. Linia care a decis ce se face: `src/render/` e
+calcul pur și **supraviețuiește deciziei de motor**; `viewer/` nu. Deci tot ce s-a livrat stă în
+`src/render/`.
+
+### Ce nu s-a făcut, și de ce
+
+Planul aprobat avea două trepte: întâi reglajul de lumină, apoi AO. **Prima treaptă a fost
+respinsă de propria ei măsurătoare.**
+
+Aritmetica mea prezicea că fețele de sus ale ierbii taie în canalul verde — pentru `0x5c7040` sub
+`hemi 1,5 × cer + soare 1,4 × 0,88` ies (0,84 / **1,05** / 0,59) — și că de acolo vine platitudinea.
+Am eșantionat pixelii randați în loc să mă uit cu ochiul, fiindcă între cadre se mutase camera:
+
+| | medie luminanță | abatere std | pixeli tăiați |
+|---|---|---|---|
+| actual | 137,7 | **11,9** | **0** |
+| „reparat" (ambient 1,0 · soare 1,25) | 125,7 | 10,9 | 0 |
+
+**Zero pixeli tăiați.** Predicția era greșită — cel mai probabil fiindcă culorile per vârf trec
+prin conversie sRGB→liniar, deci albedoul real e sub ce socotisem. Iar „reparația" scade abaterea
+standard, adică face imaginea măsurabil mai plată. Nu s-a scris în cod.
+
+Pe drum au ieșit și două lucruri contraintuitive: un soare mai **jos** înrăutățește, fiindcă
+fețele orizontale sunt majoritatea suprafeței vizibile; iar scăzând lumina emisferică scena vira
+spre kaki, fiindcă ea făcea umplerea **rece** — nu era clipping.
+
+### AO: prețul, măsurat înainte de a scrie codul
+
+Pe fixtura M10, cu tiparul de AO în cheia de unire: **90.932 → 200.216 de dreptunghiuri, +120%**.
+Codul livrat dă 199.840 — diferența e tăierea fețelor de graniță, pe care bancul de estimare n-o
+făcea. **Predicția s-a potrivit pe 14 quaduri din 200.000.**
+
+Două variante mai ieftine, măsurate și respinse: AO cuantizat la două niveluri dă +107% (deci
+**cuantizarea aproape nu ajută** — ce rupe unirea e *orice* variație, nu numărul de niveluri), iar
+AO doar pe fețele orizontale dă +69% dar lasă neocluzate exact colțurile perete/podea.
+
+Și cifra care a permis decizia: **0,5 ms median de submit CPU pe cadru** la 373.540 de triunghiuri
+(p95 1 ms, 188 draw calls). Cei „7 fps / 14633 ms" din HUD erau pagina suspendată — `rAF` nu
+rulează când panoul e ascuns.
+
+### Designul: AO în cheia de unire
+
+AO intră în `grid` ca `material | (tipar << 8)`, deci `greedy` a rămas **neatins** și unește doar
+celule cu același material și același tipar. Regula iese și corectă, nu doar comodă: o dungă lungă
+cu ocluzie uniformă *trebuie* să fie un singur quad, iar una în care ocluzia variază de-a lungul ei
+are tipare diferite și nu se unește oricum.
+
+**Apronul nu e o rafinare, e o condiție.** Măsurat: fără vecini, **51,2%** dintre vârfurile de la
+graniță (55.124 din 107.736) își schimbă AO — o cusătură de iluminare pe toată granița, clasa K16.
+`ChunkNeighbours` primește și cele patru **diagonale**, fiindcă colțul (−1,−1) nu vine de la niciun
+vecin de latură; corect calculate, se unesc chiar mai bine (199.840 cu, 200.230 fără). De-aia le
+primește și `check-gate-numbers` — altfel poarta înregistra o configurație pe care n-o randează
+nimeni.
+
+### Ce au arătat mutațiile
+
+AO a venit cu cinci teste și **zero probe**. Suita nouă `render` — prima din afara lui `src/sim/` —
+a ieșit întâi **7/8**, și RATATA avea dreptate: cubul din fixtură stă la nivelul 5, deci ramura de
+margine a ferestrei de voxeli nu e atinsă niciodată. Afirmația pe care o scrisesem în comentariul
+lui `occAt` era **netestată**.
+
+Tot mutațiile au arătat că două teste numărau în loc să verifice: „două vârfuri din patru sunt
+ocluzate" e adevărat și dacă **ordinea vârfurilor e rotită**, adică exact defectul care pune umbra
+pe muchia greșită. Acum verifică tiparul întreg, socotit pe hârtie: `[3, 2, 2, 3]` la treaptă,
+`[3, 2, 0, 2]` la colț.
+
+### Cifre
+
+| | înainte | acum |
+|---|---|---|
+| quaduri | 86.071 | **199.840** (+132%) |
+| triunghiuri | 172.142 | 399.680 |
+| meshing complet | 99 ms | **192 ms** (+94%) |
+
+Meshingul e mediana a trei rulări în procese separate (192,5 / 192,1 / 195,6). Prima măsurătoare
+dăduse 227,8 ms — aveam serverul de dev pornit în paralel. Cifra poluată n-a intrat în document.
+
+Distribuția ocluziei: 11,2% dintre vârfuri la nivelul 0, 27,1% la 1, 13,6% la 2, 48,1% neocluzate.
+Peste jumătate primesc ocluzie.
+
+**388 de teste**, **177 de probe** (8 în suita `render`), 0 tipare lipsă, 0 ambigue.
+
+### Ce rămâne
+
+- **Scara `AO_FACTOR = [0.52, 0.70, 0.86, 1.0]` e o judecată vizuală neverificată de owner.** E
+  singurul număr din tot arcul care n-a ieșit dintr-o măsurătoare.
+- **Variația de culoare per poziție** — tot în `src/render/`, tot portabilă, **zero cost în
+  quaduri** fiindcă se calculează din poziția vârfului, deci e continuă peste quaduri și peste
+  granițe de chunk.
+- **Terenul ne-promovat nu primește AO.** Heightfield-ul are propriul drum (`src/render/heightfield.ts`),
+  deci la granița promovat/ne-promovat modelul de iluminare diferă. Nu s-a măsurat cât se vede.
+- **Predicția „NU pică pe GPU" din GATE.md e acum mai GREA**, nu mai ușoară: 172.142 → 399.680 de
+  triunghiuri. Singurul indiciu e timpul de *submit*, nu de completare — nu înlocuiește sweep-ul.
