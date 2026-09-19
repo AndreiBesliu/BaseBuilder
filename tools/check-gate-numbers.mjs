@@ -45,7 +45,7 @@ function meshAll() {
       xPosYNeg: at(c.cx + 1, c.cy - 1),
       xNegYPos: at(c.cx - 1, c.cy + 1),
       xPosYPos: at(c.cx + 1, c.cy + 1),
-    }).quadCount
+    }, true).quadCount // netezire PORNITA: aia e geometria pe care o randeaza viewerul
   }
   return quads
 }

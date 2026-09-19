@@ -234,7 +234,9 @@ function neighboursOf(chunk: Chunk): ChunkNeighbours {
 }
 
 function buildVoxelGeometry(chunk: Chunk): THREE.BufferGeometry | null {
-  const mesh = meshChunk(chunk, neighboursOf(chunk))
+  // Netezirea suprafetei neatinse: panta redevine panta, treptele raman doar
+  // acolo unde a sapat cineva.
+  const mesh = meshChunk(chunk, neighboursOf(chunk), true)
   if (mesh.quadCount === 0) return null
   totalQuads += mesh.quadCount
 

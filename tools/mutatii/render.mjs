@@ -66,4 +66,27 @@ export const MUTATII = [
     b: '  outAo[a + 1] = (tipar >>> 6) & 3',
     t: 'tests/mesher.test.ts', e: 'un vecin lateral intuneca exact doua varfuri',
   },
+
+  // --- netezirea suprafetei neatinse ---
+  {
+    n: "peretele se suprima chiar daca vecina a fost SAPATA (gaura in panta)",
+    f: "src/render/mesher.ts",
+    a: "  if (!suprafataNaturala(x, y) || !suprafataNaturala(nx, ny)) return false",
+    b: "  if (natAt(x, y) === NECUNOSCUT || natAt(nx, ny) === NECUNOSCUT) return false",
+    t: 'tests/mesher.test.ts', e: 'o groapa sapata NU se neteseste',
+  },
+  {
+    n: "fetele de sus naturale nu se mai netezesc (raman la metri intregi)",
+    f: "src/render/mesher.ts",
+    a: "          if (face === Face.Z_POS && natAt(lx, ly) === level) {",
+    b: "          if (false) {",
+    t: 'tests/mesher.test.ts', e: 'netezirea aseaza fetele de sus la cote REALE',
+  },
+  {
+    n: "peretii de treapta nu se mai suprima (panta ramane scara)",
+    f: "src/render/mesher.ts",
+    a: "  return level <= natAt(x, y) && level > natAt(nx, ny)",
+    b: "  return false",
+    t: 'tests/mesher.test.ts', e: 'netezirea sterge peretii de treapta',
+  },
 ]

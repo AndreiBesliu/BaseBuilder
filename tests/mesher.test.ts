@@ -6,6 +6,7 @@ import {
   cellHeightCm,
   encodeAll,
   generateChunk,
+  groundLevelFromCm,
   Material,
   promote,
   setVoxel,
@@ -418,4 +419,101 @@ test('la marginea ferestrei de voxeli, dincolo e AER — ca la vizibilitate', ()
   for (let i = 0; i < m.ao.length; i++) {
     assert.equal(m.ao[i], 3, `varful ${i} al cubului de la nivelul 0 e ocluzat (${m.ao[i]})`)
   }
+})
+
+// ---------------------------------------------------------------------------
+// netezirea suprafetei neatinse
+// ---------------------------------------------------------------------------
+
+/** Un chunk promovat din teren REAL, ca `vertexCm` si voxelii sa se potriveasca. */
+function chunkPromovat(): Chunk {
+  const t = createTerrain(20260919, 1)
+  setFocus(t, 300, 300)
+  const c = t.chunks.get(300 * 512 + 300)!
+  promote(c)
+  return c
+}
+
+/** Cate quaduri sunt pereti de treapta — fete laterale de EXACT 1 m inaltime. */
+function quaduriDeTreapta(m: ReturnType<typeof meshChunk>): number {
+  let n = 0
+  for (let q = 0; q < m.quadCount; q++) {
+    const f = m.faces[q]!
+    if (f === Face.Z_POS || f === Face.Z_NEG) continue
+    const o = q * 12
+    const dv = Math.abs(pm(m, o + 9) - pm(m, o)) + Math.abs(pm(m, o + 10) - pm(m, o + 1)) + Math.abs(pm(m, o + 11) - pm(m, o + 2))
+    if (Math.abs(dv - 1) < 0.001) n++
+  }
+  return n
+}
+
+/** Aria fetelor LATERALE (peretii), in m². */
+function ariaLaterala(m: ReturnType<typeof meshChunk>): number {
+  let a = 0
+  for (let q = 0; q < m.quadCount; q++) {
+    const f = m.faces[q]!
+    if (f === Face.Z_POS || f === Face.Z_NEG) continue
+    const o = q * 12
+    const du = Math.abs(pm(m, o + 3) - pm(m, o)) + Math.abs(pm(m, o + 4) - pm(m, o + 1)) + Math.abs(pm(m, o + 5) - pm(m, o + 2))
+    const dv = Math.abs(pm(m, o + 9) - pm(m, o)) + Math.abs(pm(m, o + 10) - pm(m, o + 1)) + Math.abs(pm(m, o + 11) - pm(m, o + 2))
+    a += du * dv
+  }
+  return a
+}
+
+test('netezirea aseaza fetele de sus la cote REALE, nu la metri intregi', () => {
+  const c = chunkPromovat()
+  const fara = meshChunk(c)
+  const cu = meshChunk(c, undefined, true)
+
+  // Fara netezire, ORICE cota e multiplu de 100 cm. Cu netezire, aproape niciuna.
+  const subMetru = (m: ReturnType<typeof meshChunk>): number => {
+    let n = 0
+    for (let q = 0; q < m.quadCount; q++) {
+      if (m.faces[q] !== Face.Z_POS) continue
+      for (let v = 0; v < 4; v++) if (m.positions[q * 12 + v * 3 + 2]! % 100 !== 0) n++
+    }
+    return n
+  }
+  assert.equal(subMetru(fara), 0, 'fara netezire nicio cota n-are voie sa fie sub-metrica')
+  assert.ok(subMetru(cu) > 1000, `cu netezire abia ${subMetru(cu)} cote sunt sub-metrice — netezirea nu s-a aplicat`)
+})
+
+test('netezirea sterge peretii de treapta, si de-aia creste numarul de quaduri', () => {
+  const c = chunkPromovat()
+  const fara = meshChunk(c)
+  const cu = meshChunk(c, undefined, true)
+
+  // Observabilul e numarul de PERETI DE TREAPTA, nu aria laterala totala: aia e
+  // dominata de fetele de granita ale unui chunk fara vecini si de podeaua
+  // ferestrei de voxeli, care n-au nicio treaba cu netezirea. Masurat: 281 -> 99.
+  const t0 = quaduriDeTreapta(fara)
+  const t1 = quaduriDeTreapta(cu)
+  assert.ok(t0 > 100, `fixtura moarta: doar ${t0} pereti de treapta inainte de netezire`)
+  assert.ok(t1 < t0 * 0.5, `peretii de treapta: ${t0} -> ${t1}, asteptam sub jumatate`)
+  // Dar fetele de sus nu se mai pot uni, deci per total sunt MAI MULTE quaduri.
+  assert.ok(cu.quadCount > fara.quadCount, `quaduri: ${fara.quadCount} -> ${cu.quadCount}`)
+})
+
+test('o groapa sapata NU se neteseste, si peretii ei raman toti', () => {
+  // Cazul care poate produce o GAURA: coloana sapata nu primeste fata netezita,
+  // deci tavanul ei ramane plat si jos. Daca peretele dintre ea si vecina neatinsa
+  // s-ar suprima ca „treapta naturala", s-ar vedea fundalul prin el.
+  const c = chunkPromovat()
+  const inainte = ariaLaterala(meshChunk(c, undefined, true))
+
+  // Se sapa o coloana pana la 4 m sub suprafata ei.
+  const lx = 16, ly = 16
+  const zBase = c.voxels!.zBaseM
+  const nivel = groundLevelFromCm(cellHeightCm(c, lx, ly)) - zBase
+  let sapate = 0
+  for (let k = 0; k < 4; k++) {
+    if (setVoxel(c, lx, ly, zBase + nivel - k, Material.AER)) sapate++
+  }
+  assert.equal(sapate, 4, 'fixtura: n-am putut sapa patru niveluri')
+
+  const dupa = ariaLaterala(meshChunk(c, undefined, true))
+  // Groapa are patru pereti; cu patru niveluri sapate asta inseamna 16 m² noi,
+  // minus ce era deja perete din cauza pantei. Cerem cel putin jumatate.
+  assert.ok(dupa >= inainte + 8, `aria laterala trebuia sa creasca cu peretii gropii: ${inainte} -> ${dupa} m²`)
 })

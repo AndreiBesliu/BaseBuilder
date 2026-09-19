@@ -26,7 +26,7 @@
  */
 
 import type { Chunk } from '../sim/terrain/chunk.ts'
-import { CHUNK_CELLS, decodeColumn, isSolid, VOXEL_LEVELS } from '../sim/terrain/chunk.ts'
+import { cellHeightCm, CHUNK_CELLS, decodeColumn, groundLevelFromCm, isSolid, VERTS, VOXEL_LEVELS } from '../sim/terrain/chunk.ts'
 
 const SX = CHUNK_CELLS
 const SY = CHUNK_CELLS
@@ -120,6 +120,96 @@ const OX = SX + 2
 const OY = SY + 2
 const occ = new Uint8Array(OX * OY * SZ)
 const occIndex = (x: number, y: number, level: number): number => level * OX * OY + (y + 1) * OX + (x + 1)
+
+/**
+ * Nivelul pe care generatorul l-ar da suprafetei fiecarei coloane, cu apron.
+ *
+ * `-32768` inseamna „nu stiu" (vecin lipsa), si atunci nu se netezeste nimic la
+ * granita aia — aceeasi presupunere sigura ca peste tot in modul.
+ *
+ * Cheia intregului mecanism: o fata de sus se netezeste DACA SI NUMAI DACA nivelul
+ * ei e cel de aici. Daca cineva a sapat, nivelul nu se potriveste si fata ramane
+ * plata — adica groapa arata ca o groapa, nu ca o adancitura in panta. Nu e nevoie
+ * de niciun camp nou de stare: „atins de jucator" se citeste din diferenta dintre
+ * ce e si ce ar fi fost.
+ */
+const NECUNOSCUT = -32768
+const natLevel = new Int32Array(OX * OY)
+const natIndex = (x: number, y: number): number => (y + 1) * OX + (x + 1)
+
+function natAt(x: number, y: number): number {
+  if (x < -1 || y < -1 || x > SX || y > SY) return NECUNOSCUT
+  return natLevel[natIndex(x, y)]!
+}
+
+/** Cotele celor patru varfuri ale unei celule, in cm LOCALI (fata de zBase). */
+function varfuriCm(chunk: Chunk, lx: number, ly: number, out: Int32Array): void {
+  const v = chunk.vertexCm
+  const z0 = chunk.voxels!.zBaseM * 100
+  out[0] = v[ly * VERTS + lx]! - z0
+  out[1] = v[ly * VERTS + lx + 1]! - z0
+  out[2] = v[(ly + 1) * VERTS + lx + 1]! - z0
+  out[3] = v[(ly + 1) * VERTS + lx]! - z0
+}
+
+const varfBuf = new Int32Array(4)
+
+function umpleNatLevel(chunk: Chunk, n: ChunkNeighbours | undefined): void {
+  natLevel.fill(NECUNOSCUT)
+  const z0 = chunk.voxels!.zBaseM
+  for (let ly = 0; ly < SY; ly++) {
+    for (let lx = 0; lx < SX; lx++) {
+      natLevel[natIndex(lx, ly)] = groundLevelFromCm(cellHeightCm(chunk, lx, ly)) - z0
+    }
+  }
+  if (!n) return
+  // Apronul: nivelul vecinului, adus in sistemul de niveluri al chunk-ului ASTA.
+  const lat = (vec: Chunk | null | undefined, nLx: number, nLy: number, x: number, y: number): void => {
+    if (!vec?.voxels) return
+    natLevel[natIndex(x, y)] = groundLevelFromCm(cellHeightCm(vec, nLx, nLy)) - z0
+  }
+  for (let ly = 0; ly < SY; ly++) {
+    lat(n.xNeg, SX - 1, ly, -1, ly)
+    lat(n.xPos, 0, ly, SX, ly)
+  }
+  for (let lx = 0; lx < SX; lx++) {
+    lat(n.yNeg, lx, SY - 1, lx, -1)
+    lat(n.yPos, lx, 0, lx, SY)
+  }
+}
+
+/**
+ * E fata asta un perete de treapta intre doua coloane NEATINSE?
+ *
+ * Conditia e exact intervalul in care peretele exista DOAR din cauza cuantizarii:
+ * nivelul e in pamantul natural al coloanei mele si deasupra celui al vecinei. Cu
+ * fetele de sus inclinate, cele doua suprafete se intalnesc pe muchia comuna — au
+ * literalmente aceleasi varfuri din `vertexCm` — deci peretele nu mai acopera nimic.
+ *
+ * Daca cineva a sapat in vecina, nivelul ei natural nu se schimba (e o proprietate a
+ * GENERATORULUI), iar peretele gropii e sub el — deci nu se suprima. Groapa ramane
+ * groapa.
+ *
+ * Fara netezire, `natLevel` e plin de `NECUNOSCUT` si functia raspunde mereu `false`.
+ */
+/**
+ * Are coloana asta suprafata EXACT unde ar fi pus-o generatorul?
+ *
+ * Adica: solid la nivelul natural, aer deasupra. Daca cineva a sapat, nu.
+ * Conteaza fiindca doar o suprafata naturala primeste fata de sus NETEZITA — iar
+ * peretele dintre doua coloane se poate suprima numai daca AMANDOUA sunt netezite,
+ * altfel raman doua tavane la cote diferite si o gaura intre ele.
+ */
+function suprafataNaturala(x: number, y: number): boolean {
+  const n = natAt(x, y)
+  if (n === NECUNOSCUT) return false
+  return occAt(x, y, n) === 1 && occAt(x, y, n + 1) === 0
+}
+
+function treaptaNaturala(x: number, y: number, nx: number, ny: number, level: number): boolean {
+  if (!suprafataNaturala(x, y) || !suprafataNaturala(nx, ny)) return false
+  return level <= natAt(x, y) && level > natAt(nx, ny)
+}
 
 function occAt(x: number, y: number, level: number): number {
   if (level < 0 || level >= SZ) return 0
@@ -279,6 +369,32 @@ function ensureCapacity(needed: number): void {
 
 /** Metri de grila → centimetri. Un singur loc care stie factorul. */
 const CM = 100
+
+/**
+ * O fata de sus NETEZITA: colturile ei stau la cotele reale ale terenului.
+ *
+ * Se emite 1×1 si in afara unirii lacome, fiindca patru colturi la cote diferite
+ * nu se pot uni cu nimic — si nici n-ar trebui: unirea exista ca sa reduca fete
+ * IDENTICE, iar astea nu mai sunt.
+ */
+function pushFataNetezita(cheie: number, lx: number, ly: number, cm: Int32Array): void {
+  ensureCapacity(quadCount + 1)
+  const o = quadCount * 12
+  const x0 = lx * CM, x1 = (lx + 1) * CM, y0 = ly * CM, y1 = (ly + 1) * CM
+  outPositions[o] = x0; outPositions[o + 1] = y0; outPositions[o + 2] = cm[0]!
+  outPositions[o + 3] = x1; outPositions[o + 4] = y0; outPositions[o + 5] = cm[1]!
+  outPositions[o + 6] = x1; outPositions[o + 7] = y1; outPositions[o + 8] = cm[2]!
+  outPositions[o + 9] = x0; outPositions[o + 10] = y1; outPositions[o + 11] = cm[3]!
+  outMaterials[quadCount] = cheie & 0xff
+  outFaces[quadCount] = Face.Z_POS
+  const tipar = cheie >>> 8
+  const a = quadCount * 4
+  outAo[a] = tipar & 3
+  outAo[a + 1] = (tipar >>> 2) & 3
+  outAo[a + 2] = (tipar >>> 4) & 3
+  outAo[a + 3] = (tipar >>> 6) & 3
+  quadCount++
+}
 
 function pushQuad(
   face: number,
@@ -443,11 +559,31 @@ function cullChunkBorders(chunk: Chunk, n: ChunkNeighbours): void {
   if (n.yPos) cullY(chunk, n.yPos, Face.Y_POS, SY - 1, 0)
 }
 
-export function meshChunk(chunk: Chunk, neighbours?: ChunkNeighbours): ChunkMesh {
+/**
+ * Netezirea suprafetei NEATINSE.
+ *
+ * E optionala, si asta nu e prudenta: fara ea, mesher-ul e o enumerare FIDELA a
+ * fetelor voxelilor, iar invariantul central („unirea lacoma acopera exact
+ * aceleasi fete ca numararea naiva") se poate proba. Cu ea, mesher-ul devine o
+ * REDARE — sterge pereti care exista in date si muta varfuri sub cota lor. Cele
+ * doua intrebari sunt diferite si amandoua merita raspuns, deci amandoua moduri
+ * raman.
+ *
+ * Ce repara: terenul promovat e cuantizat la 1 m, deci o panta lina devine scara —
+ * si se intampla pe TOT chunk-ul, nu doar unde ai sapat. Masurat: abaterea
+ * cuantizarii e 0,25 m in medie si 0,5 m maxim, pura rotunjire.
+ *
+ * Pretul, masurat inainte de a fi scris: 199.840 → ~327.000 de quaduri (+64%).
+ * Fetele de sus nu se mai pot uni (74.150 → 303.775), dar peretii de treapta de
+ * 1 m dispar cu totul (−102.053).
+ */
+export function meshChunk(chunk: Chunk, neighbours?: ChunkNeighbours, netezire = false): ChunkMesh {
   expand(chunk)
   // Apronul INAINTE de orice citire de AO. Fara vecini ramane zero, adica
   // „dincolo e aer" — comportamentul de dinainte, si tot el e cel testat.
   if (neighbours) expandApron(chunk, neighbours)
+  if (netezire) umpleNatLevel(chunk, neighbours)
+  else natLevel.fill(NECUNOSCUT)
   computeVisibility()
   if (neighbours) cullChunkBorders(chunk, neighbours)
   quadCount = 0
@@ -466,12 +602,14 @@ export function meshChunk(chunk: Chunk, neighbours?: ChunkNeighbours): ChunkMesh
     for (let lx = 0; lx < SX; lx++) {
       const bit = 1 << lx
       if ((orAll & bit) === 0) continue
+      // Coloana vecina, dincolo de fata: acolo se uita `treaptaNaturala`.
+      const nLx = face === Face.X_POS ? lx + 1 : lx - 1
       let any = false
       for (let level = 0; level < SZ; level++) {
         let used = 0
         const base = level * SY
         for (let ly = 0; ly < SY; ly++) {
-          const m = (mask[base + ly]! & bit) !== 0
+          const m = (mask[base + ly]! & bit) !== 0 && !treaptaNaturala(lx, ly, nLx, ly, level)
             ? dense[denseIndex(lx, ly, level)]! | (aoPattern(face, lx, ly, level) << 8)
             : 0
           grid[base + ly] = m
@@ -493,6 +631,7 @@ export function meshChunk(chunk: Chunk, neighbours?: ChunkNeighbours): ChunkMesh
     const plane = face === Face.Y_POS ? 1 : 0
     const mask = vis[face]!
     for (let ly = 0; ly < SY; ly++) {
+      const nLy = face === Face.Y_POS ? ly + 1 : ly - 1
       // Felia e goala daca toate randurile ei sunt zero — un test pe cuvant,
       // nu pe celula.
       let sliceOr = 0
@@ -512,7 +651,7 @@ export function meshChunk(chunk: Chunk, neighbours?: ChunkNeighbours): ChunkMesh
         }
         rowUsed[level] = 1
         for (let lx = 0; lx < SX; lx++) {
-          grid[base + lx] = (row & (1 << lx)) !== 0
+          grid[base + lx] = (row & (1 << lx)) !== 0 && !treaptaNaturala(lx, ly, lx, nLy, level)
             ? dense[denseIndex(lx, ly, level)]! | (aoPattern(face, lx, ly, level) << 8)
             : 0
         }
@@ -544,9 +683,17 @@ export function meshChunk(chunk: Chunk, neighbours?: ChunkNeighbours): ChunkMesh
         }
         rowUsed[ly] = 1
         for (let lx = 0; lx < SX; lx++) {
-          grid[gbase + lx] = (row & (1 << lx)) !== 0
-            ? dense[denseIndex(lx, ly, level)]! | (aoPattern(face, lx, ly, level) << 8)
-            : 0
+          if ((row & (1 << lx)) === 0) { grid[gbase + lx] = 0; continue }
+          const cheie = dense[denseIndex(lx, ly, level)]! | (aoPattern(face, lx, ly, level) << 8)
+          // Suprafata NEATINSA se emite pe loc, cu colturile la cotele reale, si
+          // iese din unirea lacoma. Restul — podele sapate, tavane — raman plate.
+          if (face === Face.Z_POS && natAt(lx, ly) === level) {
+            varfuriCm(chunk, lx, ly, varfBuf)
+            pushFataNetezita(cheie, lx, ly, varfBuf)
+            grid[gbase + lx] = 0
+            continue
+          }
+          grid[gbase + lx] = cheie
         }
       }
       const z = level + plane

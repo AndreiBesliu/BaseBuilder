@@ -91,7 +91,7 @@ export interface Chunk {
   readonly baseM: number
 }
 
-const VERTS = CHUNK_CELLS + 1
+export const VERTS = CHUNK_CELLS + 1
 const COLUMNS = CHUNK_CELLS * CHUNK_CELLS
 
 /** Cate esantioane macro pe axa atinge un chunk, plus marginea pentru interpolare. */
