@@ -6,6 +6,30 @@ on:
   pull_request:
 
 jobs:
+  # Poarta NEGATIVA reala: strica pe rand cate o garantie din cod si verifica faptul
+  # ca se inroseste EXACT testul scris pentru ea. Fara ea, un test care nu mai
+  # exercita nimic arata identic cu unul care apara ceva.
+  #
+  # A stat in afara CI-ului fiindca CLAUDE.md scria „~50 de minute". Cifra aia n-a
+  # fost masurata niciodata. Cronometrata pe 19.09.2026, pe 212 de probe: **5 min
+  # 31 s**. Pe un runner de GitHub e de cateva ori mai mult, dar tot e un job de
+  # minute, nu de ore — si ruleaza in PARALEL cu `check`, care raporteaza in ~1 min.
+  #
+  # Cere arborele curat: el restaureaza prin `git checkout --`. Dupa `actions/checkout`
+  # e curat prin constructie, ceea ce e tocmai motivul pentru care poate rula aici si
+  # nu in `npm run check` (ala se ruleaza cu modificari necomise in arbore).
+  mutatii:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: toate suitele de mutatii
+        run: npm run mutatii
+
   check:
     runs-on: ubuntu-latest
     steps:
@@ -34,6 +58,12 @@ jobs:
       - name: teste
         run: npm test
 
+      # Ieftin si instant: verifica doar ca fiecare proba de mutatie ARE ce sa
+      # masoare — tiparul exista in cod, exact o data, si `e` e prefixul unui test
+      # care chiar exista. Nu raspunde la „masoara?"; aia e treaba jobului `mutatii`.
+      - name: suitele de mutatii sunt intregi
+        run: npm run mutatii:check
+
       - name: masuratori de teren
         run: node src/harness/bench-terrain.ts
 
@@ -60,7 +90,7 @@ jobs:
           OUT=$(node src/harness/cli.ts --seed 12345 --ticks 100000 --agents 40)
           echo "$OUT"
           HASH=$(echo "$OUT" | awk '/^hash/ {print $2}')
-          EXPECTED=605e9178
+          EXPECTED=6ff16b2a
           if [ "$HASH" != "$EXPECTED" ]; then
             echo "::error::hash-ul de referinta s-a schimbat: $HASH (asteptat $EXPECTED)"
             echo "Daca schimbarea e intentionata, actualizeaza EXPECTED in acest workflow"

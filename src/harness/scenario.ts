@@ -18,7 +18,7 @@ import { createTerrain, groundLevelM, materialAt, WORLD_CELLS } from '../sim/ter
 import type { Terrain } from '../sim/terrain/terrain.ts'
 import { isWalkable } from '../sim/regions.ts'
 import type { World } from '../sim/state.ts'
-import { Item } from '../sim/state.ts'
+import { Piesa, Item } from '../sim/state.ts'
 import { Zona } from '../sim/zone.ts'
 import { advance, createWorld, liveAgentCount, tick } from '../sim/world.ts'
 
@@ -214,6 +214,31 @@ export function standardScenario(seed: number, ticks: number, agents = 20): Scen
     }
     const pz = celulaBuna(scratch, s.wx - 5, s.wy - 5)
     if (pz) commands.push({ tick: t + 10, cmd: { kind: 'picteazaZona', x0: pz.wx, y0: pz.wy, x1: pz.wx + 1, y1: pz.wy + 1, z: pz.z, prioritate: 3, fel: Zona.DORMIT } })
+
+    // Santiere si piatra pentru ele (taietura 2, pasul 6).
+    //
+    // Fara ele, hash-ul de referinta din CI nu atingea DELOC constructia. Masurat
+    // pe 19.09.2026: zero desemnari de CONSTRUIESTE in tot scenariul, deci
+    // `candDist2`, `matOriunde` si cauza „lipsa material" puteau fi schimbate —
+    // si CHIAR au fost, in aceeasi zi — fara ca poarta de determinism sa observe.
+    // Aceeasi deadness ca la fixtura pe care statea M5, gasita in aceeasi zi.
+    //
+    // Piatra se pune cu comanda, desi sapaturile produc si ele: asa santierul nu
+    // depinde de cat de repede ajunge caratul, iar scenariul ramane fara refuzuri.
+    for (let b = 0; b < 2; b++) {
+      const sz = celulaBuna(scratch, s.wx + 7 + b * 2, s.wy - 2)
+      if (!sz) continue
+      const cheieS = sz.wx * 100000 + sz.wy
+      if (celuleFolosite.has(cheieS)) continue
+      celuleFolosite.add(cheieS)
+      commands.push({ tick: t + 11, cmd: { kind: 'desemneaza', wx: sz.wx, wy: sz.wy, z: sz.z, piesa: Piesa.PERETE, prioritate: 2 } })
+      const mz = celulaBuna(scratch, s.wx + 7 + b * 2, s.wy + 1)
+      if (!mz) continue
+      const cheieM = mz.wx * 100000 + mz.wy
+      if (celuleFolosite.has(cheieM)) continue
+      celuleFolosite.add(cheieM)
+      commands.push({ tick: t + 12, cmd: { kind: 'lasaItem', fel: Item.PIATRA, cantitate: 20, wx: mz.wx, wy: mz.wy, z: mz.z } })
+    }
   }
 
   return { seed, ticks, commands }

@@ -250,6 +250,37 @@ test('scenariul standard chiar promoveaza teren — altfel oracolul e orb', () =
   assert.deepEqual(r.refusals, [], 'scenariul standard trebuie sa ruleze fara refuzuri')
 })
 
+test('scenariul standard atinge TOATE subsistemele pe care hash-ul le apara', () => {
+  // Frate cu testul de deasupra, si din acelasi motiv. Masurat pe 19.09.2026:
+  // scenariul n-avea NICIO desemnare de construit. Adica hash-ul de referinta din
+  // CI era orb la tot pasul 6 al taieturii 2 — departajarea pe al doilea picior,
+  // `matOriunde`, cauza „lipsa material". Toate trei au fost schimbate in aceeasi
+  // zi, doua dintre ele reparand defecte reale, si hash-ul n-a clipit.
+  //
+  // Se verifica DOUA lucruri diferite: ce DECLARA scenariul (comenzile lui), si ce
+  // ATINGE (rularea). Primul se poate strica la o refactorizare de fixtura, al
+  // doilea la una de gameplay, si niciunul nu-l implica pe celalalt.
+  const s = standardScenario(12345, 2000, 40)
+  const feluri = new Map<string, number>()
+  for (const c of s.commands ?? []) {
+    const k = c.cmd.kind === 'desemneaza'
+      ? ((c.cmd as { piesa?: number }).piesa ? 'desemneaza:construit' : 'desemneaza:sapat')
+      : c.cmd.kind === 'lasaItem'
+        ? `lasaItem:${(c.cmd as { fel: number }).fel}`
+        : c.cmd.kind
+    feluri.set(k, (feluri.get(k) ?? 0) + 1)
+  }
+  for (const cerut of ['desemneaza:sapat', 'desemneaza:construit', 'picteazaZona', 'spawnAgent']) {
+    assert.ok((feluri.get(cerut) ?? 0) > 0,
+      `scenariul nu DECLARA nimic de felul „${cerut}": ${[...feluri.keys()].sort().join(', ')}`)
+  }
+
+  const r = runScenario(s)
+  assert.ok(r.world.ratiune.unitatiZidite > 0,
+    'scenariul declara santiere dar nu zideste nimic: hash-ul ramane orb la constructie')
+  assert.deepEqual(r.refusals, [], 'scenariul standard trebuie sa ruleze fara refuzuri')
+})
+
 test('scenariul standard sapa si sub cota zero, si peste', () => {
   // Cota se calculeaza cu `Math.floor(cm / 100)`, iar pe negative `Math.floor`
   // nu e acelasi lucru cu trunchierea: -250 cm inseamna -3 m, nu -2 m. Un
