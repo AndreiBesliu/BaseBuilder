@@ -648,6 +648,19 @@ function incarcaDesemnari(raw: unknown, rules: Rules): Outcome<DesignationStore>
     // se REFUZA, nu se repara tacut.
     const felPiesa = d.piesa[i]!
     const eConstructie = d.kind[i] === Desemnare.CONSTRUIESTE
+    // Si piesa trebuie sa EXISTE in tabel. Verificarea de mai jos cerea doar ca ea
+    // sa fie diferita de santinela, deci un `piesa` din afara tabelului trecea, iar
+    // prima scanare care il folosea ca indice (`rules.piese[felPiesa]`, `rez[...]`)
+    // crapa cu TypeError — o incarcare acceptata care omoara jocul cateva zeci de
+    // tickuri mai tarziu. Un save stricat se REFUZA la usa, nu se descopera in rulare.
+    if (felPiesa < 0 || felPiesa >= rules.piese.length) {
+      return refuse(Reason.VALOARE_INVALIDA, {
+        camp: `desemnari.piesa[${i}]`,
+        valoare: felPiesa,
+        maxim: rules.piese.length - 1,
+        motiv: 'piesa nu exista in tabelul de continut',
+      })
+    }
     if (eConstructie !== (felPiesa !== Piesa.NICIUNA)) {
       return refuse(Reason.VALOARE_INVALIDA, {
         camp: `desemnari.piesa[${i}]`,

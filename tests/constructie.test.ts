@@ -1411,3 +1411,61 @@ test('comparatorul de candidati e o ordine TOTALA — exhaustiv, nu pe esantion'
   for (const a of cand) for (const b of cand) if (a.id !== b.id && a.g * (1 + b.d) === b.g * (1 + a.d)) legate++
   assert.ok(legate > 50, `doar ${legate} perechi legate pe scor: tocmai cazul care doare lipseste`)
 })
+
+test('cand materialul APARE in lume, cauza „lipsa material" se STERGE de pe santier', () => {
+  // Ramura de stergere din bucla ieftina. Fara ea, un santier ramane portocaliu pe
+  // veci dupa prima lipsa de material: panoul ar arata un blocaj care nu mai exista,
+  // si exact asta face o lista de cauze sa nu mai fie citita de nimeni.
+  //
+  // Testul de deasupra („poarta CAUZA") nu poate lega ramura asta: acolo materialul
+  // nu apare niciodata, deci stergerea nu se executa. Iar cel de dupa nu poate lega
+  // punerea detaliului pe zero, fiindca detaliul PORNESTE de la zero.
+  const spec = R.piese[Piesa.PERETE]!
+  const { w, wx, wy, ids } = santier6c(12345, 3, 2, false)
+  ruleaza(w, 400)
+  for (const id of ids) {
+    const s = slotDesemnare(w.desemnari, id)
+    assert.notEqual(s, -1, 'fixtura: santierul a disparut')
+    assert.equal(w.desemnari.ultimulMotiv[s]!, codMotiv(Reason.LIPSA_MATERIAL),
+      'fixtura moarta: cauza nici n-a fost scrisa, deci n-are ce sa se stearga')
+  }
+
+  // Apare piatra. Dupa prima rescanare, cauza n-are voie sa mai stea acolo.
+  for (let i = 0; i < 3; i++) lasaItem(w, Item.PIATRA, spec.cantitate, wx + 1, wy + 1 + i)
+  ruleaza(w, 120)
+
+  let vii = 0
+  for (const id of ids) {
+    const s = slotDesemnare(w.desemnari, id)
+    if (s === -1) continue
+    vii++
+    assert.notEqual(w.desemnari.ultimulMotiv[s]!, codMotiv(Reason.LIPSA_MATERIAL),
+      `santierul ${id} inca poarta „lipsa material" desi lumea are piatra`)
+  }
+  assert.ok(vii > 0, 'fixtura moarta: toate santierele s-au zidit, deci n-a ramas ce verifica')
+})
+
+test('cauza „lipsa material" nu mosteneste detaliul cauzei dinainte', () => {
+  // Cauza si detaliul sunt doua campuri, iar panoul le citeste PERECHE. Trecerea
+  // scumpa scrie INACCESIBIL + COMPONENTE_DIFERITE si o racire; cand racirea expira
+  // si lumea a ramas fara material, trecerea ieftina scrie LIPSA_MATERIAL. Daca
+  // detaliul nu se pune inapoi pe zero, panoul afiseaza o pereche imposibila:
+  // „lipsa material, din cauza ca sunt in componente diferite".
+  //
+  // Detaliul se pune DIRECT pe store, ca in testele de poarta de mai sus: altfel
+  // fixtura ar trebui sa produca o racire expirata, si atunci testul ar masura
+  // rabdarea, nu garda.
+  const { w, ids } = santier6c(12345, 3, 2, false)
+  for (const id of ids) {
+    const s = slotDesemnare(w.desemnari, id)
+    w.desemnari.ultimulMotivDetaliu[s] = DetaliuMotiv.COMPONENTE_DIFERITE
+  }
+  ruleaza(w, 400)
+  for (const id of ids) {
+    const s = slotDesemnare(w.desemnari, id)
+    assert.notEqual(s, -1)
+    assert.equal(w.desemnari.ultimulMotiv[s]!, codMotiv(Reason.LIPSA_MATERIAL))
+    assert.equal(w.desemnari.ultimulMotivDetaliu[s]!, DetaliuMotiv.NICIUNUL,
+      `santierul ${id}: detaliul ${w.desemnari.ultimulMotivDetaliu[s]} a ramas agatat de cauza veche`)
+  }
+})

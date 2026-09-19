@@ -455,4 +455,27 @@ export const MUTATII = [
     b: "      if (!alMeu) continue\n      matOriunde[p] = true",
     t: 'tests/constructie.test.ts', e: 'mormanul evitat de pioni',
   },
+
+  // --- goluri gasite de a doua recenzie adversariala ---
+  {
+    n: 'decode nu verifica daca `piesa` exista in tabel (TypeError la prima scanare)',
+    f: 'src/sim/save.ts',
+    a: "    if (felPiesa < 0 || felPiesa >= rules.piese.length) {",
+    b: "    if (false) {",
+    t: 'tests/saveload.test.ts', e: 'o `piesa` din afara tabelului',
+  },
+  {
+    n: 'ramura care STERGE cauza „lipsa material" dispare (santierul ramane portocaliu pe veci)',
+    f: 'src/sim/joburi.ts',
+    a: "      } else if (d.ultimulMotiv[s]! === codMotiv(Reason.LIPSA_MATERIAL)) {",
+    b: "      } else if (false) {",
+    t: 'tests/constructie.test.ts', e: 'cand materialul APARE in lume',
+  },
+  {
+    n: 'detaliul nu se mai pune pe NICIUNUL, deci ramane agatat de cauza dinainte',
+    f: 'src/sim/joburi.ts',
+    a: "        d.ultimulMotiv[s] = codMotiv(Reason.LIPSA_MATERIAL)\n        d.ultimulMotivDetaliu[s] = DetaliuMotiv.NICIUNUL",
+    b: "        d.ultimulMotiv[s] = codMotiv(Reason.LIPSA_MATERIAL)",
+    t: 'tests/constructie.test.ts', e: 'cauza „lipsa material" nu mosteneste',
+  },
 ]

@@ -9,6 +9,7 @@ import { Reason } from '../src/sim/result.ts'
 import { groundLevelM, materialAt, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { FelJob, Item, Nevoie, NEVOI, Piesa } from '../src/sim/state.ts'
+import { Desemnare } from '../src/sim/desemnari.ts'
 import type { World } from '../src/sim/state.ts'
 import { desemneaza, lasaItem, laSit, picteaza, R, solid, solidLaDistanta } from './fixturi.ts'
 
@@ -251,4 +252,32 @@ test('fixtura bogata ATINGE ce pretinde: toate felurile de job, marfa in mana, s
   assert.ok(cuIteme > 100, `fixtura moarta: iteme vii doar ${cuIteme} tickuri din 800`)
   assert.ok(cuDesemnari > 100, `fixtura moarta: desemnari vii doar ${cuDesemnari} tickuri din 800`)
   assert.ok(cuZone > 100, `fixtura moarta: zone vii doar ${cuZone} tickuri din 800`)
+})
+
+test('o `piesa` din afara tabelului e refuzata la USA, nu descoperita la prima scanare', () => {
+  // Verificarea existenta cerea doar ca `piesa` sa fie diferita de santinela cand
+  // felul e CONSTRUIESTE. Un `piesa` din afara tabelului trecea amandoua conditiile,
+  // iar prima scanare care il folosea ca indice crapa cu TypeError — adica o
+  // incarcare ACCEPTATA care omoara jocul cateva zeci de tickuri mai tarziu.
+  const w = lumeBogata(12345)
+  let k = -1
+  for (let i = 0; i < w.desemnari.count; i++) {
+    if (w.desemnari.alive[i] === 1 && w.desemnari.kind[i] === Desemnare.CONSTRUIESTE) { k = i; break }
+  }
+  assert.notEqual(k, -1, 'fixtura moarta: n-are nicio desemnare de construit')
+
+  const brut = JSON.parse(encode(w)) as { data: { desemnari: { piesa: number[] } } }
+  // Controlul: NEATINS, acelasi save se incarca.
+  assert.ok(decode(JSON.stringify(brut), R).ok, 'fixtura: save-ul neatins nu se incarca')
+
+  for (const valoare of [200, -1, R.piese.length]) {
+    const stricat = JSON.parse(encode(w)) as { data: { desemnari: { piesa: number[] } } }
+    stricat.data.desemnari.piesa[k] = valoare
+    const out = decode(JSON.stringify(stricat), R)
+    assert.equal(out.ok, false, `piesa ${valoare} a fost ACCEPTATA la incarcare`)
+    if (!out.ok) {
+      assert.equal(out.reason, Reason.VALOARE_INVALIDA, `piesa ${valoare}: refuzata, dar din alt motiv`)
+    }
+  }
+  assert.ok(brut.data.desemnari.piesa.length > 0)
 })
