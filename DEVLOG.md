@@ -3328,7 +3328,11 @@ fiindcă CLAUDE.md scria „~50 de minute". Acum rulează, într-un job separat,
 - **Nimic nu e împins.** Cele ~19 commit-uri ale zilei sunt locale; CI n-a văzut niciunul, iar
   hash-ul nou și jobul de mutații se verifică abia la primul push.
 - **`AO_FACTOR`** — tot singurul număr al arcului de grafică ieșit dintr-o judecată vizuală.
-- **`remeshAfterEdit`** rămâne cod de browser fără test; `sapaturaUrmatoare` e probat, ce face
-  viewerul cu rezultatul ei nu.
+- ~~**`remeshAfterEdit`** rămâne cod de browser fără test.~~ **ÎNCHIS 19.09:** a ieșit în
+  `src/render/remesh.ts` ca `chunkuriDeRefacut`, cu `exista`/`eraPromovat` ca funcții, deci
+  probabil headless — 7 teste, 4 probe. A ieșit la iveală și o asimetrie: cusătura nu verifica
+  existența vecinului, deci mulțimea putea conține chei fantomă, iar mulțimea aia e cea NUMĂRATĂ
+  când se scriu „remesh-uri pe săpătură" în GATE.md. Măsurat înainte de a o numi bug: **zero chei
+  fantomă** pe rularea de S-DIG, deci cifrele rămân și garda e defensivă, nu o reparație.
 - **Prioritățile personale asimetrice** și `racireDesemnare` care numără `vii` peste toate felurile
   — netestate, de la prima recenzie.
