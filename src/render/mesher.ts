@@ -463,19 +463,91 @@ function pushFusta(cheie: number, lx: number, ly: number, cm: Int32Array, plat: 
   const x0 = lx * CM, x1 = (lx + 1) * CM, y0 = ly * CM, y1 = (ly + 1) * CM
   // Perechile de colturi ale fiecarei muchii, in ordinea varfurilor fetei de sus:
   // 0=(x0,y0) 1=(x1,y0) 2=(x1,y1) 3=(x0,y1).
-  if (!suprafataNaturala(lx + 1, ly) && (cm[1] !== plat || cm[2] !== plat)) {
-    pushQuadCm(Face.X_POS, cheie, x1, y0, plat, x1, y1, plat, x1, y1, cm[2]!, x1, y0, cm[1]!)
+  if (!suprafataNaturala(lx + 1, ly)) pushFustaLatura(Face.X_POS, cheie, x1, y0, x1, y1, cm[1]!, cm[2]!, plat)
+  if (!suprafataNaturala(lx - 1, ly)) pushFustaLatura(Face.X_NEG, cheie, x0, y0, x0, y1, cm[0]!, cm[3]!, plat)
+  if (!suprafataNaturala(lx, ly + 1)) pushFustaLatura(Face.Y_POS, cheie, x0, y1, x1, y1, cm[3]!, cm[2]!, plat)
+  if (!suprafataNaturala(lx, ly - 1)) pushFustaLatura(Face.Y_NEG, cheie, x0, y0, x1, y0, cm[0]!, cm[1]!, plat)
+}
+
+/**
+ * O latura de fusta, TAIATA la cota `plat`.
+ *
+ * Fusta umple golul dintre muchia netezita — care merge de la `za` la `zb` — si
+ * cota plata a vecinului nenetezit. Prima varianta emitea un singur quad,
+ * `(a,plat) (b,plat) (b,zb) (a,za)`, si e corect cat timp AMANDOUA cotele sunt de
+ * aceeasi parte a lui `plat`.
+ *
+ * Cand una e dedesubt si alta deasupra, muchia (b,zb)->(a,za) TAIE muchia
+ * (a,plat)->(b,plat): quadul se auto-intersecteaza, iese „papion", iar cele doua
+ * triunghiuri ale lui au infasurari OPUSE. Unul din ele ajunge dorsal si culling-ul
+ * il sterge — adica exact o gaura, in geometria pusa acolo ca sa inchida gauri.
+ * Masurat pe chunk-ul fixturii: **15 triunghiuri dorsale, 0,680 m²**.
+ *
+ * Cota netezita poate depasi varful voxelului cu pana la cativa centimetri, fiindca
+ * `vertexCm` e cota reala a terenului in colt, iar nivelul voxelului e podeaua ei.
+ * Partea de DEASUPRA lui `plat` nu are nevoie de fusta: acolo suprafata netezita e
+ * mai sus decat varful voxelului, iar vecinul mai inalt isi emite singur geometria.
+ * Deci se taie la intersectie si se pastreaza doar partea de dedesubt.
+ */
+function pushFustaLatura(
+  face: number, cheie: number,
+  ax: number, ay: number, bx: number, by: number,
+  za: number, zb: number, plat: number,
+): void {
+  if (za === plat && zb === plat) return
+
+  // Triunghi, emis ca quad cu ULTIMELE doua varfuri suprapuse. Ordinea conteaza:
+  // `quadFlipped` citeste doar PRIMUL triunghi ca sa afle infasurarea, iar daca ala e
+  // cel degenerat nu poate afla nimic si rastoarna tot quadul. Prima reparatie punea
+  // suprapunerea pe pozitiile 1 si 2 si a taiat dorsalele doar de la 15 la 7; a doua
+  // a uitat cazul in care un capat cade EXACT pe `plat`, si au mai ramas 2.
+  const tri = (
+    p1x: number, p1y: number, p1z: number,
+    p2x: number, p2y: number, p2z: number,
+    p3x: number, p3y: number, p3z: number,
+  ): void => {
+    pushQuadCm(face, cheie, p1x, p1y, p1z, p2x, p2y, p2z, p3x, p3y, p3z, p3x, p3y, p3z)
   }
-  if (!suprafataNaturala(lx - 1, ly) && (cm[0] !== plat || cm[3] !== plat)) {
-    pushQuadCm(Face.X_NEG, cheie, x0, y0, plat, x0, y1, plat, x0, y1, cm[3]!, x0, y0, cm[0]!)
+
+  // Infasurarea, aceeasi pentru fiecare bucata: pe marginea de SUS de la a la b, jos
+  // la b, inapoi pe marginea de JOS de la b la a, sus la a.
+  if (za <= plat && zb <= plat) {
+    if (zb === plat) tri(ax, ay, plat, bx, by, plat, ax, ay, za)
+    else if (za === plat) tri(ax, ay, plat, bx, by, plat, bx, by, zb)
+    else pushQuadCm(face, cheie, ax, ay, plat, bx, by, plat, bx, by, zb, ax, ay, za)
+    return
   }
-  if (!suprafataNaturala(lx, ly + 1) && (cm[2] !== plat || cm[3] !== plat)) {
-    pushQuadCm(Face.Y_POS, cheie, x0, y1, plat, x1, y1, plat, x1, y1, cm[2]!, x0, y1, cm[3]!)
+  if (za >= plat && zb >= plat) {
+    // Cazul EXISTA: `vertexCm` e cota reala a terenului in colt, iar nivelul voxelului
+    // e podeaua ei, deci netezirea poate urca cativa centimetri peste varful voxelului.
+    if (zb === plat) tri(ax, ay, za, bx, by, plat, ax, ay, plat)
+    else if (za === plat) tri(ax, ay, plat, bx, by, zb, bx, by, plat)
+    else pushQuadCm(face, cheie, ax, ay, za, bx, by, zb, bx, by, plat, ax, ay, plat)
+    return
   }
-  if (!suprafataNaturala(lx, ly - 1) && (cm[0] !== plat || cm[1] !== plat)) {
-    pushQuadCm(Face.Y_NEG, cheie, x0, y0, plat, x1, y0, plat, x1, y0, cm[1]!, x0, y0, cm[0]!)
+
+  // Muchia STRABATE `plat` — strict, fiindca egalitatile au fost luate mai sus. Un
+  // singur quad ar fi „papion": latura (b,zb)->(a,za) taie latura (a,plat)->(b,plat),
+  // cele doua triunghiuri ies cu infasurari OPUSE, si culling-ul sterge unul din ele.
+  // O gaura, in geometria pusa acolo ca sa inchida gauri: masurat, 15 triunghiuri
+  // dorsale si 0,680 m² pe chunk-ul fixturii.
+  //
+  // Se taie la intersectie, si fiecare bucata isi ia orientarea ei. AMANDOUA se
+  // pastreaza: partea de deasupra chiar acoperea ceva — era doar dorsala, deci
+  // invizibila. Aruncarea ei a inrosit testul de etanseitate.
+  const t = (plat - za) / (zb - za)
+  const cx = Math.round(ax + (bx - ax) * t)
+  const cy = Math.round(ay + (by - ay) * t)
+  if (za < plat) {
+    tri(ax, ay, plat, cx, cy, plat, ax, ay, za)
+    tri(cx, cy, plat, bx, by, zb, bx, by, plat)
+  } else {
+    tri(ax, ay, za, cx, cy, plat, ax, ay, plat)
+    tri(cx, cy, plat, bx, by, plat, bx, by, zb)
   }
 }
+
+
 
 function pushQuad(
   face: number,

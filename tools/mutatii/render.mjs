@@ -186,4 +186,27 @@ export const MUTATII = [
     b: "    if (incearca(wx, wy, cota - (c % 5))) return { wx, wy, cursor: cursor + 1 }",
     t: 'tests/sdig.test.ts', e: 'cele 1200 de sapaturi ale unei rulari se FAC',
   },
+
+  // --- fusta „papion", gasita de a doua recenzie adversariala ---
+  {
+    n: 'fusta nu se mai taie la cota plata (un singur quad, care iese papion)',
+    f: 'src/render/mesher.ts',
+    a: "  if (za < plat) {\n    tri(ax, ay, plat, cx, cy, plat, ax, ay, za)\n    tri(cx, cy, plat, bx, by, zb, bx, by, plat)\n  } else {\n    tri(ax, ay, za, cx, cy, plat, ax, ay, plat)\n    tri(cx, cy, plat, bx, by, plat, bx, by, zb)\n  }",
+    b: "  void cx\n  void cy\n  pushQuadCm(face, cheie, ax, ay, plat, bx, by, plat, bx, by, zb, ax, ay, za)",
+    t: 'tests/mesher.test.ts', e: 'niciun quad NETEZIT nu e',
+  },
+  {
+    n: 'varfurile suprapuse ajung PRIMELE, deci quadFlipped nu mai poate afla infasurarea',
+    f: 'src/render/mesher.ts',
+    a: "    pushQuadCm(face, cheie, p1x, p1y, p1z, p2x, p2y, p2z, p3x, p3y, p3z, p3x, p3y, p3z)",
+    b: "    pushQuadCm(face, cheie, p1x, p1y, p1z, p1x, p1y, p1z, p2x, p2y, p2z, p3x, p3y, p3z)",
+    t: 'tests/mesher.test.ts', e: 'niciun quad NETEZIT nu e',
+  },
+  {
+    n: 'partea de DEASUPRA cotei plate se arunca (gauri la mal)',
+    f: 'src/render/mesher.ts',
+    a: "    if (zb === plat) tri(ax, ay, za, bx, by, plat, ax, ay, plat)\n    else if (za === plat) tri(ax, ay, plat, bx, by, zb, bx, by, plat)\n    else pushQuadCm(face, cheie, ax, ay, za, bx, by, zb, bx, by, plat, ax, ay, plat)\n    return",
+    b: "    return",
+    t: 'tests/mesher.test.ts', e: 'INVELISUL NETEZIT e ETANS',
+  },
 ]

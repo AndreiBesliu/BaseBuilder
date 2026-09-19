@@ -18,6 +18,7 @@ import type { Chunk } from '../src/sim/terrain/chunk.ts'
 import { nextInt, stream } from '../src/sim/rng.ts'
 import { chunkKey, createTerrain, dig, fill, groundLevelM, setFocus } from '../src/sim/terrain/terrain.ts'
 import { writeQuadIndices } from '../src/render/winding.ts'
+import { makeM10 } from '../src/harness/fixture-m10.ts'
 
 const COLUMNS = CHUNK_CELLS * CHUNK_CELLS
 
@@ -781,4 +782,119 @@ test('fixtura de etanseitate ATINGE cazul: exista muchii intre netezit si nenete
     for (let v = 0; v < 4; v++) if (m.positions[o + v * 3 + 2]! % 100 !== 0) { fuste++; break }
   }
   assert.ok(fuste > 10, `doar ${fuste} fuste emise — fixtura n-are mal si n-are gropi, deci etanseitatea nu proba nimic`)
+})
+
+/**
+ * Cate triunghiuri ies DORSALE dupa triangularea de productie, si ce arie.
+ *
+ * Deosebirea fata de testul de deasupra: se verifica AMANDOUA triunghiurile fiecarui
+ * quad, nu doar primul. Un quad „papion" — care se auto-intersecteaza — are exact
+ * asta: primul triunghi corect, al doilea intors pe dos. Testul care se uita doar la
+ * primul nu-l poate vedea.
+ *
+ * Triunghiurile cu aria zero se SAR, si se numara: fusta emite triunghiuri ca quaduri
+ * cu ultimele doua varfuri suprapuse, deci degeneratele sunt normale acolo.
+ */
+function dorsale(m: ReturnType<typeof meshChunk>): { dorsale: number; arieCm2: number; degenerate: number; verificate: number; primul: string } {
+  const idx = new Uint32Array(6)
+  const p = m.positions
+  let nd = 0
+  let arie = 0
+  let deg = 0
+  let ver = 0
+  let primul = ''
+  for (let q = 0; q < m.quadCount; q++) {
+    writeQuadIndices(m, q, 0, idx, 0)
+    const face = m.faces[q]!
+    const asteptat = [
+      face === Face.X_POS ? 1 : face === Face.X_NEG ? -1 : 0,
+      face === Face.Z_POS ? 1 : face === Face.Z_NEG ? -1 : 0,
+      face === Face.Y_POS ? 1 : face === Face.Y_NEG ? -1 : 0,
+    ]
+    // spatiul lui three: (x, z, y) din spatiul mesher-ului
+    const varf = (k: number): [number, number, number] => {
+      const b = q * 12 + k * 3
+      return [p[b]!, p[b + 2]!, p[b + 1]!]
+    }
+    for (let t = 0; t < 2; t++) {
+      const a = varf(idx[t * 3]!)
+      const b = varf(idx[t * 3 + 1]!)
+      const c = varf(idx[t * 3 + 2]!)
+      const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]]
+      const v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]]
+      const n = [
+        u[1]! * v[2]! - u[2]! * v[1]!,
+        u[2]! * v[0]! - u[0]! * v[2]!,
+        u[0]! * v[1]! - u[1]! * v[0]!,
+      ]
+      const lung = Math.hypot(n[0]!, n[1]!, n[2]!)
+      if (lung === 0) { deg++; continue }
+      ver++
+      const dot = (n[0]! * asteptat[0]! + n[1]! * asteptat[1]! + n[2]! * asteptat[2]!) / lung
+      if (dot < 0) {
+        nd++
+        arie += lung / 2
+        if (!primul) primul = `q=${q} fata=${face} triunghi=${t + 1} dot=${dot.toFixed(3)}`
+      }
+    }
+  }
+  return { dorsale: nd, arieCm2: arie, degenerate: deg, verificate: ver, primul }
+}
+
+test('niciun quad NETEZIT nu e „papion": ambele triunghiuri arata in afara', () => {
+  // Fusta umple golul dintre muchia netezita si cota plata a vecinului nenetezit.
+  // Cand cele doua cote ale muchiei cad de o parte si de alta a cotei plate, un
+  // singur quad se auto-intersecteaza: cele doua triunghiuri ies cu infasurari
+  // OPUSE, culling-ul il sterge pe cel dorsal, si ramane o gaura — chiar in
+  // geometria pusa acolo ca sa inchida gauri.
+  //
+  // Masurat la gasire: **15 triunghiuri dorsale, 0,680 m²** pe chunk-ul fixturii.
+  // Testul de infasurare de deasupra nu putea sa-l vada: se uita doar la PRIMUL
+  // triunghi al fiecarui quad, iar la un papion ala e cel corect.
+  const c = chunkPromovat()
+
+  // Controlul: pe meshul FIDEL acelasi oracol trece. Fara el, un „0 dorsale" ar
+  // putea insemna la fel de bine ca oracolul s-a stricat.
+  const fidel = dorsale(meshChunk(c))
+  assert.equal(fidel.dorsale, 0, `oracolul e stricat: ${fidel.dorsale} dorsale pe meshul FIDEL`)
+  assert.ok(fidel.verificate > 1000, `oracolul a verificat doar ${fidel.verificate} triunghiuri pe meshul fidel`)
+
+  const netezit = dorsale(meshChunk(c, undefined, true))
+  assert.equal(netezit.dorsale, 0,
+    `${netezit.dorsale} triunghiuri dorsale, ${(netezit.arieCm2 / 10000).toFixed(3)} m² sterse de culling. Primul: ${netezit.primul}`)
+  assert.ok(netezit.verificate > 1000, `doar ${netezit.verificate} triunghiuri verificate pe calea netezita`)
+  // Fixtura ATINGE cazul: exista chiar triunghiuri emise ca quaduri degenerate, adica
+  // fuste taiate la cota plata. Fara ele, testul n-ar proba nimic despre taiere.
+  assert.ok(netezit.degenerate > 0, 'fixtura moarta: nicio fusta nu e taiata la cota plata')
+})
+
+test('nici in configuratia de PRODUCTIE — vecini SI netezire — nu exista dorsale', () => {
+  // Testul de deasupra merge pe un chunk fara vecini. Viewerul cheama
+  // `meshChunk(chunk, neighboursOf(chunk), true)`, si vecinii schimba ce fete se
+  // emit: o fata acoperita de vecin se taie, iar `natLevel` primeste apron. Un test
+  // pe configuratia gresita apara alt cod decat cel care ruleaza.
+  const { terrain } = makeM10(20260913, 300, 300, 11)
+  const la = (cx: number, cy: number): Chunk | null => terrain.chunks.get(cy * 512 + cx) ?? null
+  const promovate = [...terrain.keys].map((k) => terrain.chunks.get(k)!).filter((c) => c.voxels)
+  assert.ok(promovate.length > 100, `fixtura: doar ${promovate.length} chunk-uri promovate`)
+
+  let total = 0
+  let verificate = 0
+  let degenerate = 0
+  let primul = ''
+  for (const c of promovate) {
+    const m = meshChunk(c, {
+      xNeg: la(c.cx - 1, c.cy), xPos: la(c.cx + 1, c.cy), yNeg: la(c.cx, c.cy - 1), yPos: la(c.cx, c.cy + 1),
+      xNegYNeg: la(c.cx - 1, c.cy - 1), xPosYNeg: la(c.cx + 1, c.cy - 1),
+      xNegYPos: la(c.cx - 1, c.cy + 1), xPosYPos: la(c.cx + 1, c.cy + 1),
+    }, true)
+    const r = dorsale(m)
+    total += r.dorsale
+    verificate += r.verificate
+    degenerate += r.degenerate
+    if (!primul && r.primul) primul = `chunk ${c.cx}/${c.cy}: ${r.primul}`
+  }
+  assert.equal(total, 0, `${total} triunghiuri dorsale pe fixtura intreaga. Primul: ${primul}`)
+  assert.ok(verificate > 500_000, `doar ${verificate} triunghiuri verificate`)
+  assert.ok(degenerate > 0, 'fixtura moarta: nicio fusta taiata in toata fixtura')
 })
