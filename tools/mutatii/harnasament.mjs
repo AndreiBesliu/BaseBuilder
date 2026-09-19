@@ -66,7 +66,7 @@ export function testePicate(fisierDeTest) {
  * Cu `core.autocrlf=true`, orice fisier atins de git are CRLF, iar un tipar scris
  * cu `\n` nu se mai potriveste. A saptea oara cand asta muscă.
  */
-function potrivit(continut, tipar) {
+export function potrivit(continut, tipar) {
   return continut.includes('\r\n') ? tipar.replace(/\n/g, '\r\n') : tipar
 }
 
