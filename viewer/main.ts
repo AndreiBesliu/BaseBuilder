@@ -1179,7 +1179,8 @@ function stepFrame(ts: number): void {
         : stabOverlay.piedica !== ''
           ? ` · ${stabOverlay.piedica}`
           : ` · ultima-celula ${stabOverlay.ultima} cade ${stabOverlay.cade}` +
-            (stabOverlay.previzualizate > 0 ? ` · desemnarile ar prabusi ${stabOverlay.previzualizate}` : '')
+            (stabOverlay.previzualizate > 0 ? ` · desemnarile ar prabusi ${stabOverlay.previzualizate}` : '') +
+            (stabOverlay.imposibile > 0 ? ` · ${stabOverlay.imposibile} piese NU se pot zidi` : '')
       el('jobs').textContent = `${d} desemnari · idle ${r.idle} merg ${r.merg} lucreaza ${r.lucreaza} cara ${r.cara}${o}${m}${n}${av}${fm}${st}`
       el('jobs').className = r.faraMuncitori || r.faraCarausi ? 'warn' : ''
       if (r.faraMuncitori) el('jobs').textContent += ' · NIMENI NU SAPA'

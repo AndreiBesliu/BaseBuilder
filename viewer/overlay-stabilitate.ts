@@ -41,7 +41,7 @@ import type { World } from '../src/sim/state.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { decodeCell } from '../src/sim/path.ts'
 import { Sol, solLa, StareSapat, stareSapat } from '../src/sim/stabilitate.ts'
-import { prabusireaPrevizualizata } from '../src/sim/joburi.ts'
+import { constructiaPrevizualizata, prabusireaPrevizualizata } from '../src/sim/joburi.ts'
 
 export interface StabilityOverlay {
   readonly group: THREE.Group
@@ -52,6 +52,11 @@ export interface StabilityOverlay {
   cade: number
   /** Cati voxeli ar cadea daca s-ar sapa TOATE desemnarile vii. */
   previzualizate: number
+  /**
+   * Cate piese desenate NU se pot ridica, nici dupa ce se ridica tot restul
+   * planului. Calculate pe MULTIMEA desemnarilor, ca punct fix.
+   */
+  imposibile: number
   /** Cate celule au ajuns la scanarea SCUMPA. Pentru bugetul de cadru. */
   scanate: number
   /** Ce sa scrie in HUD cand overlay-ul nu poate desena nimic. Gol daca poate. */
@@ -61,7 +66,7 @@ export interface StabilityOverlay {
 export function createStabilityOverlay(): StabilityOverlay {
   const group = new THREE.Group()
   group.visible = false
-  return { group, visible: false, sigur: 0, ultima: 0, cade: 0, previzualizate: 0, scanate: 0, piedica: '' }
+  return { group, visible: false, sigur: 0, ultima: 0, cade: 0, previzualizate: 0, imposibile: 0, scanate: 0, piedica: '' }
 }
 
 function goleste(group: THREE.Group): void {
@@ -79,10 +84,18 @@ const CULOARE: Record<number, number> = {
   [StareSapat.CADE]: 0xd05040,
 }
 const CULOARE_PREVIZ = 0xff8030
+/**
+ * Imposibil de zidit. Nuanta e RECE, si deliberat departe de restul paletei:
+ * celelalte trei stari sunt despre ce CADE, asta e despre ce nu se poate pune.
+ * Actiunea ceruta jucatorului e alta — muta piesa, sau ridica intai ceva sub ea.
+ */
+const CULOARE_IMPOSIBIL = 0xb060d0
 
 /** Conturul de stare umple celula; cel de previzualizare sta INAUNTRUL lui. */
 const INSET_STARE = 0.08
 const INSET_PREVIZ = 0.26
+/** Intre ele, ca sa se poata citi si cand o celula e si imposibila si previzualizata. */
+const INSET_IMPOSIBIL = 0.17
 
 /**
  * Reconstruieste overlay-ul pentru nivelul activ.
@@ -104,6 +117,7 @@ export function rebuildStabilityOverlay(
   o.ultima = 0
   o.cade = 0
   o.previzualizate = 0
+  o.imposibile = 0
   o.scanate = 0
   o.piedica = ''
   if (!o.visible) return
@@ -185,6 +199,32 @@ export function rebuildStabilityOverlay(
     // deasupra planului de taiere, deci la cota lui reala ar fi invizibil. Ce
     // conteaza pentru jucator e COLOANA care pierde un voxel.
     patrat(pozitii, culori, c.wx, c.wy, Math.min(c.z, zActiv) + 0.98, INSET_PREVIZ, CULOARE_PREVIZ)
+  }
+
+  // --- ce nu se poate zidi, NICIODATA ---
+  //
+  // Se deseneaza DOAR `imposibile`, nu si `construibile`, din acelasi motiv
+  // pentru care „sigur" ramane nedesenat mai sus: o casa de 177 de piese ar
+  // acoperi ecranul cu contururi, si ar ingropa exact cele cateva care conteaza.
+  // Iar „imposibil" e ACTIONABIL — e singura stare la care jucatorul are ce face.
+  //
+  // Raspunsul se ia pe MULTIMEA desemnarilor, ca punct fix: o piesa sprijinita de
+  // alta piesa desenata e construibila, desi singura n-ar fi. Costul, masurat:
+  // 0,19 ms la 177 de piese si 6,3 ms la 1231, iar overlay-ul se reconstruieste o
+  // data la 30 de cadre — deci ~0,2 ms amortizat, fara memoizare.
+  // CONTORUL e global, DESENUL e in fereastra de +-16 celule din jurul focusului —
+  // la fel ca previzualizarea de prabusire de mai sus, si din acelasi motiv. Deci
+  // HUD-ul poate spune „6 piese NU se pot zidi" cand se vede una singura. Verificat
+  // pe ecran: mutand camera, celelalte cinci apar. Daca vreodata deranjeaza, leacul
+  // e sa spuna cate se vad DIN cate, nu sa se taie numarul global.
+  const constr = constructiaPrevizualizata(w, rules)
+  o.imposibile = constr.imposibile.length
+  for (const cheie of constr.imposibile) {
+    const c = decodeCell(cheie)
+    if (Math.abs(c.wx - cx) > raza || Math.abs(c.wy - cy) > raza) continue
+    // Ca la previzualizarea de prabusire: proiectat pe nivelul activ daca piesa e
+    // deasupra planului de taiere, altfel n-ar fi vizibila deloc.
+    patrat(pozitii, culori, c.wx, c.wy, Math.min(c.z, zActiv) + 0.94, INSET_IMPOSIBIL, CULOARE_IMPOSIBIL)
   }
 
   if (pozitii.length === 0) return
