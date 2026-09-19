@@ -73,7 +73,7 @@ export const MUTATII = [
     f: "src/render/mesher.ts",
     a: "          if (face === Face.Z_POS && natAt(lx, ly) === level) {",
     b: "          if (false) {",
-    t: 'tests/mesher.test.ts', e: 'netezirea aseaza fetele de sus la cote REALE',
+    t: 'tests/mesher.test.ts', e: 'netezirea aseaza fetele de sus EXACT',
   },
   {
     n: "peretii de treapta nu se mai suprima (panta ramane scara)",
