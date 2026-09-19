@@ -37,14 +37,28 @@
  * executa NICIODATA intr-o rulare de gate. Masurat: 0 promovari din 1200.
  *
  * Patratul incepe acum cu 3 chunk-uri inainte de focus, deci exista o banda de
- * frontiera. Masurat pe aceeasi rulare: **52 de promovari din 897 de sapaturi
- * acceptate (5,8%)**, iar ramura de 9 apare de 4 ori — era invizibila.
+ * frontiera. Masurat pe configuratia LIVRATA (cu reincercare): **52 de promovari
+ * din 1200 de sapaturi, 4,3%**, iar ramura de 9 apare de 4 ori — era invizibila.
  *
- * Banda e doar pe latura negativa, si asta e o proprietate a fixturii, nu o
- * scapare: `buildM10` ancoreaza asezarea in COLTUL focusului, iar streamingul e un
- * cerc de raza 11 in jurul lui. Coltul departat al asezarii (+13, +13) e deja in
- * afara cercului — se pastreaza doar fiindca e promovat. Pe latura pozitiva nu e
- * teren streamuit in care sa se poata sapa.
+ * (Cifra de aici a fost o vreme „52 din 897, 5,8%": aia era masuratoarea de
+ * DINAINTE de bucla de reincercare, cand 303 din 1200 de pozitii se pierdeau.
+ * Numaratorul a ramas acelasi, numitorul nu — si fisierul asta e facut anume ca sa
+ * fie sursa de adevar pentru scenariu, deci o cifra invechita aici e mai scumpa
+ * decat una intr-un comentariu oarecare.)
+ *
+ * ## De ce banda e doar pe latura negativa
+ *
+ * Motivul scris aici prima oara era FALS, si o recenzie adversariala l-a masurat:
+ * spunea ca „pe latura pozitiva nu e teren streamuit in care sa se poata sapa".
+ * Se poate: chunk-urile se creeaza la CERERE, deci o sapatura la +14 sau +20 de
+ * chunk-uri fata de focus e acceptata si chiar promoveaza.
+ *
+ * Latura negativa ramane, dar ca ALEGERE, nu ca limita. Acolo chunk-urile sunt deja
+ * rezidente si doar nepromovate, deci o sapatura masoara promovare + apron + remesh.
+ * Pe latura pozitiva ar masura si generarea chunk-ului, care e alt cost si tine de
+ * streaming, nu de bucla de constructie — adica exact ce masoara S-TRAVERSE.
+ * Scenariile n-au voie sa se suprapuna pe acelasi cost: daca ar face-o, un verdict
+ * n-ar mai spune care dintre ele l-a produs.
  */
 
 import { CHUNK_CELLS } from '../sim/terrain/chunk.ts'

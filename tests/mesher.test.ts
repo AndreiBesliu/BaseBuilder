@@ -497,8 +497,13 @@ test('netezirea aseaza fetele de sus EXACT pe cotele din vertexCm, in ordinea em
   // a bazei stivei raman sub-metrice, deci treceau. Masurat de o recenzie
   // adversariala: patru stricaciuni distincte, toate 391/391 verzi.
   //
-  // Ancora e INVARIANTUL: cele patru cote sunt exact varfurile din `vertexCm`,
-  // in ordinea de emitere (x0,y0), (x1,y0), (x1,y1), (x0,y1).
+  // Ancora e INVARIANTUL: cele patru varfuri sunt exact colturile celulei, in
+  // ordinea de emitere (x0,y0), (x1,y0), (x1,y1), (x0,y1), la cotele din `vertexCm`.
+  //
+  // Prima versiune verifica doar COTA. O a doua recenzie adversariala a masurat ce
+  // trece asa: mutand varful 2 de pe y1 pe y0, fiecare fata netezita devine un
+  // TRIUNGHI, aria in plan a fetelor de sus cade de la 1024 la 640 m² pe chunk —
+  // **37,5% din suprafata dispare** — si suita INTREAGA ramane verde.
   const c = chunkPromovat()
   const zBase = c.voxels!.zBaseM
   const m = meshChunk(c, undefined, true)
@@ -519,8 +524,18 @@ test('netezirea aseaza fetele de sus EXACT pe cotele din vertexCm, in ordinea em
         c.vertexCm[(y + 1) * V + x + 1]! - zBase * 100,
         c.vertexCm[(y + 1) * V + x]! - zBase * 100,
       ]
+      const asteptatX = [x * 100, (x + 1) * 100, (x + 1) * 100, x * 100]
+      const asteptatY = [y * 100, y * 100, (y + 1) * 100, (y + 1) * 100]
       verificate++
       for (let v = 0; v < 4; v++) {
+        assert.equal(
+          m.positions[o + v * 3], asteptatX[v],
+          `celula (${x},${y}), varful ${v}: x = ${m.positions[o + v * 3]}, asteptat ${asteptatX[v]}`,
+        )
+        assert.equal(
+          m.positions[o + v * 3 + 1], asteptatY[v],
+          `celula (${x},${y}), varful ${v}: y = ${m.positions[o + v * 3 + 1]}, asteptat ${asteptatY[v]}`,
+        )
         assert.equal(
           m.positions[o + v * 3 + 2], asteptat[v],
           `celula (${x},${y}), varful ${v}: ${m.positions[o + v * 3 + 2]} cm, asteptat ${asteptat[v]}`,
@@ -531,7 +546,7 @@ test('netezirea aseaza fetele de sus EXACT pe cotele din vertexCm, in ordinea em
   assert.ok(verificate > 500, `doar ${verificate} fete netezite verificate — fixtura nu atinge cazul`)
 })
 
-test('doua fete netezite vecine impart doua varfuri, deci si cotele lor', () => {
+test('doua fete netezite vecine impart doua varfuri, deci si cotele SI ocluzia lor', () => {
   // Independent de generator: nu cere ca o cota sa fie o anume valoare, ci ca
   // suprafata sa fie CONTINUA. Prinde inversarea axelor, pe care testul de mai sus
   // n-o vede — acolo geometria ramane coerenta cu ea insasi, doar rasucita.
@@ -548,19 +563,57 @@ test('doua fete netezite vecine impart doua varfuri, deci si cotele lor', () => 
     return areSuprafataNaturala(c, x, y, nat(x, y)) ? q : -1
   }
 
+  // Un varf comun, exprimat ca (quad, indice) in fiecare din cele doua fete.
+  //
+  // COTA se compara mereu: varfurile vin din `vertexCm`, care nu stie de niveluri.
+  //
+  // OCLUZIA doar cand cele doua fete sunt pe ACELASI nivel. AO se calculeaza din
+  // ocuparea din jurul coltului la nivelul FETEI, deci doua fete vecine aflate pe
+  // niveluri diferite au, in acelasi colt (x,y), vecinatati diferite — si au voie sa
+  // difere. Prima varianta a testului cerea egalitate peste tot si a picat pe cod
+  // corect, la perechea (1,0)-(2,0): instrumentul era prea tare, nu codul gresit.
+  //
+  // Restrictia nu slabeste testul acolo unde conteaza: pe fetele de acelasi nivel,
+  // coltul e acelasi punct cu aceeasi vecinatate, deci o rotire a tiparului de AO —
+  // stricaciunea pe care testul de mai jos n-o vede, fiindca masoara doar PREZENTA —
+  // se vede aici.
+  let cote = 0
+  let ocluzii = 0
+  const comun = (a: number, va: number, b: number, vb: number, acelasiNivel: boolean, ce: string): void => {
+    cote++
+    assert.equal(m.positions[a * 12 + va * 3 + 2], m.positions[b * 12 + vb * 3 + 2], `crapatura: ${ce}`)
+    if (!acelasiNivel) return
+    ocluzii++
+    assert.equal(m.ao[a * 4 + va], m.ao[b * 4 + vb], `ocluzie discontinua: ${ce}`)
+  }
+
   let perechi = 0
   for (let y = 0; y < CHUNK_CELLS - 1; y++) {
     for (let x = 0; x < CHUNK_CELLS - 1; x++) {
       const a = netezita(x, y)
-      const b = netezita(x + 1, y)
-      if (a === -1 || b === -1) continue
-      perechi++
-      // Muchia comuna: varfurile 1,2 ale lui A sunt varfurile 0,3 ale lui B.
-      assert.equal(m.positions[a * 12 + 5], m.positions[b * 12 + 2], `crapatura intre (${x},${y}) si (${x + 1},${y}), coltul de jos`)
-      assert.equal(m.positions[a * 12 + 8], m.positions[b * 12 + 11], `crapatura intre (${x},${y}) si (${x + 1},${y}), coltul de sus`)
+      // Vecinul pe X: varfurile 1,2 ale lui A sunt varfurile 0,3 ale lui B.
+      const bx = netezita(x + 1, y)
+      if (a !== -1 && bx !== -1) {
+        perechi++
+        const n1 = nat(x, y) === nat(x + 1, y)
+        comun(a, 1, bx, 0, n1, `(${x},${y}) si (${x + 1},${y}), coltul de jos`)
+        comun(a, 2, bx, 3, n1, `(${x},${y}) si (${x + 1},${y}), coltul de sus`)
+      }
+      // Vecinul pe Y: varfurile 3,2 ale lui A sunt varfurile 0,1 ale lui B. Axa asta
+      // lipsea, iar fara ea o inversare care pastreaza continuitatea pe X trecea.
+      const by = netezita(x, y + 1)
+      if (a !== -1 && by !== -1) {
+        perechi++
+        const n2 = nat(x, y) === nat(x, y + 1)
+        comun(a, 3, by, 0, n2, `(${x},${y}) si (${x},${y + 1}), coltul din stanga`)
+        comun(a, 2, by, 1, n2, `(${x},${y}) si (${x},${y + 1}), coltul din dreapta`)
+      }
     }
   }
-  assert.ok(perechi > 400, `doar ${perechi} perechi de fete netezite vecine — fixtura nu atinge cazul`)
+  assert.ok(perechi > 800, `doar ${perechi} perechi de fete netezite vecine — fixtura nu atinge cazul`)
+  assert.ok(cote > 1600, `doar ${cote} varfuri comune verificate pe cota`)
+  // Contorul care conteaza: restrictia la acelasi nivel n-a golit multimea.
+  assert.ok(ocluzii > 400, `doar ${ocluzii} varfuri comune pe acelasi nivel — ocluzia nu e probata`)
 })
 
 test('fetele NETEZITE primesc ocluzie, nu doar cele unite lacom', () => {

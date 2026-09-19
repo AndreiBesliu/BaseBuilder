@@ -209,4 +209,35 @@ export const MUTATII = [
     b: "    return",
     t: 'tests/mesher.test.ts', e: 'INVELISUL NETEZIT e ETANS',
   },
+
+  // --- x, y si ocluzia fetei netezite: goluri gasite de a doua recenzie ---
+  {
+    n: 'varful 2 al fetei netezite trece de pe y1 pe y0 (fata devine TRIUNGHI, 37,5% din suprafata dispare)',
+    f: 'src/render/mesher.ts',
+    a: "  pushQuadCm(Face.Z_POS, cheie, x0, y0, cm[0]!, x1, y0, cm[1]!, x1, y1, cm[2]!, x0, y1, cm[3]!)",
+    b: "  pushQuadCm(Face.Z_POS, cheie, x0, y0, cm[0]!, x1, y0, cm[1]!, x1, y0, cm[2]!, x0, y1, cm[3]!)",
+    t: 'tests/mesher.test.ts', e: 'netezirea aseaza fetele de sus EXACT',
+  },
+  {
+    n: 'x0 si x1 inversate pe fata netezita',
+    f: 'src/render/mesher.ts',
+    a: "function pushFataNetezita(cheie: number, lx: number, ly: number, cm: Int32Array): void {\n  const x0 = lx * CM, x1 = (lx + 1) * CM",
+    b: "function pushFataNetezita(cheie: number, lx: number, ly: number, cm: Int32Array): void {\n  const x0 = (lx + 1) * CM, x1 = lx * CM",
+    t: 'tests/mesher.test.ts', e: 'netezirea aseaza fetele de sus EXACT',
+  },
+  {
+    n: 'tiparul de AO rotit cu 180 de grade DOAR pe fetele netezite',
+    f: 'src/render/mesher.ts',
+    a: "function pushFataNetezita(cheie: number, lx: number, ly: number, cm: Int32Array): void {\n  const x0 = lx * CM",
+    b: "function pushFataNetezita(cheie0: number, lx: number, ly: number, cm: Int32Array): void {\n  const rot = (cheie0 >>> 8) & 0xff\n  const cheie = (cheie0 & 0xff) | ((((rot >>> 4) | (rot << 4)) & 0xff) << 8)\n  const x0 = lx * CM",
+    t: 'tests/mesher.test.ts', e: 'doua fete netezite vecine impart doua varfuri',
+  },
+
+  {
+    n: 'cursorul ramane PE pozitia rezolvata, deci o reincearca la fiecare sapatura',
+    f: 'src/harness/sdig.ts',
+    a: "    if (incearca(wx, wy, cota - (c % 5))) return { wx, wy, cursor: c + 1 }",
+    b: "    if (incearca(wx, wy, cota - (c % 5))) return { wx, wy, cursor: c }",
+    t: 'tests/sdig.test.ts', e: 'cele 1200 de sapaturi ale unei rulari se FAC',
+  },
 ]

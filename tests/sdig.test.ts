@@ -108,14 +108,23 @@ test('cele 1200 de sapaturi ale unei rulari se FAC, nu doar se incearca', () => 
       (wx, wy, z) => dig(terrain, wx, wy, z).ok,
     )
     if (!f) break
+    // Cursorul trebuie sa treaca PESTE pozitia rezolvata. Fara asertiunea asta, un
+    // `cursor: c` in loc de `c + 1` — o schimbare plauzibila, „cursorul e pozitia
+    // curenta" — face scenariul sa reincerce de fiecare data pozitia tocmai sapata:
+    // aceleasi 1200 de sapaturi, dar de sapte ori mai multe comenzi respinse pe bucla
+    // de constructie masurata de gate. Contorul `respinse` de mai jos NU o prinde, e
+    // derivat din aceeasi aritmetica.
+    assert.ok(f.cursor > cursor, `pasul ${i}: cursorul n-a avansat (${cursor} -> ${f.cursor})`)
     respinse += f.cursor - cursor - 1
     cursor = f.cursor
     facute++
   }
   assert.equal(facute, SAPATURI, `doar ${facute} din ${SAPATURI} de sapaturi s-au facut in cate ${SDIG_MAX_INCERCARI} incercari`)
-  // Controlul de VIATA al reincercarii: daca nimic n-ar fi fost respins, bucla n-ar
-  // apara nimic si testul ar trece si fara ea.
-  assert.ok(respinse > 100, `doar ${respinse} pozitii respinse: reincercarea nu e exercitata, deci nu e probata`)
+  // Controlul de VIATA al reincercarii, ca BANDA: daca nimic n-ar fi respins, bucla
+  // n-ar apara nimic; daca s-ar respinge de cateva ori mai mult, scenariul ar plati o
+  // munca pe care n-o declara. Masurat pe configuratia livrata: 200.
+  assert.ok(respinse > 100 && respinse < 600,
+    `${respinse} pozitii respinse, asteptat ~200: sub 100 reincercarea nu e exercitata, peste 600 se reincearca degeaba`)
 })
 
 test('sapaturile promoveaza chunk-uri NOI, cu apron intreg', () => {
