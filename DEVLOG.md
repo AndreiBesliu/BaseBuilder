@@ -2658,3 +2658,108 @@ e M5, nu acceptanța. M5 chiar se înroșise; eu mă uitam în altă parte.
 - **`rang(FARA_SPRIJIN)`** — se adaugă când scanerul chiar îl emite.
 - **grinda** (`suportRazaGrinda: 10`), amânată cu cifra ei.
 - **overlay-ul de construcție** — previzualizarea există în nucleu; desenarea ei pe ecran nu.
+
+---
+
+## Tăietura 2, pasul 6c — panoul de design, și un blocant în pasul 6b
+
+**Prompt:** `continua`
+**Model:** Claude Opus 5
+
+Panou adversarial înainte de orice cod: 5 lentile independente pe designul naiv v1, o sinteză, doi
+adversari pe rezultatul ei. 8 agenți, 1,59M tokeni, 58 de constatări (12 blocante), din care 45
+susținute de o măsurătoare. Arborele a rămas neatins — HEAD identic și suma tuturor surselor bit cu
+bit aceeași înainte și după.
+
+### Închiderea iese complet din scaner
+
+Decizia cea mai importantă, și stă pe două măsurători care se completează:
+
+1. **Închiderea supra-promite masiv față de „acum".** Între **71,6% și 84,4%** dintre celulele pe
+   care `constructiaPosibila` le declară construibile au suport **0** în clipa măsurării — deci
+   `zidesteVoxel` le-ar refuza cu `FARA_SPRIJIN` *după* ce pionul a cărat materialul. Măsurat pe 5
+   planuri (casa 9×9×3: 176 construibile / 32 zidibile acum; neregulat 21×21×8: 529 / 150). În sens
+   invers, **zero** celule zidibile-acum s-au găsit printre `imposibile`: închiderea le conține
+   mereu. O incluziune nu e o egalitate, și s-a verificat în ambele direcții.
+
+2. **„Zidește tot ce se poate ACUM, repetă" converge EXACT la închidere.** 5 planuri din 5,
+   `puse === construibile` și `rămase === imposibile`, octet cu octet. Casa 9×9×3: 176/1 în 7
+   valuri. Neregulat 21×21×8: 529/702 în 16 valuri. Nu e noroc — bucla de punct fix din
+   `constructiaPosibila` **este** lacomul-acum peste o mulțime ipotetică.
+
+Deci închiderea nu cumpără scanerului nicio celulă pe care poarta pe terenul real să n-o dea oricum.
+Singurul ei aport unic e mulțimea `imposibile`, iar aia e o întrebare de **overlay**, nu de tick, și
+are deja răspuns în afara buclei: `constructiaPrevizualizata`, chemată la desenare.
+
+Consecința e mai mare decât o optimizare: dispare cache-ul, dispare canalul de invalidare, și cu ele
+dispare **prin construcție** o clasă de defecte pe care două lentile au măsurat-o independent —
+cache pe steag murdar care uită zidirea/săparea dă **M5 roșu** (`973687db` vs `45ad0b74`), iar memo
+la nivel de modul cheiat pe `w.tick` dă divergență între lumi întrețesute pe care **M5 rămâne verde**
+și n-o poate prinde. Argumentul de siguranță pentru un cache nu e „e DERIVED deci nu intră în hash" —
+`d.reincercaLaTick` **este** hașuit, deci o decizie luată pe un cache învechit se imprimă în stare.
+
+### Poarta e conjuncția, nu `poateSustine` singur
+
+Pe o celulă umplută cu MOLOZ, `poateSustine` răspunde `ok` (are scurtcircuitul
+`if (solLa(...) === SOLID) return accept()`), iar `zidesteVoxel` refuză cu `CELULA_PLINA`. Cazul nu
+e teoretic: prăbușirea depune MOLOZ, iar molozul poate ateriza peste un blueprint desenat. Deci
+poarta e `solLa !== SOLID && poateSustine`. În trecerea **ieftină**, fiindcă 72–84% dintre candidați
+o pică, iar în cea scumpă ar consuma din `jobScanMaxCandidates` fără să seteze `best` — dezactivând
+și ieșirea devreme. Măsurat: plafonul a legat în 4 din 111 scanări, tăind **1541** de candidați de
+SĂPAT contra **1** de construit.
+
+### O cifră pe care am purtat-o greșit
+
+Am dat panoului „~32 ms la 400 de desemnări" ca și cum ar fi costul lui `constructiaPosibila`. Nu e:
+cifra din DEVLOG (tăietura 1) e a previzualizării de **săpat**, bazată pe `stareSapat` la ~19
+µs/celulă. Închiderea de construcție are cifra ei în propriul docstring — 0,22 ms la 177 — iar
+panoul a reprodus-o la 0,189. Sinteza a recomandat să scot cifra din DEVLOG; recomandarea e greșită,
+moștenită din atribuirea mea. DEVLOG-ul rămâne cum e.
+
+### Blocantul: `refaLoculDeLucru` presupunea SAPA, în două feluri
+
+Găsit de adversar în codul pasului 6b, comis azi, verde la 374 de teste și 41 de probe. Detaliile
+sunt în mesajul commit-ului; ce merită reținut aici sunt cele două lecții.
+
+**Testul meu pentru exact acest caz trecea în gol.** Asertiunea de distanță era sub un
+`if (peretele s-a ridicat)`; peretele nu se ridica, deci ramura nu rula. Mutația legată de el ieșea
+**PRINSĂ** — fiindcă mutația probează ce ating fixturile, iar fixtura nu ajungea acolo. O asertiune
+sub un `if` e o asertiune care poate să nu se întâmple.
+
+**Două implementări identice pot fi identice fiindcă una e greșită.** Ieri am unit două `refaTinta`
+octet cu octet identice, citând „o funcție, un adevăr", și am luat identitatea drept dovadă de acord.
+Era dovadă de **copiere**: copia cărase cu ea presupunerea locului de unde venise. Deduplicarea a
+înrăutățit-o — cod duplicat invită întrebarea „diferă?", cod unificat o închide.
+
+### Planul 6c, corectat
+
+Ambii adversari au respins planul de pași al sintezei (`sustine=false`, 6 blocante). Miezul
+designului ține; **ordinea nu**. Ce trebuie refăcut înainte de implementare:
+
+- **`pornesteConstruieste` n-are parametru pentru celula de lucru** — l-am scos la 6b ca nefolosit,
+  iar acum scanerul ar alege o celulă pe care funcția o aruncă și o recalculează în `ridica`, fără
+  componentă. Se pune la loc, cu motivul scris.
+- **Trecerea scumpă e scrisă pe DOUĂ feluri**, nu pe N (`fel === CAND_SAPA ? persS : persC`). Pasul
+  care adaugă bucla ieftină nu se poate livra singur; generalizarea vine întâi.
+- **`rang(FARA_SPRIJIN)` e nelegabil în v2 prin construcție** — designul scoate din scaner singurul
+  mecanism care l-ar emite. Nu se adaugă o gardă pe care nicio fixtură n-o poate atinge.
+- **`racireDesemnare` folosește un contor `vii` unic peste feluri**: 4096 de șantiere fac ca un refuz
+  de SĂPAT să răcească 540 de tickuri în loc de 100. Reparația are nevoie de fixtura ei — cea
+  propusă e verde și pe codul nereparat.
+- **Plafonul piciorului doi**: fixtura propusă pune mormanul „la 90 de celule", iar
+  `haulDestRadiusCells = 96`. Plafonul n-ar lega — plafon atins nu înseamnă plafon care leagă.
+- **Scenariul standard nu poate proba nimic din 6c**: `desemnari.vii = 0` după 20.000 de tickuri, și
+  cu v1 montat integral **374 din 374** rămân verzi. Fixtura cu toate trei categoriile e pasul unu,
+  și are nevoie de propriile asertiuni de fixtură vie.
+
+Amânate cu motivul lor: cache-ul „zidibile acum" (pragul măsurat: ~4096 de desemnări în rază),
+mormanul ales per-șantier, ridicarea lui `maxClaimants` (azi un morman de 75 hrănește UN constructor
+deși ține trei pereți), consolidarea fragmentelor (după o prăbușire, 300 de unități în 30 de mormane
+de câte 10 nu ridică niciun perete), și gaura de conținut **SCARA/LEMN** — blocaj circular permanent,
+fiindcă worldgen scrie doar APA, IARBA, PAMANT și ROCA.
+
+### Cifre
+
+- **375 de teste**, 28 în `tests/constructie.test.ts`.
+- **162 de probe** de mutație; cele trei noi verificate una câte una că leagă, fiecare prinsă de
+  exact testul declarat.
