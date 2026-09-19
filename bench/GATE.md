@@ -184,9 +184,31 @@ ce construiește un jucător.
 | Chunk-uri rezidente | 473 |
 | Construcție | ~700 ms |
 | Quaduri / triunghiuri | 351.287 / **702.574** |
-| Meshing complet | **205 ms** · mediana din 10 · verificat mecanic de `tools/check-gate-numbers.mjs` |
+| Meshing complet | **205 ms** · mediana din 10 · vezi nota de mai jos despre ce e verificat |
 | &nbsp;&nbsp;per chunk | **911 µs** · derivat din meshingul complet / 225 |
 | Memorie voxeli (RLE) | 2,34 MB (față de 14,1 MB necomprimat) |
+
+> **Ce verifică mecanic `tools/check-gate-numbers.mjs` din tabelul de sus, și ce NU.** Distincția
+> a fost scrisă greșit până pe 19.09.2026: lângă „meshing complet" scria „verificat mecanic", deși
+> unealta nu compara cifra aia cu nimic măsurat — verifica doar că cele două apariții ale ei din
+> document sunt de acord **între ele**. Două cifre identice și amândouă greșite treceau: scriind
+> 999 ms în ambele locuri, poarta rămânea verde deși tocmai măsurase 183 ms.
+>
+> **Cifrele de NUMĂRĂTOARE** — quaduri, triunghiuri, chunk-uri promovate, memorie RLE — se
+> compară exact cu măsurătoarea. O abatere de unu e eșec, și așa trebuie să fie: sunt
+> deterministe.
+>
+> **Cifrele de TIMP** se verifică pe două căi, niciuna la precizia la care sunt scrise: între ele,
+> peste diferența minim detectabilă; și față de măsurătoarea curentă, cu o bandă de **40%**.
+> Banda e largă fiindcă **mașina variază mai mult decât cifrele pe care le-am compara**: cinci
+> măsurători independente ale meshingului complet, în aceeași sesiune, au dat mediane între **195
+> și 258 ms — o împrăștiere de 27%**; mai devreme în aceeași zi, pe o mașină mai puțin încărcată,
+> 166-190 ms. O bandă strânsă ar face poarta să se înroșească după cât de ocupată e mașina, nu
+> după ce s-a schimbat în cod — adică un CI roșu permanent, care e un orb.
+>
+> Consecința, scrisă ca să nu fie descoperită de cineva la o decizie: **`205 ms` și `911 µs` sunt
+> cifre de o singură măsurătoare, nu constante ale codului.** Cine le folosește ca bază de buget
+> le re-măsoară pe mașina lui. Banda de 40% prinde ordinul de mărime, nu deriva de 20%.
 
 > **Re-etalonare, 14.09.2026, ÎNAINTE de orice rulare de gate.** Două lucruri s-au schimbat, niciunul
 > în mesher, și amândouă se consemnează ca să nu poată trece drept optimizare:

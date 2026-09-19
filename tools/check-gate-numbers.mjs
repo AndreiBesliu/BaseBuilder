@@ -77,25 +77,62 @@ function exact(nume, valoare, tipar) {
   if (gresite.length > 0) esecuri.push(`${nume}: GATE.md spune ${gresite.join(', ')}, masurat ${valoare}`)
 }
 
-/** O cifra de TIMP: se accepta o abatere, dar toate aparitiile trebuie sa fie de acord intre ele. */
-function coerent(nume, tipar) {
+/**
+ * O cifra de TIMP. DOUA verificari, si e important ca sunt doua lucruri diferite:
+ *
+ * 1. **Intre ele.** Doua aparitii ale aceleiasi masuratori nu au voie sa difere peste
+ *    diferenta minima detectabila. Asta e verificarea pentru care unealta a fost
+ *    scrisa: §3 spunea 105 ms si §5/§9 spuneau 84,5 ms.
+ *
+ * 2. **Fata de realitate.** Lipsea cu totul: doua cifre identice si AMANDOUA gresite
+ *    treceau. Scriind 999 ms in ambele locuri, poarta ramanea verde desi tocmai
+ *    masurase 182,7 ms.
+ *
+ * Banda celei de-a doua e larga DELIBERAT, si cifra ei e masurata: cinci masuratori
+ * independente ale meshingului complet, in aceeasi sesiune, au dat mediane intre
+ * 195 si 258 ms — o imprastiere de 27%. Mai devreme in aceeasi zi, pe o masina mai
+ * putin incarcata, 166-190 ms. O banda stransa ar face poarta sa se inroseasca dupa
+ * cat de ocupata e masina, nu dupa ce s-a schimbat in cod — adica un CI rosu
+ * permanent, care e un orb.
+ *
+ * 40% prinde ordinul de marime (999 ms, 50 ms) si nu prinde zgomotul. Nu pretinde
+ * mai mult: o cifra de timp din documentul asta NU e verificata la precizia la care e
+ * scrisa, si tabelul o spune.
+ */
+const BANDA_TIMP_PCT = 40
+
+function coerent(nume, tipar, masurat) {
   // Tiparul are doua alternative, deci una din grupe e mereu nedefinita.
   const gasite = [...doc.matchAll(tipar)].map((m) => Number((m[1] ?? m[2]).replace(',', '.')))
-  if (gasite.length < 2) return
-  const min = Math.min(...gasite)
-  const max = Math.max(...gasite)
-  if (max - min > timp.dmd) {
-    esecuri.push(
-      `${nume}: GATE.md contine ${gasite.join(' si ')} pentru aceeasi masuratoare — ` +
-        `diferenta ${(max - min).toFixed(1)} ms e PESTE diferenta minima detectabila (${timp.dmd.toFixed(1)} ms)`,
-    )
+  if (gasite.length === 0) {
+    esecuri.push(`${nume}: nu apare deloc in GATE.md`)
+    return
+  }
+  if (gasite.length >= 2) {
+    const min = Math.min(...gasite)
+    const max = Math.max(...gasite)
+    if (max - min > timp.dmd) {
+      esecuri.push(
+        `${nume}: GATE.md contine ${gasite.join(' si ')} pentru aceeasi masuratoare — ` +
+          `diferenta ${(max - min).toFixed(1)} ms e PESTE diferenta minima detectabila (${timp.dmd.toFixed(1)} ms)`,
+      )
+    }
+  }
+  for (const g of gasite) {
+    const abatere = (Math.abs(g - masurat) / masurat) * 100
+    if (abatere > BANDA_TIMP_PCT) {
+      esecuri.push(
+        `${nume}: GATE.md spune ${g} ms, masurat acum ${masurat.toFixed(1)} ms — ` +
+          `abatere ${abatere.toFixed(0)}%, peste banda de ${BANDA_TIMP_PCT}%`,
+      )
+    }
   }
 }
 
 exact('chunk-uri promovate', stats.promotedChunks, /\*\*(\d[\d.]*)\*\* \(PLAN bugeta/g)
 exact('quaduri', quads, /\| Quaduri \/ triunghiuri \| ([\d.]+) \//g)
 exact('triunghiuri', quads * 2, /\| Quaduri \/ triunghiuri \| [\d.]+ \/ \*\*([\d.]+)\*\*/g)
-coerent('meshing complet', /remesh-ul complet al fixturii e\s*\*\*([\d,]+) ms\*\*|Meshing complet \| \*\*([\d,]+) ms\*\*/g)
+coerent('meshing complet', /remesh-ul complet al fixturii e\s*\*\*([\d,]+) ms\*\*|Meshing complet \| \*\*([\d,]+) ms\*\*/g, timp.median)
 
 // Memoria, cu toleranta: e o cifra rotunjita in text.
 const memMatch = doc.match(/Memorie voxeli \(RLE\) \| ([\d,]+) MB/)
