@@ -183,7 +183,7 @@ ce construiește un jucător.
 | **Chunk-uri promovate** | **225** (PLAN bugeta ~200) |
 | Chunk-uri rezidente | 473 |
 | Construcție | ~700 ms |
-| Quaduri / triunghiuri | 350.913 / **701.826** |
+| Quaduri / triunghiuri | 351.287 / **702.574** |
 | Meshing complet | **205 ms** · mediana din 10 · verificat mecanic de `tools/check-gate-numbers.mjs` |
 | &nbsp;&nbsp;per chunk | **911 µs** · derivat din meshingul complet / 225 |
 | Memorie voxeli (RLE) | 2,34 MB (față de 14,1 MB necomprimat) |
@@ -283,6 +283,22 @@ ce construiește un jucător.
 > Asta a închis și golul consemnat mai sus: garda `suprafataNaturala(x,y) && suprafataNaturala(nx,ny)`
 > are acum probă de mutație. Nu lipsea formularea testului — **lipsea fusta**: gaura masca diferența
 > dintre garda strictă și cea slabă, deci orice asertiune ieșea comparativă în loc de binară.
+
+> **A șaptea schimbare, 19.09.2026: fusta tăiată. 350.913 → 351.287 quaduri, +0,11%.** Fusta de mai
+> sus emitea un singur quad între muchia netezită și cota plată a vecinului. Când cele două cote ale
+> muchiei cad de o parte și de alta a cotei plate, quadul se **auto-intersectează**: cele două
+> triunghiuri ies cu înfășurări opuse, iar culling-ul îl șterge pe cel dorsal. Adică o gaură, în
+> geometria pusă acolo anume ca să închidă găuri — **15 triunghiuri dorsale, 0,680 m²** pe chunk-ul
+> fixturii, măsurate de a doua recenzie adversarială.
+>
+> Muchia se taie acum la cota plată și fiecare bucată își ia orientarea ei. Ambele se păstrează:
+> partea de deasupra chiar acoperea ceva, era doar invizibilă. Creșterea de 374 de quaduri e exact
+> geometria care lipsea.
+>
+> Oracolul de înfășurare exista din S6-8, dar verifica doar PRIMUL triunghi al fiecărui quad — iar
+> la un „papion" ăla e cel corect — și rula doar pe meshul FIDEL, adică pe calea prin care nu trece
+> nicio fustă. Acum verifică amândouă triunghiurile, pe calea netezită ȘI în configurația de
+> producție (vecini + netezire, 225 de chunk-uri, peste 500.000 de triunghiuri).
 
 **Validarea fixturii NU se face prin raportul de reducere al mesher-ului.** Criteriul ăla e
 auto-referențial: selectează fixturi *ieftine de meshuit*, adică exact fixturile pe care un motor slab
@@ -633,7 +649,9 @@ Baza: măsurători făcute azi în Node, pe fixtura M10 și pe teren proaspăt.
    pe 373.540 de triunghiuri înainte de AO: **0,5 ms median de submit CPU pe cadru**, p95 1 ms, 188
    de draw calls. Nu e o măsurătoare de GPU — e timpul de submit, nu de completare — deci nu
    înlocuiește sweep-ul, dar nu arată nimic care să contrazică predicția.)*
-   *(19.09.2026, netezirea: **694.458**, adică de patru ori cifra pe care a fost scrisă predicția.
+   *(19.09.2026, netezirea: **694.458**, apoi **701.826** după fustă și **702.574** după tăierea ei —
+   adică de patru ori cifra pe care a fost scrisă predicția. Cifra vie e cea verificată mecanic în
+   tabelul din §9; asta de aici e istoricul, și se citește ca atare.
    Rămâne o predicție, nu o măsurătoare, și devine a treia oară mai greu de îndeplinit. Sweep-ul de
    rezoluție se rulează pe geometria ASTA, nu pe una istorică.)*
 2. **S-TRAVERSE pică primul.** O graniță de chunk la 40 m/s = 1,25 treceri/s, fiecare aducând 23 de
