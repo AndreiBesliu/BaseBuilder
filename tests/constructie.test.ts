@@ -33,7 +33,7 @@ import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { CATEGORII, Categorie, FelJob, Piesa } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { applyCommand } from '../src/sim/commands.ts'
-import { anuleazaDesemnare, constructiaPrevizualizata, pornesteConstruieste, unitatiDeMunca } from '../src/sim/joburi.ts'
+import { anuleazaDesemnare, celulaDeLucru, constructiaPrevizualizata, pornesteConstruieste, unitatiDeMunca } from '../src/sim/joburi.ts'
 import { slotItem } from '../src/sim/iteme.ts'
 import { Faction, Item } from '../src/sim/state.ts'
 import { panaCand } from './fixturi.ts'
@@ -967,7 +967,12 @@ test('fara material, categoria se refuza O DATA pe fel, cu LIPSA_MATERIAL', () =
   // Acopera si gaura de continut a SCARII, care cere LEMN intr-o lume in care
   // worldgen scrie doar apa, iarba, pamant si roca.
   const { w, wx, wy, g, ids } = santier6c(12345, 3, 2, false)
-  ruleaza(w, 400)
+  const t = ruleaza(w, 400)
+
+  // Observabilul e COSTUL, nu rezultatul: si fara scurtcircuit nu s-ar zidi nimic,
+  // fiindca trecerea scumpa refuza oricum. Poarta exista ca 400 de santiere fara
+  // piatra sa coste un scalar, nu 400 de evaluari scumpe care mananca plafonul.
+  assert.equal(t.candidatiExaminati, 0, `s-au evaluat scump ${t.candidatiExaminati} candidati desi nu exista material`)
 
   const m = materialAt(w.terrain, wx + 3, wy + 6, g + 1)
   assert.ok(m.ok && !isSolid(m.value), 's-a zidit ceva fara material')
@@ -1008,11 +1013,21 @@ test('un blueprint in AER nu trimite pe nimeni dupa material', () => {
   // unitati, munceste 400 de tickuri si abia atunci `zidesteVoxel` refuza cu
   // FARA_SPRIJIN. Observabilul e deci munca CHELTUITA, nu peretele lipsa:
   // peretele lipseste in ambele cazuri.
+  //
+  // Cota e g+2, si conteaza: MASURAT, de la g+3 in sus `celulaDeLucru` nu mai
+  // gaseste niciun vecin calcabil, deci poarta de sprijin devine redundanta —
+  // accesibilitatea refuza prima si mutatia pe sprijin iese RATATA. La g+2
+  // santierul e NEZIDIBIL (suport 0) dar ACCESIBIL (loc de lucru la g+1), adica
+  // exact si numai cazul pe care poarta il apara.
   const { w, wx, wy, g } = sitPlat(12345, 13)
-  const sant = applyCommand(w, { kind: 'desemneaza', wx: wx + 5, wy: wy + 6, z: g + 5, piesa: Piesa.PERETE }, R)
+  const sant = applyCommand(w, { kind: 'desemneaza', wx: wx + 5, wy: wy + 6, z: g + 2, piesa: Piesa.PERETE }, R)
   assert.ok(sant.ok, `fixtura: santierul in aer: ${JSON.stringify(sant)}`)
-  // Fixtura VIE: santierul chiar e in aer, si chiar e nezidibil ACUM.
-  assert.equal(suportDacaZidesc(w.terrain, R, wx + 5, wy + 6, g + 5), 0, 'fixtura: santierul are sprijin, deci nu proba nimic')
+  // Fixtura VIE: nezidibil, DAR accesibil. Amandoua, altfel nu proba poarta.
+  assert.equal(suportDacaZidesc(w.terrain, R, wx + 5, wy + 6, g + 2), 0, 'fixtura: santierul are sprijin, deci nu proba nimic')
+  assert.notEqual(
+    celulaDeLucru(w.terrain, w.regions, w.desemnari, wx + 5, wy + 6, g + 2, R), null,
+    'fixtura moarta: santierul n-are loc de lucru, deci accesibilitatea refuza inaintea sprijinului',
+  )
   lasaItem(w, Item.PIATRA, R.piese[Piesa.PERETE]!.cantitate, wx + 1, wy + 1)
   assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (wx + 2) * 1000 + 500, y: (wy + 2) * 1000 + 500, z: g + 1, faction: Faction.ASEZARE }, R).ok)
 
