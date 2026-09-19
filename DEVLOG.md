@@ -3334,5 +3334,16 @@ fiindcă CLAUDE.md scria „~50 de minute". Acum rulează, într-un job separat,
   existența vecinului, deci mulțimea putea conține chei fantomă, iar mulțimea aia e cea NUMĂRATĂ
   când se scriu „remesh-uri pe săpătură" în GATE.md. Măsurat înainte de a o numi bug: **zero chei
   fantomă** pe rularea de S-DIG, deci cifrele rămân și garda e defensivă, nu o reparație.
-- **Prioritățile personale asimetrice** și `racireDesemnare` care numără `vii` peste toate felurile
-  — netestate, de la prima recenzie.
+- ~~**Prioritățile personale asimetrice** și `racireDesemnare`.~~ **ÎNCHISE 19.09**, amândouă
+  măsurate înainte de a fi atinse:
+  - **`racireDesemnare`** chiar cuplează felurile — cu 60 de săpături și 2400 de șantiere,
+    fereastra iese **330 în loc de 100**. Dar debitul nu se schimbă: răcirea atinge doar țintele
+    refuzate SCUMP. Abaterea e conservatoare, nu greșită, deci **nu s-a schimbat** — s-a scris
+    justificarea ca proprietate probată (fereastra e STRICT peste o baleiere completă; nu scade
+    când apar ținte noi) și s-a consemnat că formula e strâmbă în ambele direcții: plafonul e
+    împărțit și cu itemele, care nu intră deloc în `vii`.
+  - **Prioritățile asimetrice** au căpătat test — dar prima variantă nu lega, iar de acolo a ieșit
+    ceva mai interesant decât testul: mutațiile pe SCOR nu schimbă nimic. Specializarea vine din
+    **exclusivitate** (`categoriiActive`), nu din ponderare. Iar poarta de SĂPAT scoasă singură tot
+    nu înroșește nimic, fiindcă ponderarea ține cărăușul la cărat — **cele două mecanisme se
+    suprapun**, și abia amândouă scoase se vede specializarea pierdută. Proba aia folosește `e2`.
