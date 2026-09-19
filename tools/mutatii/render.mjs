@@ -166,6 +166,20 @@ export const MUTATII = [
     t: 'tests/sdig.test.ts', e: 'cele 1200 de sapaturi ale unei rulari se FAC',
   },
   {
+    n: 'incalzirea sapa in patratul CU banda, deci cheltuie valurile de 9 inainte de masuratoare',
+    f: 'src/harness/sdig.ts',
+    a: "export const SDIG_SPAN_INCALZIRE = 13",
+    b: "export const SDIG_SPAN_INCALZIRE = 17",
+    t: 'tests/sdig.test.ts', e: 'incalzirea nu cheltuie valurile de promovare',
+  },
+  {
+    n: 'incalzirea porneste din coltul benzii, nu din coltul asezarii',
+    f: 'src/harness/sdig.ts',
+    a: "export const SDIG_OFFSET_INCALZIRE = 0",
+    b: "export const SDIG_OFFSET_INCALZIRE = -3",
+    t: 'tests/sdig.test.ts', e: 'incalzirea nu cheltuie valurile de promovare',
+  },
+  {
     n: 'cursorul nu trece peste pozitiile respinse (se reincearca aceleasi la nesfarsit)',
     f: 'src/harness/sdig.ts',
     a: "    if (incearca(wx, wy, cota - (c % 5))) return { wx, wy, cursor: c + 1 }",

@@ -37,7 +37,7 @@ import { DEFAULT_RULES } from '../src/sim/content.ts'
 import { meshHeightfield } from '../src/render/heightfield.ts'
 import { createAgentLayer, spawnNear, stepSim, updateAgentLayer } from './agenti.ts'
 import { buildM10 } from '../src/harness/fixture-m10.ts'
-import { SDIG_MAX_INCERCARI, sapaturaUrmatoare } from '../src/harness/sdig.ts'
+import { SDIG_MAX_INCERCARI, SDIG_OFFSET_INCALZIRE, SDIG_SPAN_INCALZIRE, sapaturaUrmatoare } from '../src/harness/sdig.ts'
 
 const SEED = 20260913
 /** Cate chunk-uri in jurul focusului se deseneaza. 11 = discul rezident intreg. */
@@ -964,6 +964,8 @@ const DIGS_PER_SECOND = 20
 const settleCenterX = FOCUS_CX * CHUNK_CELLS + 16
 const settleCenterZ = FOCUS_CY * CHUNK_CELLS + 16
 let digCursor = 0
+/** Cursor separat pentru incalzire: patratul ei e altul, deci si secventa. */
+let digCursorIncalzire = 0
 
 function driveScenario(frame: number): void {
   if (SCENARIO === null) return
@@ -1000,16 +1002,23 @@ function driveScenario(frame: number): void {
     // `!promotedBefore.has(key)` nu se declansa niciodata si apron-ul nou nu-si
     // primea primul mesh. Adica S-DIG — un scenariu de GATE — masura mai putina
     // munca decat face jocul.
+    // Incalzirea sapa in ALT patrat — chiar asezarea, fara banda de frontiera — si cu
+    // propriul cursor. Vezi `SDIG_SPAN_INCALZIRE`: altfel cele 4 valuri de 9 remesh-uri,
+    // care cad la sapaturile 0..3, s-ar consuma inainte sa inceapa masuratoarea.
+    const inIncalzire = frameIndex <= WARMUP_FRAMES
     let promotedBefore = new Set<number>()
     const facut = sapaturaUrmatoare(
-      digCursor, FOCUS_CX, FOCUS_CY,
+      inIncalzire ? digCursorIncalzire : digCursor, FOCUS_CX, FOCUS_CY,
       (wx, wy) => { const g = groundLevelM(world.terrain, wx, wy); return g.ok ? g.value : null },
       (wx, wy, z) => {
         promotedBefore = promotedKeys()
         return applyCommand(world, { kind: 'dig', wx, wy, z }).ok
       },
+      inIncalzire ? SDIG_SPAN_INCALZIRE : undefined,
+      inIncalzire ? SDIG_OFFSET_INCALZIRE : undefined,
     )
-    digCursor = facut ? facut.cursor : digCursor + SDIG_MAX_INCERCARI
+    if (inIncalzire) digCursorIncalzire = facut ? facut.cursor : digCursorIncalzire + SDIG_MAX_INCERCARI
+    else digCursor = facut ? facut.cursor : digCursor + SDIG_MAX_INCERCARI
     if (facut) remeshAfterEdit(facut.wx, facut.wy, promotedBefore)
     return
   }

@@ -358,7 +358,23 @@ gate-ul ar fi fost fals pozitiv prin construcție, indiferent ce stivă.
 >
 > Codul a ieșit din `viewer/main.ts` în `src/harness/sdig.ts`, fiindcă exact asta ținea defectul în
 > viață: două linii într-un modul de browser nu pot fi rulate de `npm test`, iar singurul lor
-> consumator raporta cadre, nu acoperire. Are acum 5 teste și 5 probe de mutație.
+> consumator raporta cadre, nu acoperire.
+>
+> **Al treilea strat, găsit de recenzia adversarială a reparației de mai sus: fereastra de
+> încălzire înghițea exact evenimentul.** Cele 4 valuri de 9 remesh-uri cad la săpăturile **0, 1, 2
+> și 3** — un val cere un chunk cu toți cei 8 vecini nepromovați, iar asta există doar cât timp
+> banda de frontieră e neatinsă. Încălzirea (300 de cadre / 3 = 100 de săpături) le consuma pe
+> toate, iar în fereastra MĂSURATĂ maximul rămânea 6, o singură dată. Scenariul reparat continua să
+> nu măsoare ramura pe care fusese reparat s-o măsoare — doar din alt motiv.
+>
+> Încălzirea sapă acum în pătratul de DINAINTE de reparație — cel despre care s-a probat că nu
+> promovează niciodată nimic — cu cursor propriu. Măsurat: încălzirea face 100 de săpături, **0
+> promovări, remesh maxim 3**; fereastra măsurată păstrează toate cele 4 valuri de 9 și cele 52 de
+> promovări. Are acum 6 teste și 7 probe de mutație.
+>
+> Lecția, scrisă aici fiindcă se repetă: o fereastră de încălzire nu e neutră. Ea consumă starea
+> lumii, iar dacă evenimentul rar al scenariului se naște din starea INIȚIALĂ, încălzirea e exact
+> lucrul care îl face invizibil.
 
 **S-TRAVERSE cerea cod care nu exista. Acum există** (commit `streaming`): coadă de build cu buget de
 2 chunk-uri/cadru, evacuare de mesh pe rază de desen, traversare pe șine la 40 m/s cu ambele ceasuri
@@ -628,7 +644,8 @@ Baza: măsurători făcute azi în Node, pe fixtura M10 și pe teren proaspăt.
 4. **S-DIG trece:** 20 de săpături/s × **1,24 remesh-uri/săpătură** × 720 µs = **17,9 ms/s ≈ 0,30
    ms/cadru** amortizat. X_max **între 11 și 14 ms**. Riscul e rafala, nu media — și acum rafala e
    cifrată: o săpătură care promovează un chunk nou remeshează 9, adică **6,5 ms într-un singur
-   cadru** (7,7 ms la p90). Se întâmplă de 4 ori în 60 de secunde.
+   cadru** (7,7 ms la p90). Se întâmplă de 4 ori în 60 de secunde — și toate patru sunt ÎN
+   fereastra măsurată, ceea ce e adevărat abia de la reparația încălzirii din §5.
 
    *(19.09.2026: aritmetica de dinainte era `20 × 484 µs`, adică presupunea tăcut **un** remesh per
    săpătură — și 484 µs era măsurat înainte de netezire. Presupunerea era chiar defectul: scenariul

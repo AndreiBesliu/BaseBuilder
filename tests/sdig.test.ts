@@ -18,7 +18,8 @@ import { dig, groundLevelM } from '../src/sim/terrain/terrain.ts'
 import type { Terrain } from '../src/sim/terrain/terrain.ts'
 import { makeM10, SETTLEMENT_CHUNKS } from '../src/harness/fixture-m10.ts'
 import {
-  pozitiaSapaturii, sapaturaUrmatoare, SDIG_MAX_INCERCARI, SDIG_OFFSET_CHUNKS, sdigSpanCelule,
+  pozitiaSapaturii, sapaturaUrmatoare, SDIG_MAX_INCERCARI, SDIG_OFFSET_CHUNKS,
+  SDIG_OFFSET_INCALZIRE, SDIG_SPAN_INCALZIRE, sdigSpanCelule,
 } from '../src/harness/sdig.ts'
 
 /** Focusul e arbitrar: tot ce se verifica aici e relativ la el. */
@@ -144,4 +145,62 @@ test('sapaturile promoveaza chunk-uri NOI, cu apron intreg', () => {
   }
   assert.ok(promovari > 20, `doar ${promovari} promovari din ${SAPATURI} de sapaturi`)
   assert.ok(valMaxim >= 9, `cel mai mare val de promovare a fost ${valMaxim}: ramura de 9 din remeshAfterEdit ramane nemasurata`)
+})
+
+/** 300 de cadre de incalzire / 3 cadre pe sapatura. Vezi `WARMUP_FRAMES` din viewer. */
+const SAPATURI_IN_INCALZIRE = 100
+
+test('incalzirea nu cheltuie valurile de promovare pe care fereastra le masoara', () => {
+  // Ramura scumpa din `remeshAfterEdit` — chunk nou plus apron, 9 remeshate — cere un
+  // chunk cu toti cei 8 vecini nepromovati. Asa ceva exista doar cat timp banda de
+  // frontiera e NEATINSA: dupa cateva zeci de sapaturi ea e presarata cu chunk-uri
+  // promovate si apronul le acopera vecinii.
+  //
+  // Masurat cand banda a fost adaugata: toate cele 4 valuri cadeau la sapaturile 0..3,
+  // iar incalzirea le inghitea pe toate. Scenariul reparat continua sa nu masoare
+  // ramura pe care fusese reparat s-o masoare — doar din alt motiv.
+  const { terrain } = makeM10(20260913, FCX, FCY)
+  const promovate = (): number => {
+    let n = 0
+    for (const k of terrain.keys) if (terrain.chunks.get(k)!.voxels !== null) n++
+    return n
+  }
+  const cota = (wx: number, wy: number): number | null => {
+    const g = groundLevelM(terrain, wx, wy)
+    return g.ok ? g.value : null
+  }
+  const incearca = (wx: number, wy: number, z: number): boolean => dig(terrain, wx, wy, z).ok
+
+  // 1. Incalzirea, pe patratul ei: sapa, deci incalzeste codul, dar nu promoveaza.
+  let cursorIncalzire = 0
+  let promovariInIncalzire = 0
+  let facuteInIncalzire = 0
+  for (let i = 0; i < SAPATURI_IN_INCALZIRE; i++) {
+    const inainte = promovate()
+    const f = sapaturaUrmatoare(cursorIncalzire, FCX, FCY, cota, incearca, SDIG_SPAN_INCALZIRE, SDIG_OFFSET_INCALZIRE)
+    if (!f) break
+    cursorIncalzire = f.cursor
+    facuteInIncalzire++
+    if (promovate() > inainte) promovariInIncalzire++
+  }
+  assert.equal(facuteInIncalzire, SAPATURI_IN_INCALZIRE, 'incalzirea n-a reusit sa sape tot')
+  assert.equal(promovariInIncalzire, 0,
+    `incalzirea a promovat ${promovariInIncalzire} chunk-uri: cheltuie evenimentul inainte sa inceapa masuratoarea`)
+
+  // 2. Fereastra masurata, DUPA incalzire, pe patratul cu banda.
+  let cursor = 0
+  let valMaxim = 0
+  let promovari = 0
+  for (let i = 0; i < SAPATURI; i++) {
+    const inainte = promovate()
+    const f = sapaturaUrmatoare(cursor, FCX, FCY, cota, incearca)
+    if (!f) break
+    cursor = f.cursor
+    const val = promovate() - inainte
+    if (val > 0) promovari++
+    if (val > valMaxim) valMaxim = val
+  }
+  assert.ok(promovari > 20, `doar ${promovari} promovari in fereastra masurata`)
+  assert.ok(valMaxim >= 9,
+    `dupa incalzire, cel mai mare val de promovare e ${valMaxim}: ramura de 9 ramane in afara ferestrei masurate`)
 })

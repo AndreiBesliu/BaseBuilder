@@ -53,6 +53,26 @@ import { CHUNK_CELLS } from '../sim/terrain/chunk.ts'
 export const SDIG_OFFSET_CHUNKS = -3
 /** Latura patratului, in chunk-uri. */
 export const SDIG_SPAN_CHUNKS = 17
+/**
+ * Patratul folosit in INCALZIREA gate-ului: exact asezarea, fara banda de frontiera.
+ *
+ * Masurat dupa ce banda a fost adaugata: toate cele 4 valuri de 9 remesh-uri cad la
+ * sapaturile 0, 1, 2 si 3, iar incalzirea (300 de cadre / 3 = 100 de sapaturi) le
+ * inghitea pe toate. In fereastra MASURATA maximul ramanea 6, o singura data —
+ * adica ramura scumpa continua sa nu fie masurata, doar din alt motiv decat inainte.
+ *
+ * Cauza nu e fereastra, e fizica scenariului: un val de 9 cere un chunk cu toti cei
+ * 8 vecini nepromovati, si asa ceva exista doar cat timp banda e neatinsa. Dupa
+ * cateva zeci de sapaturi ea e presarata cu chunk-uri promovate si apronul le
+ * acopera vecinii. Deci banda trebuie sa ramana INTACTA pana incepe masuratoarea.
+ *
+ * Incalzirea sapa in patratul de dinainte de reparatie — cel despre care s-a probat
+ * ca nu promoveaza niciodata nimic. Isi face treaba (incalzeste `dig`, `meshChunk`
+ * si drumul de upload) fara sa cheltuie evenimentul pe care il masuram.
+ */
+export const SDIG_SPAN_INCALZIRE = 13
+/** Coltul patratului de incalzire: chiar coltul asezarii. */
+export const SDIG_OFFSET_INCALZIRE = 0
 /** Pasul permutarii. Prim, si nu divide `(SPAN_CHUNKS * CHUNK_CELLS)²`. */
 export const SDIG_PAS = 1237
 /**
@@ -74,9 +94,15 @@ export const sdigSpanCelule = (): number => SDIG_SPAN_CHUNKS * CHUNK_CELLS
  * A `i`-a pozitie a scenariului. Deterministă, si bijectiva pe patrat pe toata
  * perioada `span²`.
  */
-export function pozitiaSapaturii(i: number, focusCx: number, focusCy: number): { wx: number; wy: number } {
-  const span = sdigSpanCelule()
-  const baza = SDIG_OFFSET_CHUNKS * CHUNK_CELLS
+export function pozitiaSapaturii(
+  i: number,
+  focusCx: number,
+  focusCy: number,
+  spanChunks = SDIG_SPAN_CHUNKS,
+  offsetChunks = SDIG_OFFSET_CHUNKS,
+): { wx: number; wy: number } {
+  const span = spanChunks * CHUNK_CELLS
+  const baza = offsetChunks * CHUNK_CELLS
   const idx = (i * SDIG_PAS) % (span * span)
   return {
     wx: focusCx * CHUNK_CELLS + baza + (idx % span),
@@ -99,10 +125,12 @@ export function sapaturaUrmatoare(
   focusCy: number,
   cotaSolului: (wx: number, wy: number) => number | null,
   incearca: (wx: number, wy: number, z: number) => boolean,
+  spanChunks = SDIG_SPAN_CHUNKS,
+  offsetChunks = SDIG_OFFSET_CHUNKS,
 ): { wx: number; wy: number; cursor: number } | null {
   for (let k = 0; k < SDIG_MAX_INCERCARI; k++) {
     const c = cursor + k
-    const { wx, wy } = pozitiaSapaturii(c, focusCx, focusCy)
+    const { wx, wy } = pozitiaSapaturii(c, focusCx, focusCy, spanChunks, offsetChunks)
     const cota = cotaSolului(wx, wy)
     if (cota === null) continue
     if (incearca(wx, wy, cota - (c % 5))) return { wx, wy, cursor: c + 1 }
