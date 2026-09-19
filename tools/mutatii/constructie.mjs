@@ -404,4 +404,41 @@ export const MUTATII = [
     b: "        memoreazaPeItem(w, rules, im, Reason.INACCESIBIL, DetaliuItem.COMPONENTE_DIFERITE)",
     t: 'tests/constructie.test.ts', e: 'un pion IZOLAT nu are voie sa inghete materialul',
   },
+
+  // --- constatarile 5 si 6 ale recenziei adversariale ---
+  {
+    n: "santierul se alege dupa ordinea desenarii (departajarea pe al doilea picior dispare)",
+    f: "src/sim/joburi.ts",
+    a: "    if (candFel[i] === candFel[j] && candDist2[i] !== candDist2[j]) return candDist2[i]! - candDist2[j]!",
+    b: "    void candDist2",
+    t: 'tests/constructie.test.ts', e: 'intre doua santiere la fel de bune',
+  },
+  {
+    n: "al doilea picior se raporteaza 0 la constructie (departajarea ramane, dar oarba)",
+    f: "src/sim/joburi.ts",
+    a: "      candDist2[n] = Math.abs(it.wx[m.slot]! - d.wx[s]!) + Math.abs(it.wy[m.slot]! - d.wy[s]!) + Math.abs(it.z[m.slot]! - d.z[s]!)",
+    b: "      candDist2[n] = 0",
+    t: 'tests/constructie.test.ts', e: 'intre doua santiere la fel de bune',
+  },
+  {
+    n: "santierul fara material nu mai primeste cauza (panoul il picteaza sanatos)",
+    f: "src/sim/joburi.ts",
+    a: "      if (!matOriunde[d.piesa[s]!]!) {\n        d.ultimulMotiv[s] = codMotiv(Reason.LIPSA_MATERIAL)",
+    b: "      if (false) {\n        d.ultimulMotiv[s] = codMotiv(Reason.LIPSA_MATERIAL)",
+    t: 'tests/constructie.test.ts', e: 'santierul care n-are din ce sa fie zidit',
+  },
+  {
+    n: "cauza pe desemnare vine din rezumatul PER-PION, nu din lume",
+    f: "src/sim/joburi.ts",
+    a: "      if (!matOriunde[d.piesa[s]!]!) {",
+    b: "      if (!m.exista) {",
+    t: 'tests/constructie.test.ts', e: 'materialul rezervat de ALT pion',
+  },
+  {
+    n: "„exista in lume" se afla DUPA portile per-pion (evitarea sterge felul)",
+    f: "src/sim/joburi.ts",
+    a: "      matOriunde[p] = true\n      if (!alMeu) continue",
+    b: "      if (!alMeu) continue\n      matOriunde[p] = true",
+    t: 'tests/constructie.test.ts', e: 'mormanul evitat de pioni',
+  },
 ]

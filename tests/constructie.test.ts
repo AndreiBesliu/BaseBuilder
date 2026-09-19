@@ -33,8 +33,10 @@ import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { CATEGORII, Categorie, FelJob, Piesa } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { applyCommand } from '../src/sim/commands.ts'
-import { anuleazaDesemnare, celulaDeLucru, constructiaPrevizualizata, pornesteConstruieste, unitatiDeMunca } from '../src/sim/joburi.ts'
+import { anuleazaDesemnare, celulaDeLucru, constructiaPrevizualizata, evitaTinta, pornesteConstruieste, unitatiDeMunca } from '../src/sim/joburi.ts'
 import { slotItem } from '../src/sim/iteme.ts'
+import { rezervariPentru, Strat } from '../src/sim/rezervari.ts'
+import { DetaliuMotiv } from '../src/sim/desemnari.ts'
 import { Faction, Item } from '../src/sim/state.ts'
 import { panaCand } from './fixturi.ts'
 import { PasCara, PasConstruieste } from '../src/sim/state.ts'
@@ -1124,4 +1126,181 @@ test('CONTROLUL NEGATIV: acelasi pion sigilat, dar fara categoria CONSTRUIESTE',
   assert.ok(n >= 0, `fixtura e stricata, nu codul: nici cu categoria stinsa nu se zideste (${w.ratiune.unitatiZidite})`)
   const m = materialAt(w.terrain, sx, sy, sz)
   assert.ok(m.ok && m.value === spec.material)
+})
+
+/**
+ * UN morman, DOUA santiere ale aceleiasi piese: unul langa morman, unul departe.
+ * `intaiDeparte` spune care se DESENEAZA primul — adica cine ia id-ul mai mic.
+ *
+ * Materialul ajunge pentru UN singur perete, deliberat: atunci „care s-a ridicat"
+ * e o proprietate permanenta a lumii finale, nu una tranzitorie pe care testul ar
+ * trebui s-o prinda la tickul potrivit.
+ */
+function douaSantiere(seed: number, intaiDeparte: boolean, doarDeparte = false): {
+  w: World; aproape: { wx: number; wy: number }; departe: { wx: number; wy: number }; g: number
+} {
+  const { w, wx, wy, g } = sitPlat(seed, 13)
+  const aproape = { wx: wx + 7, wy: wy + 6 }
+  const departe = { wx: wx + 1, wy: wy + 6 }
+  const ordine = doarDeparte ? [departe] : intaiDeparte ? [departe, aproape] : [aproape, departe]
+  for (const c of ordine) {
+    const out = applyCommand(w, { kind: 'desemneaza', wx: c.wx, wy: c.wy, z: g + 1, piesa: Piesa.PERETE }, R)
+    assert.ok(out.ok, `fixtura: santierul la ${c.wx},${c.wy}: ${JSON.stringify(out)}`)
+  }
+  lasaItem(w, Item.PIATRA, R.piese[Piesa.PERETE]!.cantitate, wx + 8, wy + 6)
+  const sp = applyCommand(w, { kind: 'spawnAgent', x: (wx + 4) * 1000 + 500, y: (wy + 10) * 1000 + 500, z: g + 1, faction: Faction.ASEZARE }, R)
+  assert.ok(sp.ok, `fixtura: pionul: ${JSON.stringify(sp)}`)
+  return { w, aproape, departe, g }
+}
+
+test('intre doua santiere la fel de bune, se alege cel de langa MORMAN', () => {
+  // `candDist` la constructie e distanta pana la MORMAN, si mormanul e acelasi
+  // pentru toate santierele unei piese. Cu prioritati egale scorul iese identic pe
+  // toata categoria, `maiBun` nu e strict, deci castiga primul examinat — adica
+  // ordinea in care jucatorul le-a desenat. Nu e o departajare, e o coincidenta.
+  const spec = R.piese[Piesa.PERETE]!
+
+  // Jumatatea care DISCRIMINEAZA: cel departe are id-ul mai mic.
+  {
+    const { w, aproape, departe, g } = douaSantiere(12345, true)
+    const n = panaCand(w, 6000, (ww) => ww.ratiune.unitatiZidite >= spec.cantitate)
+    assert.ok(n >= 0, `nu s-a zidit nimic in 6000 de tickuri (${w.ratiune.unitatiZidite}/${spec.cantitate})`)
+    const ma = materialAt(w.terrain, aproape.wx, aproape.wy, g + 1)
+    const md = materialAt(w.terrain, departe.wx, departe.wy, g + 1)
+    assert.ok(ma.ok && ma.value === spec.material, 's-a ridicat santierul DEPARTE: ordinea desenarii a decis, nu distanta')
+    assert.ok(md.ok && !isSolid(md.value), 's-au ridicat amandoua: fixtura da material pentru unul singur')
+  }
+
+  // Oglinda: cu ordinea inversa raspunsul trebuie sa fie ACELASI. Singura ei
+  // treaba e sa arate ca asertiunea de sus nu spune „mereu al doilea".
+  {
+    const { w, aproape, departe, g } = douaSantiere(12345, false)
+    const n = panaCand(w, 6000, (ww) => ww.ratiune.unitatiZidite >= spec.cantitate)
+    assert.ok(n >= 0, 'oglinda: nu s-a zidit nimic')
+    const ma = materialAt(w.terrain, aproape.wx, aproape.wy, g + 1)
+    const md = materialAt(w.terrain, departe.wx, departe.wy, g + 1)
+    assert.ok(ma.ok && ma.value === spec.material, 'oglinda: s-a ridicat cel DEPARTE')
+    assert.ok(md.ok && !isSolid(md.value), 'oglinda: s-au ridicat amandoua')
+  }
+
+  // Controlul de VIATA: santierul departe chiar se poate zidi. Fara el, testul de
+  // sus ar trece la fel de bine daca „departe" ar fi inaccesibil sau nesustinut —
+  // adica ar masura fixtura, nu departajarea.
+  {
+    const { w, departe, g } = douaSantiere(12345, true, true)
+    const n = panaCand(w, 6000, (ww) => ww.ratiune.unitatiZidite >= spec.cantitate)
+    assert.ok(n >= 0, 'control: singur pe lume, santierul departe tot nu se zideste')
+    const md = materialAt(w.terrain, departe.wx, departe.wy, g + 1)
+    assert.ok(md.ok && md.value === spec.material, 'control: santierul departe nu e zidibil, deci testul de sus nu masoara nimic')
+  }
+})
+
+test('santierul care n-are din ce sa fie zidit poarta CAUZA, nu chihlimbar', () => {
+  // Panoul coloreaza dupa `ultimulMotiv`: fara cauza, un santier blocat pe veci
+  // arata exact ca unul sanatos care isi asteapta randul. Poarta de material statea
+  // in trecerea ieftina si iesea din bucla cu `continue` inainte de orice scriere,
+  // deci scria cauza pe PION si pe nimic altceva.
+  const { w, ids } = santier6c(12345, 3, 2, false)
+  ruleaza(w, 400)
+  for (const id of ids) {
+    const s = slotDesemnare(w.desemnari, id)
+    assert.notEqual(s, -1, 'fixtura: santierul a disparut')
+    assert.equal(w.desemnari.ultimulMotiv[s]!, codMotiv(Reason.LIPSA_MATERIAL),
+      `santierul ${id} n-are cauza: panoul il picteaza chihlimbar`)
+    assert.equal(w.desemnari.ultimulMotivDetaliu[s]!, DetaliuMotiv.NICIUNUL)
+  }
+})
+
+test('materialul rezervat de ALT pion nu e „lipsa material" pentru santierul meu', () => {
+  // Cauza pe desemnare are contract: „proprietate a desemnarii insesi, niciodata a
+  // unui anume pion". `m.exista` din rezumat e per-pion — un morman rezervat de
+  // altcineva il face fals — deci daca ea ar fi sursa cauzei, panoul ar picta
+  // portocaliu exact santierele in plina constructie.
+  const spec = R.piese[Piesa.PERETE]!
+  const felItem = R.digYield[spec.material]!.fel
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  const ids: number[] = []
+  for (const c of [{ wx: wx + 3, wy: wy + 6 }, { wx: wx + 5, wy: wy + 6 }]) {
+    const out = applyCommand(w, { kind: 'desemneaza', wx: c.wx, wy: c.wy, z: g + 1, piesa: Piesa.PERETE }, R)
+    assert.ok(out.ok, `fixtura: santierul: ${JSON.stringify(out)}`)
+    if (out.ok) ids.push(out.value)
+  }
+  // UN morman, cu material pentru doi pereti: rezervarea e pe MORMAN, cu un singur
+  // pretendent, deci al doilea pion il vede ocupat desi e plin.
+  lasaItem(w, Item.PIATRA, spec.cantitate * 2, wx + 1, wy + 1)
+  for (let i = 0; i < 2; i++) {
+    const sp = applyCommand(w, { kind: 'spawnAgent', x: (wx + 9) * 1000 + 500, y: (wy + 9 + i) * 1000 + 500, z: g + 1, faction: Faction.ASEZARE }, R)
+    assert.ok(sp.ok, `fixtura: pionul ${i}: ${JSON.stringify(sp)}`)
+  }
+
+  let atinse = 0
+  ruleaza(w, 900, R, (ww) => {
+    // Exista in LUME un morman din care s-ar putea zidi?
+    let morman = -1
+    for (let i = 0; i < ww.iteme.count; i++) {
+      if (ww.iteme.alive[i] !== 1) continue
+      if (ww.iteme.kind[i] !== felItem || ww.iteme.cantitate[i]! < spec.cantitate) continue
+      morman = i
+      break
+    }
+    if (morman === -1) return
+    const ocupat = rezervariPentru(ww.rezervari, ww.iteme.id[morman]!, Strat.CARAT).length > 0
+    for (let i = 0; i < ww.desemnari.count; i++) {
+      if (ww.desemnari.alive[i] !== 1 || ww.desemnari.kind[i] !== Desemnare.CONSTRUIESTE) continue
+      if (ocupat && rezervariPentru(ww.rezervari, ww.desemnari.id[i]!, Strat.LUCRU).length === 0) atinse++
+      assert.notEqual(ww.desemnari.ultimulMotiv[i]!, codMotiv(Reason.LIPSA_MATERIAL),
+        `tickul ${ww.tick}: santierul ${ww.desemnari.id[i]} e „fara material" desi mormanul ${ww.iteme.id[morman]} exista`)
+    }
+  })
+
+  // Fixtura chiar a trecut prin cazul care doare: morman rezervat de cineva, si un
+  // santier liber langa el. Fara contorul asta, testul ar trece si intr-o lume in
+  // care nimeni n-a rezervat nimic niciodata.
+  assert.ok(atinse > 0, 'fixtura moarta: mormanul n-a fost niciodata rezervat cat timp un santier era liber')
+  assert.ok(ids.length === 2)
+})
+
+test('mormanul evitat de pioni nu e „lipsa material" pe SANTIER', () => {
+  // A doua jumatate a contractului, si cea care nu se vede din rezervari: evitarea
+  // e stare PE PION (`a.evitaSloturi`), deci raspunsul „exista material?" difera de
+  // la un pion la altul in ACELASI tick. Daca „exista in lume" s-ar afla dupa poarta
+  // aia, un pion care tocmai a ocolit mormanul ar scrie „fara material" pe un santier
+  // pe care altcineva il zideste — iar cauza ar palpai de la un scan la altul.
+  //
+  // Evitarea se IMPUNE, nu se asteapta. Prima versiune folosea fixtura pionului
+  // sigilat, care chiar produce evitare — dar mormanul e ridicat de pionul liber
+  // inainte ca sigilatul sa rescaneze, deci mutatia trecea neprinsa. Cu toti pionii
+  // ocolind mormanul, nimeni nu-l ridica: starea pe care testul o descrie chiar tine
+  // cat tine testul.
+  const spec = R.piese[Piesa.PERETE]!
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  assert.ok(applyCommand(w, { kind: 'desemneaza', wx: wx + 6, wy: wy + 6, z: g + 1, piesa: Piesa.PERETE }, R).ok)
+  const idMorman = lasaItem(w, Item.PIATRA, spec.cantitate, wx + 4, wy + 6)
+  for (let i = 0; i < 2; i++) {
+    assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (wx + 5 + i) * 1000 + 500, y: (wy + 8) * 1000 + 500, z: g + 1, faction: Faction.ASEZARE }, R).ok)
+  }
+  const ocoleste = (ww: World): void => {
+    for (let i = 0; i < ww.agents.count; i++) {
+      if (ww.agents.alive[i] === 1) evitaTinta(ww, i, idMorman, ww.tick + 5)
+    }
+  }
+  ocoleste(w)
+
+  const t = ruleaza(w, 300, R, (ww) => {
+    ocoleste(ww)
+    for (let i = 0; i < ww.desemnari.count; i++) {
+      if (ww.desemnari.alive[i] !== 1 || ww.desemnari.kind[i] !== Desemnare.CONSTRUIESTE) continue
+      assert.notEqual(ww.desemnari.ultimulMotiv[i]!, codMotiv(Reason.LIPSA_MATERIAL),
+        `tickul ${ww.tick}: santierul ${ww.desemnari.id[i]} e „fara material" desi mormanul ${idMorman} zace la doi pasi`)
+    }
+  })
+
+  // Fixtura chiar a ajuns la poarta de material, si chiar cu mormanul indisponibil
+  // pionului: `faraDepozit` se numara exact acolo. Fara contorul asta, testul ar trece
+  // si intr-o lume in care nimeni n-a scanat niciodata.
+  assert.ok(t.faraDepozit > 0, 'fixtura moarta: nicio scanare n-a ajuns la poarta de material')
+  assert.equal(w.ratiune.unitatiZidite, 0, 'fixtura: s-a zidit, deci mormanul n-a fost ocolit de toti')
+  const sm = slotItem(w.iteme, idMorman)
+  assert.notEqual(sm, -1, 'fixtura: mormanul a disparut din lume')
+  assert.ok(w.iteme.cantitate[sm]! >= spec.cantitate, 'fixtura: mormanul s-a subtiat sub cat cere piesa')
 })

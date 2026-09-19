@@ -626,6 +626,23 @@ export interface MaterialPentruPiesa {
  */
 const rezumatMat: MaterialPentruPiesa[] = []
 
+/**
+ * Indexat cu `PiesaId`: exista in LUME vreun morman de felul cerut, cu destul?
+ *
+ * Deliberat SEPARAT de `rezumatMat`, fiindca raspunde la alta intrebare. Tot ce
+ * e in rezumat e al PIONULUI care a intrebat: `exista` e fals si cand singurul
+ * morman e rezervat de altcineva, sau e in racirea lui, sau e evitat de mine.
+ * Asta e proprietate a lumii, aceeasi pentru toti.
+ *
+ * Distinctia nu e teoretica: `ultimulMotiv` pe o desemnare are contract scris
+ * — „se scrie DOAR pentru ce e o proprietate a desemnarii insesi, niciodata
+ * pentru ce tine de un anume pion". Cu `exista` drept sursa, panoul ar picta
+ * portocaliu exact santierele in plina constructie: mormanul lor E rezervat.
+ *
+ * Se reseteaza STRUCTURAL odata cu rezumatul, din acelasi motiv ca el.
+ */
+const matOriunde: boolean[] = []
+
 export function rezumatMaterial(w: World, rules: Rules, slot: number): readonly MaterialPentruPiesa[] {
   const a = w.agents
   const it = w.iteme
@@ -634,7 +651,10 @@ export function rezumatMaterial(w: World, rules: Rules, slot: number): readonly 
   const ay = cellOf(a.y[slot]!)
   const az = a.z[slot]!
 
-  for (let p = 0; p < rules.piese.length; p++) rezumatMat[p] = { exista: false, dMin: 0, slot: -1 }
+  for (let p = 0; p < rules.piese.length; p++) {
+    rezumatMat[p] = { exista: false, dMin: 0, slot: -1 }
+    matOriunde[p] = false
+  }
 
   for (let s = 0; s < it.count; s++) {
     if (it.alive[s] === 0) continue
@@ -642,7 +662,7 @@ export function rezumatMaterial(w: World, rules: Rules, slot: number): readonly 
     // nu se re-propune imediat, si unul evitat de pionul ASTA nu i se propune lui.
     // Fara ele, un morman din alta componenta ar fi ales la fiecare scanare, la
     // nesfarsit, fiindca rezumatul tine un singur morman per piesa.
-    if (it.reincercaLaTick[s]! > w.tick || esteEvitata(w, slot, it.id[s]!)) continue
+    const alMeu = it.reincercaLaTick[s]! <= w.tick && !esteEvitata(w, slot, it.id[s]!)
     const fel = it.kind[s]!
     const cant = it.cantitate[s]!
     const dist = Math.abs(it.wx[s]! - ax) + Math.abs(it.wy[s]! - ay) + Math.abs(it.z[s]! - az)
@@ -650,6 +670,9 @@ export function rezumatMaterial(w: World, rules: Rules, slot: number): readonly 
       const spec = rules.piese[p]!
       if (rules.digYield[spec.material]!.fel !== fel) continue
       if (cant < spec.cantitate) continue
+      // Pana aici e predicatul LUMII: fel si cantitate, nimic despre cine intreaba.
+      matOriunde[p] = true
+      if (!alMeu) continue
       const vechi = rezumatMat[p]!
       // Departajarea la distanta egala e pe `it.id`, EXPLICIT. Ordinea sloturilor
       // ar da azi acelasi raspuns, dar e o proprietate a formatului de save, nu a
@@ -797,6 +820,22 @@ export function cautaDestinatie(
 let candFel: CandFel[] = []
 let candSlot: number[] = []
 let candDist: number[] = []
+/**
+ * Al DOILEA picior al drumului, cand se stie ieftin. Departajare, nu metrica:
+ * nu intra niciodata in scor.
+ *
+ * Exista fiindca la constructie `candDist` e `m.dMin` — distanta pana la MORMAN
+ * — si mormanul e acelasi pentru toate santierele aceleiasi piese. Cu prioritati
+ * egale, scorul iese identic pe toata categoria, `maiBun` nu e strict, si atunci
+ * castiga primul examinat: ordinea sortarii, adica `candId`, adica ordinea in
+ * care jucatorul a desenat santierele. Masurat pe cazul patologic: +72% tickuri.
+ *
+ * 0 la SAPA si la CARA, si se compara DOAR intre candidati de acelasi fel. La
+ * sapat 0 e adevarat (nu exista al doilea picior); la carat e „nu se stie ieftin"
+ * — destinatia se alege abia in trecerea scumpa. Comparat intre categorii, zeroul
+ * ala ar fi o minciuna care inclina sistematic balanta impotriva constructiei.
+ */
+let candDist2: number[] = []
 let candG: number[] = []
 let candId: number[] = []
 /** Prioritatea personala a CATEGORIEI din care vine candidatul. */
@@ -929,6 +968,7 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       candFel[n] = CAND_SAPA
       candSlot[n] = s
       candDist[n] = Math.max(0, dist0 - margine)
+      candDist2[n] = 0
       candG[n] = 2 ** d.prioritate[s]! * gPers
       candId[n] = d.id[s]!
       candPers[n] = persS
@@ -957,6 +997,7 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       candFel[n] = CAND_CARA
       candSlot[n] = s
       candDist[n] = dist0
+      candDist2[n] = 0
       candG[n] = 2 ** ix.maxPrioLibera[it.kind[s]!]! * gPers
       candId[n] = it.id[s]!
       candPers[n] = persC
@@ -985,6 +1026,20 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
         continue
       }
       const m = rez[d.piesa[s]!]!
+      // Cauza pe DESEMNARE, ca sa nu mai fie chihlimbar un santier care n-are din
+      // ce sa fie zidit. Din `matOriunde`, nu din `m.exista` — vezi acolo de ce.
+      //
+      // FARA racire, din exact motivul scris mai jos la poarta de sprijin: materialul
+      // poate aparea la orice tick, iar `reincercaLaTick` e hasuit si persistat.
+      if (!matOriunde[d.piesa[s]!]!) {
+        d.ultimulMotiv[s] = codMotiv(Reason.LIPSA_MATERIAL)
+        d.ultimulMotivDetaliu[s] = DetaliuMotiv.NICIUNUL
+      } else if (d.ultimulMotiv[s]! === codMotiv(Reason.LIPSA_MATERIAL)) {
+        // Se sterge DOAR cauza asta. Un INACCESIBIL scris de trecerea scumpa are
+        // racirea lui si nu se afla aici: un santier racit nici nu ajunge pana aici.
+        d.ultimulMotiv[s] = 0
+        d.ultimulMotivDetaliu[s] = DetaliuMotiv.NICIUNUL
+      }
       if (!m.exista) { lipsaMaterial = true; continue }
 
       // Poarta de sprijin, pe terenul REAL si aici, in trecerea ieftina.
@@ -1029,6 +1084,9 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       // doua categorii. O schimbare de comportament pentru SAPA si CARA, strecurata
       // printr-o categorie noua.
       candDist[n] = m.dMin
+      // Al doilea picior: morman -> santier. Se stie ieftin fiindca rezumatul tine
+      // UN morman per piesa, deci e acelasi pentru toate santierele ei.
+      candDist2[n] = Math.abs(it.wx[m.slot]! - d.wx[s]!) + Math.abs(it.wy[m.slot]! - d.wy[s]!) + Math.abs(it.z[m.slot]! - d.z[s]!)
       candG[n] = 2 ** d.prioritate[s]! * gPers
       candId[n] = d.id[s]!
       candPers[n] = persB
@@ -1060,6 +1118,8 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
     const li = candG[i]! * (1 + candDist[j]!)
     const lj = candG[j]! * (1 + candDist[i]!)
     if (li !== lj) return li > lj ? -1 : 1
+    // Doar in interiorul categoriei: vezi `candDist2`.
+    if (candFel[i] === candFel[j] && candDist2[i] !== candDist2[j]) return candDist2[i]! - candDist2[j]!
     return candId[i]! - candId[j]!
   })
 
