@@ -240,4 +240,34 @@ export const MUTATII = [
     b: "    if (incearca(wx, wy, cota - (c % 5))) return { wx, wy, cursor: c }",
     t: 'tests/sdig.test.ts', e: 'cele 1200 de sapaturi ale unei rulari se FAC',
   },
+
+  // --- `chunkuriDeRefacut`: iesita din viewer pe 19.09, deci probabila ---
+  {
+    n: 'multimea de remesh nu se mai goleste (editarile se aduna intre ele)',
+    f: 'src/render/remesh.ts',
+    a: "  out.clear()",
+    b: "  void out",
+    t: 'tests/remesh.test.ts', e: 'multimea data se GOLESTE la intrare',
+  },
+  {
+    n: 'vecinii deja promovati se remesheaza si ei (fiecare editare costa noua)',
+    f: 'src/render/remesh.ts',
+    a: "      if (exista(key) && !eraPromovat(key)) out.add(key)",
+    b: "      if (exista(key)) out.add(key)",
+    t: 'tests/remesh.test.ts', e: 'un vecin DEJA promovat',
+  },
+  {
+    n: 'cusatura nu mai verifica existenta vecinului (chei fantoma in multime)',
+    f: 'src/render/remesh.ts',
+    a: "    if (exista(key)) out.add(key)\n  }\n  if (lx === 0) cusatura(cx - 1, cy)",
+    b: "    out.add(key)\n  }\n  if (lx === 0) cusatura(cx - 1, cy)",
+    t: 'tests/remesh.test.ts', e: 'cusatura nu cere un vecin care NU EXISTA',
+  },
+  {
+    n: 'cusatura se cere pe TOATE cele patru laturi, nu doar pe cele atinse',
+    f: 'src/render/remesh.ts',
+    a: "  if (lx === 0) cusatura(cx - 1, cy)",
+    b: "  cusatura(cx, cy + 1)\n  if (lx === 0) cusatura(cx - 1, cy)",
+    t: 'tests/remesh.test.ts', e: 'o editare in MIJLOCUL unui chunk',
+  },
 ]

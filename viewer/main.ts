@@ -23,6 +23,7 @@ import { Face, meshChunk } from '../src/render/mesher.ts'
 import type { ChunkNeighbours } from '../src/render/mesher.ts'
 import { AO_FACTOR, quadColor, variatiaLocului } from '../src/render/palette.ts'
 import { writeQuadIndices } from '../src/render/winding.ts'
+import { chunkuriDeRefacut } from '../src/render/remesh.ts'
 import { Ballast, Bisector, checkGuards, clockGranularityMs, FrameProbe, heapMB } from './probe.ts'
 import { createRegionOverlay, rebuildRegionOverlay } from './overlay-regions.ts'
 import { createAmprentaOverlay, FORME, rebuildAmprentaOverlay } from './overlay-amprenta.ts'
@@ -399,28 +400,16 @@ function promotedKeys(): Set<number> {
   return out
 }
 
+/** Multimea se reutilizeaza intre editari: `chunkuriDeRefacut` o goleste la intrare. */
+const deRefacut = new Set<number>()
+
 function remeshAfterEdit(wx: number, wy: number, promotedBefore: Set<number>): void {
-  const cx = Math.floor(wx / CHUNK_CELLS)
-  const cy = Math.floor(wy / CHUNK_CELLS)
-  const lx = wx - cx * CHUNK_CELLS
-  const ly = wy - cy * CHUNK_CELLS
-
-  const deRefacut = new Set<number>()
-  deRefacut.add(cy * 512 + cx)
-
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
-      const key = (cy + dy) * 512 + (cx + dx)
-      if (world.terrain.chunks.has(key) && !promotedBefore.has(key)) deRefacut.add(key)
-    }
-  }
-
-  // Cazul 3: numai laturile chiar atinse, nu toate patru.
-  if (lx === 0) deRefacut.add(cy * 512 + (cx - 1))
-  if (lx === CHUNK_CELLS - 1) deRefacut.add(cy * 512 + (cx + 1))
-  if (ly === 0) deRefacut.add((cy - 1) * 512 + cx)
-  if (ly === CHUNK_CELLS - 1) deRefacut.add((cy + 1) * 512 + cx)
-
+  chunkuriDeRefacut(
+    wx, wy,
+    (key) => world.terrain.chunks.has(key),
+    (key) => promotedBefore.has(key),
+    deRefacut,
+  )
   for (const key of deRefacut) {
     const c = world.terrain.chunks.get(key)
     if (c) buildChunkMesh(c)
