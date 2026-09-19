@@ -26,7 +26,7 @@ import { decode, encode } from '../src/sim/save.ts'
 import { cellOf } from '../src/sim/drumuri.ts'
 import { dig, fill, groundLevelM, materialAt } from '../src/sim/terrain/terrain.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
-import { Reason } from '../src/sim/result.ts'
+import { codMotiv, Reason } from '../src/sim/result.ts'
 import { constructiaPosibila, poateSustine, suportDacaZidesc, suportLa } from '../src/sim/stabilitate.ts'
 import { cellKey, decodeCell } from '../src/sim/path.ts'
 import { isSolid } from '../src/sim/terrain/chunk.ts'
@@ -903,4 +903,142 @@ test('santierul anulat in timpul zidirii nu lasa job orfan', () => {
   // Marfa din mana ajunge pe jos, nu dispare.
   ruleaza(w, 50)
   assert.equal(w.ratiune.itemePierdute, 0, 'materialul carat s-a evaporat la anulare')
+})
+
+// ---------------------------------------------------------------------------
+// scanerul alege singur santiere (pasul 6c)
+// ---------------------------------------------------------------------------
+
+/**
+ * Un sir de N pereti, material cat trebuie in mormane separate, si `cati` pioni.
+ * NIMENI nu porneste vreun job cu mana — asta e tot rostul.
+ */
+function santier6c(seed: number, pereti: number, cati: number, cuMaterial = true): {
+  w: World; wx: number; wy: number; g: number; ids: number[]
+} {
+  const { w, wx, wy, g } = sitPlat(seed, 13)
+  const ids: number[] = []
+  for (let i = 0; i < pereti; i++) {
+    const out = applyCommand(w, { kind: 'desemneaza', wx: wx + 3 + i, wy: wy + 6, z: g + 1, piesa: Piesa.PERETE }, R)
+    assert.ok(out.ok, `fixtura: santierul ${i}: ${JSON.stringify(out)}`)
+    if (out.ok) ids.push(out.value)
+  }
+  if (cuMaterial) {
+    for (let i = 0; i < pereti; i++) lasaItem(w, Item.PIATRA, R.piese[Piesa.PERETE]!.cantitate, wx + 1, wy + 1 + i)
+  }
+  for (let i = 0; i < cati; i++) {
+    const sp = applyCommand(w, { kind: 'spawnAgent', x: (wx + 2) * 1000 + 500, y: (wy + 10 + i) * 1000 + 500, z: g + 1, faction: Faction.ASEZARE }, R)
+    assert.ok(sp.ok, `fixtura: pionul ${i}: ${JSON.stringify(sp)}`)
+  }
+  // Fixtura VIE, verificata inainte sa se ruleze ceva: exista chiar desemnari de
+  // CONSTRUIT. Scenariul standard n-are niciuna, si de-aia scanerul a putut fi
+  // montat integral cu 376 din 376 de teste verzi.
+  let viiConstr = 0
+  for (let i = 0; i < w.desemnari.count; i++) {
+    if (w.desemnari.alive[i] === 1 && w.desemnari.kind[i] === Desemnare.CONSTRUIESTE) viiConstr++
+  }
+  assert.equal(viiConstr, pereti, 'fixtura moarta: n-are desemnari de construit')
+  return { w, wx, wy, g, ids }
+}
+
+test('ACCEPTANTA 6c: scanerul alege singur santiere, si sirul de pereti se ridica', () => {
+  const PERETI = 5
+  const { w, wx, wy, g, ids } = santier6c(12345, PERETI, 3)
+  const spec = R.piese[Piesa.PERETE]!
+
+  const n = panaCand(w, 6000, (ww) => ww.ratiune.unitatiZidite >= PERETI * spec.cantitate)
+  assert.ok(n >= 0, `s-au zidit ${w.ratiune.unitatiZidite} din ${PERETI * spec.cantitate} de unitati in 6000 de tickuri`)
+
+  for (let i = 0; i < PERETI; i++) {
+    const m = materialAt(w.terrain, wx + 3 + i, wy + 6, g + 1)
+    assert.ok(m.ok && m.value === spec.material, `peretele ${i}: ${m.ok ? m.value : 'refuz'}`)
+  }
+  for (const id of ids) assert.equal(slotDesemnare(w.desemnari, id), -1, 'un santier a ramas dupa ce piesa lui a fost pusa')
+
+  // Conservarea peste TOT arcul, nu doar peste un job.
+  assert.equal(marfaTotala(w) + w.ratiune.unitatiZidite, PERETI * spec.cantitate, 'materia s-a tiparit sau s-a evaporat')
+  assert.equal(w.ratiune.itemePierdute, 0, 's-a pierdut material pe drum')
+  assert.equal(w.rezervari.total, 0, 'au ramas rezervari pe id-uri moarte')
+})
+
+test('fara material, categoria se refuza O DATA pe fel, cu LIPSA_MATERIAL', () => {
+  // Poarta de material sta in trecerea IEFTINA si raspunde pe FEL, nu pe santier:
+  // 400 de santiere fara piatra trebuie sa coste un scalar, nu 400 de cautari.
+  // Acopera si gaura de continut a SCARII, care cere LEMN intr-o lume in care
+  // worldgen scrie doar apa, iarba, pamant si roca.
+  const { w, wx, wy, g, ids } = santier6c(12345, 3, 2, false)
+  ruleaza(w, 400)
+
+  const m = materialAt(w.terrain, wx + 3, wy + 6, g + 1)
+  assert.ok(m.ok && !isSolid(m.value), 's-a zidit ceva fara material')
+  assert.equal(w.ratiune.unitatiZidite, 0)
+  for (const id of ids) assert.notEqual(slotDesemnare(w.desemnari, id), -1, 'un santier a disparut fara sa fie zidit')
+
+  // Si cauza ajunge la jucator, nu se pierde.
+  let cuLipsa = 0
+  for (let i = 0; i < w.agents.count; i++) {
+    if (w.agents.alive[i] === 1 && w.ratiune.motivFinal[i] === codMotiv(Reason.LIPSA_MATERIAL)) cuLipsa++
+  }
+  assert.ok(cuLipsa > 0, 'niciun pion nu raporteaza LIPSA_MATERIAL — cauza se pierde')
+})
+
+test('un pion cu CONSTRUIESTE pe 0 nu ia niciodata un santier', () => {
+  // Poarta pe categorie, in oglinda testului „exclusiv pe construit nu mai sapa".
+  const { w, wx, wy, g } = santier6c(12345, 3, 1)
+  for (let i = 0; i < w.agents.count; i++) {
+    if (w.agents.alive[i] !== 1) continue
+    assert.ok(applyCommand(w, { kind: 'setPrioritatePersonala', id: w.agents.id[i]!, categorie: Categorie.CONSTRUIESTE, nivel: 0 }, R).ok)
+  }
+  ruleaza(w, 1500)
+  const m = materialAt(w.terrain, wx + 3, wy + 6, g + 1)
+  assert.ok(m.ok && !isSolid(m.value), 'a zidit desi are CONSTRUIESTE pe 0')
+  assert.equal(w.ratiune.unitatiZidite, 0)
+
+  // Controlul negativ: cu prioritatea inapoi pe implicit, ACEEASI lume chiar zideste.
+  for (let i = 0; i < w.agents.count; i++) {
+    if (w.agents.alive[i] !== 1) continue
+    assert.ok(applyCommand(w, { kind: 'setPrioritatePersonala', id: w.agents.id[i]!, categorie: Categorie.CONSTRUIESTE, nivel: R.personalPriorityDefault }, R).ok)
+  }
+  const n = panaCand(w, 4000, (ww) => ww.ratiune.unitatiZidite > 0)
+  assert.ok(n >= 0, 'fixtura moarta: nici cu prioritatea repusa nu zideste nimeni')
+})
+
+test('un blueprint in AER nu trimite pe nimeni dupa material', () => {
+  // Poarta de sprijin taie DRUMUL, nu doar zidirea. Fara ea, pionul cara 20 de
+  // unitati, munceste 400 de tickuri si abia atunci `zidesteVoxel` refuza cu
+  // FARA_SPRIJIN. Observabilul e deci munca CHELTUITA, nu peretele lipsa:
+  // peretele lipseste in ambele cazuri.
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  const sant = applyCommand(w, { kind: 'desemneaza', wx: wx + 5, wy: wy + 6, z: g + 5, piesa: Piesa.PERETE }, R)
+  assert.ok(sant.ok, `fixtura: santierul in aer: ${JSON.stringify(sant)}`)
+  // Fixtura VIE: santierul chiar e in aer, si chiar e nezidibil ACUM.
+  assert.equal(suportDacaZidesc(w.terrain, R, wx + 5, wy + 6, g + 5), 0, 'fixtura: santierul are sprijin, deci nu proba nimic')
+  lasaItem(w, Item.PIATRA, R.piese[Piesa.PERETE]!.cantitate, wx + 1, wy + 1)
+  assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (wx + 2) * 1000 + 500, y: (wy + 2) * 1000 + 500, z: g + 1, faction: Faction.ASEZARE }, R).ok)
+
+  ruleaza(w, 1200)
+  assert.equal(w.ratiune.unitatiZidite, 0, 's-a zidit in aer')
+  assert.equal(w.ratiune.tickuriDeLucru, 0, `s-au cheltuit ${w.ratiune.tickuriDeLucru} tickuri de munca pe un santier care nu se poate zidi`)
+  assert.equal(w.agents.caraCantitate[0], 0, 'pionul a plecat cu material dupa un santier imposibil')
+})
+
+test('un santier peste care a cazut MOLOZ nu mai e candidat', () => {
+  // `poateSustine` SINGUR nu ajunge: pe o celula deja solida raspunde `ok` prin
+  // scurtcircuit, iar `zidesteVoxel` refuza cu CELULA_PLINA. Poarta e conjunctia.
+  // Cazul e real — prabusirea depune moloz, si molozul poate ateriza peste un
+  // blueprint desenat.
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  const sant = applyCommand(w, { kind: 'desemneaza', wx: wx + 5, wy: wy + 6, z: g + 1, piesa: Piesa.PERETE }, R)
+  assert.ok(sant.ok, `fixtura: ${JSON.stringify(sant)}`)
+  assert.ok(applyCommand(w, { kind: 'fill', wx: wx + 5, wy: wy + 6, z: g + 1, material: Material.MOLOZ }, R).ok, 'fixtura: molozul')
+  // Fixtura VIE: exact asimetria pe care o probam.
+  assert.ok(poateSustine(w.terrain, R, wx + 5, wy + 6, g + 1).ok, 'fixtura: `poateSustine` ar trebui sa spuna DA pe o celula plina')
+
+  lasaItem(w, Item.PIATRA, R.piese[Piesa.PERETE]!.cantitate, wx + 1, wy + 1)
+  assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (wx + 2) * 1000 + 500, y: (wy + 2) * 1000 + 500, z: g + 1, faction: Faction.ASEZARE }, R).ok)
+
+  ruleaza(w, 1200)
+  assert.equal(w.ratiune.tickuriDeLucru, 0, `s-au cheltuit ${w.ratiune.tickuriDeLucru} tickuri pe un santier deja plin`)
+  const m = materialAt(w.terrain, wx + 5, wy + 6, g + 1)
+  assert.ok(m.ok && m.value === Material.MOLOZ, 'molozul a fost inlocuit')
 })

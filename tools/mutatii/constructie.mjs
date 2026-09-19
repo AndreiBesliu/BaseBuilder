@@ -351,4 +351,48 @@ export const MUTATII = [
     b: "    void comp\n    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules)",
     t: 'tests/constructie.test.ts', e: 'santierul de necontactat se refuza PE LOC',
   },
+
+  // --- 6c: scanerul ---
+  {
+    n: "categoria CONSTRUIESTE nu se activeaza niciodata",
+    f: 'src/sim/joburi.ts',
+    a: "    construieste: pB > 0 && (!exclusiv || pB === rules.personalPriorityLevels),",
+    b: "    construieste: false,",
+    t: 'tests/constructie.test.ts', e: "ACCEPTANTA 6c: scanerul alege singur santiere",
+  },
+  {
+    n: "scanerul sare peste desemnarile de CONSTRUIT (poarta pe fel inversata)",
+    f: 'src/sim/joburi.ts',
+    a: "      if (d.kind[s] !== Desemnare.CONSTRUIESTE) continue",
+    b: "      if (d.kind[s] !== Desemnare.SAPA) continue",
+    t: 'tests/constructie.test.ts', e: "ACCEPTANTA 6c: scanerul alege singur santiere",
+  },
+  {
+    n: "poarta de material nu taie nimic (santiere fara din ce, propuse oricum)",
+    f: 'src/sim/joburi.ts',
+    a: "      if (!m.exista) { lipsaMaterial = true; continue }",
+    b: "      if (!m.exista) { lipsaMaterial = true }",
+    t: 'tests/constructie.test.ts', e: "fara material, categoria se refuza O DATA pe fel",
+  },
+  {
+    n: "poarta de sprijin scoasa: se cara material la santiere in AER",
+    f: 'src/sim/joburi.ts',
+    a: "      if (!poateSustine(w.terrain, rules, d.wx[s]!, d.wy[s]!, d.z[s]!).ok) {",
+    b: "      if (false) {",
+    t: 'tests/constructie.test.ts', e: "un blueprint in AER nu trimite pe nimeni dupa material",
+  },
+  {
+    n: "poarta ramane doar `poateSustine`, fara verificarea de celula PLINA",
+    f: 'src/sim/joburi.ts',
+    a: "      if (solLa(w.terrain, d.wx[s]!, d.wy[s]!, d.z[s]!) === Sol.SOLID) continue",
+    b: "      if (false) continue",
+    t: 'tests/constructie.test.ts', e: "un santier peste care a cazut MOLOZ nu mai e candidat",
+  },
+  {
+    n: "pionul cu CONSTRUIESTE pe 0 primeste totusi santiere",
+    f: 'src/sim/joburi.ts',
+    a: "    construieste: pB > 0 && (!exclusiv || pB === rules.personalPriorityLevels),",
+    b: "    construieste: true,",
+    t: 'tests/constructie.test.ts', e: "un pion cu CONSTRUIESTE pe 0 nu ia niciodata un santier",
+  },
 ]

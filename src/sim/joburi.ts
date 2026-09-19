@@ -304,6 +304,11 @@ function rang(r: ReasonCode): number {
     case Reason.FARA_DEPOZIT: return 3
     case Reason.INACCESIBIL: return 4
     case Reason.REZERVAT: return 5
+    // Se adauga ACUM fiindca de la 6c scanerul chiar o emite: un santier care n-are
+    // din ce sa fie zidit. Sta sub PREA_DEPARTE si peste FARA_MUNCITOR — e mai
+    // informativ decat „n-are cine", fiindca numeste ce lipseste, dar mai putin
+    // decat „am ajuns la ea si n-am putut", care e tot ce e deasupra.
+    case Reason.LIPSA_MATERIAL: return 2
     default: return 0
   }
 }
@@ -587,9 +592,87 @@ function memoreazaPeItem(w: World, rules: Rules, is: number, motiv: ReasonCode, 
 // destinatia unui carat
 // ---------------------------------------------------------------------------
 
+/**
+ * Ce material e disponibil pentru fiecare PIESA, din perspectiva unui pion anume.
+ *
+ * O singura baleiere peste `w.iteme` pe scanare, nu una per santier. Varianta
+ * per-santier e `O(candidati x iteme)` fara plafon — masurata de panou la ~1,3 ms
+ * pe scanare la plafonul de 256 de candidati, adica ~2,8 ms/tick la 64 de pioni.
+ * Aceeasi forma pe care `ix.maxPrioLibera[fel]` o are deja pentru marfa: un scalar
+ * per fel, calculat o data, folosit ca margine de toti candidatii felului.
+ *
+ * Predicatul e IDENTIC cu cel din `pornesteConstruieste` — felul cerut, cantitatea
+ * intreaga, si rezervarea sursei. Altfel „verificat la scan, refuzat la start" nu
+ * mai e adevarat, iar `cautaJob` scrie RESPINS si se opreste in loc sa treaca la
+ * urmatorul candidat.
+ */
+export interface MaterialPentruPiesa {
+  /** Exista vreun morman liber de felul cerut, cu destul? */
+  readonly exista: boolean
+  /** Distanta Manhattan minima pion -> morman, peste mormanele bune. */
+  readonly dMin: number
+  /** Slotul mormanului care a dat minimul. -1 daca niciunul. */
+  readonly slot: number
+}
+
+/**
+ * Rezumatul, indexat cu `PiesaId`. Intrarea 0 (`Piesa.NICIUNA`) e santinela si
+ * ramane mereu goala.
+ *
+ * Reutilizat intre scanari ca sa nu aloce: e TRANSIENT, se rescrie complet la
+ * fiecare apel. Resetarea e STRUCTURALA — se scriu toate intrarile, nu doar cele
+ * ale pieselor vii — fiindca o piesa care dispare dintre desemnari intre doua
+ * scanari ar lasa in urma raspunsul vechi, si ala ar fi citit ca proaspat.
+ */
+const rezumatMat: MaterialPentruPiesa[] = []
+
+export function rezumatMaterial(w: World, rules: Rules, slot: number): readonly MaterialPentruPiesa[] {
+  const a = w.agents
+  const it = w.iteme
+  const eu = a.id[slot]!
+  const ax = cellOf(a.x[slot]!)
+  const ay = cellOf(a.y[slot]!)
+  const az = a.z[slot]!
+
+  for (let p = 0; p < rules.piese.length; p++) rezumatMat[p] = { exista: false, dMin: 0, slot: -1 }
+
+  for (let s = 0; s < it.count; s++) {
+    if (it.alive[s] === 0) continue
+    // Aceleasi doua porti ca la carat: un morman care tocmai a refuzat pe cineva
+    // nu se re-propune imediat, si unul evitat de pionul ASTA nu i se propune lui.
+    // Fara ele, un morman din alta componenta ar fi ales la fiecare scanare, la
+    // nesfarsit, fiindca rezumatul tine un singur morman per piesa.
+    if (it.reincercaLaTick[s]! > w.tick || esteEvitata(w, slot, it.id[s]!)) continue
+    const fel = it.kind[s]!
+    const cant = it.cantitate[s]!
+    const dist = Math.abs(it.wx[s]! - ax) + Math.abs(it.wy[s]! - ay) + Math.abs(it.z[s]! - az)
+    for (let p = 1; p < rules.piese.length; p++) {
+      const spec = rules.piese[p]!
+      if (rules.digYield[spec.material]!.fel !== fel) continue
+      if (cant < spec.cantitate) continue
+      const vechi = rezumatMat[p]!
+      // Departajarea la distanta egala e pe `it.id`, EXPLICIT. Ordinea sloturilor
+      // ar da azi acelasi raspuns, dar e o proprietate a formatului de save, nu a
+      // regulii — iar ce decide ce job ia pionul trebuie sa fie o ordine totala pe
+      // date persistate, scrisa ca atare.
+      if (vechi.slot !== -1) {
+        if (dist > vechi.dMin) continue
+        if (dist === vechi.dMin && it.id[s]! > it.id[vechi.slot]!) continue
+      }
+      // Rezervarea se cere ABIA aici: e cea mai scumpa dintre conditii, si o
+      // plateste doar mormanul care chiar ar fi ales.
+      const cerere = { targetId: it.id[s]!, layer: Strat.CARAT, count: spec.cantitate, maxCount: spec.cantitate, maxClaimants: 1 }
+      if (!poateRezerva(w.rezervari, eu, cerere).ok) continue
+      rezumatMat[p] = { exista: true, dMin: dist, slot: s }
+    }
+  }
+  return rezumatMat
+}
+
 /** Cine e sursa unui candidat de scanare. */
 const CAND_SAPA = 0
 const CAND_CARA = 1
+const CAND_CONSTRUIESTE = 2
 /**
  * Felurile de candidat, ca UNIUNE — nu `number`.
  *
@@ -598,7 +681,7 @@ const CAND_CARA = 1
  * nimic. Adaugarea unui membru aici FARA ramura lui in dispecerizare e eroare de
  * compilare, adica exact ce n-a existat cand s-au scris cele doua ternare.
  */
-type CandFel = typeof CAND_SAPA | typeof CAND_CARA
+type CandFel = typeof CAND_SAPA | typeof CAND_CARA | typeof CAND_CONSTRUIESTE
 
 /**
  * Unde se duce o marfa de felul `kind`, `cant` unitati, care sta la (fx, fy, fz)
@@ -737,7 +820,7 @@ let candPrio: number[] = []
  * aratat ca „fiecare la 3 sare peste celelalte" facea un pion cu ambele la 3
  * inert, fara cauza.
  */
-function categoriiActive(w: World, rules: Rules, slot: number): { sapa: boolean; cara: boolean } {
+function categoriiActive(w: World, rules: Rules, slot: number): { sapa: boolean; cara: boolean; construieste: boolean } {
   const a = w.agents
   const pS = a.prioPersonala[slot * CATEGORII + Categorie.SAPA]!
   const pC = a.prioPersonala[slot * CATEGORII + Categorie.CARA]!
@@ -749,6 +832,7 @@ function categoriiActive(w: World, rules: Rules, slot: number): { sapa: boolean;
   return {
     sapa: pS > 0 && (!exclusiv || pS === rules.personalPriorityLevels),
     cara: pC > 0 && (!exclusiv || pC === rules.personalPriorityLevels),
+    construieste: pB > 0 && (!exclusiv || pB === rules.personalPriorityLevels),
   }
 }
 
@@ -774,6 +858,7 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
   const activ = categoriiActive(w, rules, slot)
   const persS = a.prioPersonala[slot * CATEGORII + Categorie.SAPA]!
   const persC = a.prioPersonala[slot * CATEGORII + Categorie.CARA]!
+  const persB = a.prioPersonala[slot * CATEGORII + Categorie.CONSTRUIESTE]!
 
   // shouldSkip, in O(1): nimic de facut nicaieri.
   if (d.vii === 0 && ix.deMutat.length === 0) {
@@ -880,6 +965,79 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
     }
   }
 
+  if (activ.construieste) {
+    const gPers = 4 ** (persB - 1)
+    const rez = rezumatMaterial(w, rules, slot)
+    // „N-are din ce" se afla O DATA pe fel, nu o data pe santier: un blocaj de
+    // material opreste toata categoria, si pe 400 de santiere asta e diferenta
+    // dintre o cautare si un scalar. Acoperitor si pentru gaura de continut a
+    // SCARII, care cere LEMN intr-o lume unde worldgen nu scrie niciodata lemn.
+    let lipsaMaterial = false
+    for (let s = 0; s < d.count; s++) {
+      if (d.alive[s] === 0) continue
+      if (d.kind[s] !== Desemnare.CONSTRUIESTE) continue
+      raport.vizite++
+      if (d.reincercaLaTick[s]! > w.tick || esteEvitata(w, slot, d.id[s]!)) { inRacire++; continue }
+      const dist0 = Math.abs(d.wx[s]! - ax) + Math.abs(d.wy[s]! - ay) + Math.abs(d.z[s]! - az)
+      if (dist0 > rules.jobScanRadiusCells) {
+        raport.preaDeparte++
+        noteaza(Reason.PREA_DEPARTE)
+        continue
+      }
+      const m = rez[d.piesa[s]!]!
+      if (!m.exista) { lipsaMaterial = true; continue }
+
+      // Poarta de sprijin, pe terenul REAL si aici, in trecerea ieftina.
+      //
+      // NU e apartenenta la inchiderea `constructiaPosibila`: aia raspunde „se poate
+      // zidi DACA se zideste tot planul", iar pionul vrea „se poate zidi ACUM".
+      // Masurat de panou pe 5 planuri: 71,6-84,4% dintre celulele pe care inchiderea
+      // le declara construibile au suport 0 in clipa aia, deci `zidesteVoxel` le-ar
+      // refuza dupa ce pionul a carat materialul si a muncit 400 de tickuri. Si
+      // invers: „zideste tot ce se poate acum, repeta" CONVERGE exact la inchidere,
+      // 5 planuri din 5 — deci santierul vine oricum la rand, si inchiderea nu
+      // cumpara scanerului nicio celula in plus.
+      //
+      // Conjunctia, nu `poateSustine` singur: pe o celula deja SOLIDA `poateSustine`
+      // raspunde `ok` prin scurtcircuit, iar `zidesteVoxel` refuza cu CELULA_PLINA.
+      // Cazul e real — prabusirea depune MOLOZ, si molozul poate ateriza peste un
+      // blueprint desenat.
+      if (solLa(w.terrain, d.wx[s]!, d.wy[s]!, d.z[s]!) === Sol.SOLID) continue
+      if (!poateSustine(w.terrain, rules, d.wx[s]!, d.wy[s]!, d.z[s]!).ok) {
+        // NICIO racire si NICIO cauza. Un santier nezidibil acum nu e un refuz, e o
+        // pozitie in coada: `racireDesemnare` da intre 100 si 510 tickuri, iar un job
+        // de construit dureaza 76 cap-coada — constructia ar avansa la viteza racirii,
+        // nu a muncii. Si `reincercaLaTick` E hasuit, deci un parcaj gresit nu e o
+        // pierdere de debit, e stare divergenta.
+        continue
+      }
+
+      // Doar SANTIERUL. Mormanul l-a verificat deja rezumatul, cu acelasi predicat.
+      if (!poateRezerva(w.rezervari, eu, { targetId: d.id[s]!, layer: Strat.LUCRU, count: 1, maxCount: 1, maxClaimants: 1 }).ok) {
+        raport.rezervat++
+        noteaza(Reason.REZERVAT)
+        continue
+      }
+
+      candFel[n] = CAND_CONSTRUIESTE
+      candSlot[n] = s
+      // PRIMUL picior, ca la sapat si la carat: pionul merge intai la morman.
+      // `pornesteConstruieste` chiar scrie pozitia mormanului in `jobWork`. Distanta
+      // pana la santier ar fi o margine pe drumul TOTAL, valida si ea, dar sub alta
+      // metrica — si atunci constructia ar raporta sistematic distante mai mari
+      // pentru aceeasi cantitate de mers, si ar pierde in `maiBun` fata de celelalte
+      // doua categorii. O schimbare de comportament pentru SAPA si CARA, strecurata
+      // printr-o categorie noua.
+      candDist[n] = m.dMin
+      candG[n] = 2 ** d.prioritate[s]! * gPers
+      candId[n] = d.id[s]!
+      candPers[n] = persB
+      candPrio[n] = d.prioritate[s]!
+      n++
+    }
+    if (lipsaMaterial) { raport.faraDepozit++; noteaza(Reason.LIPSA_MATERIAL) }
+  }
+
   if (n === 0) {
     if (celMaiAvansat === null) {
       rat.stare[slot] = inRacire > 0 ? StareRatiune.IN_ASTEPTARE : StareRatiune.NIMIC_DE_FACUT
@@ -973,6 +1131,74 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
         bestPers = persS
         bestDist = dist
         bestWork = work
+      }
+      continue
+    }
+
+    if (fel === CAND_CONSTRUIESTE) {
+      scumpe++
+      raport.candidatiExaminati++
+      const prio = d.prioritate[s]!
+      const m = rezumatMat[d.piesa[s]!]!
+      // Rezumatul s-a calculat inaintea sortarii, pe aceeasi scanare, si nimic nu
+      // l-a invalidat de atunci: trecerea scumpa nu porneste joburi, o face abia
+      // apelantul dupa bucla.
+      if (m.slot === -1) continue
+
+      // (a) mormanul: in componenta pionului? Aceeasi intrebare ca la carat, si din
+      // acelasi motiv — un morman exista numai unde a umblat cineva, deci nu se
+      // intinde coridor spre el. Cu un singur morman retinut per piesa, refuzul se
+      // memoreaza PE MORMAN, ca scanarea urmatoare sa-l aleaga pe urmatorul.
+      const im = m.slot
+      const rm = regionAt(w.regions, it.wx[im]!, it.wy[im]!, it.z[im]!)
+      if (rm === NO_REGION && w.regions.dirty.size > 0) continue
+      if (rm === NO_REGION || find(w.regions, rm) !== compAgent) {
+        raport.inaccesibil++
+        memoreazaPeItem(w, rules, im, Reason.INACCESIBIL, DetaliuItem.COMPONENTE_DIFERITE)
+        noteaza(Reason.INACCESIBIL)
+        continue
+      }
+
+      // (b) santierul: un loc de lucru langa el, in componenta pionului. Identic cu
+      // sapatul, coridor inclusiv — si la fel ca acolo, aici se intinde, fiindca
+      // jucatorul poate cere un perete pe teren pe care n-a umblat nimeni.
+      let work = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, compAgent)
+      if (!work) {
+        const oricare = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules)
+        if (!oricare) {
+          raport.inaccesibil++
+          d.ultimulMotiv[s] = codMotiv(Reason.INACCESIBIL)
+          d.ultimulMotivDetaliu[s] = DetaliuMotiv.FARA_LOC_DE_LUCRU
+          d.reincercaLaTick[s] = w.tick + racireDesemnare(w, rules)
+          noteaza(Reason.INACCESIBIL)
+          continue
+        }
+        if (acoperaCoridor(w, rules, ax, ay, az, d.wx[s]!, d.wy[s]!, d.z[s]!)) {
+          compAgent = find(w.regions, regionAt(w.regions, ax, ay, az))
+          work = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, compAgent)
+        }
+        if (!work) {
+          raport.inaccesibil++
+          d.ultimulMotiv[s] = codMotiv(Reason.INACCESIBIL)
+          d.ultimulMotivDetaliu[s] = DetaliuMotiv.COMPONENTE_DIFERITE
+          d.reincercaLaTick[s] = w.tick + racireDesemnare(w, rules)
+          noteaza(Reason.INACCESIBIL)
+          continue
+        }
+      }
+
+      const dist = candDist[i]!
+      if (best === -1 || maiBun(prio, persB, dist, bestPrio, bestPers, bestDist)) {
+        best = i
+        bestPrio = prio
+        bestPers = persB
+        bestDist = dist
+        // Locul de lucru NU se retine: `pornesteConstruieste` trimite pionul intai la
+        // MORMAN, iar celula de langa santier se re-alege in `ridica`, in componenta
+        // de ATUNCI. Ce s-a verificat aici e ca EXISTA una, adica poarta de candidat.
+        bestWork = null
+        bestCs = im
+        bestCant = 0
       }
       continue
     }
@@ -1101,6 +1327,9 @@ function pornesteCandidatul(
   switch (fel) {
     case CAND_SAPA: return pornesteSapa(w, slot, s, work!)
     case CAND_CARA: return pornesteCara(w, rules, slot, s, cs, cant)
+    // `cs` poarta aici slotul MORMANULUI, nu o celula de zona: cele doua feluri
+    // folosesc acelasi camp pentru „a doua tinta", si fiecare stie ce e in el.
+    case CAND_CONSTRUIESTE: return pornesteConstruieste(w, rules, slot, s, cs)
     default: {
       // Nu se poate atinge cat timp `CandFel` e uniunea de mai sus: daca cineva ii
       // adauga un membru fara ramura, linia asta NU compileaza. Refuzul de dedesubt
