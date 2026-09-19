@@ -528,3 +528,137 @@ test('o groapa sapata NU primeste fata netezita', () => {
   for (let v = 0; v < 4; v++) if (m.positions[vecin * 12 + v * 3 + 2]! % 100 !== 0) subMetrice++
   assert.ok(subMetrice > 0, 'vecinul neatins n-a fost netezit, deci contrastul nu proba nimic')
 })
+
+// ---------------------------------------------------------------------------
+// etanseitatea invelisului netezit
+// ---------------------------------------------------------------------------
+
+/**
+ * Cota desenata a fetei de sus A CELULEI (x,y), evaluata pe mijlocul muchiei.
+ *
+ * Fata se cauta dupa CENTRUL celulei, nu dupa mijlocul muchiei: mijlocul apartine
+ * AMANDUROR celulelor, iar cautarea dupa el intoarce aceeasi fata pentru ambele
+ * parti, deci orice diferenta dispare. Prima varianta a instrumentului facea exact
+ * asta si a picat controlul de otrava — o fata coborata cu 50 cm nu producea nicio
+ * gaura.
+ *
+ * `tinta` ancoreaza alegerea pe suprafata NATURALA, nu pe „cea mai de sus fata":
+ * o lespede plutitoare sau o streasina sunt forme legale si ar face masuratoarea
+ * sa minta.
+ */
+function cotaPeMuchie(m: ReturnType<typeof meshChunk>, x: number, y: number, dx: number, dy: number, tinta: number): number | null {
+  const cxm = (x + 0.5) * 100
+  const cym = (y + 0.5) * 100
+  const mx = (x + 0.5 + dx * 0.5) * 100
+  const my = (y + 0.5 + dy * 0.5) * 100
+  let best: number | null = null
+  let bestD = Infinity
+  for (let q = 0; q < m.quadCount; q++) {
+    if (m.faces[q] !== Face.Z_POS) continue
+    const o = q * 12
+    const xs = [m.positions[o]!, m.positions[o + 3]!, m.positions[o + 6]!, m.positions[o + 9]!]
+    const ys = [m.positions[o + 1]!, m.positions[o + 4]!, m.positions[o + 7]!, m.positions[o + 10]!]
+    const zs = [m.positions[o + 2]!, m.positions[o + 5]!, m.positions[o + 8]!, m.positions[o + 11]!]
+    if (Math.min(...xs) > cxm || Math.max(...xs) < cxm) continue
+    if (Math.min(...ys) > cym || Math.max(...ys) < cym) continue
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
+    const tx = x1 > x0 ? (mx - x0) / (x1 - x0) : 0
+    const ty = y1 > y0 ? (my - y0) / (y1 - y0) : 0
+    const sus = zs[0]! + (zs[1]! - zs[0]!) * tx
+    const jos = zs[3]! + (zs[2]! - zs[3]!) * tx
+    const z = sus + (jos - sus) * ty
+    const dd = Math.abs(z - tinta)
+    if (dd < bestD) { bestD = dd; best = z }
+  }
+  return best
+}
+
+/** Cat din intervalul [a,b] de pe planul muchiei e acoperit de fete laterale, in cm. */
+function acoperit(m: ReturnType<typeof meshChunk>, x: number, y: number, dx: number, dy: number, a: number, b: number): number {
+  const lo = Math.min(a, b), hi = Math.max(a, b)
+  const peX = dx !== 0
+  const plan = peX ? (dx > 0 ? x + 1 : x) * 100 : (dy > 0 ? y + 1 : y) * 100
+  const mid = peX ? (y + 0.5) * 100 : (x + 0.5) * 100
+  const intervale: [number, number][] = []
+  for (let q = 0; q < m.quadCount; q++) {
+    const f = m.faces[q]!
+    if (f === Face.Z_POS || f === Face.Z_NEG) continue
+    if (peX !== (f === Face.X_POS || f === Face.X_NEG)) continue
+    const o = q * 12
+    const xs = [m.positions[o]!, m.positions[o + 3]!, m.positions[o + 6]!, m.positions[o + 9]!]
+    const ys = [m.positions[o + 1]!, m.positions[o + 4]!, m.positions[o + 7]!, m.positions[o + 10]!]
+    const zs = [m.positions[o + 2]!, m.positions[o + 5]!, m.positions[o + 8]!, m.positions[o + 11]!]
+    if ((peX ? xs[0]! : ys[0]!) !== plan) continue
+    const alt = peX ? ys : xs
+    if (Math.min(...alt) > mid || Math.max(...alt) < mid) continue
+    intervale.push([Math.min(...zs), Math.max(...zs)])
+  }
+  intervale.sort((p, q) => p[0] - q[0])
+  let acop = 0
+  let cursor = lo
+  for (const [s0, e0] of intervale) {
+    if (e0 <= cursor) continue
+    if (s0 >= hi) break
+    acop += Math.min(e0, hi) - Math.max(s0, cursor)
+    cursor = Math.max(cursor, Math.min(e0, hi))
+  }
+  return acop
+}
+
+/** Cate gauri si cata arie neacoperita are invelisul, pe granitele interioare. */
+function gauri(m: ReturnType<typeof meshChunk>, tinta: (x: number, y: number) => number): { n: number; arie: number } {
+  let n = 0
+  let arie = 0
+  for (let y = 0; y < CHUNK_CELLS; y++) {
+    for (let x = 0; x < CHUNK_CELLS; x++) {
+      for (const [dx, dy] of [[1, 0], [0, 1]] as const) {
+        if (x + dx >= CHUNK_CELLS || y + dy >= CHUNK_CELLS) continue
+        const a = cotaPeMuchie(m, x, y, dx, dy, tinta(x, y))
+        const b = cotaPeMuchie(m, x + dx, y + dy, -dx, -dy, tinta(x + dx, y + dy))
+        if (a === null || b === null) continue
+        if (Math.abs(a - b) < 0.5) continue
+        const lipsa = Math.abs(a - b) - acoperit(m, x, y, dx, dy, a, b)
+        if (lipsa > 1) { n++; arie += lipsa / 100 }
+      }
+    }
+  }
+  return { n, arie: Math.round(arie * 100) / 100 }
+}
+
+test('INVELISUL NETEZIT e ETANS: nicio gaura prin care sa se vada fundalul', () => {
+  // Testul care lipsea. Netezirea muta varfurile fetei de sus la cotele reale, si
+  // acolo unde vecina NU e netezita — apa, o groapa, o coloana zidita — tavanul ei
+  // ramane plat. Intre cele doua cote nu emitea nimeni geometrie: peretele de voxel
+  // acopera exact un metru, restul era fundal.
+  //
+  // Masurat inainte de fusta, pe 12 chunkuri VIRGINE: 26 de gauri, 5,44 m². Apar pe
+  // linia de mal, fiindca apa nu e solida, deci coloana ei nu are suprafata
+  // naturala si nu se netezeste.
+  const c = chunkPromovat()
+  const zBase = c.voxels!.zBaseM
+  const tinta = (x: number, y: number): number => (groundLevelFromCm(cellHeightCm(c, x, y)) - zBase + 1) * 100
+
+  // CONTROLUL: meshul FIDEL e etans prin constructie. Daca instrumentul raporteaza
+  // gauri si aici, el e stricat, nu netezirea.
+  const fidel = gauri(meshChunk(c), tinta)
+  assert.equal(fidel.n, 0, `instrumentul raporteaza ${fidel.n} gauri pe meshul FIDEL, care e etans prin constructie`)
+
+  const neted = gauri(meshChunk(c, undefined, true), tinta)
+  assert.equal(neted.n, 0, `${neted.n} gauri, ${neted.arie} m² de fundal vizibil prin invelisul netezit`)
+})
+
+test('fixtura de etanseitate ATINGE cazul: exista muchii intre netezit si nenetezit', () => {
+  // Fara asertiunea asta, testul de mai sus ar fi verde pe un chunk fara mal si
+  // fara gropi — adica fara nicio muchie pe care fusta sa aiba ce face.
+  const c = chunkPromovat()
+  const m = meshChunk(c, undefined, true)
+  // Fustele sunt singurele fete LATERALE cu vreo cota sub-metrica.
+  let fuste = 0
+  for (let q = 0; q < m.quadCount; q++) {
+    const f = m.faces[q]!
+    if (f === Face.Z_POS || f === Face.Z_NEG) continue
+    const o = q * 12
+    for (let v = 0; v < 4; v++) if (m.positions[o + v * 3 + 2]! % 100 !== 0) { fuste++; break }
+  }
+  assert.ok(fuste > 10, `doar ${fuste} fuste emise — fixtura n-are mal si n-are gropi, deci etanseitatea nu proba nimic`)
+})

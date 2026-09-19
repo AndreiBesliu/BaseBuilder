@@ -135,6 +135,15 @@ const occIndex = (x: number, y: number, level: number): number => level * OX * O
  */
 const NECUNOSCUT = -32768
 const natLevel = new Int32Array(OX * OY)
+/**
+ * „Coloana asta are suprafata exact unde ar fi pus-o generatorul?", per coloana.
+ *
+ * Se calculeaza O DATA, in `umpleNatLevel`, nu la fiecare intrebare: e citita de
+ * `treaptaNaturala` in buclele de fete laterale SI de patru ori per fata netezita
+ * in `pushFusta`. Masurat inainte de cache, pe fixtura M10: fusta costa +22,9% din
+ * timpul de meshing pentru +1,1% quaduri — disproportia era aici, nu in geometrie.
+ */
+const natSuprafata = new Uint8Array(OX * OY)
 const natIndex = (x: number, y: number): number => (y + 1) * OX + (x + 1)
 
 function natAt(x: number, y: number): number {
@@ -156,13 +165,14 @@ const varfBuf = new Int32Array(4)
 
 function umpleNatLevel(chunk: Chunk, n: ChunkNeighbours | undefined): void {
   natLevel.fill(NECUNOSCUT)
+  natSuprafata.fill(0)
   const z0 = chunk.voxels!.zBaseM
   for (let ly = 0; ly < SY; ly++) {
     for (let lx = 0; lx < SX; lx++) {
       natLevel[natIndex(lx, ly)] = groundLevelFromCm(cellHeightCm(chunk, lx, ly)) - z0
     }
   }
-  if (!n) return
+  if (!n) { calculeazaNatSuprafata(); return }
   // Apronul: nivelul vecinului, adus in sistemul de niveluri al chunk-ului ASTA.
   const lat = (vec: Chunk | null | undefined, nLx: number, nLy: number, x: number, y: number): void => {
     if (!vec?.voxels) return
@@ -175,6 +185,18 @@ function umpleNatLevel(chunk: Chunk, n: ChunkNeighbours | undefined): void {
   for (let lx = 0; lx < SX; lx++) {
     lat(n.yNeg, lx, SY - 1, lx, -1)
     lat(n.yPos, lx, 0, lx, SY)
+  }
+  calculeazaNatSuprafata()
+}
+
+/** Derivat din `natLevel` si `occ`, deci DUPA ce amandoua sunt complete. */
+function calculeazaNatSuprafata(): void {
+  for (let y = -1; y <= SY; y++) {
+    for (let x = -1; x <= SX; x++) {
+      const nv = natLevel[natIndex(x, y)]!
+      if (nv === NECUNOSCUT) continue
+      if (occAt(x, y, nv) === 1 && occAt(x, y, nv + 1) === 0) natSuprafata[natIndex(x, y)] = 1
+    }
   }
 }
 
@@ -201,9 +223,8 @@ function umpleNatLevel(chunk: Chunk, n: ChunkNeighbours | undefined): void {
  * altfel raman doua tavane la cote diferite si o gaura intre ele.
  */
 function suprafataNaturala(x: number, y: number): boolean {
-  const n = natAt(x, y)
-  if (n === NECUNOSCUT) return false
-  return occAt(x, y, n) === 1 && occAt(x, y, n + 1) === 0
+  if (x < -1 || y < -1 || x > SX || y > SY) return false
+  return natSuprafata[natIndex(x, y)] === 1
 }
 
 function treaptaNaturala(x: number, y: number, nx: number, ny: number, level: number): boolean {
@@ -395,18 +416,65 @@ const CM = 100
  * nu se pot uni cu nimic — si nici n-ar trebui: unirea exista ca sa reduca fete
  * IDENTICE, iar astea nu mai sunt.
  */
-function pushFataNetezita(cheie: number, lx: number, ly: number, cm: Int32Array): void {
+/** Scrie un quad direct in CENTIMETRI. Singura cale prin care ies pozitii. */
+function pushQuadCm(
+  face: number,
+  cheie: number,
+  ax: number, ay: number, az: number,
+  bx: number, by: number, bz: number,
+  cx: number, cy: number, cz: number,
+  dx: number, dy: number, dz: number,
+): void {
   ensureCapacity(quadCount + 1)
   const o = quadCount * 12
-  const x0 = lx * CM, x1 = (lx + 1) * CM, y0 = ly * CM, y1 = (ly + 1) * CM
-  outPositions[o] = x0; outPositions[o + 1] = y0; outPositions[o + 2] = cm[0]!
-  outPositions[o + 3] = x1; outPositions[o + 4] = y0; outPositions[o + 5] = cm[1]!
-  outPositions[o + 6] = x1; outPositions[o + 7] = y1; outPositions[o + 8] = cm[2]!
-  outPositions[o + 9] = x0; outPositions[o + 10] = y1; outPositions[o + 11] = cm[3]!
+  outPositions[o] = ax; outPositions[o + 1] = ay; outPositions[o + 2] = az
+  outPositions[o + 3] = bx; outPositions[o + 4] = by; outPositions[o + 5] = bz
+  outPositions[o + 6] = cx; outPositions[o + 7] = cy; outPositions[o + 8] = cz
+  outPositions[o + 9] = dx; outPositions[o + 10] = dy; outPositions[o + 11] = dz
   outMaterials[quadCount] = cheie & 0xff
-  outFaces[quadCount] = Face.Z_POS
+  outFaces[quadCount] = face
   scrieAo(cheie)
   quadCount++
+}
+
+function pushFataNetezita(cheie: number, lx: number, ly: number, cm: Int32Array): void {
+  const x0 = lx * CM, x1 = (lx + 1) * CM, y0 = ly * CM, y1 = (ly + 1) * CM
+  pushQuadCm(Face.Z_POS, cheie, x0, y0, cm[0]!, x1, y0, cm[1]!, x1, y1, cm[2]!, x0, y1, cm[3]!)
+}
+
+/**
+ * FUSTA: banda dintre cota NETEZITA a unei muchii si varful PLAT al voxelului.
+ *
+ * Netezirea muta varfurile fetei de sus la cotele reale, care se abat de la
+ * `(nivel+1)*100` cu pana la ±77 cm. Cand vecina de dincolo de muchie NU e
+ * netezita — apa, o groapa, o coloana zidita — tavanul ei ramane plat, iar intre
+ * cele doua cote nu emite nimeni geometrie. Peretele de voxel, cand exista,
+ * acopera exact un metru; restul e gaura prin care se vede fundalul.
+ *
+ * Masurat inainte de reparatie, pe 12 chunkuri VIRGINE (fara nicio sapatura):
+ * 26 de gauri, 5,44 m². Exemplu: cote 2616 si 2500 cm, deci 116 cm diferenta din
+ * care peretele acopera 100 — 16 cm de fundal. Apar pe linia de mal, fiindca apa
+ * nu e solida, deci coloana ei nu are suprafata naturala si nu se netezeste.
+ *
+ * Nu se emite spre o vecina NETEZITA: acolo cele doua fete impart aceleasi varfuri
+ * din `vertexCm` si se ating exact.
+ */
+function pushFusta(cheie: number, lx: number, ly: number, cm: Int32Array, plat: number): void {
+  const x0 = lx * CM, x1 = (lx + 1) * CM, y0 = ly * CM, y1 = (ly + 1) * CM
+  // Perechile de colturi ale fiecarei muchii, in ordinea varfurilor fetei de sus:
+  // 0=(x0,y0) 1=(x1,y0) 2=(x1,y1) 3=(x0,y1).
+  if (!suprafataNaturala(lx + 1, ly) && (cm[1] !== plat || cm[2] !== plat)) {
+    pushQuadCm(Face.X_POS, cheie, x1, y0, plat, x1, y1, plat, x1, y1, cm[2]!, x1, y0, cm[1]!)
+  }
+  if (!suprafataNaturala(lx - 1, ly) && (cm[0] !== plat || cm[3] !== plat)) {
+    pushQuadCm(Face.X_NEG, cheie, x0, y0, plat, x0, y1, plat, x0, y1, cm[3]!, x0, y0, cm[0]!)
+  }
+  if (!suprafataNaturala(lx, ly + 1) && (cm[2] !== plat || cm[3] !== plat)) {
+    pushQuadCm(Face.Y_POS, cheie, x0, y1, plat, x1, y1, plat, x1, y1, cm[2]!, x0, y1, cm[3]!)
+  }
+  if (!suprafataNaturala(lx, ly - 1) && (cm[0] !== plat || cm[1] !== plat)) {
+    pushQuadCm(Face.Y_NEG, cheie, x0, y0, plat, x1, y0, plat, x1, y0, cm[1]!, x0, y0, cm[0]!)
+  }
 }
 
 function pushQuad(
@@ -417,16 +485,13 @@ function pushQuad(
   cx: number, cy: number, cz: number,
   dx: number, dy: number, dz: number,
 ): void {
-  ensureCapacity(quadCount + 1)
-  const o = quadCount * 12
-  outPositions[o] = ax * CM; outPositions[o + 1] = ay * CM; outPositions[o + 2] = az * CM
-  outPositions[o + 3] = bx * CM; outPositions[o + 4] = by * CM; outPositions[o + 5] = bz * CM
-  outPositions[o + 6] = cx * CM; outPositions[o + 7] = cy * CM; outPositions[o + 8] = cz * CM
-  outPositions[o + 9] = dx * CM; outPositions[o + 10] = dy * CM; outPositions[o + 11] = dz * CM
-  outMaterials[quadCount] = cheie & 0xff
-  outFaces[quadCount] = face
-  scrieAo(cheie)
-  quadCount++
+  pushQuadCm(
+    face, cheie,
+    ax * CM, ay * CM, az * CM,
+    bx * CM, by * CM, bz * CM,
+    cx * CM, cy * CM, cz * CM,
+    dx * CM, dy * CM, dz * CM,
+  )
 }
 
 /**
@@ -591,7 +656,7 @@ export function meshChunk(chunk: Chunk, neighbours?: ChunkNeighbours, netezire =
   // „dincolo e aer" — comportamentul de dinainte, si tot el e cel testat.
   if (neighbours) expandApron(chunk, neighbours)
   if (netezire) umpleNatLevel(chunk, neighbours)
-  else natLevel.fill(NECUNOSCUT)
+  else { natLevel.fill(NECUNOSCUT); natSuprafata.fill(0) }
   computeVisibility()
   if (neighbours) cullChunkBorders(chunk, neighbours)
   quadCount = 0
@@ -698,6 +763,7 @@ export function meshChunk(chunk: Chunk, neighbours?: ChunkNeighbours, netezire =
           if (face === Face.Z_POS && natAt(lx, ly) === level) {
             varfuriCm(chunk, lx, ly, varfBuf)
             pushFataNetezita(cheie, lx, ly, varfBuf)
+            pushFusta(cheie, lx, ly, varfBuf, (level + 1) * CM)
             grid[gbase + lx] = 0
             continue
           }

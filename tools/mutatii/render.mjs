@@ -82,4 +82,20 @@ export const MUTATII = [
     b: "  return false",
     t: 'tests/mesher.test.ts', e: 'netezirea sterge peretii de treapta',
   },
+
+  // --- fusta, si garda pe care ea o face probabila ---
+  {
+    n: "fusta nu se emite (banda de fundal la marginea suprafetei netezite)",
+    f: "src/render/mesher.ts",
+    a: "            pushFusta(cheie, lx, ly, varfBuf, (level + 1) * CM)",
+    b: "            void pushFusta",
+    t: 'tests/mesher.test.ts', e: 'INVELISUL NETEZIT e ETANS',
+  },
+  {
+    n: "peretele se suprima chiar daca vecina a fost SAPATA (gaura in panta)",
+    f: "src/render/mesher.ts",
+    a: "  if (!suprafataNaturala(x, y) || !suprafataNaturala(nx, ny)) return false",
+    b: "  if (!suprafataNaturala(x, y)) return false",
+    t: 'tests/mesher.test.ts', e: 'INVELISUL NETEZIT e ETANS',
+  },
 ]
