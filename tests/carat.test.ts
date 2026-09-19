@@ -187,6 +187,73 @@ test('exclusiv pe AMBELE categorii: pionul face si una si alta, nu ramane inert'
   assert.ok(panaCand(w2, 600, (w) => itemeInZona(w, z2).cantitate >= 20) >= 0, 'carausul dedicat n-a carat')
 })
 
+/** Cate tickuri petrece fiecare pion pe fiecare fel de job, intr-o lume cu AMBELE. */
+function specializarea(seed: number, prioritati: ReadonlyArray<readonly [number, number, number]>): {
+  t: Array<{ sapa: number; cara: number }>; ambele: number
+} {
+  const { w, sit } = fixturaCarat(seed, 2, 20, 2, 8, 40)
+  let sapaturi = 0
+  for (let d = 2; d <= 8 && sapaturi < 12; d++) {
+    for (const [dx, dy] of [[d, 0], [-d, 0], [0, d], [0, -d]] as const) {
+      if (sapaturi >= 12) break
+      if (solid(w, sit.wx + dx, sit.wy + dy) === null) continue
+      desemneaza(w, sit.wx + dx, sit.wy + dy)
+      sapaturi++
+    }
+  }
+  assert.ok(sapaturi >= 8, `fixtura: doar ${sapaturi} desemnari de sapat`)
+  for (const [slot, categorie, nivel] of prioritati) {
+    assert.ok(applyCommand(w, { kind: 'setPrioritatePersonala', id: w.agents.id[slot]!, categorie, nivel }, R).ok)
+  }
+  const t = [{ sapa: 0, cara: 0 }, { sapa: 0, cara: 0 }]
+  let ambele = 0
+  for (let k = 0; k < 1500; k++) {
+    tick(w, R)
+    let deCarat = 0
+    for (let m = 0; m < w.iteme.count; m++) if (w.iteme.alive[m] === 1) deCarat++
+    if (w.desemnari.vii > 0 && deCarat > 0) ambele++
+    for (const slot of [0, 1] as const) {
+      if (w.agents.alive[slot] !== 1) continue
+      if (w.agents.jobKind[slot] === FelJob.SAPA) t[slot]!.sapa++
+      if (w.agents.jobKind[slot] === FelJob.CARA) t[slot]!.cara++
+    }
+  }
+  return { t, ambele }
+}
+
+test('doi pioni cu prioritati DIFERITE se specializeaza COMPLET, si dupa prioritate, nu dupa slot', () => {
+  // Prioritatile personale au fost probate pana acum doar UNIFORM (toti pionii la
+  // fel) sau pe ZERO (categoria stinsa). Asimetria — doi pioni cu valori diferite si
+  // amandoua nenule — n-avea test, desi ea e intregul rost al mecanismului.
+  //
+  // Prima varianta a testului cerea doar o DIRECTIE („sapatorul sapa mai mult decat
+  // carausul"), si nu lega: trei mutatii care scot prioritatea personala din scor
+  // treceau toate. Masurat de ce — specializarea e TOTALA, nu partiala: sapatorul nu
+  // cara niciodata. Enuntul tare se poate cere, deci se cere.
+  const sus = R.personalPriorityLevels
+  const sapator = (slot: number) => [[slot, Categorie.SAPA, sus], [slot, Categorie.CARA, 1]] as const
+  const caraus = (slot: number) => [[slot, Categorie.CARA, sus], [slot, Categorie.SAPA, 1]] as const
+
+  const a = specializarea(6100, [...sapator(0), ...caraus(1)])
+  assert.ok(a.ambele > 300, `doar ${a.ambele} tickuri din 1500 cu ambele feluri de munca disponibile`)
+  assert.ok(a.t[0]!.sapa > 100 && a.t[1]!.cara > 100, `un pion a stat degeaba: ${JSON.stringify(a.t)}`)
+  assert.equal(a.t[0]!.cara, 0, `sapatorul a carat: ${JSON.stringify(a.t)}`)
+  assert.equal(a.t[1]!.sapa, 0, `carausul a sapat: ${JSON.stringify(a.t)}`)
+
+  // OGLINDA: aceeasi lume, aceleasi pozitii, rolurile schimbate intre sloturi. Fara
+  // ea, testul de sus ar trece la fel de bine daca specializarea ar veni din geometrie
+  // — pionul 0 se naste mai aproape de sapaturi — si n-ar avea nimic de-a face cu
+  // prioritatea.
+  const b = specializarea(6100, [...caraus(0), ...sapator(1)])
+  assert.equal(b.t[0]!.sapa, 0, `oglinda: pionul 0 a sapat desi e caraus: ${JSON.stringify(b.t)}`)
+  assert.equal(b.t[1]!.cara, 0, `oglinda: pionul 1 a carat desi e sapator: ${JSON.stringify(b.t)}`)
+
+  // Si controlul care arata ca fixtura NU forteaza specializarea: cu prioritati
+  // implicite, macar un pion face amandoua felurile.
+  const u = specializarea(6100, [])
+  const amestecat = [0, 1].some((k) => u.t[k]!.sapa > 0 && u.t[k]!.cara > 0)
+  assert.ok(amestecat, `cu prioritati uniforme pionii tot se specializeaza: ${JSON.stringify(u.t)}`)
+})
 // ---------------------------------------------------------------------------
 // marfa nu dispare
 // ---------------------------------------------------------------------------

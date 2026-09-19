@@ -205,4 +205,33 @@ export const MUTATII = [
     b: "  return rules.jobRescanTicks * scanari",
     t: 'tests/joburi.test.ts', e: 'fereastra de racire e STRICT mai lunga',
   },
+
+  // --- prioritati personale ASIMETRICE: exclusivitatea, si ponderarea de sub ea ---
+  {
+    n: 'exclusivitatea dispare: o categorie la maxim nu le mai inchide pe celelalte',
+    f: 'src/sim/joburi.ts',
+    a: "  const exclusiv = Math.max(pS, pC, pB) === rules.personalPriorityLevels",
+    b: "  const exclusiv = false",
+    t: 'tests/carat.test.ts', e: 'doi pioni cu prioritati DIFERITE',
+  },
+  {
+    n: 'poarta de CARAT nu mai tine cont de exclusivitate',
+    f: 'src/sim/joburi.ts',
+    a: "    cara: pC > 0 && (!exclusiv || pC === rules.personalPriorityLevels),",
+    b: "    cara: pC > 0,",
+    t: 'tests/carat.test.ts', e: 'doi pioni cu prioritati DIFERITE',
+  },
+  // Poarta de SAPAT are nevoie de DOUA editari, si asta e ea insasi o constatare:
+  // scoasa singura, ponderarea din scor tine carausul tot la carat, deci nimic nu se
+  // inroseste. Cele doua mecanisme se suprapun — exclusivitatea inchide categoria,
+  // ponderarea o face neatractiva — si abia amandoua scoase se vede specializarea
+  // pierduta. Masurat: cu doar una din ele, testul ramane verde.
+  {
+    n: 'nici exclusivitate la SAPAT, nici ponderare la CARAT (cele doua mecanisme, impreuna)',
+    f: 'src/sim/joburi.ts',
+    a: "    sapa: pS > 0 && (!exclusiv || pS === rules.personalPriorityLevels),",
+    b: "    sapa: pS > 0,",
+    e2: [{ f: 'src/sim/joburi.ts', a: "    const gPers = 4 ** (persC - 1)", b: "    const gPers = 1" }],
+    t: 'tests/carat.test.ts', e: 'doi pioni cu prioritati DIFERITE',
+  },
 ]
