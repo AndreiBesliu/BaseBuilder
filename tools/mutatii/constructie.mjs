@@ -414,11 +414,18 @@ export const MUTATII = [
     t: 'tests/constructie.test.ts', e: 'intre doua santiere la fel de bune',
   },
   {
-    n: "departajarea se intoarce in COMPARATOR, unde rupe tranzitivitatea",
+    n: "comparatorul lasa doi candidati cu id-uri diferite sa iasa EGALI",
     f: "src/sim/joburi.ts",
-    a: "    return candId[i]! - candId[j]!\n  })",
-    b: "    if (candFel[i] === candFel[j] && candDist2[i] !== candDist2[j]) return candDist2[i]! - candDist2[j]!\n    return candId[i]! - candId[j]!\n  })",
-    t: 'tests/constructie.test.ts', e: 'o SAPATURA desenata intre doua santiere',
+    a: "  return idA - idB",
+    b: "  return (idA % 2) - (idB % 2)",
+    t: 'tests/constructie.test.ts', e: 'comparatorul de candidati e o ordine TOTALA',
+  },
+  {
+    n: "comparatorul pierde antisimetria (spune „mai mic\" in ambele sensuri)",
+    f: "src/sim/joburi.ts",
+    a: "  if (la !== lb) return la > lb ? -1 : 1",
+    b: "  if (la !== lb) return -1",
+    t: 'tests/constructie.test.ts', e: 'comparatorul de candidati e o ordine TOTALA',
   },
   {
     n: "al doilea picior se raporteaza 0 la constructie (departajarea ramane, dar oarba)",

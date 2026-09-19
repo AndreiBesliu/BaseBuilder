@@ -816,6 +816,40 @@ export function cautaDestinatie(
 // scanarea
 // ---------------------------------------------------------------------------
 
+/**
+ * Ordinea candidatilor: marginea superioara a scorului, descrescator, apoi id.
+ *
+ * PURA si EXPORTATA ca sa poata avea test. Prima varianta statea ca o inchidere
+ * inline in `cautaJob` si continea si o departajare pe al doilea picior, cu garda
+ * `candFel[i] === candFel[j]`. Arata ca exprima intentia — „se compara doar in
+ * interiorul categoriei" — dar o departajare CONDITIONATA nu e tranzitiva: cu trei
+ * candidati legati pe scor, doi de acelasi fel si unul de alt fel cu id-ul intre
+ * ei, iese X < S (dupa id), S < Y (dupa id) si Y < X (dupa al doilea picior).
+ *
+ * `Array.prototype.sort` pe un comparator inconsecvent da un rezultat definit de
+ * implementare, iar `maiBun` nu e strict la scor egal, deci castiga primul
+ * examinat: santierul DEPARTAT de morman — adica exact regresia pe care
+ * departajarea fusese scrisa s-o inchida. Masurat pe situl plat: 12 pozitii de
+ * sapatura din 166 rastoarna alegerea, doar prin id-ul lor.
+ *
+ * Semnatura nu primeste `fel`, si asta e deliberat: forma gresita nu se mai poate
+ * nici macar scrie aici. Departajarea sta in bucla scumpa, la locul deciziei, unde
+ * se compara doi candidati anume si unde „acelasi fel" e o conditie pe o pereche,
+ * nu o relatie de ordine.
+ *
+ * Ordine TOTALA pe date persistate (prioritate, distanta, id), deci aceeasi in
+ * orice lume cu aceeasi stare. `tests/constructie.test.ts` o probeaza exhaustiv.
+ */
+export function comparaCandidati(
+  gA: number, distA: number, idA: number,
+  gB: number, distB: number, idB: number,
+): number {
+  const la = gA * (1 + distB)
+  const lb = gB * (1 + distA)
+  if (la !== lb) return la > lb ? -1 : 1
+  return idA - idB
+}
+
 /** Buffere de candidati, refolosite intre scanari. Zero alocari in regim stabil. */
 let candFel: CandFel[] = []
 let candSlot: number[] = []
@@ -1134,24 +1168,7 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
   // Cheile sunt precalculate: comparatorul nu face `2 **`.
   const ordine: number[] = []
   for (let i = 0; i < n; i++) ordine.push(i)
-  ordine.sort((i, j) => {
-    const li = candG[i]! * (1 + candDist[j]!)
-    const lj = candG[j]! * (1 + candDist[i]!)
-    if (li !== lj) return li > lj ? -1 : 1
-    // Aici NU intra al doilea picior. Prima varianta il punea, cu garda
-    // `candFel[i] === candFel[j]` — si o departajare CONDITIONATA rupe
-    // tranzitivitatea: cu trei candidati legati pe scor, doi de acelasi fel si unul
-    // de alt fel cu id-ul intre ei, iese X < S (dupa id), S < Y (dupa id), Y < X
-    // (dupa al doilea picior). Un comparator inconsecvent da un rezultat definit de
-    // implementare, iar `Array.prototype.sort` alegea exact santierul departat de
-    // morman — adica regresia pe care `candDist2` fusese introdus s-o inchida.
-    // Masurat pe situl plat: 12 pozitii de sapatura din 166 rastoarna alegerea.
-    //
-    // Departajarea sta acum in bucla scumpa, la locul deciziei, unde se compara
-    // doi candidati anume si unde „acelasi fel" e o conditie, nu o relatie de
-    // ordine. Ordinea de aici ramane ce era inainte: totala pe date persistate.
-    return candId[i]! - candId[j]!
-  })
+  ordine.sort((i, j) => comparaCandidati(candG[i]!, candDist[i]!, candId[i]!, candG[j]!, candDist[j]!, candId[j]!))
 
   // --- trecerea scumpa: loc de lucru si componenta / destinatie, pe primele K ---
   let best = -1

@@ -33,7 +33,7 @@ import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { CATEGORII, Categorie, FelJob, Piesa } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { applyCommand } from '../src/sim/commands.ts'
-import { anuleazaDesemnare, celulaDeLucru, constructiaPrevizualizata, evitaTinta, pornesteConstruieste, unitatiDeMunca } from '../src/sim/joburi.ts'
+import { anuleazaDesemnare, celulaDeLucru, comparaCandidati, constructiaPrevizualizata, evitaTinta, pornesteConstruieste, unitatiDeMunca } from '../src/sim/joburi.ts'
 import { slotItem } from '../src/sim/iteme.ts'
 import { rezervariPentru, Strat } from '../src/sim/rezervari.ts'
 import { DetaliuMotiv } from '../src/sim/desemnari.ts'
@@ -1351,4 +1351,63 @@ test('o SAPATURA desenata intre doua santiere nu are voie sa schimbe raspunsul',
   assert.equal(sapaturiVii, 1, 'fixtura moarta: sapatura nu exista, deci nu e al treilea candidat')
   const t = ruleaza(w, 200)
   assert.ok(t.candidatiExaminati > 0, 'fixtura moarta: nicio scanare n-a evaluat vreun candidat')
+})
+
+test('comparatorul de candidati e o ordine TOTALA — exhaustiv, nu pe esantion', () => {
+  // Proprietatea pe care varianta veche o pierduse. Nu se vede din simulare: acolo
+  // se vede doar consecinta (testul de deasupra). Aici se verifica direct, si
+  // exhaustiv pe un domeniu mic — fiindca o ordine se strica la o TRIPLETA anume,
+  // iar un esantion o poate rata exact pe aia.
+  //
+  // Semnatura nu primeste `fel`, deci forma gresita nu se mai poate nici scrie.
+  // Testul apara asta pe alta cale: orice departajare care nu e o functie de
+  // (scor, id) fie rupe antisimetria, fie face doi candidati cu id-uri diferite
+  // sa iasa EGALI — si atunci ordinea nu mai e totala.
+  const G = [1, 2, 4, 8, 16]
+  const D = [0, 1, 3, 7]
+  const ID = [1, 2, 3]
+  const cand: Array<{ g: number; d: number; id: number }> = []
+  for (const g of G) for (const d of D) for (const id of ID) cand.push({ g, d, id })
+
+  type C = { g: number; d: number; id: number }
+  const cmp = (a: C, b: C): number => comparaCandidati(a.g, a.d, a.id, b.g, b.d, b.id)
+  const sgn = (x: number): number => (x > 0 ? 1 : x < 0 ? -1 : 0)
+  const nume = (a: C): string => `(g${a.g} d${a.d} id${a.id})`
+
+  let perechi = 0
+  for (const a of cand) {
+    for (const b of cand) {
+      perechi++
+      // `sgn(-x)`, nu `-sgn(x)`: sub `assert/strict` egalitatea e `Object.is`, iar
+      // `Object.is(0, -0)` e FALS. Prima varianta pica pe un candidat comparat cu el
+      // insusi — greseala testului, nu a comparatorului.
+      assert.equal(sgn(cmp(a, b)), sgn(-cmp(b, a)), `antisimetrie rupta: ${nume(a)} vs ${nume(b)}`)
+      if (sgn(cmp(a, b)) === 0) {
+        assert.equal(a.id, b.id, `${nume(a)} si ${nume(b)} ies EGALI desi au id-uri diferite: ordinea nu e totala`)
+      }
+    }
+  }
+
+  let triple = 0
+  let lanturi = 0
+  for (const a of cand) {
+    for (const b of cand) {
+      if (sgn(cmp(a, b)) > 0) continue
+      for (const c of cand) {
+        triple++
+        if (sgn(cmp(b, c)) > 0) continue
+        lanturi++
+        assert.ok(sgn(cmp(a, c)) <= 0,
+          `tranzitivitate rupta: ${nume(a)} <= ${nume(b)} <= ${nume(c)}, dar ${nume(a)} > ${nume(c)}`)
+      }
+    }
+  }
+
+  // Contoarele de viata: domeniul chiar produce perechi legate pe scor si lanturi
+  // de trei. Fara ele, un domeniu in care toate scorurile difera ar trece degeaba.
+  assert.equal(perechi, cand.length * cand.length)
+  assert.ok(lanturi > 10000, `doar ${lanturi} lanturi a <= b <= c: domeniul e prea sarac`)
+  let legate = 0
+  for (const a of cand) for (const b of cand) if (a.id !== b.id && a.g * (1 + b.d) === b.g * (1 + a.d)) legate++
+  assert.ok(legate > 50, `doar ${legate} perechi legate pe scor: tocmai cazul care doare lipseste`)
 })
