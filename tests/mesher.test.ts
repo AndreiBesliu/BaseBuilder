@@ -560,12 +560,15 @@ test('o groapa sapata NU se neteseste, si peretii ei raman toti', () => {
     [0, 1, Face.Y_NEG], [0, -1, Face.Y_POS],
   ] as const
   let verificate = 0
-  for (let k = 0; k < 4; k++) {
-    const L = nivel - k
-    for (const [dx, dy, fata] of dir) {
-      const nx = lx + dx
-      const ny = ly + dy
-      // Doar vecinii care CHIAR au pamant la nivelul ala pot avea perete.
+  for (const [dx, dy, fata] of dir) {
+    const nx = lx + dx
+    const ny = ly + dy
+    // De la fundul gropii pana la suprafata naturala a VECINULUI, nu a coloanei
+    // sapate. Nivelurile de DEASUPRA ei sunt cele care conteaza cand vecinul e mai
+    // inalt: acolo suprafata lui inclinata coboara spre muchia comuna, iar sub ea
+    // trebuie sa fie perete pana in groapa. Verificarea care se oprea la nivelul
+    // coloanei sapate rata exact fanta aia.
+    for (let L = nivel - 3; L <= nat(nx, ny); L++) {
       if (nat(nx, ny) < L) continue
       verificate++
       assert.ok(
