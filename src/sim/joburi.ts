@@ -96,7 +96,8 @@ import type { RegionStore } from './regions.ts'
 import type { Terrain } from './terrain/terrain.ts'
 import { dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
 import { Material } from './terrain/chunk.ts'
-import { cadeDaca, constructiaPosibila, cotaDeAsezare, multimeaCareCade, Sol, solLa } from './stabilitate.ts'
+import type { MaterialId } from './terrain/chunk.ts'
+import { cadeDaca, constructiaPosibila, cotaDeAsezare, multimeaCareCade, poateSustine, Sol, solLa } from './stabilitate.ts'
 import { cellKey, decodeCell } from './path.ts'
 import { Desemnare, desemnareLaCelula, DetaliuMotiv, seSapaLa, slotDesemnare, stergeDesemnare } from './desemnari.ts'
 import type { DesignationStore } from './desemnari.ts'
@@ -243,6 +244,8 @@ export interface JobTickReport {
   unitatiMancate: number
   /** Cati voxeli s-au prabusit (S20-23). */
   voxeliPrabusiti: number
+  /** Cate piese s-au zidit in tickul asta. */
+  pieseZidite: number
   /** Cati pioni au CAZUT odata cu podeaua lor. Nu e acelasi lucru cu `ingropati`. */
   pioniCazuti: number
   /**
@@ -267,7 +270,7 @@ const raport: JobTickReport = {
   tickuriDeLucru: 0, locuriDeLucruRefacute: 0, refuzuriDrum: 0,
   faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0, faraDepozit: 0,
   evaluariDestinatie: 0, itemeProduse: 0, unitatiProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
-  joburiDeNevoie: 0, unitatiMancate: 0, pasiNevoi: 0, plecati: 0, voxeliPrabusiti: 0, pioniCazuti: 0,
+  joburiDeNevoie: 0, unitatiMancate: 0, pasiNevoi: 0, plecati: 0, voxeliPrabusiti: 0, pioniCazuti: 0, pieseZidite: 0,
 }
 
 export function lastJobReport(): JobTickReport {
@@ -1052,6 +1055,63 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
  * re-verifica si scrie totul sau nimic). Id-ul de job se consuma DOAR daca
  * rezervarea reuseste.
  */
+/**
+ * Porneste un job de CONSTRUIT: sursa in `jobTarget`, santierul in `jobDest`.
+ *
+ * Cantitatea se INGHEATA din tabelul de piese, nu din mormanul viu — acelasi
+ * argument ca la carat: mormanul poate creste prin contopire intre rezervare si
+ * ridicare, iar o lume incarcata ar re-rezerva alta cantitate si ar lua alt job.
+ */
+export function pornesteConstruieste(
+  w: World,
+  rules: Rules,
+  slot: number,
+  ds: number,
+  is: number,
+): Outcome<void> {
+  const a = w.agents
+  const d = w.desemnari
+  const spec = rules.piese[d.piesa[ds]!]!
+
+  // Mormanul trebuie sa fie de felul CERUT, si sa aiba destul. Amandoua sunt
+  // treaba scanerului (6c), dar se refuza AICI: `ridica` ia `min(cerut, gasit)`,
+  // deci un morman prea mic nu produce niciun refuz — produce un pion care merge,
+  // ridica ce e, munceste 400 de tickuri si abia atunci descopera ca n-are din ce
+  // zidi. Refuzul la pornire costa zero si are o CAUZA.
+  const cerut = rules.digYield[spec.material]!.fel
+  if (w.iteme.kind[is] !== cerut) {
+    return refuse(Reason.LIPSA_MATERIAL, { cerut, gasit: w.iteme.kind[is]! })
+  }
+  if (w.iteme.cantitate[is]! < spec.cantitate) {
+    return refuse(Reason.LIPSA_MATERIAL, { cerut: spec.cantitate, gasit: w.iteme.cantitate[is]! })
+  }
+  const jobId = w.nextId
+  const out = rezervaToate(
+    w.rezervari,
+    a.id[slot]!,
+    jobId,
+    cereriConstruieste(w.iteme.id[is]!, d.id[ds]!, spec.cantitate, PasConstruieste.MERGE_SURSA),
+  )
+  if (!out.ok) return out
+  w.nextId++
+
+  a.jobKind[slot] = FelJob.CONSTRUIESTE
+  a.jobId[slot] = jobId
+  a.jobTarget[slot] = w.iteme.id[is]!
+  a.jobDest[slot] = d.id[ds]!
+  a.jobCantitate[slot] = spec.cantitate
+  a.jobEfect[slot] = 0
+  a.jobStep[slot] = PasConstruieste.MERGE_SURSA
+  a.jobProgres[slot] = 0
+  a.jobIncercari[slot] = 0
+  a.jobWorkX[slot] = w.iteme.wx[is]!
+  a.jobWorkY[slot] = w.iteme.wy[is]!
+  a.jobWorkZ[slot] = w.iteme.z[is]!
+  tintesteLocDeLucru(w, slot)
+  raport.joburiPornite++
+  return accept()
+}
+
 function pornesteSapa(w: World, slot: number, ds: number, work: { wx: number; wy: number; z: number }): Outcome<void> {
   const a = w.agents
   const d = w.desemnari
@@ -1415,6 +1475,74 @@ function lucreazaSapa(w: World, rules: Rules, slot: number): void {
 }
 
 /**
+ * ZIDESTE: pionul sta LANGA santier si pune piesa.
+ *
+ * „Reutilizeaza masinaria de CARA" se aplica la rezervarea-tuplu si la carat, NU
+ * la pasul final: la carat, destinatia e o celula de ZONA si pionul trebuie sa fie
+ * PE ea. Aici destinatia devine SOLIDA — luata literal, masinaria l-ar pune pe
+ * pion exact pe celula pe care o zideste, si `celulaLibera` l-ar refuza. Deci
+ * locul de lucru e un vecin calcabil, ca la sapat.
+ *
+ * Corolar util, verificat de panoul de design: pozitia de lucru iese GRATIS din
+ * regula de stabilitate — o celula cu suport > 0 e ori asezata (deci are solid
+ * dedesubt), ori are un vecin lateral SOLID la aceeasi cota. Nu e nevoie de o
+ * regula separata de accesibilitate.
+ */
+function zideste(w: World, rules: Rules, slot: number): void {
+  const a = w.agents
+  const d = w.desemnari
+  const ds = slotDesemnare(d, a.jobDest[slot]!)
+  if (ds === -1) {
+    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
+    return
+  }
+
+  const cx = cellOf(a.x[slot]!)
+  const cy = cellOf(a.y[slot]!)
+  const cz = a.z[slot]!
+  const peLoc = cx === a.jobWorkX[slot] && cy === a.jobWorkY[slot] && cz === a.jobWorkZ[slot]
+  if (!peLoc || seSapaLa(d, cx, cy, cz - 1)) {
+    if (w.regions.dirty.size > 0) return
+    if (!refaLoculDeLucru(w, rules, slot)) {
+      terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.INACCESIBIL, Racire.TINTA)
+    }
+    return
+  }
+
+  const spec = rules.piese[d.piesa[ds]!]!
+  a.jobProgres[slot] = a.jobProgres[slot]! + unitatiDeMunca(w, rules, slot)
+  raport.tickuriDeLucru++
+  w.ratiune.tickuriDeLucru++
+  if (a.jobProgres[slot]! < spec.lucru) return
+
+  // Materialul trebuie sa fie inca in mana. Daca nu mai e, jobul s-a rupt pe drum
+  // si nu se zideste din nimic.
+  if (a.caraCantitate[slot]! < spec.cantitate) {
+    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
+    return
+  }
+
+  const out = zidesteVoxel(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, spec.material)
+  if (!out.ok) {
+    // Nu se poate zidi ACUM — sprijin pierdut, celula ocupata, celula plina.
+    // Cauza e a TINTEI, nu a pionului: nimeni n-o poate zidi in clipa asta.
+    terminaJob(w, rules, slot, Sfarsit.INCOMPLET, out.reason, Racire.TINTA)
+    return
+  }
+
+  // Materialul s-a CONSUMAT. Al treilea termen al conservarii: fara el, prima
+  // zidire ar inrosi fiecare asertiune de `itemePierdute === 0`.
+  a.caraCantitate[slot] = a.caraCantitate[slot]! - spec.cantitate
+  if (a.caraCantitate[slot] === 0) a.caraKind[slot] = 0
+  w.ratiune.unitatiZidite += spec.cantitate
+  a.jobEfect[slot] = 1
+  raport.pieseZidite++
+  marcheazaZoneMurdare(w)
+  terminaJob(w, rules, slot, Sfarsit.TERMINAT)
+  stergeDesemnare(d, ds)
+}
+
+/**
  * RIDICA: pionul sta pe morman si il ia in mana. Itemul se valideaza la fiecare
  * tick: poate a murit (l-a mutat cârligul de teren si s-a contopit), poate s-a
  * mutat (a cazut la sapat) — atunci se retinteste, cu progresul pastrat.
@@ -1456,6 +1584,31 @@ function ridica(w: World, rules: Rules, slot: number): void {
 
   a.jobProgres[slot] = 0
   a.jobStep[slot] = PasCara.MERGE_DEST
+
+  // Aici se desparte construitul de carat, si e singurul loc in care „reutilizeaza
+  // masinaria de CARA" nu se aplica: la carat destinatia e o celula de ZONA si
+  // pionul trebuie sa fie PE ea, la construit destinatia devine SOLIDA. Luata
+  // literal, masinaria l-ar trimite exact pe celula pe care urmeaza s-o zideasca,
+  // iar `celulaLibera` l-ar refuza — pionul si-ar bloca singur santierul.
+  if (a.jobKind[slot] === FelJob.CONSTRUIESTE) {
+    const d = w.desemnari
+    const ds = slotDesemnare(d, a.jobDest[slot]!)
+    if (ds === -1) {
+      terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
+      return
+    }
+    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules)
+    if (loc === null) {
+      terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.INACCESIBIL, Racire.TINTA)
+      return
+    }
+    a.jobWorkX[slot] = loc.wx
+    a.jobWorkY[slot] = loc.wy
+    a.jobWorkZ[slot] = loc.z
+    tintesteLocDeLucru(w, slot)
+    return
+  }
+
   const cs = slotCelulaDeZona(w.zone, a.jobDest[slot]!)
   if (cs === -1) {
     terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.FARA_DEPOZIT, Racire.TINTA)
@@ -1573,6 +1726,52 @@ export function retrageCeluleDeZonaNecalcabile(w: World, rules: Rules, wx: numbe
     anuleazaCelulaDeZona(w, rules, cs)
     stergeCelulaDeZona(w.zone, cs)
   }
+}
+
+/**
+ * E libera celula (wx, wy, z) pentru ceva SOLID?
+ *
+ * Un pion ocupa `agentHeadroomM` niveluri, deci un zid la inaltimea capului il
+ * face la fel de ingropat ca unul la picioare; si un morman ingropat e
+ * inaccesibil pe veci, plus un candidat fals la fiecare racire. Alternativa la
+ * refuz — sa-i ingropi — produce un singur semnal, `INACCESIBIL`, si ala MINTE:
+ * problema nu e ca nu exista drum, ci ca pionul e in piatra.
+ */
+export function celulaLibera(w: World, rules: Rules, wx: number, wy: number, z: number): Outcome<void> {
+  const a = w.agents
+  for (let h = 0; h < rules.agentHeadroomM; h++) {
+    for (let i = 0; i < a.count; i++) {
+      if (a.alive[i] === 0) continue
+      if (a.z[i] !== z - h) continue
+      if (cellOf(a.x[i]!) !== wx || cellOf(a.y[i]!) !== wy) continue
+      return refuse(Reason.CELULA_OCUPATA, { id: a.id[i]!, wx, wy, z: z - h })
+    }
+  }
+  for (let h = 0; h < rules.agentHeadroomM; h++) {
+    const it = itemLaCelula(w.iteme, wx, wy, z - h)
+    if (it !== -1) return refuse(Reason.CELULA_OCUPATA, { item: w.iteme.id[it]!, wx, wy, z: z - h })
+  }
+  return accept()
+}
+
+/**
+ * Zidirea unui voxel: O SINGURA cale, pentru comanda si pentru job.
+ *
+ * Sora lui `sapaVoxel`, si exista din acelasi motiv. Cele trei porti — celula
+ * libera, sprijinul, si terenul insusi — trebuie sa fie aceleasi indiferent cine
+ * zideste; scrise de doua ori, un pion ar putea face ce jucatorului i se refuza.
+ */
+export function zidesteVoxel(w: World, rules: Rules, wx: number, wy: number, z: number, material: MaterialId): Outcome<void> {
+  const liber = celulaLibera(w, rules, wx, wy, z)
+  if (!liber.ok) return liber
+  const sprijin = poateSustine(w.terrain, rules, wx, wy, z)
+  if (!sprijin.ok) return sprijin
+  const out = fill(w.terrain, wx, wy, z, material)
+  if (!out.ok) return out
+  markDirty(w.regions, wx, wy, z, rules)
+  // Zidul ia podeaua celulei de deasupra si headroom-ul celor de dedesubt.
+  retrageCeluleDeZonaNecalcabile(w, rules, wx, wy, z + 1)
+  return accept()
 }
 
 export function sapaVoxel(w: World, wx: number, wy: number, z: number, rules: Rules): Outcome<void> {
@@ -2625,7 +2824,64 @@ const DRIVER_DOARME: DriverJob = {
 }
 
 /** Indexat pe `FelJob`. `undefined` = fel necunoscut, si atunci se REFUZA. */
-const DRIVERE: readonly (DriverJob | undefined)[] = [undefined, DRIVER_SAPA, DRIVER_CARA, DRIVER_MANANCA, DRIVER_DOARME]
+const DRIVER_CONSTRUIESTE: DriverJob = {
+  fel: FelJob.CONSTRUIESTE,
+  // Zidirea poate face o celula de zona necalcabila, iar `zidesteVoxel` chiar
+  // retrage celulele afectate — deci indexul se murdareste.
+  atingeZone: true,
+  cereri(w, _rules, slot) {
+    const a = w.agents
+    return cereriConstruieste(a.jobTarget[slot]!, a.jobDest[slot]!, a.jobCantitate[slot]!, a.jobStep[slot]!)
+  },
+  tinteVii(w, slot) {
+    const a = w.agents
+    // Sursa conteaza doar pana la ridicare inclusiv; dupa aia materialul e in mana.
+    if (a.jobStep[slot]! <= PasConstruieste.RIDICA && slotItem(w.iteme, a.jobTarget[slot]!) === -1) {
+      return refuse(Reason.ENTITATE_INEXISTENTA, { id: a.jobTarget[slot]! })
+    }
+    if (slotDesemnare(w.desemnari, a.jobDest[slot]!) === -1) {
+      return refuse(Reason.ENTITATE_INEXISTENTA, { id: a.jobDest[slot]! })
+    }
+    return accept()
+  },
+  lucreaza(w, rules, slot) {
+    if (w.agents.jobStep[slot] === PasConstruieste.RIDICA) ridica(w, rules, slot)
+    else zideste(w, rules, slot)
+  },
+  incheie(w, rules, slot, motiv, racire, rezultat) {
+    const a = w.agents
+    const ds = slotDesemnare(w.desemnari, a.jobDest[slot]!)
+    if (racire === Racire.TINTA) {
+      // Santierul e cel care nu se poate zidi acum: racirea si cauza merg pe el,
+      // ca overlay-ul si panoul „De ce nu?" sa aiba ce arata.
+      if (ds !== -1) {
+        w.desemnari.reincercaLaTick[ds] = w.tick + racireDesemnare(w, rules)
+        w.desemnari.ultimulMotiv[ds] = codMotiv(motiv ?? Reason.INACCESIBIL)
+        w.desemnari.ultimulMotivDetaliu[ds] = detaliuDesemnareDin(motiv ?? Reason.INACCESIBIL)
+      }
+      // Si marfa lasata la picioare, daca a ramas: altfel ar fi re-luata imediat
+      // pentru acelasi santier care tocmai a refuzat.
+      if (rezultat !== -1) memoreazaPeItem(w, rules, rezultat, motiv ?? Reason.INACCESIBIL, detaliuItemDin(motiv ?? Reason.INACCESIBIL))
+      return
+    }
+    // Drumul MEU e blocat: santierul ramane pentru altii.
+    evitaTinta(w, slot, a.jobDest[slot]!, w.tick + rules.jobRetryTicks)
+    if (a.jobStep[slot]! <= PasConstruieste.RIDICA) {
+      const is = slotItem(w.iteme, a.jobTarget[slot]!)
+      if (is !== -1) evitaTinta(w, slot, a.jobTarget[slot]!, w.tick + rules.jobRetryTicks)
+    }
+    if (ds !== -1 && motiv) {
+      w.desemnari.ultimulMotiv[ds] = codMotiv(motiv)
+      w.desemnari.ultimulMotivDetaliu[ds] = DetaliuMotiv.NICIUNUL
+    }
+  },
+  refaTinta(w, rules, slot) {
+    const a = w.agents
+    return refaLoculDeLucru(w, rules, slot, cellKey(a.jobWorkX[slot]!, a.jobWorkY[slot]!, a.jobWorkZ[slot]!))
+  },
+}
+
+const DRIVERE: readonly (DriverJob | undefined)[] = [undefined, DRIVER_SAPA, DRIVER_CARA, DRIVER_MANANCA, DRIVER_DOARME, DRIVER_CONSTRUIESTE]
 
 /** Driverul unui fel de job, sau `undefined` daca felul nu e cunoscut. */
 export function driverPentru(fel: number): DriverJob | undefined {

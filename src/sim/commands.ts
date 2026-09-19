@@ -20,13 +20,12 @@ import type { PiesaId } from './state.ts'
 import { cellOf, clearPath } from './drumuri.ts'
 import type { Rules } from './content.ts'
 import { DEFAULT_RULES } from './content.ts'
-import { isWalkable, markDirty } from './regions.ts'
+import { isWalkable } from './regions.ts'
 import { isSolid, type MaterialId } from './terrain/chunk.ts'
-import { CHUNK_GRID, fill, inWorld, materialAt, setFocus, voxelRangeM, WORLD_CELLS } from './terrain/terrain.ts'
+import { CHUNK_GRID, inWorld, materialAt, setFocus, voxelRangeM, WORLD_CELLS } from './terrain/terrain.ts'
 import { adaugaDesemnare, Desemnare, slotDesemnare } from './desemnari.ts'
-import { acoperaDesemnarea, anuleazaCelulaDeZona, anuleazaDesemnare, retrageCeluleDeZonaNecalcabile, sapaManual, Sfarsit, terminaJob, uitaRacirileDeMarfa, uitaTintele } from './joburi.ts'
-import { asazaItem, itemLaCelula } from './iteme.ts'
-import { poateSustine } from './stabilitate.ts'
+import { acoperaDesemnarea, anuleazaCelulaDeZona, anuleazaDesemnare, celulaLibera, sapaManual, Sfarsit, terminaJob, uitaRacirileDeMarfa, uitaTintele, zidesteVoxel } from './joburi.ts'
+import { asazaItem } from './iteme.ts'
 import { adaugaCelulaDeZona, celulaDeZonaLa, creeazaZona, marcheazaZoneMurdare, slotZona, stergeCelulaDeZona, stergeZona, Zona, ZONE_FELURI } from './zone.ts'
 
 export type Command =
@@ -70,36 +69,6 @@ export interface LoggedCommand {
  * `agentHeadroomM` si `maxStepM` ca sa stie cate niveluri atinge o editare, iar
  * alea sunt continut, nu constante.
  */
-/**
- * E libera celula (wx, wy, z) pentru ceva SOLID?
- *
- * Un pion ocupa `agentHeadroomM` niveluri, deci un zid la inaltimea capului il face
- * la fel de ingropat ca unul la picioare; si un morman ingropat e inaccesibil pe
- * veci, plus un candidat fals la fiecare racire. Alternativa la refuz — sa-i
- * ingropi — produce un singur semnal, `INACCESIBIL`, si ala MINTE: problema nu e ca
- * nu exista drum, ci ca pionul e in piatra.
- *
- * Aceeasi intrebare o pun `fill` (zideste ACUM) si `desemneaza` cu piesa (zideste
- * mai tarziu). Scrisa de doua ori, s-ar desincroniza — si prima versiune chiar era
- * asimetrica: verifica doar celula picioarelor pentru pioni, dar tot headroom-ul
- * pentru mormane.
- */
-function celulaLibera(w: World, rules: Rules, wx: number, wy: number, z: number): Outcome<void> {
-  const a = w.agents
-  for (let h = 0; h < rules.agentHeadroomM; h++) {
-    for (let i = 0; i < a.count; i++) {
-      if (a.alive[i] === 0) continue
-      if (a.z[i] !== z - h) continue
-      if (cellOf(a.x[i]!) !== wx || cellOf(a.y[i]!) !== wy) continue
-      return refuse(Reason.CELULA_OCUPATA, { id: a.id[i]!, wx, wy, z: z - h })
-    }
-  }
-  for (let h = 0; h < rules.agentHeadroomM; h++) {
-    const it = itemLaCelula(w.iteme, wx, wy, z - h)
-    if (it !== -1) return refuse(Reason.CELULA_OCUPATA, { item: w.iteme.id[it]!, wx, wy, z: z - h })
-  }
-  return accept()
-}
 export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULES): Outcome<number> {
   switch (cmd.kind) {
     case 'spawnAgent': {
@@ -260,8 +229,6 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
     }
 
     case 'fill': {
-      const liber = celulaLibera(w, rules, cmd.wx, cmd.wy, cmd.z)
-      if (!liber.ok) return liber
       // Nu se zideste peste un om.
       //
       // Alternativa e sa-l ingropi: agentul ramane intr-o celula devenita solida,
@@ -274,7 +241,10 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       // versiune verifica doar `a.z[i] === cmd.z` — asimetric fata de garda pe
       // mormane de dedesubt, care parcurgea corect headroom-ul.
 
-      // Si regula de stabilitate. Pana aici, `fill` NU trecea prin ea deloc: se
+      // Toata zidirea, pe o singura cale — aceeasi pe care o foloseste si jobul de
+      // construit. Vezi `zidesteVoxel`.
+      //
+      // Pana la taietura 2, `fill` NU trecea prin regula de stabilitate deloc: se
       // putea zidi un bloc in aer curat, cu suport 0, care nu cadea niciodata —
       // deci `suport(c) > 0` era un invariant FALS pe starea salvata. Reprodus de
       // panoul de design: `fill` la cinci metri deasupra solului, suport 0, blocul
@@ -284,13 +254,8 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       // Se cheama DUPA gardile de ocupare (alea sunt despre a rani pe cineva) si
       // INAINTE de editare. Pe o celula deja plina raspunde „da", ca refuzul sa
       // vina de la teren cu `CELULA_PLINA`, care e informatia utila.
-      const sprijin = poateSustine(w.terrain, rules, cmd.wx, cmd.wy, cmd.z)
-      if (!sprijin.ok) return sprijin
-      const out = fill(w.terrain, cmd.wx, cmd.wy, cmd.z, cmd.material)
+      const out = zidesteVoxel(w, rules, cmd.wx, cmd.wy, cmd.z, cmd.material)
       if (!out.ok) return out
-      markDirty(w.regions, cmd.wx, cmd.wy, cmd.z, rules)
-      // Zidul ia podeaua celulei de deasupra si headroom-ul celor de dedesubt.
-      retrageCeluleDeZonaNecalcabile(w, rules, cmd.wx, cmd.wy, cmd.z + 1)
       return accept(0)
     }
 

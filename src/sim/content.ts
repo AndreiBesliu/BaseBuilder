@@ -14,6 +14,7 @@ import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import { REGION_SIZE } from './regions.ts'
 import { isSolid, Material } from './terrain/chunk.ts'
+import type { MaterialId } from './terrain/chunk.ts'
 import { Gand, GAND_PENTRU_NEVOIE, GANDURI, Item, ITEME, Nevoie, NEVOI, Piesa } from './state.ts'
 
 /** Ce lasa in urma un voxel sapat: felul de item si cate unitati. `cantitate` 0 = nimic (aer, apa). */
@@ -31,7 +32,7 @@ export interface DigYield {
  */
 export interface SpecPiesa {
   /** Materialul care rezulta. Trebuie sa fie SOLID. */
-  readonly material: number
+  readonly material: MaterialId
   /**
    * Cate unitati se consuma. Invariant verificat la incarcare: EXACT cat da
    * `digYield` inapoi la sapatul aceluiasi material.
@@ -403,7 +404,9 @@ function parsePiese(raw: unknown): Outcome<SpecPiesa[]> {
   for (const key of Object.keys(obj).sort()) {
     if (!cunoscute.includes(key)) return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: `piese.${key}`, cunoscute: cunoscute.join(', ') })
   }
-  const out: SpecPiesa[] = [{ material: 0, cantitate: 0, lucru: 0 }]
+  // Santinela: intrarea 0 e absenta unei piese, nu o piesa. AER e materialul ei,
+  // fiindca e singurul care nu se poate zidi.
+  const out: SpecPiesa[] = [{ material: Material.AER, cantitate: 0, lucru: 0 }]
   for (const [nume, id] of NUME_PIESE) {
     const v = obj[nume]
     if (v === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: `piese.${nume}` })
@@ -424,7 +427,9 @@ function parsePiese(raw: unknown): Outcome<SpecPiesa[]> {
     if (typeof l !== 'number' || !Number.isInteger(l) || l < 1 || l > MAX_LUCRU) {
       return refuse(Reason.VALOARE_INVALIDA, { camp: `piese.${nume}.lucru`, valoare: String(l), min: 1, max: MAX_LUCRU })
     }
-    out[id] = { material: mat[1], cantitate: c, lucru: l }
+    // `mat[1]` vine din `NUME_MATERIALE`, care e construit din `Material.*`: cheia
+    // a fost deja cautata in tabelul ala, deci ingustarea e sigura.
+    out[id] = { material: mat[1] as MaterialId, cantitate: c, lucru: l }
   }
   return accept(out)
 }
@@ -963,7 +968,7 @@ export const DEFAULT_RULES: Rules = {
   // Kitul de constructie, indexat cu `PiesaId`. Intrarea 0 e santinela.
   // `cantitate` e legata de `digYield` printr-un invariant: vezi `parseRules`.
   piese: [
-    { material: 0, cantitate: 0, lucru: 0 },
+    { material: Material.AER, cantitate: 0, lucru: 0 },
     { material: Material.PIATRA_CONSTRUITA, cantitate: 20, lucru: 400 },
     { material: Material.PIATRA_CONSTRUITA, cantitate: 20, lucru: 300 },
     { material: Material.LEMN_CONSTRUIT, cantitate: 5, lucru: 250 },

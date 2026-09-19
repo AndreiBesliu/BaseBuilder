@@ -138,13 +138,14 @@ export interface Totaluri extends JobTickReport { refuzuriAgenti: number; maxSca
 
 /** Ruleaza N tickuri si aduna raportul de joburi. */
 export function ruleaza(w: World, ticks: number, rules: Rules = R, laFiecareTick?: (w: World) => void): Totaluri {
-  const t: Totaluri = {
-    scanari: 0, vizite: 0, candidatiExaminati: 0, candidatiTaiati: 0, coridoare: 0, joburiPornite: 0, joburiTerminate: 0, joburiAnulate: 0,
-    tickuriDeLucru: 0, locuriDeLucruRefacute: 0, refuzuriDrum: 0, faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0,
-    faraDepozit: 0, evaluariDestinatie: 0, itemeProduse: 0, unitatiProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
-    joburiDeNevoie: 0, unitatiMancate: 0, pasiNevoi: 0, plecati: 0, voxeliPrabusiti: 0, pioniCazuti: 0,
-    refuzuriAgenti: 0, maxScanariPeTick: 0,
-  }
+  // Pornirea de la zero e STRUCTURALA, nu enumerata pe camp: un contor nou in
+  // raport ar ramane `undefined`, iar adunarea ar da NaN — la fel de tacut ca
+  // resetarea pe camp din productie, care a lasat trei contoare sa se adune la
+  // infinit si a raportat 44 de milioane de unitati mancate intr-o lume cu 900.
+  //
+  // determinism-ok: toate cheile primesc aceeasi valoare, deci ordinea nu conteaza.
+  const t = { refuzuriAgenti: 0, maxScanariPeTick: 0 } as Totaluri
+  for (const k of (Object.keys(lastJobReport()) as (keyof JobTickReport)[]).sort()) t[k] = 0
   for (let i = 0; i < ticks; i++) {
     tick(w, rules)
     const r = lastJobReport()

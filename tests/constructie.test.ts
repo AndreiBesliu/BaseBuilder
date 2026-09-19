@@ -33,7 +33,10 @@ import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { CATEGORII, Categorie, FelJob, Piesa } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { applyCommand } from '../src/sim/commands.ts'
-import { anuleazaDesemnare, constructiaPrevizualizata } from '../src/sim/joburi.ts'
+import { anuleazaDesemnare, constructiaPrevizualizata, pornesteConstruieste, unitatiDeMunca } from '../src/sim/joburi.ts'
+import { slotItem } from '../src/sim/iteme.ts'
+import { Item } from '../src/sim/state.ts'
+import { panaCand } from './fixturi.ts'
 import { PasCara, PasConstruieste } from '../src/sim/state.ts'
 import { asazaItem, itemLaCelula } from '../src/sim/iteme.ts'
 import { lasaItem } from './fixturi.ts'
@@ -629,4 +632,142 @@ test('marfa nu se lasa PE un santier', () => {
   // Si chiar se poate zidi acolo dupa aceea.
   const zidit = applyCommand(w, { kind: 'fill', wx, wy, z: g + 1, material: Material.PIATRA_CONSTRUITA }, R)
   assert.ok(zidit.ok, `zidirea a fost blocata de propriul material: ${JSON.stringify(zidit)}`)
+})
+
+// ---------------------------------------------------------------------------
+// jobul de construit, cap-coada (pasul 6b)
+// ---------------------------------------------------------------------------
+
+/** Un santier, un morman langa el, si un pion. Jobul se porneste explicit — scanerul vine in 6c. */
+function santier(seed: number, fel: number = Item.PIATRA, cantitate = -1): {
+  w: World; sx: number; sy: number; sz: number; idSantier: number; ds: number; is: number
+} {
+  const { w, wx, wy, g } = sitPlat(seed, 11)
+  const sx = wx + 5
+  const sy = wy + 5
+  const sz = g + 1
+  const sant = applyCommand(w, { kind: 'desemneaza', wx: sx, wy: sy, z: sz, piesa: Piesa.PERETE }, R)
+  assert.ok(sant.ok, `fixtura: santierul: ${JSON.stringify(sant)}`)
+  const idSantier = sant.ok ? sant.value : -1
+
+  const cant = cantitate === -1 ? R.piese[Piesa.PERETE]!.cantitate : cantitate
+  const idItem = lasaItem(w, fel, cant, wx + 1, wy + 5)
+  const sp = applyCommand(w, { kind: 'spawnAgent', x: (wx + 2) * 1000 + 500, y: (wy + 5) * 1000 + 500, z: g + 1, faction: 0 }, R)
+  assert.ok(sp.ok, `fixtura: pionul: ${JSON.stringify(sp)}`)
+
+  const ds = slotDesemnare(w.desemnari, idSantier)
+  const is = slotItem(w.iteme, idItem)
+  assert.notEqual(is, -1, 'fixtura: mormanul')
+  return { w, sx, sy, sz, idSantier, ds, is }
+}
+
+test('ACCEPTANTA: pionul cara materialul si RIDICA peretele', () => {
+  const { w, sx, sy, sz, idSantier, ds, is } = santier(12345)
+  const spec = R.piese[Piesa.PERETE]!
+  const rata = unitatiDeMunca(w, R, 0)
+  assert.ok(pornesteConstruieste(w, R, 0, ds, is).ok)
+
+  // Tickurile petrecute pe pasul ZIDESTE se NUMARA. Fara ele, „peretele a aparut"
+  // ramane verde si cand munca e gratis: `lucru: 400` din rules.json ar fi o cifra
+  // decorativa, iar jucatorul ar vedea zidurile aparand instantaneu.
+  let ziditTickuri = 0
+  let n = -1
+  for (let i = 0; i < 4000; i++) {
+    if (w.agents.jobKind[0] === 0) { n = i; break }
+    if (w.agents.jobStep[0] === PasConstruieste.ZIDESTE) ziditTickuri++
+    ruleaza(w, 1)
+  }
+  assert.notEqual(n, -1, 'jobul de construit trebuia sa se termine')
+  assert.ok(
+    ziditTickuri >= Math.ceil(spec.lucru / rata),
+    `zidirea a costat ${ziditTickuri} tickuri, dar ${spec.lucru} unitati la ${rata}/tick cer cel putin ${Math.ceil(spec.lucru / rata)}`,
+  )
+
+  const m = materialAt(w.terrain, sx, sy, sz)
+  assert.ok(m.ok && m.value === spec.material, `peretele: ${m.ok ? m.value : 'refuz'}, asteptat ${spec.material}`)
+  assert.equal(slotDesemnare(w.desemnari, idSantier), -1, 'santierul dispare cand piesa e pusa')
+  assert.equal(w.ratiune.unitatiZidite, spec.cantitate, 'materialul se CONSUMA, si se numara')
+  assert.equal(w.ratiune.itemePierdute, 0, 'si nimic nu se pierde pe drum')
+  assert.equal(w.agents.caraCantitate[0], 0, 'pionul nu ramane cu marfa in mana')
+  assert.equal(w.rezervari.total, 0, 'si nicio rezervare nu ramane pe id-uri moarte')
+
+  // Pionul NU e ingropat in propriul perete...
+  const px = cellOf(w.agents.x[0]!)
+  const py = cellOf(w.agents.y[0]!)
+  const pe = materialAt(w.terrain, px, py, w.agents.z[0]!)
+  assert.ok(pe.ok && !isSolid(pe.value), 'pionul a ramas in piatra')
+  // ...si a zidit de LANGA santier, nu de la distanta. Fara verificarea de pozitie
+  // din `zideste`, progresul s-ar aduna in timpul mersului si peretele ar aparea
+  // in clipa in care pionul mai e la patru celule distanta.
+  assert.equal(Math.max(Math.abs(px - sx), Math.abs(py - sy)), 1, `pionul a zidit de la (${px},${py}), santierul e la (${sx},${sy})`)
+})
+
+test('un morman de alt fel, sau prea mic, se refuza la PORNIRE', () => {
+  // `ridica` ia `min(cerut, gasit)`: fara garda, un morman de 10 ar trimite pionul
+  // sa munceasca 400 de tickuri si sa descopere abia la final ca n-are din ce zidi.
+  const a = santier(12345, Item.LEMN)
+  const r1 = pornesteConstruieste(a.w, R, 0, a.ds, a.is)
+  assert.equal(r1.ok, false, 'lemnul nu e piatra')
+  assert.equal(r1.ok ? '' : r1.reason, Reason.LIPSA_MATERIAL)
+
+  const b = santier(12345, Item.PIATRA, R.piese[Piesa.PERETE]!.cantitate - 1)
+  const r2 = pornesteConstruieste(b.w, R, 0, b.ds, b.is)
+  assert.equal(r2.ok, false, 'un perete nu se zideste din jumatate de morman')
+  assert.equal(r2.ok ? '' : r2.reason, Reason.LIPSA_MATERIAL)
+  assert.equal(b.w.rezervari.total, 0, 'si un refuz nu lasa rezervari in urma')
+})
+
+test('materialul disparut din mana nu se zideste din nimic', () => {
+  // Garda e defensiva: intre RIDICA si ZIDESTE nimeni n-are cum sa ia marfa din
+  // mana unui pion. Dar „n-are cum" e o presupunere despre restul sistemului, si
+  // exact asta o face de probat — altfel ramane cod neverificat care intr-o zi
+  // devine singurul lucru dintre jucator si un perete zidit din aer.
+  const { w, sx, sy, sz, ds, is } = santier(12345)
+  assert.ok(pornesteConstruieste(w, R, 0, ds, is).ok)
+  assert.ok(panaCand(w, 2000, (ww) => ww.agents.caraCantitate[0]! > 0) >= 0)
+
+  w.agents.caraCantitate[0] = R.piese[Piesa.PERETE]!.cantitate - 1
+  const n = panaCand(w, 2000, (ww) => ww.agents.jobKind[0] === 0)
+  assert.ok(n >= 0, 'jobul trebuia sa se incheie')
+  const m = materialAt(w.terrain, sx, sy, sz)
+  assert.ok(m.ok && !isSolid(m.value), 'peretele s-a ridicat din 19 unitati in loc de 20')
+  assert.equal(w.ratiune.unitatiZidite, 0, 'si s-a si NUMARAT o zidire care n-a avut loc')
+})
+
+test('M5 peste o zidire in curs: save luat cu materialul in mana', () => {
+  // Pasul periculos e cel de dupa RIDICA: sursa e moarta, materialul e in mana, si
+  // tuplul de rezervare trebuie sa fie de ajuns ca `reconstruiesteRezervari` sa
+  // refaca EXACT aceleasi rezervari. Un fel de job necunoscut celor cinci puncte
+  // de dispecerizare ar fi anulat la incarcare in timp ce lumea continua il tine.
+  const { w, ds, is } = santier(4242)
+  assert.ok(pornesteConstruieste(w, R, 0, ds, is).ok)
+  const pana = panaCand(w, 2000, (ww) => ww.agents.caraCantitate[0]! > 0)
+  assert.ok(pana >= 0, 'fixtura: pionul n-a apucat sa ridice materialul')
+
+  const incarcat = decode(encode(w), R)
+  assert.ok(incarcat.ok, `refuzat: ${JSON.stringify(incarcat)}`)
+  if (!incarcat.ok) return
+  assert.equal(hashWorld(incarcat.value), hashWorld(w), 'lumea incarcata difera imediat dupa save')
+
+  ruleaza(w, 800)
+  ruleaza(incarcat.value, 800)
+  assert.equal(hashWorld(incarcat.value), hashWorld(w), 'lumea incarcata a divergat de cea continua')
+  assert.equal(w.ratiune.unitatiZidite, R.piese[Piesa.PERETE]!.cantitate, 'fixtura: zidirea trebuia sa se termine in 800 de tickuri')
+})
+
+test('santierul anulat in timpul zidirii nu lasa job orfan', () => {
+  // Cazul pe care panoul l-a masurat ca M5 rosu la pasul 6a, cu tuplul pus cu mana.
+  // Acum e un job REAL: sursa in `jobTarget`, santierul in `jobDest`.
+  const { w, ds, is } = santier(777)
+  assert.ok(pornesteConstruieste(w, R, 0, ds, is).ok)
+  const pana = panaCand(w, 2000, (ww) => ww.agents.caraCantitate[0]! > 0)
+  assert.ok(pana >= 0, 'fixtura: pionul n-a apucat sa ridice materialul')
+
+  anuleazaDesemnare(w, R, ds)
+  assert.equal(w.agents.jobKind[0], 0, 'jobul trebuie intrerupt, nu lasat sa arate spre un id mort')
+  assert.equal(w.rezervari.total, 0, 'si rezervarile eliberate')
+
+  // Marfa din mana ajunge pe jos, nu dispare.
+  ruleaza(w, 50)
+  assert.equal(w.ratiune.itemePierdute, 0, 'materialul carat s-a evaporat la anulare')
 })
