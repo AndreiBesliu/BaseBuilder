@@ -98,4 +98,41 @@ export const MUTATII = [
     b: "  if (!suprafataNaturala(x, y)) return false",
     t: 'tests/mesher.test.ts', e: 'INVELISUL NETEZIT e ETANS',
   },
+
+  // --- geometria si ocluzia fetelor NETEZITE ---
+  {
+    n: "cota unui colt se ia de la ALT colt (suprafata se rupe pe diagonala)",
+    f: 'src/render/mesher.ts',
+    a: "  out[1] = v[ly * VERTS + lx + 1]! - z0",
+    b: "  out[1] = v[ly * VERTS + lx]! - z0",
+    t: 'tests/mesher.test.ts', e: "netezirea aseaza fetele de sus EXACT pe cotele",
+  },
+  {
+    n: "colturile 2 si 3 inversate (quaduri rasucite)",
+    f: 'src/render/mesher.ts',
+    a: "  out[2] = v[(ly + 1) * VERTS + lx + 1]! - z0\n  out[3] = v[(ly + 1) * VERTS + lx]! - z0",
+    b: "  out[3] = v[(ly + 1) * VERTS + lx + 1]! - z0\n  out[2] = v[(ly + 1) * VERTS + lx]! - z0",
+    t: 'tests/mesher.test.ts', e: "netezirea aseaza fetele de sus EXACT pe cotele",
+  },
+  {
+    n: "baza stivei nu se scade (toata suprafata la zeci de metri sub locul ei)",
+    f: 'src/render/mesher.ts',
+    a: "  const z0 = chunk.voxels!.zBaseM * 100",
+    b: "  const z0 = 0",
+    t: 'tests/mesher.test.ts', e: "netezirea aseaza fetele de sus EXACT pe cotele",
+  },
+  {
+    n: "axele x inversate la emitere (geometria ramane coerenta, dar rasucita)",
+    f: 'src/render/mesher.ts',
+    a: "  const x0 = lx * CM, x1 = (lx + 1) * CM, y0 = ly * CM, y1 = (ly + 1) * CM\n  pushQuadCm(Face.Z_POS, cheie, x0, y0, cm[0]!, x1, y0, cm[1]!, x1, y1, cm[2]!, x0, y1, cm[3]!)",
+    b: "  const x0 = (lx + 1) * CM, x1 = lx * CM, y0 = ly * CM, y1 = (ly + 1) * CM\n  pushQuadCm(Face.Z_POS, cheie, x0, y0, cm[0]!, x1, y0, cm[1]!, x1, y1, cm[2]!, x0, y1, cm[3]!)",
+    t: 'tests/mesher.test.ts', e: "doua fete netezite vecine impart doua varfuri",
+  },
+  {
+    n: "fetele netezite pierd ocluzia (tiparul de AO nu ajunge pe calea lor)",
+    f: 'src/render/mesher.ts',
+    a: "            pushFataNetezita(cheie, lx, ly, varfBuf)",
+    b: "            pushFataNetezita(cheie & 0xff, lx, ly, varfBuf)",
+    t: 'tests/mesher.test.ts', e: "fetele NETEZITE primesc ocluzie",
+  },
 ]

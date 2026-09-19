@@ -5,8 +5,10 @@ import {
   CHUNK_CELLS,
   cellHeightCm,
   encodeAll,
+  decodeColumn,
   generateChunk,
   groundLevelFromCm,
+  isSolid,
   Material,
   promote,
   setVoxel,
@@ -451,22 +453,140 @@ function quaduriDeTreapta(m: ReturnType<typeof meshChunk>): number {
 
 /** Aria fetelor LATERALE (peretii), in m². */
 
-test('netezirea aseaza fetele de sus la cote REALE, nu la metri intregi', () => {
-  const c = chunkPromovat()
-  const fara = meshChunk(c)
-  const cu = meshChunk(c, undefined, true)
+/**
+ * Are coloana suprafata EXACT unde ar fi pus-o generatorul?
+ *
+ * Selecteaza CE celule se verifica, nu CUM se calculeaza cotele — deci nu repeta
+ * implementarea, doar citeste aceleasi date publice. Conteaza fiindca o coloana de
+ * APA nu are suprafata solida la nivelul ei natural si corect NU se netezeste; o
+ * clasificare dupa cota (prima varianta) le prindea printr-un off-by-one si testul
+ * pica pe cod CORECT.
+ */
+const colBuf = new Uint8Array(VOXEL_LEVELS)
+function areSuprafataNaturala(c: Chunk, x: number, y: number, nat: number): boolean {
+  decodeColumn(c.voxels!, y * CHUNK_CELLS + x, colBuf)
+  if (nat < 0 || nat + 1 >= VOXEL_LEVELS) return false
+  return isSolid(colBuf[nat]!) && !isSolid(colBuf[nat + 1]!)
+}
 
-  // Fara netezire, ORICE cota e multiplu de 100 cm. Cu netezire, aproape niciuna.
-  const subMetru = (m: ReturnType<typeof meshChunk>): number => {
-    let n = 0
-    for (let q = 0; q < m.quadCount; q++) {
-      if (m.faces[q] !== Face.Z_POS) continue
-      for (let v = 0; v < 4; v++) if (m.positions[q * 12 + v * 3 + 2]! % 100 !== 0) n++
-    }
-    return n
+/**
+ * Indicele fetei de sus de 1×1 a celulei (x, y) cea mai apropiata de `tinta`, sau -1.
+ *
+ * „Cea mai apropiata", nu „prima": o coloana poate avea mai multe fete de sus — o
+ * podea sapata dedesubt, o lespede deasupra — iar prima gasita e la voia ordinii de
+ * emitere. Prima varianta a testului lua prima si pica pe cod CORECT.
+ */
+function fataDeSus(m: ReturnType<typeof meshChunk>, x: number, y: number, tinta: number): number {
+  let best = -1
+  let bestD = Infinity
+  for (let q = 0; q < m.quadCount; q++) {
+    if (m.faces[q] !== Face.Z_POS) continue
+    const o = q * 12
+    if (m.positions[o] !== x * 100 || m.positions[o + 1] !== y * 100) continue
+    if (m.positions[o + 3] !== (x + 1) * 100 || m.positions[o + 10] !== (y + 1) * 100) continue
+    const d = Math.abs(m.positions[o + 2]! - tinta)
+    if (d < bestD) { bestD = d; best = q }
   }
-  assert.equal(subMetru(fara), 0, 'fara netezire nicio cota n-are voie sa fie sub-metrica')
-  assert.ok(subMetru(cu) > 1000, `cu netezire abia ${subMetru(cu)} cote sunt sub-metrice — netezirea nu s-a aplicat`)
+  return best
+}
+
+test('netezirea aseaza fetele de sus EXACT pe cotele din vertexCm, in ordinea emiterii', () => {
+  // Testul de dinainte numara doar cate cote NU sunt multipli de 100 — un PROXY.
+  // Orice permutare a colturilor, orice inversare de axe, si chiar scaderea uitata
+  // a bazei stivei raman sub-metrice, deci treceau. Masurat de o recenzie
+  // adversariala: patru stricaciuni distincte, toate 391/391 verzi.
+  //
+  // Ancora e INVARIANTUL: cele patru cote sunt exact varfurile din `vertexCm`,
+  // in ordinea de emitere (x0,y0), (x1,y0), (x1,y1), (x0,y1).
+  const c = chunkPromovat()
+  const zBase = c.voxels!.zBaseM
+  const m = meshChunk(c, undefined, true)
+  const V = CHUNK_CELLS + 1
+  const nat = (x: number, y: number): number => groundLevelFromCm(cellHeightCm(c, x, y)) - zBase
+
+  let verificate = 0
+  for (let y = 0; y < CHUNK_CELLS; y++) {
+    for (let x = 0; x < CHUNK_CELLS; x++) {
+      const q = fataDeSus(m, x, y, (nat(x, y) + 1) * 100)
+      if (q === -1) continue
+      const o = q * 12
+      // Doar coloanele cu suprafata NATURALA se netezesc; apa si gropile raman plate.
+      if (!areSuprafataNaturala(c, x, y, nat(x, y))) continue
+      const asteptat = [
+        c.vertexCm[y * V + x]! - zBase * 100,
+        c.vertexCm[y * V + x + 1]! - zBase * 100,
+        c.vertexCm[(y + 1) * V + x + 1]! - zBase * 100,
+        c.vertexCm[(y + 1) * V + x]! - zBase * 100,
+      ]
+      verificate++
+      for (let v = 0; v < 4; v++) {
+        assert.equal(
+          m.positions[o + v * 3 + 2], asteptat[v],
+          `celula (${x},${y}), varful ${v}: ${m.positions[o + v * 3 + 2]} cm, asteptat ${asteptat[v]}`,
+        )
+      }
+    }
+  }
+  assert.ok(verificate > 500, `doar ${verificate} fete netezite verificate — fixtura nu atinge cazul`)
+})
+
+test('doua fete netezite vecine impart doua varfuri, deci si cotele lor', () => {
+  // Independent de generator: nu cere ca o cota sa fie o anume valoare, ci ca
+  // suprafata sa fie CONTINUA. Prinde inversarea axelor, pe care testul de mai sus
+  // n-o vede — acolo geometria ramane coerenta cu ea insasi, doar rasucita.
+  //
+  // Restrans la fetele NETEZITE: peste toate fetele de 1×1 codul corect are
+  // „crapaturi" legitime, acolo unde o groapa sapata sta langa suprafata neatinsa.
+  const c = chunkPromovat()
+  const zBase = c.voxels!.zBaseM
+  const m = meshChunk(c, undefined, true)
+  const nat = (x: number, y: number): number => groundLevelFromCm(cellHeightCm(c, x, y)) - zBase
+  const netezita = (x: number, y: number): number => {
+    const q = fataDeSus(m, x, y, (nat(x, y) + 1) * 100)
+    if (q === -1) return -1
+    return areSuprafataNaturala(c, x, y, nat(x, y)) ? q : -1
+  }
+
+  let perechi = 0
+  for (let y = 0; y < CHUNK_CELLS - 1; y++) {
+    for (let x = 0; x < CHUNK_CELLS - 1; x++) {
+      const a = netezita(x, y)
+      const b = netezita(x + 1, y)
+      if (a === -1 || b === -1) continue
+      perechi++
+      // Muchia comuna: varfurile 1,2 ale lui A sunt varfurile 0,3 ale lui B.
+      assert.equal(m.positions[a * 12 + 5], m.positions[b * 12 + 2], `crapatura intre (${x},${y}) si (${x + 1},${y}), coltul de jos`)
+      assert.equal(m.positions[a * 12 + 8], m.positions[b * 12 + 11], `crapatura intre (${x},${y}) si (${x + 1},${y}), coltul de sus`)
+    }
+  }
+  assert.ok(perechi > 400, `doar ${perechi} perechi de fete netezite vecine — fixtura nu atinge cazul`)
+})
+
+test('fetele NETEZITE primesc ocluzie, nu doar cele unite lacom', () => {
+  // Suprafata naturala iese din unirea lacoma si se emite pe alta cale. Toate cele
+  // opt teste de AO cheama `meshChunk` FARA al treilea argument, deci `natLevel` e
+  // plin de NECUNOSCUT si calea netezita nu se atinge niciodata — desi prin ea ies
+  // 768 din 1000 de quaduri ale unui chunk promovat.
+  const c = chunkPromovat()
+  const m = meshChunk(c, undefined, true)
+  const zBase = c.voxels!.zBaseM
+  const nat = (x: number, y: number): number => groundLevelFromCm(cellHeightCm(c, x, y)) - zBase
+
+  let netezite = 0
+  let ocluzate = 0
+  for (let y = 0; y < CHUNK_CELLS; y++) {
+    for (let x = 0; x < CHUNK_CELLS; x++) {
+      const q = fataDeSus(m, x, y, (nat(x, y) + 1) * 100)
+      if (q === -1) continue
+      if (!areSuprafataNaturala(c, x, y, nat(x, y))) continue
+      netezite++
+      for (let v = 0; v < 4; v++) if (m.ao[q * 4 + v]! < 3) { ocluzate++; break }
+    }
+  }
+  assert.ok(netezite > 500, `doar ${netezite} fete netezite — fixtura nu atinge cazul`)
+  // Pe teren real, o parte dintre ele au vecini mai inalti. Nici toate, nici niciuna.
+  assert.ok(ocluzate > 20, `doar ${ocluzate} din ${netezite} fete netezite au vreo ocluzie — AO nu ajunge pe calea netezita`)
+  assert.ok(ocluzate < netezite, `TOATE cele ${netezite} fete netezite sunt ocluzate — suspect de saturatie`)
 })
 
 test('netezirea sterge peretii de treapta, si de-aia creste numarul de quaduri', () => {
