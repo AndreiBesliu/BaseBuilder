@@ -3066,3 +3066,120 @@ verde · `GATE.md` re-etalonat de două ori, fiecare într-un commit separat.
 - **Predicția „NU pică pe GPU"** e acum la 694.458 de triunghiuri, de patru ori cifra pe care a fost
   scrisă. Sweep-ul de rezoluție se rulează pe geometria asta.
 - **Terenul ne-promovat nu primește AO** — 4,3% diferență, măsurată, sub variația naturală.
+
+---
+
+## Recenzia adversarială — cinci reparații, și trei instrumente care minteau
+
+**Prompt:** `continua` (×3) · **Model:** Opus 5
+
+Recenzia adversarială a codului scris azi a confirmat 15 proprietăți (conservarea, determinismul
+inclusiv pe lumi întrețesute, izolarea bufferelor de modul, toate cele 61 de probe declarate care
+leagă) și a scos 7 defecte reale. Două s-au reparat în aceeași trecere; aici sunt celelalte cinci,
+plus o gardă nouă pentru două feluri de eșec tăcut întâlnite pe drum.
+
+### 3+4 · Geometria netezită se verifica pe un proxy
+
+Testul de cote număra doar câte cote NU sunt multipli de 100. Orice permutare a colțurilor, orice
+inversare de axe și chiar scăderea uitată a bazei stivei rămân sub-metrice, deci treceau — recenzia
+a măsurat **patru stricăciuni distincte, toate 391/391 verzi**, și nici `gate:numbers` nu le vedea,
+fiindcă `quadCount` nu se schimbă la niciuna.
+
+Acum se verifică cotele exacte în ordinea emiterii, continuitatea a două fețe vecine (independentă
+de generator — prinde inversarea axelor, pe care prima n-o vede, fiindcă geometria rămâne coerentă
+cu ea însăși, doar răsucită), și ocluzia pe calea netezită. Ultima lipsea cu totul: toate cele opt
+teste de AO chemau `meshChunk` **fără** al treilea argument, deci calea prin care ies 768 din 1000
+de quaduri n-avea nicio acoperire.
+
+### 5 · Șantierul se alegea după ordinea desenării
+
+`candDist` la construcție e distanța până la MORMAN, iar rezumatul ține un singur morman per piesă —
+deci e același număr pentru toate șantierele piesei. Cu priorități egale scorul iese identic pe toată
+categoria, `maiBun` nu e strict, și câștigă primul examinat: ordinea sortării, adică `candId`. Pionul
+mergea la șantierul desenat primul, nu la cel de lângă el. **+72% tickuri** în cazul patologic.
+
+Departajarea e al doilea picior — morman → șantier — și se compară DOAR în interiorul categoriei.
+Pentru SAPA zeroul e adevărat; pentru CARA înseamnă „nu se știe ieftin", fiindcă destinația se alege
+abia în trecerea scumpă. Comparat peste categorii, zeroul ăla ar fi înclinat sistematic balanța
+împotriva construcției — exact ce argumenta comentariul de lângă `candDist`.
+
+### 6 · Șantierul fără material nu spunea nimic
+
+Poarta de material ieșea din buclă cu `continue` înaintea oricărei scrieri pe desemnare. Cauza ajungea
+pe PION, deci panoul picta șantierul chihlimbar — sănătos, își așteaptă rândul — iar HUD-ul îl număra
+liber. Un blocaj permanent (SCARA cere LEMN într-o lume fără lemn) arăta identic cu unul de o secundă.
+
+Cauza NU putea veni din `m.exista`: rezumatul e al pionului care întreabă, și e fals și când singurul
+morman e rezervat de altcineva. Cu el drept sursă, panoul ar fi pictat portocaliu exact șantierele în
+plină construcție. `ultimulMotiv` are contract scris — „proprietate a desemnării înseși, niciodată a
+unui anume pion" — deci întrebarea se pune separat: `matOriunde`, înaintea oricărei porți per-pion.
+
+### 7 · S-DIG măsura 0,24% din așezare, o treime din săpături, și niciodată cazul scump
+
+Recenzia a raportat că scenariul de gate nu promovează niciun chunk. Reprodus headless — corect, și
+verificarea a scos **două** defecte, al doilea mai mare.
+
+`SPAN_CHUNKS` era scris `13`, adică exact `SETTLEMENT_CHUNKS`, cu același colț. Cum promovarea vine
+cu apron de 1, dreptunghiul promovat e `-1..13`, deci pătratul stătea strict înăuntru: **0 promovări
+din 1200**, iar ramura scumpă din `remeshAfterEdit` (chunk nou + apron = 9 remeshate) nu s-a executat
+NICIODATĂ într-o rulare de gate.
+
+Și pozițiile nu erau împrăștiate, erau o linie: `wx` și `wy` se calculau amândouă din ACELAȘI contor,
+reduse modulo ACELAȘI span, deci perechea e o funcție de `c mod span`. **416 coloane distincte dintr-o
+așezare de 416×416**, re-săpate de aproape trei ori — de acolo veneau și 415 refuzuri din 1200. Poarta
+scria 20 de săpături/s în propriul tabel și făcea 13,1.
+
+Codul a ieșit din `viewer/main.ts` în `src/harness/sdig.ts`, fiindcă exact asta ținea defectul în
+viață: două linii într-un modul de browser nu pot fi rulate de `npm test`, iar singurul lor consumator
+raporta cadre, nu acoperire. Configurația livrată: **1200/1200 săpături efectuate, 52 de promovări,
+1,24 remesh-uri/săpătură, cel mai scump cadru 9**.
+
+### Garda nouă: suitele de mutații se verifică în `npm run check`
+
+Două feluri de stricăciune se vedeau doar după ~50 de minute, și amândouă s-au întâmplat azi: o suită
+care nu parsează (ghilimele românești închise într-un șir cu ghilimele drepte — `check` rămâne verde,
+el nu încarcă fișierele de mutații), și un `e` învechit, care raportează RATATĂ pe cod corect și te
+trimite să scrii un test pentru o gardă deja probată. Plus `TIPAR LIPSĂ` și `TIPAR AMBIGUU`, pe care
+harnașamentul le raporta corect, dar tot după o rulare întreagă. Toate patru se pot afla din citire.
+
+### Trei instrumente care minteau — ale mele
+
+Tiparul zilei n-a fost codul, ci verificarea lui:
+
+1. **Testul de cote** lua *prima* față de sus a unei celule; o coloană poate avea mai multe. Pica pe
+   cod corect. A doua formulare clasifica fețele netezite după cotă și prindea coloanele de APĂ
+   (material nesolid ⇒ corect nu se netezesc). Pica tot pe cod corect. Clasificarea se face pe DATELE
+   coloanei.
+2. **Testul de evitare** folosea fixtura pionului sigilat, care chiar *produce* evitare — dar mormanul
+   e ridicat de pionul liber înainte ca sigilatul să rescaneze. Starea pe care testul o descria nu mai
+   exista când o verifica: mutația trecea neprinsă. Acum evitarea se **impune**.
+3. **O asertiune vidă**, prinsă de propria probă: „nicio poziție nu cade pe teren nestreamuit". Proba
+   ei — un pătrat de 23 de chunk-uri, mult peste cercul de rază 11 — n-a înroșit nimic. `groundLevelM`
+   nu eșuează: chunk-urile se creează la cerere. Contorul `faraSol` ieșise 0 în TOATE măsurătorile, și
+   eu citisem asta ca „pătratul e în siguranță" în loc de „instrumentul nu poate ieși nenul".
+
+Și una de raportare, nu de cod: o rulare de fundal a murit în prima secundă cu `SyntaxError`, dar am
+filtrat ieșirea prin `grep`, care a întors 0. Am citit „exit 0" acolo unde scria „n-a pornit".
+
+Verificatorul de mutații a picat și el prima lui probă: a raportat 18 probe ca având câmpul `b` lipsă,
+când `b: ""` e mutația care ȘTERGE linia. De-aia testul lui începe cu controlul POZITIV — fără el, cele
+șapte asertiuni negative ar fi fost satisfăcute și de un verificator care iese roșu la orice.
+
+### Cifre finale
+
+**408 teste** · **197 de probe**, 0 tipare lipsă, 0 ambigue, 0 controale invalide · `npm run check`
+verde · GATE.md re-etalonat o dată (§5, scenariul — primele șase erau schimbări de fixtură), în commit
+separat, cu motivul scris.
+
+### Ce rămâne
+
+- **`AO_FACTOR`** — tot singurul număr din arcul de grafică ieșit dintr-o judecată vizuală, nu dintr-o
+  măsurătoare.
+- **Cei 205 ms din GATE.md** s-au luat dimineața, cu serverul de dev pe mașină; `check-gate-numbers`
+  măsoară azi 179,9 (±22,2). Poarta trece, deci cifra e în toleranța ei — dar e o cifră de mașină
+  zgomotoasă. A o re-etalona de două ori într-o zi ar fi mai rău decât a o nota.
+- **Bucla de reîncercare din S-DIG** e probată prin `sapaturaUrmatoare`, dar ce face viewerul CU
+  rezultatul ei (`remeshAfterEdit`) rămâne cod de browser fără test.
+- **Prioritățile personale asimetrice**, plafonul pe al doilea picior, și `racireDesemnare` care
+  numără `vii` peste toate felurile — netestate, de la recenzia dinainte.
+- **Deadlock-ul de conținut SCARA/LEMN** — acum măcar se vede în panou, portocaliu.
