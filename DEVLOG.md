@@ -2973,3 +2973,96 @@ Peste jumătate primesc ocluzie.
   derivat din diferențele de înălțime, și e alt arc.
 - **Predicția „NU pică pe GPU" din GATE.md e acum mai GREA**, nu mai ușoară: 172.142 → 399.680 de
   triunghiuri. Singurul indiciu e timpul de *submit*, nu de completare — nu înlocuiește sweep-ul.
+
+---
+
+## Grafică — liniile drepte, și de unde veneau de fapt
+
+**Prompt:** `vreau sa facem ceva cu liniile astea drepte, vreau o grafica mai buna de atat` ·
+`da, mergi pe varianta completa`
+**Model:** Claude Opus 5
+
+Terenul arăta ca un câmp arat: terase paralele perfect drepte, de 1 m, până la orizont. Iar AO,
+livrat cu o zi înainte, le făcea **mai** citibile, nu mai puțin.
+
+### Diagnosticul a fost greșit de două ori înainte să fie corect
+
+Prima ipoteză — „terasele sunt identice între ele, deci se citesc ca tipar" — a produs
+`variatiaLocului`, o variație de culoare legată de poziția în lume. E o îmbunătățire reală și a
+rămas, dar **nu rezolvă liniile** și nu pretinde asta.
+
+A doua ipoteză — „e generarea lumii" — a fost respinsă de măsurătoare: cotele heightfield-ului au
+**558 de valori distincte cu pas de 18 cm**, doar 1% multipli de metru. Terenul ne-promovat e neted.
+
+Răspunsul l-a dat o probă simplă: **cu cele 12 chunk-uri de voxeli ascunse, toate terasele dispar.**
+Liniile apar la **promovare** — suprafața netedă se rotunjește la metru întreg (abatere măsurată
+**0,25 m medie, 0,5 m maximă**, pură rotunjire) și o pantă lină devine scară. Pe TOT chunk-ul, nu
+doar unde s-a săpat, plus apronul: o singură groapă preface nouă chunk-uri în scară.
+
+### Reparația
+
+Fața de sus a unui voxel de suprafață **neatinsă** se așază la cotele reale din `vertexCm`, iar
+peretele de treaptă dintre două coloane neatinse se suprimă — cele două fețe înclinate se întâlnesc
+pe muchia comună, având literalmente aceleași vârfuri. Treptele rămân doar unde s-a săpat.
+
+„Coloana a fost atinsă de jucător" se citește din diferența dintre ce e și ce ar fi fost: solid
+exact la nivelul pe care generatorul l-ar produce, și aer deasupra. **Niciun câmp nou de stare.**
+
+Netezirea e **opțională**, și nu din prudență: fără ea, mesher-ul rămâne o enumerare fidelă a
+fețelor voxelilor și invariantul central se poate proba. Cu ea, devine o redare — șterge pereți care
+există în date. Ambele întrebări merită răspuns. Toate cele 24 de teste de mesher trec neschimbate
+în modul fidel, adică `netezire=false` chiar e un no-op.
+
+`positions` a trecut din metri în **centimetri**; alternativa — un al doilea tablou doar pentru
+cotele netezite — ar fi însemnat două surse de adevăr pentru aceeași poziție.
+
+### Cifre
+
+| | înainte | după AO | după netezire |
+|---|---|---|---|
+| quaduri | 86.071 | 199.840 | **347.229** |
+| triunghiuri | 172.142 | 399.680 | 694.458 |
+| meshing | 99 ms | 192 ms | **219 ms** |
+
+Raportul merită reținut: **+74% quaduri costă doar +14% timp**, fiindcă partea scumpă a mesher-ului
+e calculul de AO per celulă, nu numărul de dreptunghiuri unite.
+
+Estimarea de dinainte de cod spunea +64% și era greșită: presupunea că toți pereții de 1 m dispar,
+când de fapt dispar doar cei dintre două coloane neatinse.
+
+### Ce a găsit suita de mutații
+
+Suita `render` a ieșit **8/9 cu două controale invalide**, și toate trei erau reale: un `TIPAR
+AMBIGUU` (despachetarea AO ajunsese scrisă de două ori — a treia oară în aceeași zi când
+instrumentul prinde o duplicare făcută de mine), un `TIPAR LIPSA`, și o `RATATA`.
+
+### O gardă rămâne FĂRĂ probă, și se scrie aici
+
+Condiția care cere ca **amândouă** coloanele să fie neatinse înainte de a suprima peretele dintre
+ele e corectă și necesară — **măsurat direct**: pe 36 de gropi săpate pe pantă, condiția strânsă
+emite 1459 de quaduri, cea slabă 1450. **Nouă fețe în minus, zero în plus**; alea sunt găuri prin
+care se vede fundalul.
+
+Dar n-am reușit să-i scriu un test care să lege, în patru încercări: asertiune pe arie (prea slabă —
+o față lipsă din 16 tot arată a creștere), verificare per perete oprită la nivelul coloanei săpate
+(nu atinge cazul, fanta e deasupra ei), urcată la nivelul vecinului (pică pe cod corect), și
+invariantul general „se șterg doar fețe de deasupra suprafeței desenate" (189 de false pozitive —
+între două coloane neatinse suprafețele se ating pe muchie și peretele e legitim șters deși e sub
+cota muchiei). A cincea formulare ar fi trebuit să reconstruiască în test exact regula din cod, iar
+un test care repetă implementarea nu probează implementarea.
+
+Proba s-a **scos** din suită. O probă RATATĂ permanentă e un orb care raportează, iar una falsă e
+mai rău.
+
+### Cifre finale
+
+**391 de teste** · **179 de probe** (10 în `render`), 0 tipare lipsă, 0 ambigue · `npm run check`
+verde · `GATE.md` re-etalonat de două ori, fiecare într-un commit separat.
+
+### Ce rămâne
+
+- **Garda de mai sus, fără probă.** Dacă cineva găsește formularea, e cea mai valoroasă adăugare.
+- **Scara `AO_FACTOR`** — singurul număr din tot arcul care n-a ieșit dintr-o măsurătoare.
+- **Predicția „NU pică pe GPU"** e acum la 694.458 de triunghiuri, de patru ori cifra pe care a fost
+  scrisă. Sweep-ul de rezoluție se rulează pe geometria asta.
+- **Terenul ne-promovat nu primește AO** — 4,3% diferență, măsurată, sub variația naturală.
