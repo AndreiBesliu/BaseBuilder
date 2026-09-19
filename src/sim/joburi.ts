@@ -560,8 +560,26 @@ export function acoperaCoridor(w: World, rules: Rules, ax: number, ay: number, a
  * expire, altfel plafonul nu ajunge niciodata la coada (recenzia: cu 1700 de
  * desemnari fara loc si racire de 100, exact 1024 primeau vreodata un motiv).
  * Derivat din stare persistata (`vii`), deci acelasi in orice lume.
+ *
+ * ## Populatia din care se deriva NU e cea care concureaza
+ *
+ * `racireDesemnare` ii da `w.desemnari.vii` — TOATE desemnarile vii, de orice fel.
+ * De cand exista si CONSTRUIESTE, un pion care doar sapa isi primeste fereastra
+ * dimensionata si de santiere. Si in cealalta directie: plafonul de evaluari
+ * scumpe e IMPARTIT cu itemele (candidatii de carat), care nu intra deloc in `vii`.
+ *
+ * Masurat pe 19.09.2026: cu 60 de sapaturi si 2400 de santiere, fereastra iese
+ * **330 in loc de 100**. Sub ~768 de desemnari vii nu se vede deloc, fiindca
+ * `jobInfeasibleRetryTicks` domina. Debitul sapatului n-a scazut in masuratoare,
+ * fiindca racirea atinge doar tintele refuzate SCUMP, si alea erau accesibile.
+ *
+ * Nu s-a schimbat, si asta e o alegere: abaterea e CONSERVATOARE. O fereastra mai
+ * lunga decat trebuie intarzie reincercarea; una mai scurta rupe ACOPERIREA, adica
+ * exact defectul pentru care formula a fost scrisa. Un contor per fel ar fi stare
+ * DERIVED noua pentru un castig de reglaj, si merita masurat pe o colonie reala
+ * inainte de a fi scris.
  */
-function racireTinta(vii: number, rules: Rules): number {
+export function racireTinta(vii: number, rules: Rules): number {
   // `+ 1`: fereastra trebuie sa fie STRICT mai lunga decat scanarile necesare,
   // altfel prima transa expira exact cand scanarea ar fi ajuns la coada.
   const scanari = Math.ceil(vii / rules.jobScanMaxCandidates) + 1

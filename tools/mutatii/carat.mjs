@@ -189,4 +189,20 @@ export const MUTATII = [
     a: "    if (a.alive[i] === 1) {\n      lasaLaPicioare(w, rules, i)\n    } else {",
     b: "    if (a.alive[i] === 2) {\n      lasaLaPicioare(w, rules, i)\n    } else {",
     t: 'tests/carat.test.ts', e: 'un save cu un job de carat orfan' },
+
+  // --- fereastra de racire: justificarea ei, ca proprietate ---
+  {
+    n: 'fereastra de racire nu mai e STRICT peste o baleiere completa (se inchide singura)',
+    f: 'src/sim/joburi.ts',
+    a: "  const scanari = Math.ceil(vii / rules.jobScanMaxCandidates) + 1",
+    b: "  const scanari = Math.ceil(vii / rules.jobScanMaxCandidates)",
+    t: 'tests/joburi.test.ts', e: 'fereastra de racire e STRICT mai lunga',
+  },
+  {
+    n: 'fereastra de racire pierde podeaua (tintele putine se reincearca prea des)',
+    f: 'src/sim/joburi.ts',
+    a: "  return Math.max(rules.jobInfeasibleRetryTicks, rules.jobRescanTicks * scanari)",
+    b: "  return rules.jobRescanTicks * scanari",
+    t: 'tests/joburi.test.ts', e: 'fereastra de racire e STRICT mai lunga',
+  },
 ]

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { DEFAULT_RULES, parseRules } from '../src/sim/content.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { applyCommand } from '../src/sim/commands.ts'
+import { racireTinta } from '../src/sim/joburi.ts'
 import { createWorld, tick } from '../src/sim/world.ts'
 import { Faction, PasJob } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
@@ -1261,4 +1262,39 @@ test('INACCESIBIL numara o incercare si jobul se incheie: „refacut" inseamna A
   assert.notEqual(slotDesemnare(w.desemnari, id), -1, 'desemnarea a disparut; trebuia doar eliberata')
   // Si cauza ajunge undeva: fie pe tinta, fie pe pereche.
   assert.ok(w.desemnari.ultimulMotiv[0]! > 0 || esteEvitata(w, 0, id), 'niciun semnal dupa plafon')
+})
+
+test('fereastra de racire e STRICT mai lunga decat o baleiere completa a tintelor', () => {
+  // Justificarea formulei, scrisa ca PROPRIETATE. Ea exista fiindca plafonul de
+  // evaluari scumpe nu ajunge niciodata la coada daca primele tinte ies din racire
+  // inainte ca scanarea sa fi trecut prin toate: masurat la recenzia S16-19, cu 1700
+  // de desemnari fara loc si racire de 100, exact 1024 primeau vreodata un motiv.
+  //
+  // „Strict" nu e o subtilitate: la egalitate, prima transa expira exact cand
+  // scanarea ar fi ajuns la coada, si bucla se inchide singura.
+  let acoperitoare = 0
+  for (const vii of [0, 1, 255, 256, 257, 512, 768, 1024, 1700, 5000, 100000]) {
+    const f = racireTinta(vii, DEFAULT_RULES)
+    const baleiere = DEFAULT_RULES.jobRescanTicks * Math.ceil(vii / DEFAULT_RULES.jobScanMaxCandidates)
+    assert.ok(f > baleiere,
+      `cu ${vii} tinte vii: fereastra ${f} nu e strict peste baleierea completa ${baleiere}`)
+    assert.ok(f >= DEFAULT_RULES.jobInfeasibleRetryTicks,
+      `cu ${vii} tinte vii: fereastra ${f} e sub podeaua ${DEFAULT_RULES.jobInfeasibleRetryTicks}`)
+    if (baleiere >= DEFAULT_RULES.jobInfeasibleRetryTicks) acoperitoare++
+  }
+  // Controlul de VIATA: domeniul chiar trece de pragul unde podeaua nu mai domina.
+  // Sub ~768 de tinte fereastra e constanta 100, si acolo proprietatea e vida.
+  assert.ok(acoperitoare >= 3, `doar ${acoperitoare} cazuri peste podea: testul nu atinge formula`)
+})
+
+test('fereastra de racire nu SCADE cand apar tinte noi', () => {
+  // Monotonia. Fara ea, o desemnare noua ar putea scurta fereastra celor existente
+  // — adica exact inversul a ce face formula sa functioneze.
+  let anterioara = -1
+  for (let vii = 0; vii <= 3000; vii += 37) {
+    const f = racireTinta(vii, DEFAULT_RULES)
+    assert.ok(f >= anterioara, `fereastra a scazut la ${vii} tinte: ${f} dupa ${anterioara}`)
+    anterioara = f
+  }
+  assert.ok(anterioara > DEFAULT_RULES.jobInfeasibleRetryTicks, 'domeniul nu iese niciodata de sub podea')
 })
