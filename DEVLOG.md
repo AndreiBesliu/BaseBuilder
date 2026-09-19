@@ -3300,13 +3300,33 @@ Tiparul zilei, a doua oară: nu codul, ci verificarea lui.
 **418 teste** · **212 probe**, 212/212 prinse, 0 controale invalide, 0 tipare lipsă sau ambigue ·
 `npm run check` verde · GATE.md re-etalonat o dată (a șaptea), în commit separat.
 
+### Plasa de siguranță a CI-ului avea două găuri, găsite măsurând de ce hash-ul NU s-a mișcat
+
+După o zi întreagă de reparații în bucla de construcție, hash-ul de referință din CI a rămas
+`605e9178`. Măsurat de ce: **`standardScenario` nu conține nicio desemnare de construit.** Sapă,
+cară, mănâncă, doarme, pictează zone — dar zero șantiere. Deci poarta de determinism era oarbă
+exact la subsistemul cel mai nou și cel mai atins, și `candDist2`, `matOriunde` și cauza „lipsă
+material" puteau fi schimbate toate trei fără să clipească.
+
+Aceeași deadness ca la fixtura pe care stătea M5, în aceeași zi — și aceeași lecție ca la testul
+care păzește promovarea terenului, scris chiar deasupra în același fișier, cu motivul lui.
+
+Scenariul primește două șantiere de PERETE și piatră pentru ele, per sit: **480 de unități zidite**
+până la tickul 2000, zero refuzuri, hash reproductibil pe două rulări. `EXPECTED` devine
+`6ff16b2a`, exact cum cere workflow-ul însuși. Testul nou verifică două lucruri diferite: ce
+DECLARĂ scenariul (comenzile lui) și ce ATINGE (rularea).
+
+A doua gaură: **CI rulează pașii individual, nu `npm run check`** — deci verificatorul de suite
+adăugat în aceeași zi nu rula acolo deloc. Iar poarta negativă reală n-a rulat niciodată în CI,
+fiindcă CLAUDE.md scria „~50 de minute". Acum rulează, într-un job separat, în paralel cu `check`.
+
 ### Ce rămâne
 
 - **Defazarea de un tick la granița de salvare** — un job pe o țintă tocmai dispărută. Lumea
   continuă îl încheie la tickul următor, cea încărcată îl anulează pe loc. Cere o decizie de
   design: se reconciliază la moartea țintei, sau se acceptă și se scrie în contract?
-- **Mutațiile pot intra în CI** acum că se știe că sunt ieftine. În `npm run check` tot nu pot:
-  cer arborele curat, iar `check` se rulează tocmai cu modificări necomise.
+- **Nimic nu e împins.** Cele ~19 commit-uri ale zilei sunt locale; CI n-a văzut niciunul, iar
+  hash-ul nou și jobul de mutații se verifică abia la primul push.
 - **`AO_FACTOR`** — tot singurul număr al arcului de grafică ieșit dintr-o judecată vizuală.
 - **`remeshAfterEdit`** rămâne cod de browser fără test; `sapaturaUrmatoare` e probat, ce face
   viewerul cu rezultatul ei nu.
