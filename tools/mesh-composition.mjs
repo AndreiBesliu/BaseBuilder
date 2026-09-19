@@ -33,7 +33,7 @@ for (const key of terrain.keys) {
     let zmin = Infinity
     let zmax = -Infinity
     for (let v = 0; v < 4; v++) {
-      const z = m.positions[b + v * 3 + 2]
+      const z = m.positions[b + v * 3 + 2] / 100 // pozitiile sunt in centimetri
       if (z < zmin) zmin = z
       if (z > zmax) zmax = z
     }

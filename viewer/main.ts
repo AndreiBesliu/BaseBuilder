@@ -252,10 +252,11 @@ function buildVoxelGeometry(chunk: Chunk): THREE.BufferGeometry | null {
     const src = q * 12
     const dst = q * 12
     for (let v = 0; v < 4; v++) {
-      positions[dst + v * 3] = mesh.positions[src + v * 3]!
+      // Mesher-ul da CENTIMETRI locali; scena lucreaza in metri.
+      positions[dst + v * 3] = mesh.positions[src + v * 3]! / 100
       // Nivelul 0 al stivei sta la cota zBase, nu la zero.
-      positions[dst + v * 3 + 1] = mesh.positions[src + v * 3 + 2]! + zBase
-      positions[dst + v * 3 + 2] = mesh.positions[src + v * 3 + 1]!
+      positions[dst + v * 3 + 1] = mesh.positions[src + v * 3 + 2]! / 100 + zBase
+      positions[dst + v * 3 + 2] = mesh.positions[src + v * 3 + 1]! / 100
     }
     const face = mesh.faces[q]!
     const [r, g, b] = quadColor(mesh.materials[q]!, face)
@@ -275,7 +276,7 @@ function buildVoxelGeometry(chunk: Chunk): THREE.BufferGeometry | null {
       // a varfului — deci doua quaduri care se ating primesc aceeasi valoare, si
       // terasele vecine inceteaza sa mai fie identice.
       const k = AO_FACTOR[mesh.ao[q * 4 + v]!]!
-        * variatiaLocului(originX + mesh.positions[src + v * 3]!, originY + mesh.positions[src + v * 3 + 1]!)
+        * variatiaLocului(originX + mesh.positions[src + v * 3]! / 100, originY + mesh.positions[src + v * 3 + 1]! / 100)
       colors[dst + v * 3] = r * k
       colors[dst + v * 3 + 1] = g * k
       colors[dst + v * 3 + 2] = b * k

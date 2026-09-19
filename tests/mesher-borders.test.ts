@@ -63,8 +63,9 @@ function acoperireXNeg(chunk: Chunk, neighbours?: Parameters<typeof meshChunk>[1
     if (m.faces[q] !== Face.X_NEG) continue
     const o = q * 12
     if (m.positions[o] !== 0) continue // doar planul de granita
-    const ys = [m.positions[o + 1]!, m.positions[o + 4]!, m.positions[o + 7]!, m.positions[o + 10]!]
-    const zs = [m.positions[o + 2]!, m.positions[o + 5]!, m.positions[o + 8]!, m.positions[o + 11]!]
+    // `positions` e in CENTIMETRI; testul gandeste in metri de grila.
+    const ys = [m.positions[o + 1]! / 100, m.positions[o + 4]! / 100, m.positions[o + 7]! / 100, m.positions[o + 10]! / 100]
+    const zs = [m.positions[o + 2]! / 100, m.positions[o + 5]! / 100, m.positions[o + 8]! / 100, m.positions[o + 11]! / 100]
     for (let ly = Math.min(...ys); ly < Math.max(...ys); ly++) {
       for (let lv = Math.min(...zs); lv < Math.max(...zs); lv++) {
         const level = lv

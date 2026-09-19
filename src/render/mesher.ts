@@ -45,7 +45,19 @@ export const Face = {
 
 export interface ChunkMesh {
   quadCount: number
-  /** 4 varfuri × 3 componente per quad, in coordonate locale de chunk (metri). */
+  /**
+   * 4 varfuri × 3 componente per quad, in coordonate locale de chunk, in
+   * **CENTIMETRI**.
+   *
+   * Erau metri. Au devenit centimetri fiindca suprafata NEATINSA a unui chunk
+   * promovat se deseneaza la cota ei reala, iar aia are precizie de centimetru
+   * (`vertexCm`) — pasul zgomotului e de 18 cm, deci decimetrii ar reintroduce
+   * terase, doar de zece ori mai mici.
+   *
+   * Alternativa — un al doilea tablou, doar pentru inaltimile netezite — ar fi
+   * insemnat doua surse de adevar pentru aceeasi pozitie. Int16 ajunge: 3200 cm pe
+   * X si Y, 6400 pe Z.
+   */
   positions: Int16Array
   /** Materialul fiecarui quad. */
   materials: Uint8Array
@@ -265,6 +277,9 @@ function ensureCapacity(needed: number): void {
   outAo = a
 }
 
+/** Metri de grila → centimetri. Un singur loc care stie factorul. */
+const CM = 100
+
 function pushQuad(
   face: number,
   cheie: number,
@@ -275,10 +290,10 @@ function pushQuad(
 ): void {
   ensureCapacity(quadCount + 1)
   const o = quadCount * 12
-  outPositions[o] = ax; outPositions[o + 1] = ay; outPositions[o + 2] = az
-  outPositions[o + 3] = bx; outPositions[o + 4] = by; outPositions[o + 5] = bz
-  outPositions[o + 6] = cx; outPositions[o + 7] = cy; outPositions[o + 8] = cz
-  outPositions[o + 9] = dx; outPositions[o + 10] = dy; outPositions[o + 11] = dz
+  outPositions[o] = ax * CM; outPositions[o + 1] = ay * CM; outPositions[o + 2] = az * CM
+  outPositions[o + 3] = bx * CM; outPositions[o + 4] = by * CM; outPositions[o + 5] = bz * CM
+  outPositions[o + 6] = cx * CM; outPositions[o + 7] = cy * CM; outPositions[o + 8] = cz * CM
+  outPositions[o + 9] = dx * CM; outPositions[o + 10] = dy * CM; outPositions[o + 11] = dz * CM
   outMaterials[quadCount] = cheie & 0xff
   outFaces[quadCount] = face
   const tipar = cheie >>> 8

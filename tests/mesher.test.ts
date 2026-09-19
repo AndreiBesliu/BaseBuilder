@@ -26,14 +26,22 @@ function emptyChunk(): Chunk {
   return chunk
 }
 
+/**
+ * O componenta de pozitie, in METRI.
+ *
+ * `positions` e in CENTIMETRI de cand suprafata neatinsa se deseneaza la cota ei
+ * reala. Testele gandesc in metri de grila, deci conversia sta intr-un loc.
+ */
+const pm = (mesh: ReturnType<typeof meshChunk>, i: number): number => mesh.positions[i]! / 100
+
 function areaOf(mesh: ReturnType<typeof meshChunk>): number {
   // Aria unui quad se deduce din colturile lui: doua laturi perpendiculare.
   let total = 0
   for (let q = 0; q < mesh.quadCount; q++) {
     const o = q * 12
-    const ax = mesh.positions[o]!, ay = mesh.positions[o + 1]!, az = mesh.positions[o + 2]!
-    const bx = mesh.positions[o + 3]!, by = mesh.positions[o + 4]!, bz = mesh.positions[o + 5]!
-    const dx = mesh.positions[o + 9]!, dy = mesh.positions[o + 10]!, dz = mesh.positions[o + 11]!
+    const ax = pm(mesh, o), ay = pm(mesh, o + 1), az = pm(mesh, o + 2)
+    const bx = pm(mesh, o + 3), by = pm(mesh, o + 4), bz = pm(mesh, o + 5)
+    const dx = pm(mesh, o + 9), dy = pm(mesh, o + 10), dz = pm(mesh, o + 11)
     const du = Math.abs(bx - ax) + Math.abs(by - ay) + Math.abs(bz - az)
     const dv = Math.abs(dx - ax) + Math.abs(dy - ay) + Math.abs(dz - az)
     total += du * dv
@@ -111,7 +119,7 @@ test('un perete vertical de 20 × 8 devine un singur quad pe fiecare fata mare',
   const mesh = meshChunk(chunk)
   const bigFaces = Array.from({ length: mesh.quadCount }, (_, q) => q).filter((q) => {
     const o = q * 12
-    const du = Math.abs(mesh.positions[o + 3]! - mesh.positions[o]!)
+    const du = Math.abs(pm(mesh, o + 3) - pm(mesh, o))
     return du === 20
   })
   assert.ok(bigFaces.length >= 2, `peretele ar trebui sa aiba doua fete mari unite, are ${bigFaces.length}`)
@@ -124,9 +132,9 @@ test('quadurile stau in marginile chunk-ului', () => {
   promote(chunk)
   const mesh = meshChunk(chunk)
   for (let i = 0; i < mesh.positions.length; i += 3) {
-    const x = mesh.positions[i]!
-    const y = mesh.positions[i + 1]!
-    const z = mesh.positions[i + 2]!
+    const x = pm(mesh, i)
+    const y = pm(mesh, i + 1)
+    const z = pm(mesh, i + 2)
     assert.ok(x >= 0 && x <= CHUNK_CELLS, `x iesit: ${x}`)
     assert.ok(y >= 0 && y <= CHUNK_CELLS, `y iesit: ${y}`)
     assert.ok(z >= 0 && z <= VOXEL_LEVELS, `z iesit: ${z}`)
@@ -177,8 +185,8 @@ test('fetele de sus ale unui teren normal se unesc bine', () => {
     if (mesh.faces[q] !== Face.Z_POS) continue
     topQuads++
     const o = q * 12
-    const du = Math.abs(mesh.positions[o + 3]! - mesh.positions[o]!)
-    const dv = Math.abs(mesh.positions[o + 10]! - mesh.positions[o + 1]!)
+    const du = Math.abs(pm(mesh, o + 3) - pm(mesh, o))
+    const dv = Math.abs(pm(mesh, o + 10) - pm(mesh, o + 1))
     topArea += du * dv
   }
   // Suprafata de sus acopera fix cele 1024 de celule ale chunk-ului.
@@ -275,7 +283,7 @@ function indiceFata(m: ReturnType<typeof meshChunk>, face: number, x: number, y:
   for (let q = 0; q < m.quadCount; q++) {
     if (m.faces[q] !== face) continue
     const o = q * 12
-    if (m.positions[o] === x && m.positions[o + 1] === y && m.positions[o + 2] === z) return q
+    if (pm(m, o) === x && pm(m, o + 1) === y && pm(m, o + 2) === z) return q
   }
   return -1
 }
@@ -310,7 +318,7 @@ test('un vecin lateral intuneca exact doua varfuri din patru', () => {
   // Si ca varfurile intunecate sunt CHIAR cele de langa bloc, nu doua oarecare.
   const o = sus * 12
   for (let v = 0; v < 4; v++) {
-    const x = m.positions[o + v * 3]!
+    const x = pm(m, o + v * 3)
     const asteptat = x === 6 ? 2 : 3
     assert.equal(m.ao[sus * 4 + v], asteptat, `varful ${v} e la x=${x} si are ao=${m.ao[sus * 4 + v]}`)
   }
