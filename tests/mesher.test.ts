@@ -394,3 +394,20 @@ test('coltul chunk-ului are nevoie de vecinul DIAGONAL, nu doar de cele patru la
     assert.equal(cu.ao[iC * 4 + v], 3, `varful ${v} n-avea de ce sa se schimbe`)
   }
 })
+
+test('la marginea ferestrei de voxeli, dincolo e AER — ca la vizibilitate', () => {
+  // Afirmatia din `occAt`, probata. Fata de JOS a unui cub de la nivelul 0 CHIAR se
+  // emite (`computeVisibility` trateaza iesirea din fereastra ca aer), deci n-are
+  // voie sa fie intunecata de ceva ce, pentru vizibilitate, nu exista. Consecventa
+  // intre cele doua conteaza mai mult decat fidelitatea fizica: sub fereastra chiar
+  // e stanca, dar daca AO ar sti-o, ar umbri o fata pe care tot el o arata.
+  const c = emptyChunk()
+  setVoxel(c, 5, 5, 0, Material.ROCA)
+  const m = meshChunk(c)
+  assert.equal(m.quadCount, 6, 'fixtura: cubul de la nivelul 0 trebuie sa aiba sase fete, inclusiv cea de jos')
+  const jos = indiceFata(m, Face.Z_NEG, 5, 5, 0)
+  assert.notEqual(jos, -1, 'fixtura: fata de jos nu se emite, deci testul n-ar proba nimic')
+  for (let i = 0; i < m.ao.length; i++) {
+    assert.equal(m.ao[i], 3, `varful ${i} al cubului de la nivelul 0 e ocluzat (${m.ao[i]})`)
+  }
+})

@@ -22,7 +22,7 @@ export const MUTATII = [
     f: 'src/render/mesher.ts',
     a: '  if (level < 0 || level >= SZ) return 0\n  if (x < -1 || y < -1 || x > SX || y > SY) return 0',
     b: '  if (level < 0 || level >= SZ) return 1\n  if (x < -1 || y < -1 || x > SX || y > SY) return 0',
-    t: 'tests/mesher.test.ts', e: 'un cub izolat n-are nicio ocluzie',
+    t: 'tests/mesher.test.ts', e: 'la marginea ferestrei de voxeli, dincolo e AER',
   },
   {
     n: 'regula celor doua laturi dispare: coltul e doar „putin mai inchis"',
