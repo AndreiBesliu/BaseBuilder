@@ -71,7 +71,7 @@ Pe Windows, `kinstead.bat` le adună pe toate: dublu-click deschide un meniu, ia
 
 ```bash
 npm run mutatii -- --lista      # ce suite există
-npm run mutatii                 # toate cele 179, ~50 de minute
+npm run mutatii                 # toate cele 212, 5 min 31 s (cronometrat 19.09.2026)
 npm run mutatii -- nevoi        # o singură suită
 npm run mutatii -- nevoi podeaua  # doar mutațiile al căror nume conține „podeaua"
 ```
@@ -84,7 +84,17 @@ când codul de sub ele se mută, deci se rulează **toate** suitele după fiecar
 noi. La fel un `TIPAR AMBIGUU`: `String.replace` ia PRIMA apariție, deci un tipar care se
 potrivește în două locuri editează altul decât cel gândit, rulează testele celui gândit și iese
 „RATATĂ" — adică te trimite să scrii un test pentru o gardă deja probată. Nu intră în
-`npm run check` și nici în CI: modifică fișiere sursă.
+`npm run check`: modifică fișiere sursă, iar `check` se rulează tocmai cu modificări necomise
+în arbore.
+
+> **Durata era scrisă „~50 de minute", și ăsta era singurul argument pentru care poarta
+> negativă reală stă în afara CI-ului. Cronometrată pe 19.09.2026: 5 min 31 s pentru 212 de
+> probe** — de nouă ori mai puțin. Cifra veche n-a fost măsurată niciodată; era o impresie
+> dintr-o rulare în timpul căreia se lucra altceva.
+>
+> `tools/check-mutatii.mjs` a fost scris ca înlocuitor static și rămâne util, dar nu mai e o
+> compensație: el răspunde la „proba ARE ce să măsoare?", nu la „măsoară?". A doua întrebare
+> are un singur răspuns, și acum se știe că e ieftin.
 
 ## Metodă
 

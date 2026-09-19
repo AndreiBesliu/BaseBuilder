@@ -1,7 +1,7 @@
 /**
  * Ruleaza suitele de mutatii.
  *
- *   node tools/mutatii/ruleaza.mjs                  toate suitele (~40 de minute)
+ *   node tools/mutatii/ruleaza.mjs                  toate suitele (5 min 31 s la 212 de probe)
  *   node tools/mutatii/ruleaza.mjs nevoi            o singura suita
  *   node tools/mutatii/ruleaza.mjs nevoi podeaua    doar mutatiile al caror nume contine „podeaua"
  *   node tools/mutatii/ruleaza.mjs --lista          ce suite exista, fara sa ruleze nimic
