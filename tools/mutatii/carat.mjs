@@ -234,4 +234,34 @@ export const MUTATII = [
     e2: [{ f: 'src/sim/joburi.ts', a: "    const gPers = 4 ** (persC - 1)", b: "    const gPers = 1" }],
     t: 'tests/carat.test.ts', e: 'doi pioni cu prioritati DIFERITE',
   },
+
+  // --- reconcilierea la moartea tintei (22.09.2026) ---
+  {
+    n: '`ridica` arunca iar lista de pretendenti (job viu pe id mort, si fara rezervare)',
+    f: 'src/sim/joburi.ts',
+    a: "  if (it.alive[is] === 0) reconciliazaTintaMoarta(w, rules, idItem, slot)",
+    b: "  if (it.alive[is] === 0) elibereazaTinta(w.rezervari, idItem)",
+    t: 'tests/saveload.test.ts', e: 'M5 la FIECARE tick',
+  },
+  {
+    n: '`mananca` nu mai reconciliaza deloc cand goleste mormanul',
+    f: 'src/sim/joburi.ts',
+    a: "  if (it.alive[is] === 0) reconciliazaTintaMoarta(w, rules, idMorman)",
+    b: "  void idMorman",
+    t: 'tests/saveload.test.ts', e: 'nicio rezervare pe o tinta care nu mai exista',
+  },
+  {
+    n: 'reconcilierea filtreaza pe CAMP in loc de rezervare (ii scapa cine nu mai tine nimic)',
+    f: 'src/sim/joburi.ts',
+    a: "  for (const claimant of elibereazaTinta(w.rezervari, id)) {\n    for (let i = 0; i < a.count; i++) {",
+    b: "  elibereazaTinta(w.rezervari, id)\n  for (const claimant of [-1]) {\n    void claimant\n    for (let i = 0; i < a.count; i++) {",
+    t: 'tests/saveload.test.ts', e: 'M5 la FIECARE tick',
+  },
+  {
+    n: '`ridica` nu se mai exclude pe sine, deci isi zombifica propriul job',
+    f: 'src/sim/joburi.ts',
+    a: "      if (i === exceptSlot) continue",
+    b: "      void exceptSlot",
+    t: 'tests/saveload.test.ts', e: 'M5 la FIECARE tick',
+  },
 ]

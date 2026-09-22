@@ -10,6 +10,8 @@ import { groundLevelM, materialAt, WORLD_CELLS } from '../src/sim/terrain/terrai
 import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { FelJob, Item, Nevoie, NEVOI, Piesa } from '../src/sim/state.ts'
 import { Desemnare } from '../src/sim/desemnari.ts'
+import { verificaRezervari } from '../src/sim/rezervari.ts'
+import { existaTinta } from '../src/sim/joburi.ts'
 import type { World } from '../src/sim/state.ts'
 import { desemneaza, lasaItem, laSit, picteaza, R, solid, solidLaDistanta } from './fixturi.ts'
 
@@ -280,4 +282,86 @@ test('o `piesa` din afara tabelului e refuzata la USA, nu descoperita la prima s
     }
   }
   assert.ok(brut.data.desemnari.piesa.length > 0)
+})
+
+/** Semintele si lungimea pe care se masoara invariantii PER TICK. */
+/** Oracolul SCUMP (encode+decode, ~15 ms pe granita) merge ingust... */
+const SEMINTE_ROUNDTRIP = [12345, 7] as const
+const TICKURI_ROUNDTRIP = 300
+/** ...iar cel IEFTIN merge larg: verificarea rezervarilor nu serializeaza nimic. */
+const SEMINTE_REZERVARI = [12345, 7, 12, 17, 18, 19] as const
+const TICKURI_REZERVARI = 600
+
+test('M5 la FIECARE tick, nu doar la unul ales', () => {
+  // Enuntul TARE, pe care testul de deasupra nu-l putea cere pana pe 22.09.2026.
+  //
+  // Pana atunci, `ridica` si `mananca` omorau un morman fara sa incheie joburile care
+  // il tinteau: `stergeItem` isi scrie contractul in docstring („rezervarile de pe un
+  // morman mort sunt treaba apelantului"), dar din trei apelanti doar `mutaItem` si-l
+  // respecta. Ramaneau un job VIU pe un id mort si o rezervare ORFANA, pana la 127 de
+  // tickuri, iar lumea continua si cea incarcata NU re-convergeau.
+  //
+  // Masurat pe fixtura asta, 11 seminte x 600 de tickuri: **74 de granite rosii din
+  // 6600** inainte, 0 dupa.
+  //
+  // Enuntul de mai sus („N + save + load + N == 2N") RAMANE, si nu e redundant: el ia
+  // save-ul la un singur tick si lasa lumea sa mearga mai departe, deci prinde si ce
+  // diverge DUPA incarcare, nu doar la granita.
+  let granite = 0
+  let mortiTintite = 0
+  for (const seed of SEMINTE_ROUNDTRIP) {
+    const w = lumeBogata(seed)
+    for (let t = 0; t < TICKURI_ROUNDTRIP; t++) {
+      // Contorul de VIATA: id-uri de item vii pe care CINEVA le tinteste acum.
+      const tintite = new Set<number>()
+      for (let i = 0; i < w.agents.count; i++) {
+        if (w.agents.alive[i] === 1 && w.agents.jobKind[i] !== 0) tintite.add(w.agents.jobTarget[i]!)
+      }
+      const viiInainte = new Set<number>()
+      for (let i = 0; i < w.iteme.count; i++) {
+        if (w.iteme.alive[i] === 1 && tintite.has(w.iteme.id[i]!)) viiInainte.add(w.iteme.id[i]!)
+      }
+
+      advance(w, 1, R)
+      granite++
+
+      const viiAcum = new Set<number>()
+      for (let i = 0; i < w.iteme.count; i++) if (w.iteme.alive[i] === 1) viiAcum.add(w.iteme.id[i]!)
+      for (const id of viiInainte) if (!viiAcum.has(id)) mortiTintite++
+
+      const out = decode(encode(w), R)
+      assert.ok(out.ok, `seed ${seed}, tickul ${w.tick}: decode a refuzat propriul encode`)
+      if (out.ok) {
+        assert.equal(hashWorld(out.value), hashWorld(w),
+          `seed ${seed}, tickul ${w.tick}: roundtrip-ul schimba lumea`)
+      }
+    }
+  }
+  assert.equal(granite, SEMINTE_ROUNDTRIP.length * TICKURI_ROUNDTRIP)
+  // Fixtura ATINGE cazul: chiar mor mormane pe care cineva le tintea. Fara contorul
+  // asta, testul ar trece si intr-o lume in care nimic nu moare sub picioarele nimanui.
+  assert.ok(mortiTintite > 5,
+    `doar ${mortiTintite} morti de morman tintit in ${granite} de granite: fixtura nu atinge cazul`)
+})
+
+test('nicio rezervare pe o tinta care nu mai exista, la FIECARE tick', () => {
+  // A DOUA plasa, si nu decurge din prima: `src/sim/hash.ts` nu contine nicio
+  // referinta la `w.rezervari`, deci hash-ul e ORB la o rezervare pe un id mort.
+  // Masurat pe aceeasi rulare: 74 de granite rosii pe hash si 63 pe rezervari — doua
+  // multimi diferite, nu una inclusa in cealalta.
+  //
+  // Invariantul e al codului, nu inventat aici: `verificaRezervari(..., existaTinta(w))`
+  // e asertat deja in opt locuri din suita. Dar toate pe fixturi prea mici, iar cea
+  // mai lunga il cheama doar la `tick % 100 === 0` — un esantion, nu un zavor.
+  let granite = 0
+  for (const seed of SEMINTE_REZERVARI) {
+    const w = lumeBogata(seed)
+    for (let t = 0; t < TICKURI_REZERVARI; t++) {
+      advance(w, 1, R)
+      granite++
+      const v = verificaRezervari(w.rezervari, w.agents, existaTinta(w))
+      assert.ok(v.ok, `seed ${seed}, tickul ${w.tick}: ${JSON.stringify(v)}`)
+    }
+  }
+  assert.equal(granite, SEMINTE_REZERVARI.length * TICKURI_REZERVARI)
 })

@@ -2060,7 +2060,10 @@ function ridica(w: World, rules: Rules, slot: number): void {
   elibereazaUna(w.rezervari, a.id[slot]!, a.jobId[slot]!, idItem, Strat.CARAT)
   const luat = iaDinItem(w, rules, is, cant)
   if (luat !== cant) a.caraCantitate[slot] = luat
-  if (it.alive[is] === 0) elibereazaTinta(w.rezervari, idItem)
+  // Mormanul s-a golit: cine il mai tinea isi incheie jobul ACUM. Varianta veche
+  // chema `elibereazaTinta` si ii ARUNCA valoarea de retur — adica stergea rezervarile
+  // celorlalti fara sa le incheie joburile, lasand un job viu FARA rezervare.
+  if (it.alive[is] === 0) reconciliazaTintaMoarta(w, rules, idItem, slot)
 
   a.jobProgres[slot] = 0
   a.jobStep[slot] = PasCara.MERGE_DEST
@@ -2188,13 +2191,51 @@ function mutaItem(w: World, rules: Rules, is: number, wx: number, wy: number, z:
   const r = asazaItem(w, rules, kind, cant, wx, wy, z, id)
   marcheazaZoneMurdare(w)
   if (slotItem(it, id) !== -1) return
+  reconciliazaTintaMoarta(w, rules, id)
+  void r
+}
+
+/**
+ * Tinta a murit: cine o mai tinea isi incheie jobul ACUM, in acelasi tick.
+ *
+ * `stergeItem` isi scrie contractul in docstring — „rezervarile de pe un morman mort
+ * sunt treaba apelantului" — si are trei apelanti. `mutaItem` si-l respecta de la
+ * inceput; `ridica` chema `elibereazaTinta` dar ARUNCA lista de pretendenti pe care o
+ * intoarce; `mananca` nu chema nici macar atat.
+ *
+ * Ce lasa in urma un apelant care nu-si face partea: un job VIU pe un id mort, si o
+ * rezervare ORFANA pe acelasi id. Masurat de o recenzie adversariala pe 20 de seminte
+ * x 2000 de tickuri: **285 de granite de tick divergente din 40.000**, episoade de
+ * pana la 127 de tickuri, iar lumea continua si cea incarcata NU re-converg. Si
+ * invariantul propriu al codului, `verificaRezervari(..., existaTinta(w))` clauza 5,
+ * era deja ROSU pe 266 de granite — desi e asertat verde in opt locuri din teste, pe
+ * fixturi prea mici ca sa atinga cazul.
+ *
+ * ## De ce filtrul e pe REZERVARE, nu pe campuri de job
+ *
+ * Pretendentii vin din `elibereazaTinta`, sortati: cine TINEA ceva pe id-ul ala. O
+ * regula scrisa pe campuri („toti cei cu `jobTarget === id`") ar parea echivalenta si
+ * nu e — dupa RIDICA, `jobTarget` ramane pe mormanul consumat, dar rezervarea a fost
+ * deja eliberata, iar jobul e viu si corect. Rezervarea spune cine mai DEPINDE de
+ * tinta; campul spune doar cine a atins-o candva.
+ *
+ * @param exceptSlot pionul care tocmai a golit mormanul prin munca lui, si care NU
+ * trebuie incheiat: la `ridica` el si-a eliberat singur rezervarea cu trei linii mai
+ * sus, deci n-ar trebui sa apara in lista — iar daca ar aparea, `terminaJob` la
+ * mijlocul lui `ridica` i-ar zombifica jobul, fiindca functia continua sa-i scrie
+ * pasii dupa apelul asta. La `mananca` nu se exclude nimeni: mancatorul ramas fara
+ * morman TREBUIE incheiat, si asta e exact ce face lumea continua un tick mai tarziu.
+ */
+function reconciliazaTintaMoarta(w: World, rules: Rules, id: number, exceptSlot = -1): void {
+  const a = w.agents
   for (const claimant of elibereazaTinta(w.rezervari, id)) {
-    const a = w.agents
     for (let i = 0; i < a.count; i++) {
-      if (a.alive[i] === 1 && a.id[i] === claimant && a.jobKind[i] !== 0 && a.jobTarget[i] === id) terminaJob(w, rules, i, Sfarsit.INTRERUPT)
+      if (i === exceptSlot) continue
+      if (a.alive[i] === 1 && a.id[i] === claimant && a.jobKind[i] !== 0 && a.jobTarget[i] === id) {
+        terminaJob(w, rules, i, Sfarsit.INTRERUPT)
+      }
     }
   }
-  void r
 }
 
 /**
@@ -2862,6 +2903,7 @@ function mananca(w: World, rules: Rules, slot: number): void {
     return
   }
   const fel = it.kind[is]!
+  const idMorman = it.id[is]!
   const luat = iaDinItem(w, rules, is, portie)
   const baza = slot * NEVOI + Nevoie.FOAME
   // Nutritia e PE UNITATE: cu ea pe morman, restul de 15 dintr-o stiva de 75 ar
@@ -2873,6 +2915,11 @@ function mananca(w: World, rules: Rules, slot: number): void {
   if (a.nevoi[baza]! >= rules.nevoieMax || a.jobConsumat[slot]! >= a.jobCantitate[slot]!) {
     terminaJob(w, rules, slot, Sfarsit.TERMINAT)
   }
+  // DUPA creditarea hranei, si dupa sfarsitul normal. Ordinea e tot ce conteaza aici:
+  // incheiat inainte, pionul ar pierde portia pe care tocmai a mancat-o. Iar daca a
+  // terminat cu TERMINAT, `terminaJob` iese devreme pe `jobKind === 0`, deci bucla e
+  // un no-op pentru el — si INTRERUPT ramane doar pentru cine chiar a ramas fara.
+  if (it.alive[is] === 0) reconciliazaTintaMoarta(w, rules, idMorman)
 }
 
 /**
