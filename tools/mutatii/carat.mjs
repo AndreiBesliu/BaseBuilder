@@ -239,7 +239,7 @@ export const MUTATII = [
   {
     n: '`ridica` arunca iar lista de pretendenti (job viu pe id mort, si fara rezervare)',
     f: 'src/sim/joburi.ts',
-    a: "  if (it.alive[is] === 0) reconciliazaTintaMoarta(w, rules, idItem, slot)",
+    a: "  if (it.alive[is] === 0) reconciliazaTintaMoarta(w, rules, idItem)",
     b: "  if (it.alive[is] === 0) elibereazaTinta(w.rezervari, idItem)",
     t: 'tests/saveload.test.ts', e: 'M5 la FIECARE tick',
   },
@@ -257,11 +257,15 @@ export const MUTATII = [
     b: "  elibereazaTinta(w.rezervari, id)\n  for (const claimant of [-1]) {\n    void claimant\n    for (let i = 0; i < a.count; i++) {",
     t: 'tests/saveload.test.ts', e: 'M5 la FIECARE tick',
   },
+  // Reordonarea de care se temea centura scoasa: daca pionul isi elibereaza
+  // rezervarea DUPA ce goleste mormanul, ajunge in propria lista de pretendenti,
+  // primeste `terminaJob` la mijlocul lui `ridica`, iar functia ii scrie pasii peste
+  // un job mort. Fara centura, asta se vede — si asta e proba.
   {
-    n: '`ridica` nu se mai exclude pe sine, deci isi zombifica propriul job',
+    n: '`ridica` isi elibereaza rezervarea DUPA ce goleste mormanul (job zombi)',
     f: 'src/sim/joburi.ts',
-    a: "      if (i === exceptSlot) continue",
-    b: "      void exceptSlot",
+    a: "  elibereazaUna(w.rezervari, a.id[slot]!, a.jobId[slot]!, idItem, Strat.CARAT)\n  const luat = iaDinItem(w, rules, is, cant)",
+    b: "  const luat = iaDinItem(w, rules, is, cant)\n  elibereazaUna(w.rezervari, a.id[slot]!, a.jobId[slot]!, idItem, Strat.CARAT)",
     t: 'tests/saveload.test.ts', e: 'M5 la FIECARE tick',
   },
 ]

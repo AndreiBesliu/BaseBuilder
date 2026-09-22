@@ -2063,7 +2063,7 @@ function ridica(w: World, rules: Rules, slot: number): void {
   // Mormanul s-a golit: cine il mai tinea isi incheie jobul ACUM. Varianta veche
   // chema `elibereazaTinta` si ii ARUNCA valoarea de retur — adica stergea rezervarile
   // celorlalti fara sa le incheie joburile, lasand un job viu FARA rezervare.
-  if (it.alive[is] === 0) reconciliazaTintaMoarta(w, rules, idItem, slot)
+  if (it.alive[is] === 0) reconciliazaTintaMoarta(w, rules, idItem)
 
   a.jobProgres[slot] = 0
   a.jobStep[slot] = PasCara.MERGE_DEST
@@ -2219,18 +2219,27 @@ function mutaItem(w: World, rules: Rules, is: number, wx: number, wy: number, z:
  * deja eliberata, iar jobul e viu si corect. Rezervarea spune cine mai DEPINDE de
  * tinta; campul spune doar cine a atins-o candva.
  *
- * @param exceptSlot pionul care tocmai a golit mormanul prin munca lui, si care NU
- * trebuie incheiat: la `ridica` el si-a eliberat singur rezervarea cu trei linii mai
- * sus, deci n-ar trebui sa apara in lista — iar daca ar aparea, `terminaJob` la
- * mijlocul lui `ridica` i-ar zombifica jobul, fiindca functia continua sa-i scrie
- * pasii dupa apelul asta. La `mananca` nu se exclude nimeni: mancatorul ramas fara
- * morman TREBUIE incheiat, si asta e exact ce face lumea continua un tick mai tarziu.
+ * ## Pionul care tocmai a golit mormanul nu se exclude, si nici nu trebuie
+ *
+ * La `ridica`, el si-a eliberat propria rezervare cu trei linii mai sus, deci nu
+ * apare in lista. Prima varianta avea si un parametru `exceptSlot` care il sarea
+ * explicit — o centura care nu se poate aprinde: proba ei a iesit RATATA, adica
+ * scoaterea ei nu inrosea nimic.
+ *
+ * S-a scos, si nu din estetica. O centura fara proba e un orb: daca cineva muta
+ * vreodata `elibereazaUna` DUPA `iaDinItem`, pionul chiar ar aparea in lista, si-ar
+ * primi `terminaJob` la mijlocul lui `ridica`, iar functia ar continua sa-i scrie
+ * pasii peste un job mort. Centura ar fi ascuns exact asta. Fara ea, reordonarea
+ * produce un job zombi — pe care AMANDOUA plasele per tick il vad, si exista o
+ * proba de mutatie care o face.
+ *
+ * La `mananca` nu se exclude nimeni oricum: mancatorul ramas fara morman TREBUIE
+ * incheiat, si asta e exact ce face lumea continua un tick mai tarziu.
  */
-function reconciliazaTintaMoarta(w: World, rules: Rules, id: number, exceptSlot = -1): void {
+function reconciliazaTintaMoarta(w: World, rules: Rules, id: number): void {
   const a = w.agents
   for (const claimant of elibereazaTinta(w.rezervari, id)) {
     for (let i = 0; i < a.count; i++) {
-      if (i === exceptSlot) continue
       if (a.alive[i] === 1 && a.id[i] === claimant && a.jobKind[i] !== 0 && a.jobTarget[i] === id) {
         terminaJob(w, rules, i, Sfarsit.INTRERUPT)
       }
