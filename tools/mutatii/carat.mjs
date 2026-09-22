@@ -257,15 +257,24 @@ export const MUTATII = [
     b: "  elibereazaTinta(w.rezervari, id)\n  for (const claimant of [-1]) {\n    void claimant\n    for (let i = 0; i < a.count; i++) {",
     t: 'tests/saveload.test.ts', e: 'M5 la FIECARE tick',
   },
-  // Reordonarea de care se temea centura scoasa: daca pionul isi elibereaza
-  // rezervarea DUPA ce goleste mormanul, ajunge in propria lista de pretendenti,
-  // primeste `terminaJob` la mijlocul lui `ridica`, iar functia ii scrie pasii peste
-  // un job mort. Fara centura, asta se vede — si asta e proba.
+  // Reordonarea de care se temea centura scoasa din `reconciliazaTintaMoarta`: daca
+  // pionul isi elibereaza rezervarea DUPA reconciliere, ajunge in propria lista de
+  // pretendenti, primeste `terminaJob` la mijlocul lui `ridica`, iar functia continua
+  // sa-i scrie pasii peste un job mort.
+  //
+  // Prima varianta a probei muta eliberarea doar peste `iaDinItem` — si a iesit
+  // RATATA, pe buna dreptate: acolo ea ramane tot INAINTEA reconcilierii, deci pionul
+  // iese oricum din lista. Iar cand reordonarea a fost facuta ca lumea, n-au vazut-o
+  // nici plasele de save/load: ambele lumi ajung la aceeasi stare stricata. De-aia
+  // proba tinteste invariantul structural, nu roundtrip-ul.
   {
-    n: '`ridica` isi elibereaza rezervarea DUPA ce goleste mormanul (job zombi)',
+    n: '`ridica` isi elibereaza rezervarea DUPA reconciliere (scrie pasi peste un job mort)',
     f: 'src/sim/joburi.ts',
     a: "  elibereazaUna(w.rezervari, a.id[slot]!, a.jobId[slot]!, idItem, Strat.CARAT)\n  const luat = iaDinItem(w, rules, is, cant)",
-    b: "  const luat = iaDinItem(w, rules, is, cant)\n  elibereazaUna(w.rezervari, a.id[slot]!, a.jobId[slot]!, idItem, Strat.CARAT)",
-    t: 'tests/saveload.test.ts', e: 'M5 la FIECARE tick',
+    b: "  const luat = iaDinItem(w, rules, is, cant)",
+    e2: [{ f: 'src/sim/joburi.ts',
+      a: "  if (it.alive[is] === 0) reconciliazaTintaMoarta(w, rules, idItem)",
+      b: "  if (it.alive[is] === 0) reconciliazaTintaMoarta(w, rules, idItem)\n  elibereazaUna(w.rezervari, a.id[slot]!, a.jobId[slot]!, idItem, Strat.CARAT)" }],
+    t: 'tests/joburi.test.ts', e: 'un slot FARA job are campurile',
   },
 ]

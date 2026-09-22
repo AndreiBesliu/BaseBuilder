@@ -8,12 +8,11 @@ import { Faction, SCHEMA_VERSION } from '../src/sim/state.ts'
 import { Reason } from '../src/sim/result.ts'
 import { groundLevelM, materialAt, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 import { isSolid } from '../src/sim/terrain/chunk.ts'
-import { FelJob, Item, Nevoie, NEVOI, Piesa } from '../src/sim/state.ts'
+import { FelJob } from '../src/sim/state.ts'
 import { Desemnare } from '../src/sim/desemnari.ts'
 import { verificaRezervari } from '../src/sim/rezervari.ts'
 import { existaTinta } from '../src/sim/joburi.ts'
-import type { World } from '../src/sim/state.ts'
-import { desemneaza, lasaItem, laSit, picteaza, R, solid, solidLaDistanta } from './fixturi.ts'
+import { lumeBogata, R } from './fixturi.ts'
 
 /**
  * Agenti asezati PE SOL.
@@ -163,40 +162,6 @@ test('sloturile moarte nu se salveaza degeaba, dar indexii raman stabili', () =>
   assert.equal(hashWorld(loaded.value), hashWorld(w))
 })
 
-/**
- * O lume in care chiar se intampla ceva.
- *
- * `populated` de mai sus a fost reparata odata — agentii se nasteau la `z = 0`,
- * deci nu se miscau deloc — si a murit a doua oara, altfel: se misca, dar in 2000
- * de tickuri singurul fel de job pe care il iau vreodata e DOARME. Zero desemnari,
- * zero iteme, zero zone, `jobConsumat` si `caraCantitate` mereu nule.
- *
- * Adica orice camp PERSISTED al taieturilor 2 si 3 putea fi scos din `encode` si
- * M5 ramanea verde. Unul CHIAR era: `jobConsumat` se hashuia, `decode` il citea,
- * dar `encode` nu-l scria niciodata. A stat asa pana la recenzia din 19.09.
- *
- * Fixtura asta pune ce lipsea: sapaturi, marfa, un depozit, hrana si santiere.
- * Contoarele de viata din test sunt partea care conteaza — fara ele, moartea a
- * treia oara ar arata exact ca vietile de pana acum.
- */
-function lumeBogata(seed: number): World {
-  const { w, sit } = laSit(seed, 6)
-  for (let i = 0; i < 4; i++) {
-    const t = solidLaDistanta(w, sit.wx, sit.wy, sit.g, 3 + i, 8)
-    desemneaza(w, t.wx, t.wy)
-  }
-  picteaza(w, sit.wx + 2, sit.wy + 3, 3)
-  for (let i = 0; i < 3; i++) lasaItem(w, Item.PIATRA, 20, sit.wx + 5 + i, sit.wy + 6)
-  lasaItem(w, Item.HRANA, 75, sit.wx + 1, sit.wy + 1)
-  // Foamea se pune direct: altfel masa vine dupa mii de tickuri, si testul ar
-  // masura rabdarea, nu roundtrip-ul.
-  for (let i = 0; i < w.agents.count; i++) w.agents.nevoi[i * NEVOI + Nevoie.FOAME] = 200
-  for (let i = 0; i < 2; i++) {
-    const g = solid(w, sit.wx + 4 + i, sit.wy + 1)
-    if (g !== null) applyCommand(w, { kind: 'desemneaza', wx: sit.wx + 4 + i, wy: sit.wy + 1, z: g + 1, piesa: Piesa.PERETE }, R)
-  }
-  return w
-}
 
 
 test('M5 pe o lume in care chiar se intampla ceva — si care se PROBEAZA ca atare', () => {

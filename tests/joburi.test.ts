@@ -4,7 +4,8 @@ import { DEFAULT_RULES, parseRules } from '../src/sim/content.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { racireTinta } from '../src/sim/joburi.ts'
-import { createWorld, tick } from '../src/sim/world.ts'
+import { lumeBogata } from './fixturi.ts'
+import { advance, createWorld, tick } from '../src/sim/world.ts'
 import { Faction, PasJob } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { cellOf } from '../src/sim/drumuri.ts'
@@ -1297,4 +1298,36 @@ test('fereastra de racire nu SCADE cand apar tinte noi', () => {
     anterioara = f
   }
   assert.ok(anterioara > DEFAULT_RULES.jobInfeasibleRetryTicks, 'domeniul nu iese niciodata de sub podea')
+})
+
+test('un slot FARA job are campurile de job pe zero', () => {
+  // A treia plasa, si e pe alta axa decat celelalte doua. Cele din saveload.test.ts
+  // compara lumea continua cu cea incarcata; asta se uita la o SINGURA lume si cere
+  // ca `terminaJob` sa fie ultimul care scrie. Cineva care incheie un job si apoi ii
+  // mai scrie un pas lasa un slot fara job dar cu campuri nenule — si NICIUNA din
+  // celelalte doua plase nu-l vede, fiindca amandoua lumile ajung la aceeasi stare.
+  //
+  // Masurat: pe codul corect, 14.542 de sloturi-tick fara job, ZERO cu campuri
+  // nenule. Cu `elibereazaUna` mutat dupa reconciliere — reordonarea plauzibila de
+  // care se temea o centura scoasa din `reconciliazaTintaMoarta` — 1811 rupte din
+  // 2643. Deci invariantul asta e chiar plasa care lipsea sub centura aia.
+  const CAMPURI = ['jobTarget', 'jobDest', 'jobStep', 'jobProgres'] as const
+  let faraJob = 0
+  for (const seed of [12345, 7, 12, 17, 18, 19]) {
+    const w = lumeBogata(seed)
+    for (let t = 0; t < 600; t++) {
+      advance(w, 1, DEFAULT_RULES)
+      for (let i = 0; i < w.agents.count; i++) {
+        if (w.agents.alive[i] !== 1 || w.agents.jobKind[i] !== 0) continue
+        faraJob++
+        for (const c of CAMPURI) {
+          assert.equal(w.agents[c][i], 0,
+            `seed ${seed}, tickul ${w.tick}, slotul ${i}: job incheiat dar ${c} = ${w.agents[c][i]}`)
+        }
+      }
+    }
+  }
+  // Contorul de VIATA: chiar exista sloturi fara job. Fara el, o lume in care toti
+  // pionii sunt mereu ocupati ar trece fara sa verifice nimic.
+  assert.ok(faraJob > 1000, `doar ${faraJob} sloturi-tick fara job: nu se verifica nimic`)
 })

@@ -9,7 +9,7 @@ import { DEFAULT_RULES } from '../src/sim/content.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { createWorld, tick } from '../src/sim/world.ts'
-import { Faction } from '../src/sim/state.ts'
+import { Faction, Item, NEVOI, Nevoie, Piesa } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { groundLevelM, materialAt, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
@@ -193,4 +193,39 @@ export function itemeInZona(w: World, zonaId: number): { iteme: number; cantitat
     cantitate += w.iteme.cantitate[i]!
   }
   return { iteme, cantitate }
+}
+
+/**
+ * O lume in care chiar se intampla ceva.
+ *
+ * `populated` de mai sus a fost reparata odata — agentii se nasteau la `z = 0`,
+ * deci nu se miscau deloc — si a murit a doua oara, altfel: se misca, dar in 2000
+ * de tickuri singurul fel de job pe care il iau vreodata e DOARME. Zero desemnari,
+ * zero iteme, zero zone, `jobConsumat` si `caraCantitate` mereu nule.
+ *
+ * Adica orice camp PERSISTED al taieturilor 2 si 3 putea fi scos din `encode` si
+ * M5 ramanea verde. Unul CHIAR era: `jobConsumat` se hashuia, `decode` il citea,
+ * dar `encode` nu-l scria niciodata. A stat asa pana la recenzia din 19.09.
+ *
+ * Fixtura asta pune ce lipsea: sapaturi, marfa, un depozit, hrana si santiere.
+ * Contoarele de viata din test sunt partea care conteaza — fara ele, moartea a
+ * treia oara ar arata exact ca vietile de pana acum.
+ */
+export function lumeBogata(seed: number): World {
+  const { w, sit } = laSit(seed, 6)
+  for (let i = 0; i < 4; i++) {
+    const t = solidLaDistanta(w, sit.wx, sit.wy, sit.g, 3 + i, 8)
+    desemneaza(w, t.wx, t.wy)
+  }
+  picteaza(w, sit.wx + 2, sit.wy + 3, 3)
+  for (let i = 0; i < 3; i++) lasaItem(w, Item.PIATRA, 20, sit.wx + 5 + i, sit.wy + 6)
+  lasaItem(w, Item.HRANA, 75, sit.wx + 1, sit.wy + 1)
+  // Foamea se pune direct: altfel masa vine dupa mii de tickuri, si testul ar
+  // masura rabdarea, nu roundtrip-ul.
+  for (let i = 0; i < w.agents.count; i++) w.agents.nevoi[i * NEVOI + Nevoie.FOAME] = 200
+  for (let i = 0; i < 2; i++) {
+    const g = solid(w, sit.wx + 4 + i, sit.wy + 1)
+    if (g !== null) applyCommand(w, { kind: 'desemneaza', wx: sit.wx + 4 + i, wy: sit.wy + 1, z: g + 1, piesa: Piesa.PERETE }, R)
+  }
+  return w
 }
