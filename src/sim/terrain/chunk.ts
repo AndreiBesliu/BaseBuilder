@@ -51,6 +51,24 @@ export function isSolid(m: number): boolean {
   return m !== Material.AER && m !== Material.APA
 }
 
+/**
+ * Cea mai mare valoare din `Material`. Se schimba odata cu tabelul — un test cere
+ * egalitatea cu maximul valorilor, ca un material nou sa nu ramana in afara lui.
+ */
+export const MATERIAL_MAX = Material.MOLOZ
+
+/**
+ * E `m` un material pe care jocul il CUNOASTE? `isSolid` raspunde „da" pentru orice
+ * numar care nu e AER sau APA — si 200 — deci nu poate fi usa pentru o valoare
+ * venita din afara (comanda `fill`, un save). Masurat pe HEAD de panoul grinzii:
+ * `fill` cu materialul 7, 8 si 200 era acceptat si citit inapoi identic. Un
+ * material nou (GRINDA, 8) ar fi schimbat atunci fizica unui save sau a unui log de
+ * replay care il continea deja, fara nicio schema noua.
+ */
+export function esteMaterialCunoscut(m: number): boolean {
+  return Number.isInteger(m) && m >= 0 && m <= MATERIAL_MAX
+}
+
 /** Datele de voxeli ale unui chunk promovat. */
 export interface VoxelData {
   /** Cota, in metri, a nivelului 0. */

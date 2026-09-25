@@ -8,9 +8,11 @@ import {
   decodeAll,
   decodeColumn,
   encodeAll,
+  esteMaterialCunoscut,
   generateChunk,
   isSolid,
   Material,
+  MATERIAL_MAX,
   promote,
   runCount,
   setVoxel,
@@ -527,6 +529,44 @@ test('promovarea NU schimba lumea: calea derivata si cea de voxeli spun acelasi 
     }
     assert.ok(inainte.length > 2000, `doar ${inainte.length} celule verificate`)
   }
+})
+
+test('un material NECUNOSCUT se refuza la usa: la comanda `fill` si la incarcare', () => {
+  // `isSolid` spune „da" pentru orice numar care nu e AER sau APA, deci 200 trecea:
+  // panoul grinzii (25.09) a masurat `fill` cu 7, 8 si 200 acceptat si citit inapoi.
+  // Cu GRINDA = 8 in versiunea urmatoare, un save sau un log de replay care continea
+  // deja un 8 ar fi capatat alta fizica fara schema noua.
+  // determinism-ok: testul verifica exact ca maximul coincide cu tabelul, ordinea nu conteaza.
+  assert.equal(MATERIAL_MAX, Math.max(...Object.values(Material)), 'MATERIAL_MAX nu mai e maximul tabelului `Material`')
+  assert.ok(esteMaterialCunoscut(MATERIAL_MAX) && !esteMaterialCunoscut(MATERIAL_MAX + 1) && !esteMaterialCunoscut(-1) && !esteMaterialCunoscut(1.5))
+
+  const w = createWorld(12345)
+  let tinta: { wx: number; wy: number; z: number } | null = null
+  for (let k = 1; k <= 4000 && tinta === null; k++) {
+    const wx = (k * 1237) % WORLD_CELLS
+    const wy = (k * 7919) % WORLD_CELLS
+    const g = groundLevelM(w.terrain, wx, wy)
+    if (!g.ok) continue
+    const sus = materialAt(w.terrain, wx, wy, g.value)
+    if (sus.ok && isSolid(sus.value)) tinta = { wx, wy, z: g.value + 1 }
+  }
+  assert.ok(tinta, 'fixtura: niciun sol')
+  for (const material of [MATERIAL_MAX + 1, 200]) {
+    const out = applyCommand(w, { kind: 'fill', wx: tinta!.wx, wy: tinta!.wy, z: tinta!.z, material: material as never })
+    assert.equal(out.ok, false, `fill cu materialul ${material} a fost acceptat`)
+    if (!out.ok) assert.equal(out.reason, Reason.VALOARE_INVALIDA)
+  }
+  // Controlul: un material cunoscut trece.
+  assert.ok(applyCommand(w, { kind: 'fill', wx: tinta!.wx, wy: tinta!.wy, z: tinta!.z, material: Material.PIATRA_CONSTRUITA }).ok)
+
+  // Si la incarcare: un run cu un material necunoscut e un save editat, refuzat.
+  const raw = JSON.parse(encode(w)) as { data: { terrain: { promoted: { runMaterial: number[] }[] } } }
+  assert.ok(raw.data.terrain.promoted.length > 0, 'fixtura: niciun chunk promovat')
+  assert.ok(decode(JSON.stringify(raw)).ok, 'controlul: save-ul neatins se incarca')
+  raw.data.terrain.promoted[0]!.runMaterial[0] = MATERIAL_MAX + 1
+  const stricat = decode(JSON.stringify(raw))
+  assert.equal(stricat.ok, false, 'un run cu material necunoscut a fost incarcat')
+  if (!stricat.ok) assert.equal(stricat.reason, Reason.VALOARE_INVALIDA)
 })
 
 test('voxelAt da EXACT ce da decodeColumn, pe toata coloana', () => {

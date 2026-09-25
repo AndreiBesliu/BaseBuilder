@@ -21,7 +21,7 @@ import { cellOf, clearPath } from './drumuri.ts'
 import type { Rules } from './content.ts'
 import { DEFAULT_RULES } from './content.ts'
 import { isWalkable } from './regions.ts'
-import { isSolid, type MaterialId } from './terrain/chunk.ts'
+import { esteMaterialCunoscut, isSolid, MATERIAL_MAX, type MaterialId } from './terrain/chunk.ts'
 import { CHUNK_GRID, inWorld, materialAt, setFocus, voxelRangeM, WORLD_CELLS } from './terrain/terrain.ts'
 import { adaugaDesemnare, Desemnare, slotDesemnare } from './desemnari.ts'
 import { acoperaDesemnarea, anuleazaCelulaDeZona, anuleazaDesemnare, celulaLibera, sapaManual, Sfarsit, terminaJob, uitaRacirileDeMarfa, uitaTintele, zidesteVoxel } from './joburi.ts'
@@ -254,6 +254,10 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       // Se cheama DUPA gardile de ocupare (alea sunt despre a rani pe cineva) si
       // INAINTE de editare. Pe o celula deja plina raspunde „da", ca refuzul sa
       // vina de la teren cu `CELULA_PLINA`, care e informatia utila.
+      // Materialul vine din afara: se valideaza la usa, nu se lasa sa devina fizica.
+      if (!esteMaterialCunoscut(cmd.material)) {
+        return refuse(Reason.VALOARE_INVALIDA, { camp: 'material', valoare: String(cmd.material), min: 0, max: MATERIAL_MAX })
+      }
       const out = zidesteVoxel(w, rules, cmd.wx, cmd.wy, cmd.z, cmd.material)
       if (!out.ok) return out
       return accept(0)

@@ -22,7 +22,7 @@ import { makePathStore } from './drumuri.ts'
 import type { PathStore } from './drumuri.ts'
 import { DEFAULT_RULES } from './content.ts'
 import type { Rules } from './content.ts'
-import { runCount } from './terrain/chunk.ts'
+import { esteMaterialCunoscut, MATERIAL_MAX, runCount } from './terrain/chunk.ts'
 import { createTerrain, ensureChunk, inWorld, WORLD_CELLS } from './terrain/terrain.ts'
 import { Desemnare, makeDesignationStore, reindexeazaDesemnari } from './desemnari.ts'
 import type { DesignationStore } from './desemnari.ts'
@@ -546,6 +546,14 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
   for (const saved of tRaw.promoted) {
     if (!inWorld(saved.cx, saved.cy)) {
       return refuse(Reason.IN_AFARA_LUMII, { camp: 'terrain.promoted', cx: saved.cx, cy: saved.cy })
+    }
+    // Un material necunoscut in teren e un save editat sau stricat: refuz, nu fizica
+    // noua. Altfel valoarea ar deveni tacut GRINDA (sau ce urmeaza) la prima versiune
+    // care o defineste.
+    for (const m of saved.runMaterial) {
+      if (!esteMaterialCunoscut(m)) {
+        return refuse(Reason.VALOARE_INVALIDA, { camp: 'terrain.promoted.runMaterial', cx: saved.cx, cy: saved.cy, valoare: m, max: MATERIAL_MAX })
+      }
     }
     // `vertexCm` e DERIVED: se regenereaza din seed, nu se citeste din fisier.
     const chunk = ensureChunk(terrain, saved.cx, saved.cy)

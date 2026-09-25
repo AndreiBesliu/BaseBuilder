@@ -17,7 +17,7 @@ import { cellOf } from '../src/sim/drumuri.ts'
 import { cellKey, decodeCell } from '../src/sim/path.ts'
 import { isSolid, Material } from '../src/sim/terrain/chunk.ts'
 import { bazaVoxeli, groundLevelM, materialAt, promoteWithApron, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
-import { cadeDaca, celuleAtinse, cotaDeAsezare, esteAsezat, Sol, solLa, StareSapat, stareSapat, suportDacaSap, suportLa } from '../src/sim/stabilitate.ts'
+import { cadeDaca, celuleAtinse, cotaDeAsezare, esteAsezat, Prefiltru, prefiltruStabilitate, Sol, solLa, StareSapat, stareSapat, suportDacaSap, suportLa } from '../src/sim/stabilitate.ts'
 import { existaTinta, lastJobReport, prabuseste, prabusireaPrevizualizata } from '../src/sim/joburi.ts'
 import { verificaRezervari } from '../src/sim/rezervari.ts'
 import { isWalkable } from '../src/sim/regions.ts'
@@ -686,6 +686,43 @@ test('stareSapat nu minte: niciun SIGUR nu prabuseste, niciun CADE nu e alarma f
     assert.equal(sigurDarPrabuseste, 0, `camera ${lx}x${ly}: ${sigurDarPrabuseste} celule spun SIGUR si chiar prabusesc ceva`)
     assert.equal(alarmaFalsa, 0, `camera ${lx}x${ly}: ${alarmaFalsa} celule spun CADE degeaba`)
     assert.equal(cade, asteptatCade, `camera ${lx}x${ly}: ${cade} celule CADE, asteptat ${asteptatCade}`)
+  }
+})
+
+test('prefiltrul overlay-ului nu ascunde nicio celula periculoasa — si pe TAVANUL unei pivnite', () => {
+  // Prima versiune a prefiltrului (in viewer) cauta doar AER la zA si zA+1. Privit de
+  // pe nivelul tavanului, roca e plina la ambele cote, deci totul iesea SIGUR fara
+  // sa fie intrebat: panoul grinzii (25.09) a masurat la o pivnita de 6×7 48 din 48
+  // de celule periculoase ascunse, 6 CADE. Tavanul ATARNA — solidul neasezat e sursa.
+  //
+  // Adevarul e `stareSapat` pe FIECARE celula solida din fereastra; prefiltrul are
+  // voie sa scaneze in plus, nu sa sara.
+  for (const [lx, ly] of [[6, 7], [5, 5], [7, 7]] as const) {
+    const { w, wx, wy, g } = sitPlat(12345, Math.max(lx, ly))
+    const zPivnita = g - 3
+    for (let dx = 0; dx < lx; dx++) {
+      for (let dy = 0; dy < ly; dy++) assert.ok(applyCommand(w, { kind: 'dig', wx: wx + dx, wy: wy + dy, z: zPivnita }, R).ok)
+    }
+    const raza = 12
+    const lat = 2 * raza + 1
+    const x0 = wx + (lx >> 1) - raza
+    const y0 = wy + (ly >> 1) - raza
+    for (const zA of [zPivnita + 1, zPivnita]) {
+      const filtru = prefiltruStabilitate(w.terrain, R, x0, y0, lat, zA)
+      let periculoase = 0
+      let ascunse = 0
+      for (let i = 0; i < lat; i++) {
+        for (let j = 0; j < lat; j++) {
+          if (solLa(w.terrain, x0 + i, y0 + j, zA) !== Sol.SOLID) continue
+          const stare = stareSapat(w.terrain, R, x0 + i, y0 + j, zA)
+          if (stare !== StareSapat.CADE && stare !== StareSapat.ULTIMA_CELULA) continue
+          periculoase++
+          if (filtru[i * lat + j] !== Prefiltru.DE_SCANAT) ascunse++
+        }
+      }
+      if (zA === zPivnita + 1) assert.ok(periculoase > 0, `fixtura: tavanul pivnitei ${lx}x${ly} n-are nicio celula periculoasa`)
+      assert.equal(ascunse, 0, `pivnita ${lx}x${ly}, nivelul ${zA - zPivnita > 0 ? 'tavanului' : 'pivnitei'}: ${ascunse} din ${periculoase} celule periculoase declarate SIGUR fara scanare`)
+    }
   }
 })
 

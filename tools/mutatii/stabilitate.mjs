@@ -278,4 +278,27 @@ export const MUTATII = [
     b: '  const { cazute, minim } = propaga(t, rules, [cellKey(wx, wy, z)])\n  void cazute\n  void minim\n  const dupa = suportDacaSap(t, rules, wx, wy, z)\n  if (solLa(t, wx, wy, z + 1) !== Sol.SOLID) return StareSapat.SIGUR\n  if (dupa === 0) return StareSapat.CADE\n  if (dupa === 1) return StareSapat.ULTIMA_CELULA\n  return StareSapat.SIGUR',
     t: 'tests/stabilitate.test.ts', e: 'stareSapat nu minte',
   },
+
+  // --- doua defecte livrate, gasite de panoul grinzii (26.09.2026) ---
+  {
+    n: 'prefiltrul overlay-ului cauta doar AER (tavanul unei pivnite iese SIGUR fara scanare)',
+    f: 'src/sim/stabilitate.ts',
+    a: '      if (!solidJos || !solidSus || !esteAsezat(t, x, y, zA)) dist[k] = 0',
+    b: '      if (!solidJos || !solidSus) dist[k] = 0',
+    t: 'tests/stabilitate.test.ts', e: 'prefiltrul overlay-ului nu ascunde',
+  },
+  {
+    n: 'comanda `fill` accepta orice numar ca material',
+    f: 'src/sim/commands.ts',
+    a: '      if (!esteMaterialCunoscut(cmd.material)) {',
+    b: '      if (false) {',
+    t: 'tests/terrain.test.ts', e: 'un material NECUNOSCUT se refuza la usa',
+  },
+  {
+    n: 'decode incarca un run de teren cu material necunoscut',
+    f: 'src/sim/save.ts',
+    a: '      if (!esteMaterialCunoscut(m)) {',
+    b: '      if (false) {',
+    t: 'tests/terrain.test.ts', e: 'un material NECUNOSCUT se refuza la usa',
+  },
 ]

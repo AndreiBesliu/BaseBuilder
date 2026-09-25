@@ -546,6 +546,78 @@ export function stareSapat(t: Terrain, rules: Rules, wx: number, wy: number, z: 
   return minim <= 1 ? StareSapat.ULTIMA_CELULA : StareSapat.SIGUR
 }
 
+/** Ce face overlay-ul de stabilitate cu o celula din fereastra lui. */
+export const Prefiltru = {
+  /** Nu e solid la nivelul activ: nimic de judecat. */
+  NIMIC: 0,
+  /** Solid si SIGUR fara nicio scanare: nicio sursa de pericol in raza. */
+  SIGUR: 1,
+  /** Solid, cu o sursa de pericol in raza: merita scanarea scumpa (`stareSapat`). */
+  DE_SCANAT: 2,
+} as const
+
+/**
+ * Prefiltrul overlay-ului de stabilitate, pe fereastra `lat × lat` cu coltul la
+ * (x0, y0), la nivelul activ `zA`. Intoarce un `Prefiltru` per celula, rand pe
+ * rand (`i * lat + j` = celula (x0 + i, y0 + j)).
+ *
+ * `stareSapat` costa ~19 µs pe celula, deci fereastra intreaga ar fi un cadru
+ * pierdut; dar o celula departe de orice SURSA DE PERICOL nu poate fi nici CADE,
+ * nici ULTIMA CELULA — discul care i-ar schimba suportul are raza `suportMax`.
+ * Deci se calculeaza intai distanta Manhattan pana la cea mai apropiata sursa
+ * (doua treceri, O(celule)), si abia apoi se plateste scump acolo unde poate conta.
+ *
+ * ## Sursele de pericol, si cea care lipsea
+ *
+ * Aerul la `zA` sau la `zA + 1` — si **solidul NEASEZAT de la `zA`** (cu aer
+ * dedesubt). Prima versiune, scrisa in viewer, avea doar aerul. Pe tavanul unei
+ * pivnite, privit de pe nivelul lui, `zA` si `zA + 1` sunt roca plina, deci
+ * prefiltrul declara SIGUR tot, fara sa intrebe: masurat de panoul grinzii
+ * (25.09), la o pivnita de 6×7 ascundea 48 din 48 de celule periculoase, dintre
+ * care 6 CADE. Adica exact esecul pentru care exista overlay-ul — zero patrate
+ * peste un tavan care cade. Tavanul atarna, iar celulele atarnate sunt chiar
+ * cele pe care o sapatura alaturi le poate dobori.
+ *
+ * Marginea ferestrei nu stie ce e dincolo de ea: se trateaza ca „poate fi sursa",
+ * ca sa nu se rateze o celula periculoasa fiindca s-a privit prea ingust.
+ */
+export function prefiltruStabilitate(t: Terrain, rules: Rules, x0: number, y0: number, lat: number, zA: number): Uint8Array {
+  const MARE = 1 << 20
+  const n = lat * lat
+  const dist = new Int32Array(n).fill(MARE)
+  const out = new Uint8Array(n)
+  for (let i = 0; i < lat; i++) {
+    for (let j = 0; j < lat; j++) {
+      const k = i * lat + j
+      const x = x0 + i
+      const y = y0 + j
+      const solidJos = solLa(t, x, y, zA) === Sol.SOLID
+      const solidSus = solLa(t, x, y, zA + 1) === Sol.SOLID
+      out[k] = solidJos ? Prefiltru.SIGUR : Prefiltru.NIMIC
+      if (!solidJos || !solidSus || !esteAsezat(t, x, y, zA)) dist[k] = 0
+      else if (i === 0 || j === 0 || i === lat - 1 || j === lat - 1) dist[k] = rules.suportMax
+    }
+  }
+  for (let i = 0; i < lat; i++) {
+    for (let j = 0; j < lat; j++) {
+      const k = i * lat + j
+      if (i > 0 && dist[k - lat]! + 1 < dist[k]!) dist[k] = dist[k - lat]! + 1
+      if (j > 0 && dist[k - 1]! + 1 < dist[k]!) dist[k] = dist[k - 1]! + 1
+    }
+  }
+  for (let i = lat - 1; i >= 0; i--) {
+    for (let j = lat - 1; j >= 0; j--) {
+      const k = i * lat + j
+      if (i < lat - 1 && dist[k + lat]! + 1 < dist[k]!) dist[k] = dist[k + lat]! + 1
+      if (j < lat - 1 && dist[k + 1]! + 1 < dist[k]!) dist[k] = dist[k + 1]! + 1
+    }
+  }
+  for (let k = 0; k < n; k++) {
+    if (out[k] === Prefiltru.SIGUR && dist[k]! <= rules.suportMax) out[k] = Prefiltru.DE_SCANAT
+  }
+  return out
+}
+
 /**
  * Cota pe care se aseaza ce a cazut din (wx, wy, zDeLa): coboara pana gaseste
  * ceva solid dedesubt.

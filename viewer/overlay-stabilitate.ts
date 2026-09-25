@@ -40,7 +40,7 @@ import * as THREE from 'three'
 import type { World } from '../src/sim/state.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { decodeCell } from '../src/sim/path.ts'
-import { Sol, solLa, StareSapat, stareSapat } from '../src/sim/stabilitate.ts'
+import { Prefiltru, prefiltruStabilitate, StareSapat, stareSapat } from '../src/sim/stabilitate.ts'
 import { constructiaPrevizualizata, prabusireaPrevizualizata } from '../src/sim/joburi.ts'
 
 export interface StabilityOverlay {
@@ -132,51 +132,18 @@ export function rebuildStabilityOverlay(
   const x0 = cx - raza
   const y0 = cy - raza
 
-  // --- prefiltru: cat de departe e cel mai apropiat AER ---
+  // --- prefiltru: unde poate fi altceva decat SIGUR (vezi `prefiltruStabilitate`) ---
   //
-  // Scanarea scumpa (`stareSapat`) costa ~19 µs pe celula, deci fereastra intreaga
-  // ar fi 21 ms la raza 16 — un cadru pierdut. Dar o celula ingropata adanc in
-  // roca nu poate fi nici CADE nici ULTIMA CELULA: ca sa conteze, trebuie sa aiba
-  // gol la cel mult `suportMax` pasi, fiindca doar atat se intinde discul care i-ar
-  // schimba suportul. Deci se calculeaza intai distanta Manhattan pana la primul
-  // aer (doua treceri peste fereastra, O(celule)), si abia apoi se plateste scump
-  // acolo unde poate conta. In roca netulburata: zero apeluri scumpe.
-  const MARE = 9999
-  const dist = new Int32Array(lat * lat).fill(MARE)
-  const solidAici = new Uint8Array(lat * lat)
-  for (let i = 0; i < lat; i++) {
-    for (let j = 0; j < lat; j++) {
-      const k = i * lat + j
-      const solidJos = solLa(w.terrain, x0 + i, y0 + j, zActiv) === Sol.SOLID
-      const solidSus = solLa(w.terrain, x0 + i, y0 + j, zActiv + 1) === Sol.SOLID
-      solidAici[k] = solidJos ? 1 : 0
-      if (!solidJos || !solidSus) dist[k] = 0
-      // Marginea ferestrei nu stie ce e dincolo de ea: se trateaza ca „poate fi
-      // aer", ca sa nu ratam o celula periculoasa fiindca am privit prea ingust.
-      else if (i === 0 || j === 0 || i === lat - 1 || j === lat - 1) dist[k] = rules.suportMax
-    }
-  }
-  for (let i = 0; i < lat; i++) {
-    for (let j = 0; j < lat; j++) {
-      const k = i * lat + j
-      if (i > 0 && dist[k - lat]! + 1 < dist[k]!) dist[k] = dist[k - lat]! + 1
-      if (j > 0 && dist[k - 1]! + 1 < dist[k]!) dist[k] = dist[k - 1]! + 1
-    }
-  }
-  for (let i = lat - 1; i >= 0; i--) {
-    for (let j = lat - 1; j >= 0; j--) {
-      const k = i * lat + j
-      if (i < lat - 1 && dist[k + lat]! + 1 < dist[k]!) dist[k] = dist[k + lat]! + 1
-      if (j < lat - 1 && dist[k + 1]! + 1 < dist[k]!) dist[k] = dist[k + 1]! + 1
-    }
-  }
+  // Scris intai AICI, si livrat cu o gaura: cauta doar aerul, deci pe tavanul unei
+  // pivnite declara SIGUR tot. Mutat in `src/sim/stabilitate.ts` ca sa aiba test.
+  const filtru = prefiltruStabilitate(w.terrain, rules, x0, y0, lat, zActiv)
 
   // --- scanarea propriu-zisa, doar unde prefiltrul o cere ---
   for (let i = 0; i < lat; i++) {
     for (let j = 0; j < lat; j++) {
       const k = i * lat + j
-      if (solidAici[k] === 0) continue
-      if (dist[k]! > rules.suportMax) { o.sigur++; continue }
+      if (filtru[k] === Prefiltru.NIMIC) continue
+      if (filtru[k] === Prefiltru.SIGUR) { o.sigur++; continue }
       o.scanate++
       const stare = stareSapat(w.terrain, rules, x0 + i, y0 + j, zActiv)
       if (stare === StareSapat.SIGUR || stare === StareSapat.NIMIC) { o.sigur++; continue }
