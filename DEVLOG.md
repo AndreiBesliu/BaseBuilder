@@ -3322,11 +3322,12 @@ fiindcă CLAUDE.md scria „~50 de minute". Acum rulează, într-un job separat,
 
 ### Ce rămâne
 
-- **Defazarea de un tick la granița de salvare** — un job pe o țintă tocmai dispărută. Lumea
-  continuă îl încheie la tickul următor, cea încărcată îl anulează pe loc. Cere o decizie de
-  design: se reconciliază la moartea țintei, sau se acceptă și se scrie în contract?
-- **Nimic nu e împins.** Cele ~19 commit-uri ale zilei sunt locale; CI n-a văzut niciunul, iar
-  hash-ul nou și jobul de mutații se verifică abia la primul push.
+- ~~**Defazarea de un tick la granița de salvare.**~~ **ÎNCHISĂ 22.09**, decizia owner-ului: *se
+  reconciliază la moartea țintei*. Reparat, dar întâi măsurat — și nu era o defazare de un tick.
+  **285 de granițe divergente din 40.000**, episoade de până la **127 de tickuri**, iar lumile
+  **nu reconvergeau**. Vezi intrarea de mai jos.
+- ~~**Nimic nu e împins.**~~ **ÎNCHIS 21.09:** împinse 83 de commit-uri, CI verde pe amândouă
+  joburile, iar hash-ul de referință s-a reprodus pe runner — adică exact ce nu se verificase.
 - **`AO_FACTOR`** — tot singurul număr al arcului de grafică ieșit dintr-o judecată vizuală.
 - ~~**`remeshAfterEdit`** rămâne cod de browser fără test.~~ **ÎNCHIS 19.09:** a ieșit în
   `src/render/remesh.ts` ca `chunkuriDeRefacut`, cu `exista`/`eraPromovat` ca funcții, deci
@@ -3347,3 +3348,79 @@ fiindcă CLAUDE.md scria „~50 de minute". Acum rulează, într-un job separat,
     **exclusivitate** (`categoriiActive`), nu din ponderare. Iar poarta de SĂPAT scoasă singură tot
     nu înroșește nimic, fiindcă ponderarea ține cărăușul la cărat — **cele două mecanisme se
     suprapun**, și abia amândouă scoase se vede specializarea pierdută. Proba aia folosește `e2`.
+
+---
+
+## Reconcilierea la moartea țintei — și un defect de zece ori mai mare decât eticheta lui
+
+**Model:** Claude Opus 5
+**Prompt de start:** „se reconciliază la moartea țintei"
+
+Decizia owner-ului pe singurul punct de design rămas deschis din a doua recenzie. Regula: când o
+țintă moare, joburile care arată spre ea se încheie în ACELAȘI tick, nu la următorul.
+
+### Eticheta minimaliza defectul
+
+Punctul era scris în DEVLOG ca „defazare de un tick" — deci ceva cosmetic, o singură graniță de
+salvare care se aliniază un tick mai târziu. Înainte să ating codul, l-am măsurat. Nu era asta:
+
+- **285 de granițe divergente din 40.000** încercate;
+- episoade lungi de până la **127 de tickuri** — deci nu o defazare, ci o bifurcare;
+- lumile **nu reconvergeau**: odată despărțite, rămâneau despărțite;
+- iar un invariant care exista DEJA în cod, `verificaRezervari`, era roșu pe **266** dintre ele.
+
+Ultimul punct e cel care doare. Invariantul era acolo, scris, corect — dar nimeni nu-l rula per
+tick. Rula o dată, la capătul unui scenariu. Un oracol care se uită o singură dată la sfârșit
+raportează starea de la sfârșit, nu ce s-a întâmplat pe drum.
+
+### Cauza: un contract scris în comentariu, respectat de unul din trei
+
+`stergeItem` are în antet, negru pe alb: *„rezervările de pe un morman mort sunt treaba
+apelantului"*. Are trei apelanți. Doar `mutaItem` își făcea treaba.
+
+- `ridica` chema `elibereazaTinta` și **arunca lista returnată** — deci rezervările plecau, dar
+  joburile rămâneau vii, arătând spre un id care nu mai există.
+- `mananca` nu chema nimic.
+
+Reparația e o funcție, `reconciliazaTintaMoarta`, chemată din toți trei. Filtrul ei e pe
+**rezervare**, nu pe câmpurile jobului: pretendenții vin sortați din `elibereazaTinta`, iar după
+RIDICA `jobTarget` e învechit prin design — jobul e valid, doar câmpul e vechi. Un filtru pe câmp
+ar fi sărit exact peste cine trebuia încheiat.
+
+La `mananca`, apelul stă la **capătul** funcției, după ce nutriția a fost creditată; `idMorman` se
+capturează înainte de `iaDinItem`, fiindcă după el mormanul poate să nu mai existe.
+
+Rezultatul măsurat: cele două oracole per tick trec de la **74 și 63 de granițe roșii la 0 și 0**.
+
+### O centură care nu se poate aprinde nu e o centură
+
+Prima variantă avea un parametru `exceptSlot`, care sărea peste pionul ce tocmai golise mormanul
+prin munca lui. Proba de mutație pentru el a ieșit **RATATĂ**: scoaterea centurii nu înroșea nimic.
+
+Motivul e că la `ridica` pionul își eliberează propria rezervare cu trei linii mai sus, deci nu
+apare niciodată în lista de pretendenți. Centura apăra o stare inaccesibilă.
+
+S-a scos — dar nu din estetică, și nu fără plasă. O centură fără probă e un raportor orb: dacă
+cineva mută vreodată eliberarea DUPĂ reconciliere, pionul chiar ajunge în propria listă, primește
+`terminaJob` la mijlocul lui `ridica`, iar funcția continuă să-i scrie pașii peste un job mort.
+Centura ar fi ascuns fix asta.
+
+### A treia plasă, fiindcă primele două sunt oarbe pe axa asta
+
+Am încercat să scriu proba pentru reordonarea de mai sus și **nu lega** — nici pe oracolul de hash,
+nici pe cel de rezervări. Motivul nu e că plasele sunt slabe, ci că sunt pe axa greșită: amândouă
+compară lumea continuă cu cea încărcată, iar un job zombi apare **identic în amândouă**. Hash-urile
+se potrivesc. Nu e o regresie de determinism, e una de joc.
+
+Deci o a treia plasă, care se uită la o SINGURĂ lume: *un slot viu cu `jobKind === 0` are
+`jobTarget`, `jobDest`, `jobStep` și `jobProgres` pe zero.* Altfel spus, `terminaJob` trebuie să fie
+ultimul care scrie.
+
+Măsurat pe 6 semințe × 600 de tickuri: **0 rupte din 14.542** de sloturi-tick fără job pe codul
+corect, **1811 din 2643** cu reordonarea. Prinde exact clasa la care celelalte două sunt oarbe.
+`lumeBogata` s-a mutat în `tests/fixturi.ts` ca export, fiind acum a doua suită care o folosește.
+
+### Bilanț
+
+**432 de teste**, **225 de probe de mutație**, toate prinse. Trei commit-uri: reparația cu cele două
+plase per tick și 4 probe; scoaterea centurii; a treia plasă cu proba ei retintită.
