@@ -3771,3 +3771,151 @@ de lume e testul cu mormanul EVITAT — evitarea e a perechii, lumea tot îl are
 în aceeași rulare. Proba s-a re-ancorat pe el, într-un commit separat, și s-a confirmat singură. Deci
 **252/252** după re-ancorare, iar testul cu materialul rezervat rămâne cu o gaură cunoscută: apără
 în continuare ce-i spune numele, dar nu mai e proba negativă a acestei linii.
+
+---
+
+## S20-23, tăietura 3 — recenzia adversarială a logisticii: 49 de constatări, 13 confirmate, 5 commit-uri de reparație
+
+**Model:** Claude Fable 5.1
+**Prompt de start:** „continua" (după push-ul feliei, cu recenzia lansată în aceeași sesiune)
+
+### Cum s-a făcut
+
+Șase lentile care REPRODUC (determinism/save, rezervări, joc, performanță, probe, contracte),
+fiecare cu scripturi proprii pe HEAD `b14fcb1`, plus doi verificatori independenți pe fiecare
+CRITIC/MARE, cu instrucțiunea de a REFUTA; ~5,65 M tokeni, 32 de agenți, 52 de minute.
+**49 de constatări, 13 confirmate de câte doi verificatori** (niciuna respinsă; una
+retrogradată de un verificator de la MARE la MEDIU, cu argument). Coada MEDIU/MIC (36) s-a
+triat la sursă — regula rămâne: coada tăiată ascunde defecte nete, și aici a ascuns două
+care au intrat în reparații (`sumaLibera` pe claimanți plini; `refaSursa` pe fragmentul viu
+exclus).
+
+### Rădăcina: doi predicați pentru aceeași întrebare
+
+Trei constatări confirmate separat erau o singură gaură: sonda (`rezumatMaterial`) și
+retintirea (`refaSursa`) răspundeau diferit la „există a doua sursă?", pe trei axe —
+- **componenta**: sonda număra în suma LIBERĂ orice morman din rază, retintirea îl refuza și
+  îl evita pe pereche; cu ≥ `jobAvoidSlots + 1` (5) mormane sigilate mereu unul „uitat"
+  reintra în sumă, și pionul ridica și lăsa același morman la ~30 de tickuri, pe veci —
+  **66–126 de cicluri în 3000–6000 de tickuri, `nextId` +2 fiecare, 0 zidit**, pe trei
+  geometrii; testul feliei avea UN morman sigilat (orb pe clasă);
+- **raza**: sonda de la pion, retintirea de la celula curentă — două mormane de 10 la ±50
+  de pion **nu ridicau niciodată peretele, 8 semințe din 8**, cu 20 de piatră în lume;
+- **pragul**: sonda cerea pragul întreg fiecărui morman, retintirea doar ce mai lipsește —
+  **15 + 5 nu pornea**, deși retintirea ar fi luat restul de 5, iar cauza de pe șantier se
+  ștergea („De ce nu?" gol; la fel 19 + 1 și 10 + 5 + 5).
+Docstringul lui `ridicariAbandonate` promitea o margine „prin construcție" care nu exista, și
+DEVLOG-ul feliei o repeta.
+
+**Reparația (`9d0ef25`):** `liberPentru` (viu, nerăcit, neevitat, în componentă, loc de
+claimant — un `Map.get` prin `rezervatPe`) e predicatul amândurora; `lantAcopera(sumaPrag,
+maxSubPrag, C, prag)` = `sumaPrag ≥ C || (C − sumaPrag < prag && maxSubPrag ≥ C − sumaPrag)` e
+regula lanțului — independentă de ordine și de primul morman, aceeași pentru `exista` (pion),
+`matOriunde` (lume) și retintire; `refaSursa` caută la 2R de ȘANTIER (șantierul e la ≤ R de
+pionul care a scanat, deci tot ce a numărat sonda e la ≤ 2R de el, inegalitatea triunghiului,
+și ancora nu se mută la retintirile din reconciliere), întoarce `Outcome` cu motivul (REZERVAT /
+INACCESIBIL / LIPSA_MATERIAL — trei răspunsuri acționabile) și nu mai scrie nicio evitare pe
+pereche; trecerea scumpă nu mai verifică componenta (o face sonda, fără să scrie stare —
+prima versiune răcea global, a doua pe pereche, a treia nu scrie nimic). Verificarea scumpă
+se plătește **lenes**, doar când răspunsul poate depinde de morman: la 3000 de mormane de
+piatră în rază **98 → 172 µs/apel cu verificarea completă → 72 µs lenes** (bench-ul
+recenziei). `refaTinta` pe piciorul sursei evită vechea sursă înainte de căutare și, cu
+marfă în mână, abandonează contorizat (înainte cădea pe `drumRefuzat`, marfa jos, contorul 0).
+Reconcilierea unui fragment viu îl poate realege (înainte era exclus ca „de evitat").
+LIPSA_MATERIAL urcă peste FARA_DEPOZIT în rang. Hash neschimbat: scenariul standard nu atinge
+niciuna dintre cele trei axe.
+
+### Celelalte confirmate, și ce s-a făcut
+
+- **Oracolul de cantitate era ROȘU pe o stare legală** (`3b6632f`): un mâncător la 390
+  termină în ~185 de tickuri, un căruș la 40–80 de celule încă ține 50 pe un morman de 34,
+  MANCAT 0 — „toleranța" (suma ținută ACUM pe MANCAT) dispărea exact când mâncătorul termina;
+  5 semințe din 7, ferestre de 14–122 de tickuri; testul era verde din compoziția fixturii
+  (doi flămânzi la 200 golesc mormanul). HRANA iese din oracol; pe ea se cere conservarea,
+  decode fără anulări în fereastră, și contor de viață pe exact starea refuzată înainte.
+  Panoul de design propusese chiar el toleranța, și o altă lentilă a lui avertizase că e
+  neverificabilă; s-a luat prima voce.
+- **Probe lipsă pe gărzi** (`2392c3e`): 14 mutații plauzibile supraviețuiau. Cele care contau:
+  `viiConstruieste++` din reindexare scos → lumea încărcată nu mai construiește (3 vs 0
+  șantiere după +1500, hash divergent) — o prindea DOAR M5 pe scenariul standard, nu
+  saveload/migrare; `--` la ștergere scos → cost, 462/462 verzi; „nu e vina șantierului"
+  fără asertiune (șantierul evitat 2559/3000 de tickuri cu cauză falsă); decode fără probă pe
+  `- cara` și pe ramura de după RIDICA; felul din mână nevalidat (piatră din pământ). Toate au
+  acum test și probă, plus REZERVAT (nu LIPSA) la pornire când materialul e al altora.
+- **Șantierul ocupat** (`260aa4d`): trei mecanisme de dinaintea feliei, cărora felia le-a adus
+  clienții — `celulaDeLucru` punea constructorul pe peretele vecin (1–3 refuzuri per rând de
+  patru, timp dublat–triplat), `pornesteDoarme` dormea pe șantier (dormitorul la prag ținea
+  constructorul la ușă 2500–3750 de tickuri), `zideste` întreba `celulaLibera` abia după 40 de
+  tickuri (drum + muncă + marfă jos + răcire 100, de la capăt). Acum: locul de lucru sare
+  șantierele vii, somnul pe loc alege vecinul, ocuparea se verifică la fiecare tick de muncă și
+  se AȘTEAPTĂ (`raport.santierOcupat`). Și contractul din `incheie` („mormanul nu se răcește
+  global niciodată") era contrazis 17 linii mai jos: marfa lăsată se contopea în mormanul
+  comun de pe celulă și îl răcea 99 de tickuri cu cauză falsă (§3.9 din design, promis și
+  nescris). Marfa lăsată nu se mai răcește deloc. **Hash `d9c0dc04 → 52b16ed2`.**
+- **Costul sondei** (`95d5a59`): revendicarea „crește cu MUNCA, nu cu lumea" era adevărată
+  doar pentru felurile NEcerute; la 3000 de mormane de felul cerut sonda e liniară (98 µs/apel,
+  ~30 % din tick la 20 de pioni). Testul scrie clasa; cifra de azi e 72 µs.
+
+### Ce a schimbat recenzia față de ce credeam
+
+- „Marginit prin construcție" din DEVLOG-ul feliei era **vid**: per (pion, id de morman) ținea
+  trivial (id nou la fiecare lăsare), per (pion, celulă) era încălcat măsurabil. Marginea
+  reală nu e un mecanism, e egalitatea predicaților.
+- Fixturile din felie porneau jobul explicit și **scoteau din probă tot ce face `cautaJob`
+  pe prima sursă**: raza n-avea nicio probă (mutată, sonda propunea un morman la 101 celule
+  și jobul pornea; pe `refaSursa`, nici hash-ul nu se mișca). Acum raza are test cu reguli
+  mici (R = 6) în ambele locuri.
+- Trei probe din felie nu mutau ce spunea numele lor („DUPA" muta „deloc"; „raceste GLOBAL"
+  păstra `return`-ul; „viiConstruieste nu creste" acoperea un scriitor din trei). Redenumite
+  sau dublate.
+- Un panou care converge din 5 direcții nu e o garanție pentru ce NU întreabă: panoul
+  avertizase că inelul de 4 se rupe la > 4 ȘANTIERE; v3 a mutat evitarea pe MORMANE și a
+  lăsat aceeași limită nemăsurată pe noul obiect. **Reintrarea prin alt obiect** e o clasă
+  de defect a designului, nu a codului.
+
+### Cifre
+
+- 5 commit-uri de reparație, **462 → 479 de teste, 252 → 280 de probe** (26 re-ancorate, 28 noi;
+  una a ieșit RATATĂ prima dată: presupunea că fără evitare vechea sursă ar fi realeasă —
+  propria rezervare încă ținută o excludea oricum; re-ancorată pe urma pe pereche).
+- Sonda la 3000 de mormane de felul cerut: 98 → 72 µs/apel; scenariul standard 88–89 µs/tick,
+  neschimbat.
+- CI pe felie: `mutatii` a durat **15 min 30 s** la 252 de probe (400 s la 225): suita `constr`
+  are acum 100+ probe și `constructie.test.ts` e greu (două fixturi de 3000 de mormane,
+  ±50 pe 6000 de tickuri, 3000 de tickuri pe „de neatins"). Opțiunea, dacă apasă: testele
+  grele într-un fișier separat pe care probele `constr` nu-l re-rulează.
+
+### Ce rămâne, cu cifra (în registru, nu reparat aici)
+
+- **Consolidarea la cărat** (joc#5, MEDIU): `cautaDestinatie` alege cea mai apropiată celulă
+  liberă, deci patru mormane de 5 cărate într-un depozit rămân patru celule de câte 5; hintul
+  lui MATERIAL_IMPRASTIAT s-a rescris pe ce e adevărat. Preferința pentru celula cu același fel
+  intră la D-C (căratul de consolidare).
+- **2·dMin pe relief** (joc#4, MEDIU): pe o terasă la +2 m sonda alege mormanul de JOS
+  (Manhattan 4) în loc de cel de SUS (16): **452 vs 204 tickuri** pe job. Argumentul cu care
+  s-a refuzat plafonul piciorului doi e în Manhattan, nu pe drum.
+- **`refaSursa` pe regiuni murdare din reconciliere** (contracte#3, citit): decizia de
+  componentă pe etichete vechi; acum nu mai scrie nicio stare pe ele (evitarea a dispărut), deci
+  prețul e un drum refuzat sau o lăsare, nu 600 de tickuri de evitare.
+- **Ordinea greedy a surselor** (joc#8): 1,3–1,5× față de cea mai bună PERECHE pe câmp
+  împrăștiat, al doilea picior până la 24 de celule; nu e defect, e banda.
+- **Reconstrucția indexului per ridicare** (perf#4): `refaSursa` cere `indexZone` doar pentru
+  `peFel`, listă care nu depinde de zone; ~105 µs la 3000. Rămâne din registrul feliei.
+- **`refuzatLaStart`**: zăvor fără probă pozitivă — scris la el; `=== 0` e o santinelă pentru o
+  reordonare viitoare, nu o probă a ceva de azi.
+
+### Suita întreagă de mutații, la capăt
+
+**277 din 280 prinse prima dată, 0 controale invalide** (carat 59/60, constr 110/112, drivere,
+nevoi, stabil, render întregi). Cele trei ratate erau plase SLĂBITE de reparațiile de azi, nu
+defecte: (1) sonda ridicase pragul per piesă prin `pragRidicare` direct, deci mutația pe
+`pragSursa` nu o mai atingea — trei ALTE teste picau, nu cel numit; sonda cere acum pragul prin
+`pragSursa(spec, cantitate)`, același drum ca retintirea; (2) de când `refaTinta` evită vechea
+sursă înainte de căutare, evitarea din `incheie` nu mai e singura, iar răcirea globală scrisă
+de mutație expira înainte de tickul 3000 — „munca falsă" cere acum zero tickuri de răcire pe
+morman, la fiecare tick; (3) pe `lumeBogata`, cu ordinea joburilor schimbată (hash nou),
+mormanul de hrană nu mai murea cu un căruș pe el — testul orfanelor a primit scenariul care o
+produce sigur, cu contor de viață. Re-ancorate într-un commit separat (`92b1b22`), rulate
+individual: **280/280**. Lecția e cea de la fiecare rulare: o probă leagă pe ce ating fixturile
+și pe drumul pe care îl ia codul AZI; când muți un drum, re-rulezi toate suitele, nu doar pe cele
+noi — două din trei erau în suite pe care reparațiile nu le-au atins direct.
