@@ -184,8 +184,8 @@ ce construiește un jucător.
 | Chunk-uri rezidente | 473 |
 | Construcție | ~700 ms |
 | Quaduri / triunghiuri | 351.287 / **702.574** |
-| Meshing complet | **205 ms** · mediana din 10 · vezi nota de mai jos despre ce e verificat |
-| &nbsp;&nbsp;per chunk | **911 µs** · derivat din meshingul complet / 225 |
+| Meshing complet | **174 ms** · mediana a 5 rulări liniștite (25.09.2026) · vezi notele de mai jos |
+| &nbsp;&nbsp;per chunk | **773 µs** · derivat din meshingul complet / 225 |
 | Memorie voxeli (RLE) | 2,34 MB (față de 14,1 MB necomprimat) |
 
 > **Ce verifică mecanic `tools/check-gate-numbers.mjs` din tabelul de sus, și ce NU.** Distincția
@@ -206,9 +206,16 @@ ce construiește un jucător.
 > 166-190 ms. O bandă strânsă ar face poarta să se înroșească după cât de ocupată e mașina, nu
 > după ce s-a schimbat în cod — adică un CI roșu permanent, care e un orb.
 >
-> Consecința, scrisă ca să nu fie descoperită de cineva la o decizie: **`205 ms` și `911 µs` sunt
-> cifre de o singură măsurătoare, nu constante ale codului.** Cine le folosește ca bază de buget
+> Consecința, scrisă ca să nu fie descoperită de cineva la o decizie: **`174 ms` și `773 µs` sunt
+> cifre de o măsurătoare, nu constante ale codului.** Cine le folosește ca bază de buget
 > le re-măsoară pe mașina lui. Banda de 40% prinde ordinul de mărime, nu deriva de 20%.
+>
+> **Re-etalonare, 25.09.2026, în commit separat, cum cere antetul.** Cifra de dinainte, 205 ms, era
+> o măsurătoare dintr-o dimineață zgomotoasă (serverul de dev rula) și stătea în bandă doar pe
+> mașina de referință. CI-ul a picat pe ea: runner-ul de GitHub măsoară **139,9 ms**, adică −47%.
+> Re-măsurat liniștit, de cinci ori: 174,1 · 181,8 · 184,0 · 174,4 · 161,5 ms → mediana **174 ms**;
+> runner-ul e la −20% de ea. **Nimic nu s-a schimbat în mesher** — s-a schimbat numai cât de
+> încărcată era mașina la măsurătoare, ceea ce e exact ce spune nota de deasupra.
 
 > **Re-etalonare, 14.09.2026, ÎNAINTE de orice rulare de gate.** Două lucruri s-au schimbat, niciunul
 > în mesher, și amândouă se consemnează ca să nu poată trece drept optimizare:
@@ -427,7 +434,7 @@ bine decât va fi în joc.
 
 **Slice-ul, declarat în scris înainte de rulare:** azi e implementat prin `renderer.clippingPlanes`,
 adică discard în shader — **NU** re-mesh. PLAN prognozează ~87 ms pentru re-mesh pe 200 de chunk-uri;
-măsurat azi, remesh-ul complet al fixturii e **205 ms**, adică 12 cadre pierdute la fiecare schimbare
+măsurat, remesh-ul complet al fixturii e **174 ms**, adică 10 cadre pierdute la fiecare schimbare
 de nivel. Sunt două jocuri diferite, cu 20× între ele. Dacă implementarea livrată se schimbă vreodată
 în re-mesh, toate cifrele de gate se re-rulează.
 
@@ -680,7 +687,7 @@ Baza: măsurători făcute azi în Node, pe fixtura M10 și pe teren proaspăt.
 | `dig` în sim, fără mesh | 4,8 µs |
 | `setFocus` o graniță de chunk | 0,62 ms · **23 de chunk-uri noi** |
 | Chunk-uri rezidente la rază 11 | 377 |
-| Fixtura completă, meshing | 205 ms |
+| Fixtura completă, meshing | 174 ms |
 
 **Prezic:**
 
