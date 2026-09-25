@@ -128,11 +128,48 @@ export function rezervariPentru(s: ReservationStore, targetId: number, layer: St
  * Tuplul stocat nu contine niciodata cantitatea vie — vezi `cerereCarat`.
  */
 export function sumaRezervata(s: ReservationStore, targetId: number, layer: StratId): number {
+  // -1 nu e id de entitate (`nextId` porneste de la 1): nimeni nu e „eu".
+  return rezervatPe(s, targetId, layer, -1).suma
+}
+
+/** Ce tine storeul pe (tinta, strat), din perspectiva unui claimant. Vezi `rezervatPe`. */
+export interface RezervatPe {
+  /** Suma count-urilor tuturor claimantilor. */
+  suma: number
+  /** Cate rezervari ale ALTORA — locurile ocupate, in sensul lui `maxClaimants`. */
+  altii: number
+  /** `claimant` tine deja ceva aici, deci nu ocupa inca un loc. */
+  euDeja: boolean
+}
+
+/**
+ * TRANSIENT, refolosit intre apeluri ca sa nu aloce: `rezervatPe` il rescrie
+ * complet la fiecare apel. Apelantul il citeste IMEDIAT, inainte de urmatorul.
+ */
+const REZERVAT_PE: RezervatPe = { suma: 0, altii: 0, euDeja: false }
+
+/**
+ * Suma tinuta, cate locuri ocupa altii si daca `claimant` e deja printre ei —
+ * dintr-un singur `Map.get`. Sonda si retintirea construitului intreaba amandoua,
+ * pentru fiecare morman al felului cerut, „cat e liber SI mai incap eu?"; doua
+ * interogari per morman (`sumaRezervata` + `poateRezerva`) erau exact ce designul
+ * v3 §1 cerea sa nu fie. Aceeasi numaratoare ca in `verificaUna`, care ramane usa
+ * (cu motivul refuzului si cine tine tinta).
+ */
+export function rezervatPe(s: ReservationStore, targetId: number, layer: StratId, claimant: number): RezervatPe {
+  const r = REZERVAT_PE
+  r.suma = 0
+  r.altii = 0
+  r.euDeja = false
   const lista = s.peTinta.get(cheieRezervare(targetId, layer))
-  if (!lista) return 0
-  let suma = 0
-  for (const r of lista) suma += r.count
-  return suma
+  if (lista) {
+    for (const x of lista) {
+      r.suma += x.count
+      if (x.claimant === claimant) r.euDeja = true
+      else r.altii++
+    }
+  }
+  return r
 }
 
 /**

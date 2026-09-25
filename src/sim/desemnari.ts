@@ -37,9 +37,14 @@ export const DetaliuMotiv = {
   /** Are loc de lucru, dar nu in componenta pionului care a intrebat. Actionabil: leaga zonele. */
   COMPONENTE_DIFERITE: 2,
   /**
-   * Material DESTUL in lume, dar in mormane de la care nu merita un drum (toate sub
-   * pragul de ridicare). Actionabil: picteaza un depozit — caratul le contopeste.
-   * Proprietate a lumii, nu a unui pion: se decide pe sume brute, nu pe raze.
+   * Material DESTUL in lume ca suma, dar niciun LANT de ridicari nu-l aduna
+   * (`lantAcopera`): ori niciun morman n-are pragul, ori dupa mormanele de la prag
+   * in sus ramane un rest pe care niciun morman mic nu-l inchide (10 + 5 + 5 pentru
+   * 20). Actionabil: sapa inca un morman de la prag in sus, sau cara-l spre ACEEASI
+   * celula de depozit — caratul contopeste doar ce ajunge pe aceeasi celula, nu
+   * consolideaza de la sine (recenzia din 25.09: patru mormane de 5 carate intr-un
+   * depozit raman patru celule de cate 5). Proprietate a lumii, nu a unui pion:
+   * se decide pe sume brute, nu pe raze si nu pe rezervari.
    */
   MATERIAL_IMPRASTIAT: 3,
 } as const

@@ -157,7 +157,7 @@ export interface Rules {
   /**
    * Cati pioni DISTINCTI pot tine acelasi morman deodata pe stratul CARAT —
    * carausi si constructori laolalta. Pana la taietura 3 era 1, scris literal in
-   * cinci locuri: un morman de 75 hranea un singur drum o data, iar al doilea
+   * patru locuri din `src/`: un morman de 75 hranea un singur drum o data, iar al doilea
    * pretendent astepta `jobRescanTicks`. Masurat: 3 constructori pe un morman,
    * 220–420 de tickuri; pe trei mormane, 112–120.
    */

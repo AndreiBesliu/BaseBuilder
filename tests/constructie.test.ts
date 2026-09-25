@@ -33,12 +33,14 @@ import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { CATEGORII, Categorie, FelJob, Piesa } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { applyCommand } from '../src/sim/commands.ts'
-import { anuleazaDesemnare, celulaDeLucru, comparaCandidati, constructiaPrevizualizata, esteEvitata, evitaTinta, lastJobReport, pornesteConstruieste, pragRidicare, rezumatMaterial, unitatiDeMunca } from '../src/sim/joburi.ts'
+import { anuleazaDesemnare, celulaDeLucru, cerereCarat, comparaCandidati, constructiaPrevizualizata, esteEvitata, evitaTinta, lantAcopera, lastJobReport, pornesteConstruieste, pragRidicare, rezumatMaterial, unitatiDeMunca } from '../src/sim/joburi.ts'
 import { Nevoie, NEVOI } from '../src/sim/state.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { slotItem } from '../src/sim/iteme.ts'
 import { indexZone } from '../src/sim/zone.ts'
-import { rezervariPentru, Strat } from '../src/sim/rezervari.ts'
+import { elibereaza, rezervariPentru, rezervaToate, Strat } from '../src/sim/rezervari.ts'
+import { find, regionAt } from '../src/sim/regions.ts'
+import type { MaterialPentruPiesa } from '../src/sim/joburi.ts'
 import { DetaliuMotiv } from '../src/sim/desemnari.ts'
 import { Faction, Item } from '../src/sim/state.ts'
 import { panaCand } from './fixturi.ts'
@@ -1501,11 +1503,11 @@ function pereteLa(w: World, wx: number, wy: number, rules: Rules = R): number {
  * tarziu — masurat: 4 celule mai incolo. Cand testul e despre A DOUA sursa, prima se
  * fixeaza aici, iar a doua se alege determinist de la celula primei.
  */
-function pornestePe(w: World, p: number, idSantier: number, idItem: number): void {
+function pornestePe(w: World, p: number, idSantier: number, idItem: number, rules: Rules = R): void {
   const ds = slotDesemnare(w.desemnari, idSantier)
   const is = slotItem(w.iteme, idItem)
   assert.ok(ds !== -1 && is !== -1, 'fixtura: santierul sau mormanul nu exista')
-  const out = pornesteConstruieste(w, R, p, ds, is)
+  const out = pornesteConstruieste(w, rules, p, ds, is)
   assert.ok(out.ok, `fixtura: pornirea pe ${idItem} refuzata: ${JSON.stringify(out)}`)
 }
 
@@ -1727,7 +1729,10 @@ test('ridicarea in mai multe randuri: 30 de mormane de cate 10, fara depozit, ri
   assert.equal(w.ratiune.zidiriCuManaGoala, 0)
   assert.equal(w.ratiune.unitatiZidite, 3 * R.piese[Piesa.PERETE]!.cantitate)
   assert.equal(w.ratiune.itemePierdute, 0)
-  assert.ok(w.ratiune.ridicariAbandonate <= 1, `${w.ratiune.ridicariAbandonate} ridicari abandonate cu material din belsug`)
+  // Zero, nu „cel mult unu": un abandon cere ca a doua sursa sa dispara intre
+  // scanare si retintire, si cu 30 de mormane pentru 6 pioni asta nu se intampla
+  // (masurat 0). O banda de 1 ar fi ascuns un abandon nou sub pragul de o unitate.
+  assert.equal(w.ratiune.ridicariAbandonate, 0, `${w.ratiune.ridicariAbandonate} ridicari abandonate cu material din belsug`)
   // K05: a doua sursa nu intinde coridoare. Acoperirea e cea de dupa asezare.
   assert.equal(w.regions.keys.length, blocuri, `acoperirea a crescut cu ${w.regions.keys.length - blocuri} blocuri in timpul constructiei`)
 })
@@ -1749,23 +1754,41 @@ test('doi constructori, doua mormane de 10, UN santier, fara depozit: peretele s
   assert.equal(w.ratiune.itemePierdute, 0)
 })
 
-test('materialul de neatins nu produce un ciclu de ridicari: 10 accesibile + 10 sigilate, 2 pioni, 2 santiere', () => {
-  // Suma pe LUME ar porni joburi pe material din alta componenta la fiecare tact;
-  // suma LIBERA in raza plus evitarea pe pereche a mormanului de neatins le
-  // marginesc la o incercare per (pion, morman) per `jobRetryTicks`.
-  const { w, wx, wy, g } = sitPlat(12345, 11)
-  const px = wx + 1
-  const py = wy + 5
-  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
-    for (const dz of [1, 2]) assert.ok(applyCommand(w, { kind: 'fill', wx: px + dx, wy: py + dy, z: g + dz, material: Material.PIATRA_CONSTRUITA }, R).ok)
+test('materialul de neatins nu porneste niciun job: 10 accesibile + (jobAvoidSlots + 1) x 10 sigilate, 2 pioni, 2 santiere', () => {
+  // Recenzia din 25.09: cu suma LIBERA fara componenta, singura margine a buclei
+  // ridica-lasa era inelul de evitare pe pereche din `refaSursa` — 4 sloturi. Cu
+  // 5 mormane sigilate mereu unul ramanea neevitat, suma dadea 10 + 10 ≥ 20, si
+  // pionul ridica si lasa acelasi morman la ~30 de tickuri, pe veci (66–126 de
+  // cicluri in 3000–6000 de tickuri, `nextId` +2 fiecare, 0 zidit). Testul vechi
+  // avea UN morman sigilat si era orb pe clasa ≥ jobAvoidSlots + 1. Acum sonda
+  // numara doar mormanele din componenta pionului: niciun job nu porneste, deloc.
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  const sigilate: number[] = []
+  const celule = [[1, 1], [1, 4], [1, 7], [1, 10], [4, 1], [4, 10], [7, 10], [10, 10]] as const
+  for (let k = 0; k < R.jobAvoidSlots + 1; k++) {
+    const [dx, dy] = celule[k]!
+    sigileaza(w, wx + dx, wy + dy, g)
+    sigilate.push(lasaItem(w, Item.PIATRA, 10, wx + dx, wy + dy))
   }
-  lasaItem(w, Item.PIATRA, 10, px, py)
-  lasaItem(w, Item.PIATRA, 10, wx + 5, wy + 5)
-  pereteLa(w, wx + 8, wy + 4)
-  pereteLa(w, wx + 8, wy + 6)
-  pionLa(w, wx + 5, wy + 3)
-  pionLa(w, wx + 5, wy + 7)
+  lasaItem(w, Item.PIATRA, 10, wx + 7, wy + 5)
+  pereteLa(w, wx + 10, wy + 4)
+  pereteLa(w, wx + 10, wy + 6)
+  const p1 = pionLa(w, wx + 7, wy + 3)
+  const p2 = pionLa(w, wx + 7, wy + 7)
   ruleaza(w, 5)
+  // Fixtura chiar produce clasa: fiecare morman sigilat e in ALTA componenta decat
+  // pionii, in raza lor, si toate impreuna cu cel accesibil ar acoperi de trei ori
+  // peretele — o sonda fara componenta le-ar numara pe toate.
+  for (const p of [p1, p2]) {
+    const comp = find(w.regions, regionAt(w.regions, cellOf(w.agents.x[p]!), cellOf(w.agents.y[p]!), w.agents.z[p]!))
+    for (const id of sigilate) {
+      const s = slotItem(w.iteme, id)
+      const r = regionAt(w.regions, w.iteme.wx[s]!, w.iteme.wy[s]!, w.iteme.z[s]!)
+      assert.notEqual(find(w.regions, r), comp, `fixtura: mormanul ${id} nu e sigilat fata de pionul ${p}`)
+      assert.ok(Math.abs(w.iteme.wx[s]! - cellOf(w.agents.x[p]!)) + Math.abs(w.iteme.wy[s]! - cellOf(w.agents.y[p]!)) <= R.jobScanRadiusCells, 'fixtura: sigilatul e in afara razei')
+    }
+  }
+  assert.ok(lantAcopera(10 * (R.jobAvoidSlots + 2), 0, R.piese[Piesa.PERETE]!.cantitate, pragRidicare(R, R.piese[Piesa.PERETE]!)), 'fixtura: fara componenta, lantul ar acoperi')
   const nextId0 = w.nextId
   const marfa0 = marfaTotala(w)
   let porniri = 0
@@ -1773,14 +1796,270 @@ test('materialul de neatins nu produce un ciclu de ridicari: 10 accesibile + 10 
   ruleaza(w, 3000, R, (w) => {
     for (let i = 0; i < w.agents.count; i++) if (w.agents.jobKind[i] === FelJob.CONSTRUIESTE && w.agents.jobId[i] !== vazut[i]) { vazut[i] = w.agents.jobId[i]!; porniri++ }
   })
-  const margine = 2 * (1 + Math.ceil(3000 / R.jobRetryTicks))
-  assert.ok(w.ratiune.ridicariAbandonate >= 1, 'fixtura: nimeni n-a ridicat prima parte si n-a ramas fara a doua')
-  assert.ok(porniri <= margine, `${porniri} joburi pornite in 3000 de tickuri; marginea e ${margine}`)
-  assert.ok(w.nextId - nextId0 <= 2 * margine + 2, `nextId a crescut cu ${w.nextId - nextId0}`)
+  assert.equal(porniri, 0, `${porniri} joburi de construit pornite pe material de neatins`)
+  assert.equal(w.ratiune.ridicariAbandonate, 0)
+  assert.equal(w.nextId, nextId0, `nextId a crescut cu ${w.nextId - nextId0}: cineva a ridicat si a lasat`)
   assert.equal(marfaTotala(w), marfa0)
   assert.equal(w.ratiune.itemePierdute, 0)
   assert.equal(w.ratiune.unitatiZidite, 0, 'fixtura: cu 10 de neatins nu se poate zidi nimic')
 })
+
+test('abandonul LEGITIM: a doua sursa e luata de altii intre scanare si retintire — motiv REZERVAT, rescanare la un tact, si peretele se ridica dupa eliberare', () => {
+  // Singura cale spre `ridicariAbandonate` e lumea care se schimba intre scanare si
+  // retintire: sonda a numarat B, altcineva l-a luat. Contorul creste EXACT o data,
+  // motivul e REZERVAT (era un morman bun, al altora), marfa e la picioare, si
+  // rescanarea vine la un tact, nu la tickul urmator.
+  const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 7)
+  const idSantier = pereteLa(w, T.x0 + 6, T.y0 + 3)
+  const idA = lasaItem(w, Item.PIATRA, 10, T.x0 + 1, T.y0 + 3)
+  const idB = lasaItem(w, Item.PIATRA, 10, T.x0 + 3, T.y0 + 1)
+  const p = pionLa(w, T.x0, T.y0 + 3)
+  ruleaza(w, 5)
+  assert.ok(rezumatMaterial(w, R, p)[Piesa.PERETE]!.exista, 'fixtura: sonda trebuia sa vada 10 + 10')
+  pornestePe(w, p, idSantier, idA)
+  const strain = { claimant: 990001, job: 880001 }
+  assert.ok(rezervaToate(w.rezervari, strain.claimant, strain.job, [cerereCarat(R, idB, 10)]).ok, 'fixtura: rezervarea straina pe B')
+  let lasate = 0
+  const laAbandon = panaCand(w, 600, (w) => { lasate += lastJobReport().lasateLaPicioare; return w.ratiune.ridicariAbandonate === 1 })
+  assert.ok(laAbandon >= 0, 'ridicarea nu s-a abandonat desi B era al altora')
+  assert.equal(w.ratiune.motivFinal[p], codMotiv(Reason.REZERVAT), 'motivul retintirii esuate trebuie sa ajunga pe pion')
+  assert.equal(lasate, 1, 'marfa din mana se lasa la picioare, o data')
+  assert.equal(w.agents.caraCantitate[p], 0)
+  assert.equal(w.agents.jobKind[p], 0)
+  const tickAbandon = w.tick
+  // B se elibereaza pe loc: acum sonda ar admite iar (10 lasate + 10 in B), deci
+  // ce tine pionul pe loc e doar amanarea de rescanare a abandonului: nu la tickul
+  // urmator (cum face orice alt sfarsit de job), ci la cadenta obisnuita — cel
+  // mult un tact.
+  elibereaza(w.rezervari, strain.claimant, strain.job)
+  const laJob = panaCand(w, 600, (w) => w.agents.jobKind[p] === FelJob.CONSTRUIESTE)
+  assert.ok(laJob >= 0, 'pionul nu a reluat constructia dupa eliberarea lui B')
+  assert.ok(w.tick - tickAbandon > 1, 'abandonul a rescanat la tickul urmator, ca un sfarsit obisnuit de job')
+  assert.ok(w.tick - tickAbandon <= R.jobRescanTicks, `a rescanat abia dupa ${w.tick - tickAbandon} tickuri; cadenta e ${R.jobRescanTicks}`)
+  const n = panaCand(w, 2000, (w) => santiereVii(w) === 0)
+  assert.ok(n >= 0, 'peretele nu s-a ridicat dupa eliberare')
+  assert.equal(w.ratiune.ridicariAbandonate, 1)
+  assert.equal(w.ratiune.itemePierdute, 0)
+})
+
+test('doua mormane de 10 la ±k celule de pion, la peste o raza unul de altul: peretele se ridica (a doua sursa se cauta de la SANTIER, la 2R)', () => {
+  // Recenzia din 25.09: sonda admitea (ambele in raza pionului), `refaSursa` cauta
+  // in raza celulei curente — de pe A, B era la 2k > R — si peretele nu se ridica
+  // NICIODATA, pe 8 seminte din 8, cu 20 de piatra in lume si un pion liber.
+  for (const seed of [7, 12345]) {
+    const { w, sit } = laSit(seed, 0)
+    const gaseste = (dir: number): { wx: number; wy: number } | null => {
+      for (let k = 50; k <= 70; k++) {
+        const x = sit.wx + dir * k
+        if (x >= 0 && solid(w, x, sit.wy) !== null) return { wx: x, wy: sit.wy }
+      }
+      return null
+    }
+    const A = gaseste(1)
+    const B = gaseste(-1)
+    assert.ok(A && B, `fixtura: fara sol la ±50 pe semintea ${seed}`)
+    let idSantier = -1
+    for (const [dx, dy] of [[0, 1], [1, 0], [0, -1], [-1, 0], [1, 1]] as const) {
+      if (solid(w, sit.wx + dx, sit.wy + dy) === null) continue
+      const r = applyCommand(w, { kind: 'desemneaza', wx: sit.wx + dx, wy: sit.wy + dy, z: solid(w, sit.wx + dx, sit.wy + dy)! + 1, piesa: Piesa.PERETE }, R)
+      if (r.ok) { idSantier = r.value; break }
+    }
+    assert.notEqual(idSantier, -1, 'fixtura: niciun santier langa sit')
+    const idA = lasaItem(w, Item.PIATRA, 10, A!.wx, A!.wy)
+    const idB = lasaItem(w, Item.PIATRA, 10, B!.wx, B!.wy)
+    const p = pionLa(w, sit.wx, sit.wy)
+    ruleaza(w, 5)
+    const sA = slotItem(w.iteme, idA)
+    const sB = slotItem(w.iteme, idB)
+    const dAB = Math.abs(w.iteme.wx[sA]! - w.iteme.wx[sB]!) + Math.abs(w.iteme.wy[sA]! - w.iteme.wy[sB]!) + Math.abs(w.iteme.z[sA]! - w.iteme.z[sB]!)
+    assert.ok(dAB > R.jobScanRadiusCells, `fixtura: A si B la ${dAB} unul de altul, sub raza`)
+    assert.ok(rezumatMaterial(w, R, p)[Piesa.PERETE]!.exista, 'fixtura: sonda trebuia sa admita 10 + 10 in raza ei')
+    pornestePe(w, p, idSantier, idA)
+    const n = panaCand(w, 6000, (w) => santiereVii(w) === 0)
+    assert.ok(n >= 0, `semintea ${seed}: peretele nu s-a ridicat in 6000 de tickuri (abandonuri: ${w.ratiune.ridicariAbandonate})`)
+    assert.equal(w.ratiune.ridicariAbandonate, 0, `semintea ${seed}`)
+    assert.equal(w.ratiune.unitatiZidite, R.piese[Piesa.PERETE]!.cantitate)
+    assert.equal(w.ratiune.itemePierdute, 0)
+  }
+})
+
+test('raza de scanare LEAGA in sonda: un morman dincolo de ea nu e propus, unul in ea da', () => {
+  // Garda `dist > jobScanRadiusCells` n-avea nicio proba (recenzia din 25.09: scoasa,
+  // sonda propunea un morman la 101 celule si jobul pornea). Cu raza implicita ar
+  // trebui un sit plat de 200; regula se ia mica, mecanismul e acelasi.
+  const RZ: Rules = { ...R, jobScanRadiusCells: 6 }
+  const { w, wx, wy } = sitPlat(12345, 15)
+  pereteLa(w, wx + 3, wy + 7)
+  const p = pionLa(w, wx + 1, wy + 7)
+  ruleaza(w, 5, RZ)
+  const px = cellOf(w.agents.x[p]!)
+  const py = cellOf(w.agents.y[p]!)
+  const idDeparte = lasaItem(w, Item.PIATRA, 20, px + RZ.jobScanRadiusCells + 2, py)
+  assert.equal(rezumatMaterial(w, RZ, p)[Piesa.PERETE]!.slot, -1, `sonda a propus mormanul de la ${RZ.jobScanRadiusCells + 2} celule, raza fiind ${RZ.jobScanRadiusCells}`)
+  const idAproape = lasaItem(w, Item.PIATRA, 20, px + RZ.jobScanRadiusCells - 2, py)
+  const m = rezumatMaterial(w, RZ, p)[Piesa.PERETE]!
+  assert.ok(m.exista && m.slot !== -1 && w.iteme.id[m.slot] === idAproape, `controlul: mormanul din raza trebuia propus (${idDeparte}, ${idAproape})`)
+})
+
+test('raza la A DOUA sursa e 2R de la SANTIER: un morman mai departe se refuza (abandon), unul mai aproape se ia', () => {
+  const RZ: Rules = { ...R, jobScanRadiusCells: 6 }
+  const scena = (dB: number): { w: World; p: number; idB: number; idSantier: number } => {
+    const { w, wx, wy } = sitPlat(12345, 15)
+    const idSantier = pereteLa(w, wx + 3, wy + 7)
+    const idA = lasaItem(w, Item.PIATRA, 10, wx + 2, wy + 7)
+    const idB = lasaItem(w, Item.PIATRA, 10, wx + 3 + dB, wy + 7)
+    const p = pionLa(w, wx + 1, wy + 7)
+    ruleaza(w, 5, RZ)
+    pornestePe(w, p, idSantier, idA, RZ)
+    return { w, p, idB, idSantier }
+  }
+  const departe = scena(2 * RZ.jobScanRadiusCells + 2)
+  const la = panaCand(departe.w, 600, (w) => w.ratiune.ridicariAbandonate === 1 || aDouaSursa(w, departe.p) !== -1, RZ)
+  assert.ok(la >= 0, 'fixtura: nici abandon, nici a doua sursa')
+  assert.equal(departe.w.ratiune.ridicariAbandonate, 1, `mormanul de la ${2 * RZ.jobScanRadiusCells + 2} de santier a fost luat ca a doua sursa`)
+  assert.equal(departe.w.ratiune.motivFinal[departe.p], codMotiv(Reason.LIPSA_MATERIAL))
+  const aproape = scena(2 * RZ.jobScanRadiusCells - 2)
+  const spreB = panaCand(aproape.w, 600, (w) => aDouaSursa(w, aproape.p) === aproape.idB, RZ)
+  assert.ok(spreB >= 0, 'controlul: mormanul de sub 2R trebuia luat ca a doua sursa')
+  const n = panaCand(aproape.w, 2000, (w) => santiereVii(w) === 0, RZ)
+  assert.ok(n >= 0, 'controlul: peretele nu s-a ridicat')
+  assert.equal(aproape.w.ratiune.ridicariAbandonate, 0)
+})
+
+test('lantul de ridicari: 15 + 5 si 19 + 1 se zidesc, 10 + 5 + 5 poarta MATERIAL_IMPRASTIAT pe santier si LIPSA_MATERIAL pe pion', () => {
+  // Recenzia din 25.09: sonda cerea pragul intreg fiecarui morman din suma, deci
+  // 15 + 5 nu pornea niciodata — desi `refaSursa` ar fi luat restul de 5 — iar
+  // cauza de pe santier se stergea (un morman ≥ prag si suma bruta ≥ 20), deci
+  // „De ce nu?" tacea. Un singur lant, `lantAcopera`, pentru sonda, retintire si
+  // cauza: 10 + 5 + 5 nu-l acopera (dupa 10 lipsesc 10, si niciun morman n-are 10).
+  const scena = (marimi: readonly number[]): { w: World; ds: number; p: number } => {
+    const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 9)
+    marimi.forEach((q, k) => lasaItem(w, Item.PIATRA, q, T.x0, T.y0 + 2 + 2 * k))
+    const ds = slotDesemnare(w.desemnari, pereteLa(w, T.x0 + 5, T.y0 + 4))
+    const p = pionLa(w, T.x0 + 2, T.y0 + 4)
+    return { w, ds, p }
+  }
+  for (const marimi of [[15, 5], [19, 1]] as const) {
+    const { w } = scena(marimi)
+    const n = panaCand(w, 1500, (w) => santiereVii(w) === 0)
+    assert.ok(n >= 0, `${marimi.join(' + ')}: peretele nu s-a ridicat`)
+    assert.equal(w.ratiune.unitatiZidite, R.piese[Piesa.PERETE]!.cantitate)
+    assert.equal(w.ratiune.ridicariAbandonate, 0)
+    assert.equal(w.ratiune.itemePierdute, 0)
+  }
+  const { w, ds, p } = scena([10, 5, 5])
+  const t = ruleaza(w, 400)
+  assert.equal(t.joburiPornite, 0, '10 + 5 + 5 nu acopera 20: niciun job nu are voie sa porneasca')
+  assert.equal(w.desemnari.ultimulMotiv[ds], codMotiv(Reason.LIPSA_MATERIAL), 'santierul trebuie sa poarte cauza')
+  assert.equal(w.desemnari.ultimulMotivDetaliu[ds], DetaliuMotiv.MATERIAL_IMPRASTIAT, 'e destul ca suma, dar niciun lant nu-l aduna')
+  assert.equal(w.ratiune.motivFinal[p], codMotiv(Reason.LIPSA_MATERIAL), 'pionul spune ce lipseste, nu FARA_DEPOZIT')
+  assert.equal(w.ratiune.unitatiZidite, 0)
+})
+
+test('un morman cu locurile de claimant PLINE nu intra in suma sondei, chiar daca are liber peste prag', () => {
+  // Recenzia din 25.09 (P4): patru claimanti a cate 5 pe un morman de 75 — 55 liber,
+  // dar niciun loc. Suma il numara, `exista` iesea adevarat, jobul pornea pe
+  // mormanul de 10 de alaturi, si retintirea refuza: 60 de porniri si 59 de
+  // abandonuri in 2000 de tickuri, zero zidit.
+  const scena = (claimanti: number): { m: MaterialPentruPiesa; idP: number; idA: number } => {
+    const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 8)
+    const idP = lasaItem(w, Item.PIATRA, R.itemStackMax, T.x0 + 5, T.y0 + 1)
+    for (let k = 0; k < claimanti; k++) assert.ok(rezervaToate(w.rezervari, 990001 + k, 880001 + k, [cerereCarat(R, idP, 5)]).ok, 'fixtura: rezervarea straina')
+    const idA = lasaItem(w, Item.PIATRA, 10, T.x0 + 2, T.y0 + 4)
+    const p = pionLa(w, T.x0 + 2, T.y0 + 5)
+    pereteLa(w, T.x0 + 2, T.y0 + 7)
+    ruleaza(w, 5)
+    return { m: rezumatMaterial(w, R, p)[Piesa.PERETE]!, idP, idA }
+  }
+  const plin = scena(R.itemClaimantsMax)
+  assert.equal(plin.m.exista, false, 'mormanul plin de claimanti a fost numarat in suma')
+  const loc = scena(R.itemClaimantsMax - 1)
+  assert.ok(loc.m.exista, 'controlul: cu un loc liber, mormanul e sursa')
+})
+
+test('fragmentul VIU ramas cu destul liber ramane a doua sursa: dupa cadere, constructorul il realege, nu abandoneaza', () => {
+  // Recenzia din 25.09: reconcilierea pasa id-ul viu drept „de evitat" catre
+  // `refaSursa`, deci exact mormanul care ramasese cu 15 era exclus, si marfa
+  // ajungea la picioare cu sursa buna la un pas.
+  const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 7)
+  const idSantier = pereteLa(w, T.x0 + 6, T.y0 + 3)
+  const idA = lasaItem(w, Item.PIATRA, 10, T.x0 + 1, T.y0 + 3)
+  const idB = lasaItem(w, Item.PIATRA, 20, T.x0 + 3, T.y0 + 1)
+  const idD = lasaItem(w, Item.PIATRA, 70, T.x0 + 4, T.y0 + 1)
+  const p = pionLa(w, T.x0, T.y0 + 3)
+  evitaTinta(w, p, idD, w.tick + 100000)
+  ruleaza(w, 5)
+  pornestePe(w, p, idSantier, idA)
+  const spreB = panaCand(w, 600, (w) => aDouaSursa(w, p) === idB)
+  assert.ok(spreB >= 0, 'fixtura: a doua sursa trebuia sa fie B')
+  assert.ok(applyCommand(w, { kind: 'desemneaza', wx: T.x0 + 3, wy: T.y0 + 1, z: T.g - 1 }, R).ok)
+  assert.ok(applyCommand(w, { kind: 'dig', wx: T.x0 + 3, wy: T.y0 + 1, z: T.g }, R).ok)
+  const sB = slotItem(w.iteme, idB)
+  assert.ok(sB !== -1 && w.iteme.cantitate[sB]! < 20 && w.iteme.cantitate[sB]! >= pragRidicare(R, R.piese[Piesa.PERETE]!), `fixtura: B trebuia sa ramana viu, cu mai putin dar peste prag (are ${sB === -1 ? 'mort' : w.iteme.cantitate[sB]})`)
+  assert.equal(aDouaSursa(w, p), idB, 'constructorul trebuia sa ramana pe fragmentul lui B')
+  assert.equal(w.ratiune.ridicariAbandonate, 0)
+  assert.equal(w.agents.caraCantitate[p], 10)
+  const n = panaCand(w, 2000, (w) => santiereVii(w) === 0)
+  assert.ok(n >= 0, 'peretele nu s-a ridicat')
+  assert.equal(w.ratiune.itemePierdute, 0)
+})
+
+test('pragul la A DOUA ridicare e ce mai lipseste: un rest de 5 liber nu e sursa cand lipsesc 10, chiar daca e mai aproape', () => {
+  const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 7)
+  const idSantier = pereteLa(w, T.x0 + 6, T.y0 + 3)
+  const idA = lasaItem(w, Item.PIATRA, 10, T.x0 + 1, T.y0 + 3)
+  const idB = lasaItem(w, Item.PIATRA, 25, T.x0 + 1, T.y0 + 2)   // lipit de A, dar 20 din 25 sunt ale altuia
+  const idC = lasaItem(w, Item.PIATRA, 10, T.x0 + 1, T.y0 + 6)   // mai departe, intreg
+  assert.ok(rezervaToate(w.rezervari, 990001, 880001, [cerereCarat(R, idB, 20)]).ok)
+  const p = pionLa(w, T.x0, T.y0 + 3)
+  ruleaza(w, 5)
+  pornestePe(w, p, idSantier, idA)
+  const la = panaCand(w, 600, (w) => aDouaSursa(w, p) !== -1)
+  assert.ok(la >= 0, 'fixtura: nicio a doua sursa')
+  assert.equal(aDouaSursa(w, p), idC, `a doua sursa trebuia sa fie C, nu restul de 5 din B (${idB})`)
+  const n = panaCand(w, 2000, (w) => santiereVii(w) === 0)
+  assert.ok(n >= 0)
+  assert.equal(w.iteme.cantitate[slotItem(w.iteme, idB)], 25, 'B trebuia sa ramana neatins')
+})
+
+test('ostil pe a doua sursa si NICIO alta: ridicarea se abandoneaza (contorizata), nu se lasa marfa prin drumul refuzat', () => {
+  // Recenzia din 25.09: pe piciorul sursei, un drum refuzat fara alta sursa ajungea
+  // in `drumRefuzat` → INCOMPLET pe morman, marfa la picioare, si `ridicariAbandonate`
+  // ramanea 0 — aceeasi stare de joc, alta cifra.
+  const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 7)
+  const idSantier = pereteLa(w, T.x0 + 6, T.y0 + 3)
+  const idA = lasaItem(w, Item.PIATRA, 10, T.x0 + 1, T.y0 + 3)
+  const idB = lasaItem(w, Item.PIATRA, 10, T.x0 + 3, T.y0 + 1)
+  const p = pionLa(w, T.x0, T.y0 + 3)
+  ruleaza(w, 5)
+  pornestePe(w, p, idSantier, idA)
+  const ostil = applyCommand(w, { kind: 'spawnAgent', x: (T.x0 + 3) * 1000 + 500, y: (T.y0 + 1) * 1000 + 500, z: T.g + 1, faction: Faction.SALBATIC }, R)
+  assert.ok(ostil.ok)
+  const o = w.agents.count - 1
+  let refuzuriCuMarfa = 0
+  let lasate = 0
+  let la = -1
+  for (let t = 0; t < 600; t++) {
+    w.agents.x[o] = (T.x0 + 3) * 1000 + 500
+    w.agents.y[o] = (T.y0 + 1) * 1000 + 500
+    w.agents.z[o] = T.g + 1
+    // Refuzul si abandonul cad in ACELASI tick: marfa se numara dinainte.
+    const caraInainte = w.agents.caraCantitate[p]!
+    const r = ruleaza(w, 1)
+    if (r.refuzuriDrum > 0 && caraInainte > 0) refuzuriCuMarfa += r.refuzuriDrum
+    lasate += r.lasateLaPicioare
+    if (w.ratiune.ridicariAbandonate === 1 || lasate > 0) { la = t; break }
+  }
+  assert.ok(la >= 0, 'fixtura: nici abandon, nici marfa lasata')
+  assert.ok(refuzuriCuMarfa >= 1, 'fixtura: drumul spre B nu a fost refuzat cu marfa in mana')
+  assert.equal(w.ratiune.ridicariAbandonate, 1, 'abandonul de pe drumul refuzat trebuie contorizat ca orice abandon')
+  assert.equal(lasate, 1)
+  assert.ok(esteEvitata(w, p, idB), 'sursa cu drumul refuzat se evita pe pereche')
+  assert.equal(w.ratiune.zidiriCuManaGoala, 0)
+  assert.equal(w.ratiune.itemePierdute, 0)
+  void idA
+})
+
 
 test('a doua sursa moare sub constructor (contopire partiala): se retinteste, marfa ramane in mana', () => {
   const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 7)
@@ -1812,7 +2091,7 @@ test('a doua sursa moare sub constructor (contopire partiala): se retinteste, ma
   assert.equal(w.ratiune.itemePierdute, 0)
 })
 
-test('a doua sursa e in alta componenta: se sare fara niciun refuz de drum, si se evita pe pereche', () => {
+test('a doua sursa e in alta componenta: se sare fara niciun refuz de drum, si fara nicio urma pe pereche sau pe morman', () => {
   const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 7)
   const idSantier = pereteLa(w, T.x0 + 6, T.y0 + 3)
   const idA = lasaItem(w, Item.PIATRA, 10, T.x0 + 1, T.y0 + 3)
@@ -1834,7 +2113,11 @@ test('a doua sursa e in alta componenta: se sare fara niciun refuz de drum, si s
   assert.ok(n >= 0, 'peretele nu s-a ridicat')
   assert.equal(sursa2, idC, 'a doua sursa trebuia sa fie C, nu mormanul sigilat')
   assert.equal(refuzuri, 0, 'pionul a plecat spre mormanul sigilat si a ars refuzuri de drum')
-  assert.ok(esteEvitata(w, p, idB), 'mormanul de neatins trebuia evitat pe pereche')
+  // Niciun fel de stare pentru asta: mormanul de neatins nu e al pionului, atat.
+  // Evitarea pe pereche (prima versiune) avea un inel de 4 sloturi drept singura
+  // margine a buclei; racirea globala ar fi ascuns mormanul de toata colonia.
+  assert.ok(!esteEvitata(w, p, idB), 'mormanul de neatins n-are voie sa fie evitat pe pereche: nu e o racire, e un filtru')
+  assert.ok(w.iteme.reincercaLaTick[slotItem(w.iteme, idB)]! <= w.tick, 'mormanul de neatins a fost racit GLOBAL')
 })
 
 test('ostil pe a doua sursa: constructorul ia ALTA sursa, nu pleaca la santier cu mana goala', () => {
@@ -1851,6 +2134,8 @@ test('ostil pe a doua sursa: constructorul ia ALTA sursa, nu pleaca la santier c
   const o = w.agents.count - 1
   let refuzuriCuMarfa = 0
   let sursa2 = -1
+  let sursa3 = -1
+  let lasate = 0
   let n = -1
   for (let t = 0; t < 3000; t++) {
     w.agents.x[o] = (T.x0 + 3) * 1000 + 500
@@ -1858,15 +2143,22 @@ test('ostil pe a doua sursa: constructorul ia ALTA sursa, nu pleaca la santier c
     w.agents.z[o] = T.g + 1
     const r = ruleaza(w, 1)
     if (r.refuzuriDrum > 0 && w.agents.caraCantitate[p]! > 0) refuzuriCuMarfa += r.refuzuriDrum
-    if (sursa2 === -1 && aDouaSursa(w, p) !== -1) sursa2 = aDouaSursa(w, p)
+    lasate += r.lasateLaPicioare
+    const s2 = aDouaSursa(w, p)
+    if (sursa2 === -1 && s2 !== -1) sursa2 = s2
+    if (sursa3 === -1 && s2 !== -1 && s2 !== sursa2) sursa3 = s2
     if (santiereVii(w) === 0) { n = t; break }
   }
   assert.notEqual(n, -1, 'peretele nu s-a ridicat')
   assert.equal(sursa2, idB, 'fixtura: a doua sursa aleasa intai trebuia sa fie B (cea cu ostilul)')
   assert.ok(refuzuriCuMarfa >= 1, 'fixtura: drumul spre B nu a fost refuzat cu marfa in mana')
+  // Chiar ia ALTA sursa, cu marfa in mana — nu ajunge la perete prin marfa lasata
+  // jos si o rescanare (recenzia din 25.09: testul trecea si fara sa mearga la C).
+  assert.equal(sursa3, idC, `dupa refuz, a doua sursa trebuia sa devina C (${idC}), nu ${sursa3}`)
+  assert.equal(lasate, 0, 'marfa din mana nu se lasa jos cand exista alta sursa')
+  assert.equal(w.ratiune.ridicariAbandonate, 0)
   assert.equal(w.ratiune.zidiriCuManaGoala, 0)
   assert.equal(w.ratiune.itemePierdute, 0)
-  void idC
 })
 
 test('a doua sursa se alege dupa drumul curent → morman → santier, nu dupa cel mai apropiat de pion', () => {

@@ -278,7 +278,10 @@ export interface AgentStore {
   jobKind: Uint8Array
   /** Identitatea INSTANTEI de job, din `w.nextId`. E componenta `jobId` din tuplul de rezervare. */
   jobId: Int32Array
-  /** Id-ul tintei: o desemnare (SAPA) sau itemul-sursa (CARA). */
+  /**
+   * Id-ul tintei: o desemnare (SAPA), itemul-sursa (CARA, CONSTRUIESTE — santierul
+   * e in `jobDest`), mormanul de hrana (MANANCA), 0 (DOARME).
+   */
   jobTarget: Int32Array
   /** `PasJob` sau `PasCara`, dupa fel. */
   jobStep: Uint8Array
@@ -307,10 +310,15 @@ export interface AgentStore {
    */
   jobDest: Int32Array
   /**
-   * CARA: cat s-a REZERVAT din morman, inghetat la start. Panoul a aratat de ce
-   * nu se poate citi din `cantitate`: mormanul creste prin contopire intre
-   * rezervare si save, iar la incarcare `cereriPentru` ar re-rezerva alta
-   * cantitate — alta lume, alt hash, si marfa care dispare din mana.
+   * Cat s-a REZERVAT din tinta — ce se RE-REZERVA la incarcare. CARA: din morman,
+   * inghetat la start. CONSTRUIESTE: count-ul pe SURSA CURENTA — rescris de
+   * `refaSursa` la fiecare retintire, 0 dupa RIDICA; totalul piesei e in content
+   * (`rules.piese[].cantitate`), nu aici. MANANCA: portiile rezervate.
+   *
+   * Panoul a aratat de ce nu se poate citi din `cantitate`: mormanul creste prin
+   * contopire intre rezervare si save, iar la incarcare `cereriPentru` ar
+   * re-rezerva alta cantitate — alta lume, alt hash, si marfa care dispare din
+   * mana. Marginile pe CONSTRUIESTE le verifica `valideazaJoburiDeConstruit`.
    */
   jobCantitate: Int32Array
   /**
