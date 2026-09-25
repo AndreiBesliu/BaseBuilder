@@ -3175,7 +3175,7 @@ separat, cu motivul scris.
 
 - **`AO_FACTOR`** — tot singurul număr din arcul de grafică ieșit dintr-o judecată vizuală, nu dintr-o
   măsurătoare.
-- ~~**Cei 205 ms din GATE.md**~~ **ÎNCHIS (reconciliat 25.09):** cifra nu mai există; GATE.md s-a re-etalonat de atunci, fiecare dată în commit separat, iar `check-gate-numbers` o compară la fiecare `npm run check` (175,3 ms ±31,0 la ultima rulare). *Era:* s-au luat dimineața, cu serverul de dev pe mașină; `check-gate-numbers`
+- ~~**Cei 205 ms din GATE.md**~~ **ÎNCHIS 25.09, a doua oară — prima închidere, de dimineață, era greșită:** scrisesem „cifra nu mai există" citind verdele local al lui `check-gate-numbers`, nu fișierul. Cifra exista, iar CI-ul a picat pe ea două ore mai târziu (runner-ul: 139,9 ms, −47%). Re-etalonată la **174 ms** (mediana a 5 măsurători liniștite), în commit separat, cum cere protocolul. *Era:* s-au luat dimineața, cu serverul de dev pe mașină; `check-gate-numbers`
   măsoară azi 179,9 (±22,2). Poarta trece, deci cifra e în toleranța ei — dar e o cifră de mașină
   zgomotoasă. A o re-etalona de două ori într-o zi ar fi mai rău decât a o nota.
 - ~~**Bucla de reîncercare din S-DIG**~~ **ÎNCHIS 19.09** — `remeshAfterEdit` a ieșit în `chunkuriDeRefacut`, headless, cu teste. *Era:* e probată prin `sapaturaUrmatoare`, dar ce face viewerul CU
@@ -3443,7 +3443,7 @@ Fiecare punct s-a verificat **pe cod**, pe un instantaneu `git archive HEAD` (su
 în paralel și rescria fișiere sursă), nu pe text. Punctele închise sunt tăiate pe loc în listele lor,
 cu verdictul lângă; aici e starea întreagă, într-un singur loc.
 
-### Închise, fără să scrie nicăieri — șapte
+### Închise, fără să scrie nicăieri — șase (și una închisă greșit, corectată mai jos)
 
 | punct | cum s-a închis |
 |---|---|
@@ -3452,7 +3452,7 @@ cu verdictul lângă; aici e starea întreagă, într-un singur loc.
 | garda peretelui „fără probă" | o leagă testul de etanșeitate; proba iese PRINSĂ |
 | pasul 6, driverul | `anuleazaDesemnare` filtrează pe `jobTarget` sau `jobDest` |
 | CI-ul n-a rulat niciodată | rulează la fiecare push, verde |
-| cei 205 ms din GATE.md | cifră înlocuită, păzită de `check-gate-numbers` |
+| ~~cei 205 ms din GATE.md~~ | **închis greșit aici** — cifra era în fișier; CI-ul a picat pe ea. Vezi corecția de la sfârșitul zilei |
 | `rang(FARA_SPRIJIN)` (două liste) | **nu se face**: scanerul sare deliberat șantierele nesprijinite fără cauză |
 
 ### Deschise, de joc — fiecare re-verificat pe cod azi
@@ -3570,3 +3570,20 @@ altădată a colapsat `\r`. Scriptul de editare de azi a picat întâi din acela
 - **Măsurătoarea**, care e a unui om: trei rulări cu fereastra vizibilă. E în OWNER_VERIFY 2.
 - **Granularitatea rămâne 100 µs** și sub Electron. Izolarea cross-origin (COOP/COEP) ar da 5 µs;
   `vite preview` nu trimite anteturile. Rezoluția bisecției e 0,25 ms, deci deocamdată nu leagă.
+
+### Corecție la reconcilierea de dimineață: cei 205 ms erau acolo
+
+Push-ul de la 06:08 a picat pe `check-gate-numbers`: runner-ul de GitHub a măsurat meshing-ul
+fixturii M10 la **139,9 ms**, GATE.md spunea **205 ms** — abatere 47%, peste banda de 40%. Local,
+aceeași verificare ieșea verde (175 ms, la 15% de 205), și pe verdele ăla am declarat de dimineață
+punctul „cei 205 ms" ÎNCHIS, cu propoziția „cifra nu mai există". Cifra era în cinci locuri.
+
+Eroarea are un nume în memoriile de lucru: un semnal verde nu e o măsurătoare. Verificarea compară
+cifra cu **mașina pe care rulează**; o cifră luată într-o dimineață zgomotoasă poate sta în bandă pe
+mașina de referință și în afara ei pe runner. Am citit verdele, nu fișierul.
+
+Re-măsurat, liniștit, de cinci ori: 174,1 · 181,8 · 184,0 · 174,4 · 161,5 ms → **mediana 174 ms**.
+Runner-ul e la −20% de ea; 205 era la +18%. Re-etalonarea s-a făcut în commit separat, cu motivul,
+cum cere antetul protocolului; celelalte apariții ale lui 205 din GATE.md s-au aliniat (12 cadre
+pierdute la remesh devin 10), în afară de cea istorică din perechea „219 → 205", care e o
+măsurătoare de atunci, nu o afirmație despre azi.
