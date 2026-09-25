@@ -102,7 +102,7 @@ import { cellKey, decodeCell } from './path.ts'
 import { Desemnare, desemnareLaCelula, DetaliuMotiv, seSapaLa, slotDesemnare, stergeDesemnare } from './desemnari.ts'
 import type { DesignationStore } from './desemnari.ts'
 import type { Cerere } from './rezervari.ts'
-import { elibereaza, elibereazaTinta, elibereazaUna, poateRezerva, rezervaToate, Strat } from './rezervari.ts'
+import { elibereaza, elibereazaTinta, elibereazaUna, poateRezerva, rezervaToate, Strat, sumaRezervata } from './rezervari.ts'
 import { asazaItem, creeazaItem, DetaliuItem, iaDinItem, itemLaCelula, locPeCelula, slotItem, stergeItem } from './iteme.ts'
 import { celulaDeZonaLa, indexZone, marcheazaZoneMurdare, prioritateaLocului, slotCelulaDeZona, slotZona, stergeCelulaDeZona } from './zone.ts'
 
@@ -228,6 +228,13 @@ export interface JobTickReport {
   inaccesibil: number
   rezervat: number
   faraDepozit: number
+  /**
+   * „Verificat la scan, refuzat la start": intre cele doua nu se schimba nimic pe un
+   * singur fir, deci ar trebui sa fie zero MEREU. Contor propriu, nu inghitit in
+   * `rezervat`: cu mai multi claimanti pe morman, o sonda care ar cere altceva decat
+   * pornirea ar produce exact asta — si s-ar ascunde in refuzurile de scanare.
+   */
+  refuzatLaStart: number
   /** Cate celule de depozit s-au examinat in cautarile de destinatie. */
   evaluariDestinatie: number
   /** Cate mormane a produs sapatul. */
@@ -268,7 +275,7 @@ const raport: JobTickReport = {
   scanari: 0, vizite: 0, candidatiExaminati: 0, candidatiTaiati: 0, coridoare: 0,
   joburiPornite: 0, joburiTerminate: 0, joburiAnulate: 0,
   tickuriDeLucru: 0, locuriDeLucruRefacute: 0, refuzuriDrum: 0,
-  faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0, faraDepozit: 0,
+  faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0, faraDepozit: 0, refuzatLaStart: 0,
   evaluariDestinatie: 0, itemeProduse: 0, unitatiProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
   joburiDeNevoie: 0, unitatiMancate: 0, pasiNevoi: 0, plecati: 0, voxeliPrabusiti: 0, pioniCazuti: 0, pieseZidite: 0,
 }
@@ -317,6 +324,30 @@ function rang(r: ReasonCode): number {
 // ce cere un job
 // ---------------------------------------------------------------------------
 
+/**
+ * Cererea pe stratul CARAT — UNA pentru toate: carat, construit, sonda din rezumat.
+ *
+ * Tuplul e CONSTANT pe strat: `maxCount` e plafonul stivei, `maxClaimants` e regula.
+ * NU citeste cantitatea vie a mormanului. Aia intra o singura data, la cererea NOUA,
+ * in mana apelantului: `liber = Q − sumaRezervata` (`liberPeItem`), din care se cere
+ * `count`. Panoul din 25.09 a masurat de ce nu are voie sa fie altfel: un
+ * `maxCount = Q vie` in tuplu anula joburi corecte la incarcare, fiindca Q scade
+ * pe cai pe care rezervarile nu le vad (mancat pe MANCAT, cadere cu contopire
+ * partiala) — iar `verificaRezervari` ia minimul peste tupluri vechi si s-ar
+ * inrosi pe un morman care a CRESCUT intre doua cereri.
+ *
+ * Cinci locuri scriau tuplul literal, cu `maxClaimants: 1`. Cinci copii ale
+ * aceluiasi fapt sunt cinci feluri de a-l strica pe unul singur.
+ */
+export function cerereCarat(rules: Rules, itemId: number, count: number): Cerere {
+  return { targetId: itemId, layer: Strat.CARAT, count, maxCount: rules.itemStackMax, maxClaimants: rules.itemClaimantsMax }
+}
+
+/** Cat mai e LIBER pe un morman: cantitatea vie minus ce tin deja altii pe CARAT. Poate fi 0. */
+export function liberPeItem(w: World, is: number): number {
+  return w.iteme.cantitate[is]! - sumaRezervata(w.rezervari, w.iteme.id[is]!, Strat.CARAT)
+}
+
 /** Sapatul: un singur sapator pe un voxel. `count`/`maxCount` sunt 1/1 fiindca un voxel nu se imparte. */
 export function cereriSapa(targetId: number): readonly Cerere[] {
   return [{ targetId, layer: Strat.LUCRU, count: 1, maxCount: 1, maxClaimants: 1 }]
@@ -324,13 +355,13 @@ export function cereriSapa(targetId: number): readonly Cerere[] {
 
 /**
  * Caratul: destinatia (celula de zona) se tine tot jobul; sursa (itemul) doar
- * pana la ridicare inclusiv. Un caraus per morman (v1, `maxClaimants = 1`):
- * `haulCarryMax` e ce leaga, restul mormanului ramane jobului urmator.
- * `cant` e cantitatea INGHETATA in job, nu cea vie a mormanului.
+ * pana la ridicare inclusiv. Pe morman incap `itemClaimantsMax` carausi, fiecare
+ * cu `cant`-ul lui din ce era LIBER la scanare (75 = 50 + 25); `haulCarryMax` e
+ * ce leaga un drum. `cant` e cantitatea INGHETATA in job, nu cea vie a mormanului.
  */
 export function cereriCara(rules: Rules, itemId: number, destId: number, cant: number, step: number): readonly Cerere[] {
   const cereri: Cerere[] = [{ targetId: destId, layer: Strat.LUCRU, count: cant, maxCount: rules.itemStackMax, maxClaimants: 1 }]
-  if (step <= PasCara.RIDICA) cereri.push({ targetId: itemId, layer: Strat.CARAT, count: cant, maxCount: cant, maxClaimants: 1 })
+  if (step <= PasCara.RIDICA) cereri.push(cerereCarat(rules, itemId, cant))
   return cereri
 }
 
@@ -343,9 +374,9 @@ export function cereriCara(rules: Rules, itemId: number, destId: number, cant: n
  * ITEMULUI, deci cu desemnarea in `jobTarget` constructorul n-ar mai fi intrerupt
  * cand mormanul-sursa se muta. Ar muta defectul dintr-un loc in altul.
  */
-export function cereriConstruieste(itemId: number, desemnareId: number, cant: number, step: number): readonly Cerere[] {
+export function cereriConstruieste(rules: Rules, itemId: number, desemnareId: number, cant: number, step: number): readonly Cerere[] {
   const cereri: Cerere[] = [{ targetId: desemnareId, layer: Strat.LUCRU, count: 1, maxCount: 1, maxClaimants: 1 }]
-  if (step <= PasConstruieste.RIDICA) cereri.push({ targetId: itemId, layer: Strat.CARAT, count: cant, maxCount: cant, maxClaimants: 1 })
+  if (step <= PasConstruieste.RIDICA) cereri.push(cerereCarat(rules, itemId, cant))
   return cereri
 }
 
@@ -700,10 +731,12 @@ export function rezumatMaterial(w: World, rules: Rules, slot: number): readonly 
         if (dist > vechi.dMin) continue
         if (dist === vechi.dMin && it.id[s]! > it.id[vechi.slot]!) continue
       }
-      // Rezervarea se cere ABIA aici: e cea mai scumpa dintre conditii, si o
-      // plateste doar mormanul care chiar ar fi ales.
-      const cerere = { targetId: it.id[s]!, layer: Strat.CARAT, count: spec.cantitate, maxCount: spec.cantitate, maxClaimants: 1 }
-      if (!poateRezerva(w.rezervari, eu, cerere).ok) continue
+      // Ce e LIBER si rezervarea se cer ABIA aici: sunt cele mai scumpe dintre
+      // conditii (un `Map.get` fiecare), si le plateste doar mormanul care chiar
+      // ar fi ales. `liber`, nu `cant`: cu mai multi claimanti pe strat, un morman
+      // de 75 tinut cu 60 mai are 15, si un perete de 20 nu incape in ele.
+      if (liberPeItem(w, s) < spec.cantitate) continue
+      if (!poateRezerva(w.rezervari, eu, cerereCarat(rules, it.id[s]!, spec.cantitate)).ok) continue
       rezumatMat[p] = { exista: true, dMin: dist, slot: s }
     }
   }
@@ -1060,8 +1093,11 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
         noteaza(Reason.PREA_DEPARTE)
         continue
       }
-      const cant = Math.min(it.cantitate[s]!, rules.haulCarryMax)
-      if (!poateRezerva(w.rezervari, eu, { targetId: it.id[s]!, layer: Strat.CARAT, count: cant, maxCount: cant, maxClaimants: 1 }).ok) {
+      // Cat e LIBER, nu cat e in morman: cu mai multi claimanti pe strat, al doilea
+      // caraus cere restul (75 = 50 + 25). Un `liber` de zero da o cerere de zero, pe
+      // care storeul o refuza la usa — si refuzul se numara ca REZERVAT, ca orice alt.
+      const cant = Math.min(liberPeItem(w, s), rules.haulCarryMax)
+      if (!poateRezerva(w.rezervari, eu, cerereCarat(rules, it.id[s]!, cant)).ok) {
         raport.rezervat++
         noteaza(Reason.REZERVAT)
         continue
@@ -1399,8 +1435,9 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       noteaza(Reason.INACCESIBIL)
       continue
     }
-    // (b) destinatia.
-    const cant = Math.min(it.cantitate[s]!, rules.haulCarryMax)
+    // (b) destinatia. Aceeasi cantitate ca in trecerea ieftina: intre ele nu s-a
+    // schimbat nimic pe un singur fir.
+    const cant = Math.min(liberPeItem(w, s), rules.haulCarryMax)
     const prioLoc = prioritateaLocului(w.zone, ixx, iy, iz)
     const dest = cautaDestinatie(w, rules, slot, it.kind[s]!, cant, ixx, iy, iz, prioLoc, ax, ay, az)
     if (!dest.ok) {
@@ -1453,8 +1490,10 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
   if (!out.ok) {
     // Verificat la scan, refuzat la start: intre ele nu s-a schimbat nimic pe
     // un singur fir, deci nu se intampla. Dar contractul cere re-verificarea,
-    // si refuzul se numara, nu se inghite.
+    // si refuzul se numara, nu se inghite — in contorul LUI, pe care testele il
+    // cer zero, nu in `rezervat`, unde s-ar pierde printre refuzurile de scanare.
     raport.rezervat++
+    raport.refuzatLaStart++
     rat.stare[slot] = StareRatiune.RESPINS
     rat.motivFinal[slot] = codMotiv(out.reason)
     return false
@@ -1531,15 +1570,17 @@ export function pornesteConstruieste(
   if (w.iteme.kind[is] !== cerut) {
     return refuse(Reason.LIPSA_MATERIAL, { cerut, gasit: w.iteme.kind[is]! })
   }
-  if (w.iteme.cantitate[is]! < spec.cantitate) {
-    return refuse(Reason.LIPSA_MATERIAL, { cerut: spec.cantitate, gasit: w.iteme.cantitate[is]! })
+  // Ce e LIBER, nu ce e in morman: restul poate fi deja al altcuiva.
+  const liber = liberPeItem(w, is)
+  if (liber < spec.cantitate) {
+    return refuse(Reason.LIPSA_MATERIAL, { cerut: spec.cantitate, gasit: liber })
   }
   const jobId = w.nextId
   const out = rezervaToate(
     w.rezervari,
     a.id[slot]!,
     jobId,
-    cereriConstruieste(w.iteme.id[is]!, d.id[ds]!, spec.cantitate, PasConstruieste.MERGE_SURSA),
+    cereriConstruieste(rules, w.iteme.id[is]!, d.id[ds]!, spec.cantitate, PasConstruieste.MERGE_SURSA),
   )
   if (!out.ok) return out
   w.nextId++
@@ -2696,6 +2737,30 @@ export function uitaRacirileDeMarfa(w: World): void {
 }
 
 /** Exista tinta unei rezervari? Pentru `verificaRezervari` (clauza 5), in teste si acceptanta. */
+/**
+ * Oracolul de CANTITATE, separat de store: pe fiecare morman viu, suma count-urilor
+ * CARAT nu depaseste ce e in el. Pe un fel COMESTIBIL se admite ce tin mancatorii
+ * pe MANCAT — stratul lor nu vede CARAT, deci un caraus cu 50 rezervate dintr-un
+ * morman de 75 din care doi flamanzi iau 40 e o stare LEGALA (masurat pe 25.09:
+ * 6 din 3600 de tickuri pe `lumeBogata`), iar `ridica` ia ce gaseste.
+ *
+ * NU e clauza 3 din `verificaRezervari`: aia e o proprietate a storeului (suma sub
+ * plafonul stratului), aceeasi in ambele lumi. Asta citeste Q vie din `w.iteme`.
+ * Ruleaza in teste, nu in tick.
+ */
+export function verificaCantitatiRezervate(w: World, rules: Rules): Outcome<void> {
+  const it = w.iteme
+  for (let s = 0; s < it.count; s++) {
+    if (it.alive[s] === 0) continue
+    const carat = sumaRezervata(w.rezervari, it.id[s]!, Strat.CARAT)
+    const toleranta = rules.nutritie[it.kind[s]!]! > 0 ? sumaRezervata(w.rezervari, it.id[s]!, Strat.MANCAT) : 0
+    if (carat > it.cantitate[s]! + toleranta) {
+      return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'mai mult rezervat pe CARAT decat e in morman', id: it.id[s]!, fel: it.kind[s]!, cantitate: it.cantitate[s]!, carat, toleranta })
+    }
+  }
+  return accept()
+}
+
 export function existaTinta(w: World): (targetId: number, layer: number) => boolean {
   return (targetId, layer) => {
     if (layer === Strat.CARAT || layer === Strat.MANCAT) return slotItem(w.iteme, targetId) !== -1
@@ -3400,9 +3465,9 @@ const DRIVER_CONSTRUIESTE: DriverJob = {
   // Zidirea poate face o celula de zona necalcabila, iar `zidesteVoxel` chiar
   // retrage celulele afectate — deci indexul se murdareste.
   atingeZone: true,
-  cereri(w, _rules, slot) {
+  cereri(w, rules, slot) {
     const a = w.agents
-    return cereriConstruieste(a.jobTarget[slot]!, a.jobDest[slot]!, a.jobCantitate[slot]!, a.jobStep[slot]!)
+    return cereriConstruieste(rules, a.jobTarget[slot]!, a.jobDest[slot]!, a.jobCantitate[slot]!, a.jobStep[slot]!)
   },
   tinteVii(w, slot) {
     const a = w.agents

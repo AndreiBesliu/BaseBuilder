@@ -33,7 +33,8 @@ import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { CATEGORII, Categorie, FelJob, Piesa } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { applyCommand } from '../src/sim/commands.ts'
-import { anuleazaDesemnare, celulaDeLucru, comparaCandidati, constructiaPrevizualizata, evitaTinta, pornesteConstruieste, unitatiDeMunca } from '../src/sim/joburi.ts'
+import { anuleazaDesemnare, celulaDeLucru, comparaCandidati, constructiaPrevizualizata, evitaTinta, lastJobReport, pornesteConstruieste, unitatiDeMunca } from '../src/sim/joburi.ts'
+import type { Rules } from '../src/sim/content.ts'
 import { slotItem } from '../src/sim/iteme.ts'
 import { rezervariPentru, Strat } from '../src/sim/rezervari.ts'
 import { DetaliuMotiv } from '../src/sim/desemnari.ts'
@@ -42,7 +43,7 @@ import { panaCand } from './fixturi.ts'
 import { PasCara, PasConstruieste } from '../src/sim/state.ts'
 import { asazaItem, itemLaCelula } from '../src/sim/iteme.ts'
 import { lasaItem } from './fixturi.ts'
-import { desemneaza, laSit, marfaTotala, R, ruleaza, solid, solidLaDistanta } from './fixturi.ts'
+import { desemneaza, laSit, marfaTotala, patratPlat, R, ruleaza, solid, solidLaDistanta } from './fixturi.ts'
 import { createWorld } from '../src/sim/world.ts'
 import { WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 
@@ -1468,4 +1469,101 @@ test('cauza „lipsa material" nu mosteneste detaliul cauzei dinainte', () => {
     assert.equal(w.desemnari.ultimulMotivDetaliu[s]!, DetaliuMotiv.NICIUNUL,
       `santierul ${id}: detaliul ${w.desemnari.ultimulMotivDetaliu[s]} a ramas agatat de cauza veche`)
   }
+})
+
+// ---------------------------------------------------------------------------
+// logistica constructiei (S20-23, taietura 3)
+// ---------------------------------------------------------------------------
+
+/** Un santier de PERETE pe solul de la (wx, wy). */
+function pereteLa(w: World, wx: number, wy: number, rules: Rules = R): void {
+  const g = solid(w, wx, wy)
+  assert.notEqual(g, null, `nu e sol la ${wx},${wy}`)
+  const r = applyCommand(w, { kind: 'desemneaza', wx, wy, z: g! + 1, piesa: Piesa.PERETE }, rules)
+  assert.ok(r.ok, `santier refuzat la ${wx},${wy}: ${JSON.stringify(r)}`)
+}
+
+/** Cate santiere de construit mai sunt vii. */
+function santiereVii(w: World): number {
+  let n = 0
+  for (let s = 0; s < w.desemnari.count; s++) if (w.desemnari.alive[s] === 1 && w.desemnari.kind[s] === Desemnare.CONSTRUIESTE) n++
+  return n
+}
+
+/**
+ * Trei constructori, trei pereti, si materialul fie intr-UN morman de 75, fie in
+ * trei de 25. Intoarce tickurile pana la ultimul perete si cati claimanti a tinut
+ * mormanul mare deodata, la maxim.
+ */
+function treiPereti(seed: number, unMorman: boolean, rules: Rules): { tickuri: number; maxClaimanti: number; refuzatLaStart: number } {
+  const { w, sit } = laSit(seed, 0, [], rules)
+  const T = patratPlat(w, sit, 6, 2, 30)
+  assert.ok(T, 'fixtura: niciun patrat plat')
+  const mormane: number[] = []
+  if (unMorman) mormane.push(lasaItem(w, Item.PIATRA, R.itemStackMax, T!.x0, T!.y0, rules))
+  else for (let k = 0; k < 3; k++) mormane.push(lasaItem(w, Item.PIATRA, 25, T!.x0, T!.y0 + k, rules))
+  for (let k = 0; k < 3; k++) pereteLa(w, T!.x0 + 4, T!.y0 + k, rules)
+  for (let i = 0; i < 3; i++) {
+    const g = solid(w, T!.x0 + 2, T!.y0 + i)
+    assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (T!.x0 + 2) * 1000 + 500, y: (T!.y0 + i) * 1000 + 500, z: g! + 1, faction: 0 }, rules).ok)
+  }
+  let maxClaimanti = 0
+  let refuzatLaStart = 0
+  const tickuri = panaCand(w, 3000, (w) => {
+    refuzatLaStart += lastJobReport().refuzatLaStart
+    for (const id of mormane) {
+      const n = new Set(rezervariPentru(w.rezervari, id, Strat.CARAT).map((r) => r.claimant)).size
+      if (n > maxClaimanti) maxClaimanti = n
+    }
+    return santiereVii(w) === 0
+  }, rules)
+  assert.ok(tickuri >= 0, 'peretii nu s-au ridicat in 3000 de tickuri')
+  return { tickuri, maxClaimanti, refuzatLaStart }
+}
+
+test('trei constructori pe UN morman de 75: fara lacat pornesc toti; cu lacatul de dinainte se serializeaza', () => {
+  // Masurat pe 25.09, INAINTE de reparatie: un morman 220/420/241 de tickuri,
+  // trei mormane 112/112/120 — lacatul exclusiv pe morman plus `jobRescanTicks`.
+  // Testul ruleaza AMBELE reguli: cea implicita trebuie sa arate mecanismul (doi
+  // pe acelasi morman deodata) si sa nu piarda mai mult de un tact de rescanare
+  // fata de varianta cu trei mormane; controlul cu `itemClaimantsMax: 1` trebuie
+  // sa fie vizibil mai lent — altfel testul n-ar deosebi reparatia de nimic.
+  const seed = 7
+  const trei = treiPereti(seed, false, R)
+  const unul = treiPereti(seed, true, R)
+  const lacat = treiPereti(seed, true, { ...R, itemClaimantsMax: 1 })
+  assert.ok(unul.maxClaimanti >= 2, `mormanul de 75 n-a fost tinut de doi constructori deodata (max ${unul.maxClaimanti})`)
+  assert.ok(unul.tickuri <= trei.tickuri + R.jobRescanTicks, `un morman: ${unul.tickuri} tickuri, trei mormane: ${trei.tickuri} — mai mult de un tact de rescanare pierdut`)
+  assert.equal(lacat.maxClaimanti, 1, 'controlul: cu itemClaimantsMax 1 nu incap doi')
+  assert.ok(lacat.tickuri > unul.tickuri + R.jobRescanTicks, `controlul: lacatul (${lacat.tickuri}) nu e mai lent decat reparatia (${unul.tickuri})`)
+  assert.equal(unul.refuzatLaStart + trei.refuzatLaStart + lacat.refuzatLaStart, 0, 'verificat la scan, refuzat la start')
+})
+
+test('doua mormane de 20, doi constructori: al doilea ia AL DOILEA morman, nu e refuzat la start pe primul', () => {
+  // Sonda din `rezumatMaterial` trebuie sa se uite la ce e LIBER: primul constructor
+  // tine mormanul A cu 20, deci pentru al doilea A are zero liber, si sonda ii da
+  // B. O sonda care se uita la cat E in morman ar propune tot A, iar pornirea l-ar
+  // refuza — „verificat la scan, refuzat la start", un scan pierdut pe fiecare.
+  const { w, sit } = laSit(7, 0)
+  const T = patratPlat(w, sit, 6, 2, 30)
+  assert.ok(T)
+  const a = lasaItem(w, Item.PIATRA, 20, T!.x0, T!.y0)
+  const b = lasaItem(w, Item.PIATRA, 20, T!.x0, T!.y0 + 1)
+  for (let k = 0; k < 2; k++) pereteLa(w, T!.x0 + 4, T!.y0 + k)
+  for (let i = 0; i < 2; i++) {
+    const g = solid(w, T!.x0 + 2, T!.y0 + i)
+    assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (T!.x0 + 2) * 1000 + 500, y: (T!.y0 + i) * 1000 + 500, z: g! + 1, faction: 0 }, R).ok)
+  }
+  let refuzatLaStart = 0
+  let ambii = -1
+  const n = panaCand(w, 3000, (w) => {
+    refuzatLaStart += lastJobReport().refuzatLaStart
+    const tinte = [0, 1].filter((i) => w.agents.jobKind[i] === FelJob.CONSTRUIESTE).map((i) => w.agents.jobTarget[i]!)
+    if (ambii === -1 && tinte.length === 2 && tinte[0] !== tinte[1]) ambii = w.tick
+    return santiereVii(w) === 0
+  })
+  assert.ok(n >= 0)
+  assert.ok(ambii >= 0 && ambii <= 2 * R.jobRescanTicks, `cei doi n-au tinut mormane DIFERITE in doua tacte de rescanare (${ambii})`)
+  assert.equal(refuzatLaStart, 0, 'verificat la scan, refuzat la start')
+  assert.ok(slotItem(w.iteme, a) === -1 && slotItem(w.iteme, b) === -1, 'ambele mormane trebuie consumate')
 })

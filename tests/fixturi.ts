@@ -229,3 +229,22 @@ export function lumeBogata(seed: number): World {
   }
   return w
 }
+
+/**
+ * `lumeBogata` plus ce cere logistica constructiei: un morman MARE de piatra (75,
+ * din care incap trei pereti — mai multi claimanti pe acelasi morman), patru
+ * mormane MICI de cate 10 la o celula de sit (sursa partiala, doua ridicari), si
+ * inca doi pereti. Fixtura proprie, nu `lumeBogata` largita: aia e baza a sase
+ * suite de mutatii si a contoarelor de viata din M5 — o schimbare acolo muta tot.
+ */
+export function lumeFragmentata(seed: number): World {
+  const w = lumeBogata(seed)
+  const sit = gasesteSit(w, seed)
+  lasaItem(w, Item.PIATRA, 75, sit.wx + 3, sit.wy + 5)
+  for (let i = 0; i < 4; i++) lasaItem(w, Item.PIATRA, 10, sit.wx + 1 + (i % 2), sit.wy + 3 + Math.floor(i / 2))
+  for (let i = 0; i < 2; i++) {
+    const g = solid(w, sit.wx + 6 + i, sit.wy + 1)
+    if (g !== null) applyCommand(w, { kind: 'desemneaza', wx: sit.wx + 6 + i, wy: sit.wy + 1, z: g + 1, piesa: Piesa.PERETE }, R)
+  }
+  return w
+}

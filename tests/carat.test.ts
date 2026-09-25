@@ -1020,3 +1020,51 @@ test('racirea pe marfa se deriva din cati CANDIDATI sunt, nu din cate mormane ex
   // Se observa cu un tick dupa scriere, deci fereastra masurata e cu 1-2 mai mica.
   assert.ok(fereastra <= dinCandidati && fereastra >= dinCandidati - 3, `fereastra ${fereastra} nu e cea derivata din candidati (${dinCandidati}); din toate mormanele ar fi ${dinToate}`)
 })
+
+test('doi carausi pe un morman de 75: 50 + 25, amandoi porniti INAINTE de prima ridicare, 75 in depozit', () => {
+  // Pana la taietura 3 a logisticii, `maxClaimants: 1` pe CARAT: al doilea caraus
+  // astepta ca primul sa RIDICE, apoi inca pana la `jobRescanTicks`. Acum al doilea
+  // cere ce e LIBER (75 − 50 = 25) in aceeasi scanare.
+  const { w, item, zona } = fixturaCarat(611, 2, R.itemStackMax)
+  let impreuna = -1
+  const n = panaCand(w, 600, (w) => {
+    const is = slotItem(w.iteme, item)
+    if (is === -1) return true
+    const carausi = [0, 1].filter((i) => w.agents.jobKind[i] === FelJob.CARA && w.agents.jobTarget[i] === item && w.agents.jobStep[i]! <= PasCara.RIDICA)
+    if (carausi.length === 2 && impreuna === -1 && w.iteme.cantitate[is] === R.itemStackMax) impreuna = w.tick
+    return false
+  })
+  assert.ok(impreuna >= 0, 'cei doi carausi nu au tinut NICIODATA acelasi morman intreg, in acelasi timp')
+  assert.ok(n >= 0)
+  // Cantitatile inghetate in joburi: 50 si 25, in ordinea in care au cerut.
+  const cantitati = [0, 1].map((i) => w.agents.jobCantitate[i]!).sort((a, b) => b - a)
+  assert.deepEqual(cantitati, [R.haulCarryMax, R.itemStackMax - R.haulCarryMax])
+  const gata = panaCand(w, 900, (w) => itemeInZona(w, zona).cantitate === R.itemStackMax)
+  assert.ok(gata >= 0, 'cei 75 n-au ajuns intregi in depozit')
+  assert.equal(marfaTotala(w), R.itemStackMax)
+  assert.equal(w.ratiune.itemePierdute, 0)
+  assert.equal(w.rezervari.total, 0)
+  assert.ok(verificaRezervari(w.rezervari, w.agents, existaTinta(w)).ok)
+})
+
+test('un morman tinut cu totul de altii nu mai porneste un caraus: cererea de zero e refuzata si se numara REZERVAT', () => {
+  // Trei carausi, un morman de 75, doi ii tin 50 + 25. Al treilea nu are ce cere.
+  const { w, item } = fixturaCarat(612, 3, R.itemStackMax)
+  let alTreileaLiber = false
+  let refuzat = 0
+  const n = panaCand(w, 600, (w) => {
+    const is = slotItem(w.iteme, item)
+    if (is === -1) return true
+    const carausi = [0, 1, 2].filter((i) => w.agents.jobKind[i] === FelJob.CARA && w.agents.jobTarget[i] === item && w.agents.jobStep[i]! <= PasCara.RIDICA)
+    if (carausi.length === 2 && w.iteme.cantitate[is] === R.itemStackMax) {
+      const liber = [0, 1, 2].find((i) => !carausi.includes(i))!
+      if (w.agents.jobKind[liber] === 0) alTreileaLiber = true
+      if (w.ratiune.motivFinal[liber] === codMotiv(Reason.REZERVAT)) refuzat++
+    }
+    return false
+  })
+  assert.ok(n >= 0)
+  assert.ok(alTreileaLiber, 'al treilea caraus a pornit un job pe un morman fara nimic liber')
+  assert.ok(refuzat > 0, 'al treilea nu a spus niciodata REZERVAT')
+  assert.equal(marfaTotala(w), R.itemStackMax)
+})

@@ -262,3 +262,19 @@ test('INVARIANT: clauza „tinta exista" prinde o rezervare pe un id mort, si nu
     assert.equal(out.params.targetId, 700)
   }
 })
+
+test('o cerere de ZERO e refuzata la usa, si una negativa la fel: un job de nimic nu porneste', () => {
+  // Cu mai multi claimanti pe un morman, `liber = Q − suma` poate fi 0: un caraus
+  // ar cere 0, ar trece de plafon si de locuri, ar porni, ar merge, ar ridica
+  // nimic si s-ar incheia INTRERUPT la depozit — cu celula de depozit tinuta
+  // degeaba tot drumul. Usa e in store, o singura data, nu in fiecare apelant.
+  const s = createReservations()
+  const zero = poateRezerva(s, 1, cerere(7, { layer: Strat.CARAT, count: 0, maxCount: 75, maxClaimants: 4 }))
+  assert.equal(zero.ok, false)
+  if (!zero.ok) assert.equal(zero.reason, Reason.VALOARE_INVALIDA)
+  const negativ = rezervaToate(s, 1, 100, [cerere(7, { layer: Strat.CARAT, count: -5, maxCount: 75, maxClaimants: 4 })])
+  assert.equal(negativ.ok, false)
+  assert.equal(s.total, 0, 'un refuz nu scrie nimic')
+  // Controlul: aceeasi cerere cu 1 trece.
+  assert.equal(poateRezerva(s, 1, cerere(7, { layer: Strat.CARAT, count: 1, maxCount: 75, maxClaimants: 4 })).ok, true)
+})

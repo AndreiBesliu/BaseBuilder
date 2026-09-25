@@ -121,6 +121,21 @@ export function rezervariPentru(s: ReservationStore, targetId: number, layer: St
 }
 
 /**
+ * Cat tin TOTI claimantii pe (tinta, strat), insumat. Un singur `Map.get`.
+ *
+ * E jumatatea de „cat e liber" pe care storeul o stie; cealalta jumatate (cat e
+ * in morman) e a apelantului, si se citeste O SINGURA DATA, la cererea noua.
+ * Tuplul stocat nu contine niciodata cantitatea vie — vezi `cerereCarat`.
+ */
+export function sumaRezervata(s: ReservationStore, targetId: number, layer: StratId): number {
+  const lista = s.peTinta.get(cheieRezervare(targetId, layer))
+  if (!lista) return 0
+  let suma = 0
+  for (const r of lista) suma += r.count
+  return suma
+}
+
+/**
  * Poate `claimant` sa obtina cererea, tinand cont si de ce ar fi luat deja in
  * aceeasi tranzactie (`pendingCount`, `pendingSelf`)?
  *
@@ -134,6 +149,10 @@ function verificaUna(
   pendingCount: number,
   pendingSelf: boolean,
 ): Outcome<void> {
+  // O cerere de ZERO nu tine nimic si totusi ocupa un loc: ar porni un job care
+  // merge, ridica nimic si se incheie INTRERUPT la depozit, cu o celula de depozit
+  // tinuta degeaba tot drumul. Se refuza la USA, nu se descopera in rulare.
+  if (c.count < 1) return refuse(Reason.VALOARE_INVALIDA, { targetId: c.targetId, layer: c.layer, count: c.count })
   const lista = s.peTinta.get(cheieRezervare(c.targetId, c.layer))
   let altii = 0
   let primulAltul: Rezervare | null = null

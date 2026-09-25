@@ -294,9 +294,24 @@ export const MUTATII = [
   {
     n: "mormanul prea mic e acceptat (drum irosit, refuz abia la final)",
     f: "src/sim/joburi.ts",
-    a: "  if (w.iteme.cantitate[is]! < spec.cantitate) {",
+    a: "  if (liber < spec.cantitate) {",
     b: "  if (false) {",
     t: 'tests/constructie.test.ts', e: "un morman de alt fel, sau prea mic, se refuza la PORNIRE",
+  },
+  // --- logistica constructiei, commit 1 (25.09.2026) ---
+  {
+    n: "itemClaimantsMax ignorat: lacatul exclusiv pe morman revine",
+    f: "src/sim/joburi.ts",
+    a: "  return { targetId: itemId, layer: Strat.CARAT, count, maxCount: rules.itemStackMax, maxClaimants: rules.itemClaimantsMax }",
+    b: "  return { targetId: itemId, layer: Strat.CARAT, count, maxCount: rules.itemStackMax, maxClaimants: 1 }",
+    t: 'tests/constructie.test.ts', e: "trei constructori pe UN morman",
+  },
+  {
+    n: "sonda din rezumat se uita la cat E in morman, nu la cat e LIBER (verificat la scan, refuzat la start)",
+    f: "src/sim/joburi.ts",
+    a: "      if (liberPeItem(w, s) < spec.cantitate) continue",
+    b: "      if (it.cantitate[s]! < spec.cantitate) continue",
+    t: 'tests/constructie.test.ts', e: "doua mormane de 20, doi constructori",
   },
   {
     n: "sursa se verifica si DUPA ce materialul e in mana",

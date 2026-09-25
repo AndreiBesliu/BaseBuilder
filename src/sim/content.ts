@@ -154,6 +154,14 @@ export interface Rules {
   readonly haulDestMaxCells: number
   /** Cat de departe de item se cauta o celula de depozit, in celule (Manhattan). */
   readonly haulDestRadiusCells: number
+  /**
+   * Cati pioni DISTINCTI pot tine acelasi morman deodata pe stratul CARAT —
+   * carausi si constructori laolalta. Pana la taietura 3 era 1, scris literal in
+   * cinci locuri: un morman de 75 hranea un singur drum o data, iar al doilea
+   * pretendent astepta `jobRescanTicks`. Masurat: 3 constructori pe un morman,
+   * 220–420 de tickuri; pe trei mormane, 112–120.
+   */
+  readonly itemClaimantsMax: number
   /** Cate mormane incap in lume. Plafon dur: cand e atins, sapatul refuza pana se cara ceva. */
   readonly itemCapacity: number
   /** Cate zone incap. */
@@ -315,6 +323,7 @@ const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield' | 'piese' | 'nevoi' | '
   haulDropUnits: { min: 1, max: 1000000 },
   haulDestMaxCells: { min: 1, max: 1000000 },
   haulDestRadiusCells: { min: 1, max: 4096 },
+  itemClaimantsMax: { min: 1, max: 64 },
   itemCapacity: { min: 1, max: 1000000 },
   zoneCapacity: { min: 1, max: 1000000 },
   zoneCellCapacity: { min: 1, max: 1000000 },
@@ -947,6 +956,7 @@ export const DEFAULT_RULES: Rules = {
   haulDropUnits: 100,
   haulDestMaxCells: 512,
   haulDestRadiusCells: 96,
+  itemClaimantsMax: 4,
   itemCapacity: 4096,
   zoneCapacity: 256,
   zoneCellCapacity: 4096,

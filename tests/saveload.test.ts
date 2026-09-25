@@ -10,9 +10,9 @@ import { groundLevelM, materialAt, WORLD_CELLS } from '../src/sim/terrain/terrai
 import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { FelJob } from '../src/sim/state.ts'
 import { Desemnare } from '../src/sim/desemnari.ts'
-import { verificaRezervari } from '../src/sim/rezervari.ts'
-import { existaTinta } from '../src/sim/joburi.ts'
-import { lumeBogata, R } from './fixturi.ts'
+import { rezervariPentru, Strat, verificaRezervari } from '../src/sim/rezervari.ts'
+import { existaTinta, verificaCantitatiRezervate } from '../src/sim/joburi.ts'
+import { lumeBogata, lumeFragmentata, R } from './fixturi.ts'
 
 /**
  * Agenti asezati PE SOL.
@@ -329,4 +329,31 @@ test('nicio rezervare pe o tinta care nu mai exista, la FIECARE tick', () => {
     }
   }
   assert.equal(granite, SEMINTE_REZERVARI.length * TICKURI_REZERVARI)
+})
+
+test('suma rezervata pe un morman nu depaseste ce e in el, la FIECARE tick — cu toleranta scrisa pe HRANA', () => {
+  // A patra plasa, pe o alta axa decat storeul: `verificaRezervari` cere suma sub
+  // PLAFONUL stratului (constant), asta cere suma sub CANTITATEA VIE. Pe HRANA
+  // mancatul scade Q pe stratul MANCAT fara sa vada CARAT — masurat: 6 din 3600
+  // de tickuri pe lumeBogata — deci acolo toleranta e ce tin mancatorii, scrisa,
+  // nu presupusa. Doua contoare de viata: fara ele, o fixtura in care nimeni nu
+  // imparte un morman ar trece fara sa probeze nimic.
+  let doiPeAcelasi = 0
+  let hranaPesteQ = 0
+  for (const seed of [12345, 7, 12, 17, 18, 19]) {
+    const w = lumeFragmentata(seed)
+    for (let t = 0; t < 600; t++) {
+      advance(w, 1, R)
+      const v = verificaCantitatiRezervate(w, R)
+      assert.ok(v.ok, `seed ${seed}, tickul ${w.tick}: ${JSON.stringify(v)}`)
+      for (let s = 0; s < w.iteme.count; s++) {
+        if (w.iteme.alive[s] === 0) continue
+        const lista = rezervariPentru(w.rezervari, w.iteme.id[s]!, Strat.CARAT)
+        if (new Set(lista.map((r) => r.claimant)).size >= 2) doiPeAcelasi++
+        if (R.nutritie[w.iteme.kind[s]!]! > 0 && lista.reduce((a, r) => a + r.count, 0) > w.iteme.cantitate[s]!) hranaPesteQ++
+      }
+    }
+  }
+  assert.ok(doiPeAcelasi > 0, 'niciun morman n-a fost tinut de doi claimanti CARAT deodata: fixtura nu atinge ce pretinde')
+  assert.ok(hranaPesteQ > 0, 'niciun morman de HRANA n-a fost tinut pe CARAT peste cat avea: toleranta nu s-a probat')
 })
