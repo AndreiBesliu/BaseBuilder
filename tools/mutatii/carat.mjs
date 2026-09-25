@@ -198,8 +198,12 @@ export const MUTATII = [
   { n: 'o cerere de ZERO trece de usa storeului', f: 'src/sim/rezervari.ts',
     a: "  if (c.count < 1) return refuse(Reason.VALOARE_INVALIDA", b: "  if (c.count < 0) return refuse(Reason.VALOARE_INVALIDA",
     t: 'tests/rezervari.test.ts', e: 'o cerere de ZERO' },
-  { n: 'oracolul de cantitate nu mai tolereaza mancatul pe HRANA (s-ar innosi pe stari legale)', f: 'src/sim/joburi.ts',
-    a: "    const toleranta = rules.nutritie[it.kind[s]!]! > 0 ? sumaRezervata(w.rezervari, it.id[s]!, Strat.MANCAT) : 0", b: "    const toleranta = 0",
+  // Prima forma a probei scotea „toleranta" pe MANCAT; recenzia din 25.09 a aratat ca
+  // toleranta insasi era falsa (rosie cand mancatorul TERMINA), asa ca HRANA a iesit
+  // din oracol, iar proba cere ca excluderea sa lege: fara ea, oracolul e rosu pe
+  // starea legala „CARAT 50 pe un morman de 34, MANCAT 0".
+  { n: 'oracolul de cantitate judeca si felurile comestibile (rosu pe o stare legala: mancatorul a terminat, carausul inca tine)', f: 'src/sim/joburi.ts',
+    a: "    if (rules.nutritie[it.kind[s]!]! > 0) continue\n    const carat = sumaRezervata(w.rezervari, it.id[s]!, Strat.CARAT)", b: "    const carat = sumaRezervata(w.rezervari, it.id[s]!, Strat.CARAT)",
     t: 'tests/saveload.test.ts', e: 'suma rezervata pe un morman' },
   { n: 'anularea de la incarcare nu lasa marfa la picioare', f: 'src/sim/joburi.ts',
     a: "    if (a.alive[i] === 1) {\n      lasaLaPicioare(w, rules, i)\n    } else {",

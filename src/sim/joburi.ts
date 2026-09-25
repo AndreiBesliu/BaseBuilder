@@ -3097,11 +3097,19 @@ export function uitaRacirileDeMarfa(w: World): void {
 }
 
 /**
- * Oracolul de CANTITATE, separat de store: pe fiecare morman viu, suma count-urilor
- * CARAT nu depaseste ce e in el. Pe un fel COMESTIBIL se admite ce tin mancatorii
- * pe MANCAT — stratul lor nu vede CARAT, deci un caraus cu 50 rezervate dintr-un
- * morman de 75 din care doi flamanzi iau 40 e o stare LEGALA (masurat pe 25.09:
- * 6 din 3600 de tickuri pe `lumeBogata`), iar `ridica` ia ce gaseste.
+ * Oracolul de CANTITATE, separat de store: pe fiecare morman viu al unui fel
+ * NECOMESTIBIL, suma count-urilor CARAT nu depaseste ce e in el.
+ *
+ * Felurile comestibile NU intra. Mancatul scade Q pe stratul MANCAT fara sa vada
+ * CARAT, si `terminaJob(TERMINAT)` al mancatorului nu reconciliaza nimic — deci dupa
+ * ce un flamand a terminat, un caraus poate tine 50 pe un morman de 34, LEGAL, pana
+ * ajunge si ia `min` (`ridica`). Recenzia din 25.09 a masurat starea pe un mancator
+ * la 390 si un caraus la 40–80 de celule: 5 seminte din 7, ferestre de 14–122 de
+ * tickuri, decode fara anulari, marfa conservata. Prima versiune „tolera" suma
+ * tinuta ACUM pe MANCAT, falsa exact cand mancatorul termina: toleranta dispare,
+ * Q ramane scazut. O toleranta corecta ar cere „cat s-a mancat de la fiecare
+ * cerere CARAT" — stare noua pentru un oracol; pe HRANA se probeaza CONSERVAREA
+ * (nimic nu dispare, decode fara anulari), nu invariantul.
  *
  * NU e clauza 3 din `verificaRezervari`: aia e o proprietate a storeului (suma sub
  * plafonul stratului), aceeasi in ambele lumi. Asta citeste Q vie din `w.iteme`.
@@ -3111,10 +3119,10 @@ export function verificaCantitatiRezervate(w: World, rules: Rules): Outcome<void
   const it = w.iteme
   for (let s = 0; s < it.count; s++) {
     if (it.alive[s] === 0) continue
+    if (rules.nutritie[it.kind[s]!]! > 0) continue
     const carat = sumaRezervata(w.rezervari, it.id[s]!, Strat.CARAT)
-    const toleranta = rules.nutritie[it.kind[s]!]! > 0 ? sumaRezervata(w.rezervari, it.id[s]!, Strat.MANCAT) : 0
-    if (carat > it.cantitate[s]! + toleranta) {
-      return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'mai mult rezervat pe CARAT decat e in morman', id: it.id[s]!, fel: it.kind[s]!, cantitate: it.cantitate[s]!, carat, toleranta })
+    if (carat > it.cantitate[s]!) {
+      return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'mai mult rezervat pe CARAT decat e in morman', id: it.id[s]!, fel: it.kind[s]!, cantitate: it.cantitate[s]!, carat })
     }
   }
   return accept()

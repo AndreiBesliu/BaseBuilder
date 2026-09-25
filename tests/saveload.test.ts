@@ -11,7 +11,8 @@ import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { FelJob, PasConstruieste } from '../src/sim/state.ts'
 import { Desemnare, slotDesemnare } from '../src/sim/desemnari.ts'
 import { dumpRezervari, rezervariPentru, Strat, verificaRezervari } from '../src/sim/rezervari.ts'
-import { existaTinta, verificaCantitatiRezervate } from '../src/sim/joburi.ts'
+import { existaTinta, lastJobReport, verificaCantitatiRezervate } from '../src/sim/joburi.ts'
+import { slotItem } from '../src/sim/iteme.ts'
 import { laSit, lasaItem, lumeBogata, lumeFragmentata, picteaza, R, solid, solidLaDistanta } from './fixturi.ts'
 import { Item, Nevoie, NEVOI } from '../src/sim/state.ts'
 
@@ -332,13 +333,15 @@ test('nicio rezervare pe o tinta care nu mai exista, la FIECARE tick', () => {
   assert.equal(granite, SEMINTE_REZERVARI.length * TICKURI_REZERVARI)
 })
 
-test('suma rezervata pe un morman nu depaseste ce e in el, la FIECARE tick — cu toleranta scrisa pe HRANA', () => {
+test('suma rezervata pe un morman nu depaseste ce e in el, la FIECARE tick — pe felurile necomestibile; pe HRANA se probeaza conservarea', () => {
   // A patra plasa, pe o alta axa decat storeul: `verificaRezervari` cere suma sub
   // PLAFONUL stratului (constant), asta cere suma sub CANTITATEA VIE. Pe HRANA
-  // mancatul scade Q pe stratul MANCAT fara sa vada CARAT — masurat: 6 din 3600
-  // de tickuri pe lumeBogata — deci acolo toleranta e ce tin mancatorii, scrisa,
-  // nu presupusa. Doua contoare de viata: fara ele, o fixtura in care nimeni nu
-  // imparte un morman ar trece fara sa probeze nimic.
+  // mancatul scade Q pe stratul MANCAT fara sa vada CARAT, si dupa ce mancatorul
+  // TERMINA nimic nu reconciliaza — carausul tine legal mai mult decat e in morman
+  // pana ajunge si ia `min`. Prima versiune „tolera" suma tinuta ACUM pe MANCAT si
+  // era rosie exact pe starea aia (recenzia din 25.09); acum HRANA nu intra in
+  // oracol, iar pe ea se cere conservarea. Contoare de viata la fiecare bloc: fara
+  // ele, o fixtura in care nimeni nu imparte un morman ar trece fara sa probeze nimic.
   let doiPeAcelasi = 0
   let hranaPesteQ = 0
   for (const seed of [12345, 7, 12, 17, 18, 19]) {
@@ -356,10 +359,11 @@ test('suma rezervata pe un morman nu depaseste ce e in el, la FIECARE tick — c
     }
   }
   assert.ok(doiPeAcelasi > 0, 'niciun morman n-a fost tinut de doi claimanti CARAT deodata: fixtura nu atinge ce pretinde')
-  // Toleranta pe HRANA se probeaza pe scenariul care o produce SIGUR (panoul, 25.09:
-  // fereastra de 26–60 de tickuri): un caraus la 16–24 de celule, cu depozit langa
-  // el, si doi flamanzi lipiti de mormanul de hrana. Pe lumeFragmentata coincidenta
-  // depinde de asezare, si o fixtura care „se nimereste" nu e o proba.
+  // Excluderea HRANEI se probeaza pe scenariul care produce SIGUR „CARAT peste Q cu
+  // MANCAT inca tinut" (panoul, 25.09: fereastra de 26–60 de tickuri): un caraus la
+  // 16–24 de celule, cu depozit langa el, si doi flamanzi lipiti de mormanul de
+  // hrana. Pe lumeFragmentata coincidenta depinde de asezare, si o fixtura care
+  // „se nimereste" nu e o proba.
   for (const seed of [12345, 7, 12, 99]) {
     const { w, sit } = laSit(seed, 1)
     picteaza(w, sit.wx + 2, sit.wy + 2, 3)
@@ -385,7 +389,54 @@ test('suma rezervata pe un morman nu depaseste ce e in el, la FIECARE tick — c
       }
     }
   }
-  assert.ok(hranaPesteQ > 0, 'niciun morman de HRANA n-a fost tinut pe CARAT peste cat avea: toleranta nu s-a probat')
+  assert.ok(hranaPesteQ > 0, 'niciun morman de HRANA n-a fost tinut pe CARAT peste cat avea: excluderea nu s-a probat')
+  // Si starea pe care prima versiune o refuza: UN mancator (doi n-ar incapea pe
+  // MANCAT: 41 + 41 > 75) care TERMINA inainte ca un caraus de la 60–80 de celule
+  // sa ajunga — CARAT 50 pe un morman de 34, cu MANCAT 0. Legala: decode fara
+  // anulari, marfa conservata, carausul ia 34. Recenzia a masurat-o pe 5 seminte
+  // din 7; aici pe doua, cu contor de viata pe exact starea aia.
+  let caratPesteQFaraMancat = 0
+  for (const seed of [12345, 7]) {
+    const { w, sit } = laSit(seed, 1)
+    picteaza(w, sit.wx + 2, sit.wy + 2, 3)
+    const T = solidLaDistanta(w, sit.wx, sit.wy, sit.g, 60, 80)
+    const idH = lasaItem(w, Item.HRANA, 75, T.wx, T.wy)
+    let pus = false
+    for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]] as const) {
+      const g = solid(w, T.wx + dx, T.wy + dy)
+      if (g === null) continue
+      const out = applyCommand(w, { kind: 'spawnAgent', x: (T.wx + dx) * 1000 + 500, y: (T.wy + dy) * 1000 + 500, z: g + 1, faction: 0 }, R)
+      if (!out.ok) continue
+      w.agents.nevoi[(w.agents.count - 1) * NEVOI + Nevoie.FOAME] = 390
+      pus = true
+      break
+    }
+    assert.ok(pus, 'fixtura: flamandul')
+    const hrana = (w: ReturnType<typeof lumeFragmentata>): number => {
+      let s = 0
+      for (let i = 0; i < w.iteme.count; i++) if (w.iteme.alive[i] === 1 && w.iteme.kind[i] === Item.HRANA) s += w.iteme.cantitate[i]!
+      for (let i = 0; i < w.agents.count; i++) if (w.agents.caraKind[i] === Item.HRANA) s += w.agents.caraCantitate[i]!
+      return s
+    }
+    let mancate = 0
+    for (let t = 0; t < 400; t++) {
+      advance(w, 1, R)
+      mancate += lastJobReport().unitatiMancate
+      const v = verificaCantitatiRezervate(w, R)
+      assert.ok(v.ok, `HRANA cu un mancator, seed ${seed}, tickul ${w.tick}: ${JSON.stringify(v)}`)
+      assert.equal(hrana(w) + mancate, 75, `seed ${seed}, tickul ${w.tick}: hrana nu se conserva`)
+      const carat = rezervariPentru(w.rezervari, idH, Strat.CARAT).reduce((a, r) => a + r.count, 0)
+      const mancat = rezervariPentru(w.rezervari, idH, Strat.MANCAT).reduce((a, r) => a + r.count, 0)
+      const is = slotItem(w.iteme, idH)
+      if (is !== -1 && mancat === 0 && carat > w.iteme.cantitate[is]!) {
+        caratPesteQFaraMancat++
+        const out = decode(encode(w), R)
+        assert.ok(out.ok && out.value.rezervari.anulateLaIncarcare === 0, `seed ${seed}, tickul ${w.tick}: starea legala nu se incarca curat`)
+      }
+    }
+    assert.equal(w.ratiune.itemePierdute, 0)
+  }
+  assert.ok(caratPesteQFaraMancat > 0, 'fixtura: mancatorul n-a terminat inaintea carausului pe niciun tick — starea pe care oracolul vechi o refuza nu s-a atins')
 })
 
 test('M5 la FIECARE tick pe lumea FRAGMENTATA: hash, tuplurile rezervarilor si zero anulari — cu surse partiale si a doua ridicare', () => {
