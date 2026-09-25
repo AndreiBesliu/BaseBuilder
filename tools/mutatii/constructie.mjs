@@ -310,7 +310,7 @@ export const MUTATII = [
     n: "sonda parcurge TOATE itemele, nu doar felul cerut",
     f: "src/sim/joburi.ts",
     a: "    for (const s of ix.peFel[fel]!) {\n    if (it.alive[s] === 0) continue\n    raport.pasiRezumat++",
-    b: "    for (let s = 0; s < it.count; s++) {\n    if (it.alive[s] === 0 || it.kind[s] !== fel) continue\n    raport.pasiRezumat++",
+    b: "    for (let s = 0; s < it.count; s++) {\n    raport.pasiRezumat++\n    if (it.alive[s] === 0 || it.kind[s] !== fel) continue",
     t: 'tests/constructie.test.ts', e: "3000 de mormane: cu un santier",
   },
   {

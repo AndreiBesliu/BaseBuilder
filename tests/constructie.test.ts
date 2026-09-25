@@ -1982,10 +1982,15 @@ test('3000 de mormane: fara santiere, sonda de material nu face niciun pas', () 
   // Masurat de panou pe codul dinainte: 42 µs/apel la 3000 de mormane, chemat la
   // fiecare scanare a fiecarui pion liber — cu 64 de pioni, tot bugetul de tick,
   // pentru o intrebare la care raspunsul era „niciun santier".
-  const { w, puse } = lume3000(12345)
+  const { w, sit, puse } = lume3000(12345)
   assert.ok(puse >= 2500, `fixtura: doar ${puse} mormane puse`)
+  // O SAPATURA, departe: fara nicio desemnare scanarea iese din prima (`shouldSkip`)
+  // si sonda n-ar fi atinsa oricum. Cu ea, scanarea merge pana la categoria de
+  // construit, si acolo trebuie sa NU plateasca nimic.
+  desemneaza(w, sit.wx + 35, sit.wy)
   const t = ruleaza(w, 200)
   assert.ok(t.scanari > 0, 'fixtura: nicio scanare')
+  assert.ok(t.vizite > 0, 'fixtura: scanarea a iesit inainte de categorii')
   assert.equal(t.pasiRezumat, 0, `${t.pasiRezumat} pasi de sonda fara niciun santier`)
 })
 
