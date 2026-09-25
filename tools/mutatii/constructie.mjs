@@ -748,10 +748,14 @@ export const MUTATII = [
     t: 'tests/constructie.test.ts', e: 'ostil pe a doua sursa si NICIO alta',
   },
   {
-    n: 'refaTinta nu evita sursa cu drumul refuzat inainte de retintire (o realege, si arde plafonul pe ea)',
+    // Prima ancora („constructorul ia ALTA sursa") a iesit RATATA: fara evitare, vechea
+    // sursa e oricum exclusa de propria rezervare inca tinuta (liber 0), deci C se alege
+    // la fel. Ce leaga evitarea e URMA ei: pionul nu reia sursa cu drumul refuzat la
+    // scanarile urmatoare — asertata pe scenariul fara alta sursa.
+    n: 'refaTinta nu evita pe pereche sursa cu drumul refuzat: pionul o poate relua la urmatoarea scanare',
     f: 'src/sim/joburi.ts',
     a: "      evitaTinta(w, slot, veche, w.tick + rules.jobRetryTicks)\n      const sursa = refaSursa(w, rules, slot)",
     b: "      const sursa = refaSursa(w, rules, slot)",
-    t: 'tests/constructie.test.ts', e: 'ostil pe a doua sursa: constructorul ia ALTA sursa',
+    t: 'tests/constructie.test.ts', e: 'ostil pe a doua sursa si NICIO alta',
   },
 ]
