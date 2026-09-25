@@ -279,7 +279,7 @@ export const MUTATII = [
     t: 'tests/stabilitate.test.ts', e: 'stareSapat nu minte',
   },
 
-  // --- doua defecte livrate, gasite de panoul grinzii (26.09.2026) ---
+  // --- doua defecte livrate, gasite de panoul grinzii (25.09.2026) ---
   {
     n: 'prefiltrul overlay-ului cauta doar AER (tavanul unei pivnite iese SIGUR fara scanare)',
     f: 'src/sim/stabilitate.ts',

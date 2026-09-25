@@ -3,7 +3,7 @@
  *
  * Designul a trecut printr-un panou care masoara (3 lentile, 24 de constatari, doua
  * CRITIC confirmate de cate doi verificatori): `scratchpad/design-grinda-v2.md` in
- * sesiunea din 26.09. Fisierul asta creste odata cu felia: intai indexul DERIVED al
+ * sesiunea din 25.09. Fisierul asta creste odata cu felia: intai indexul DERIVED al
  * grinzilor (regula de stabilitate inca neschimbata), apoi regula.
  */
 

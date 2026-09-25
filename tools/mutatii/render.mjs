@@ -5,7 +5,7 @@
  * cu cinci teste si zero probe — adica exact situatia in care un test care nu mai
  * exercita nimic arata la fel cu unul care apara ceva.
  *
- * Din 26.09 harnasamentul ruleaza doar testul NUMIT de proba. Scurgerile intre
+ * Din 25.09 harnasamentul ruleaza doar testul NUMIT de proba. Scurgerile intre
  * chunk-uri (starea refolosita a mesher-ului) le provoaca testul insusi, meshuind
  * intai un chunk plin — nu mai depind de ce a rulat inaintea lui in fisier.
  */

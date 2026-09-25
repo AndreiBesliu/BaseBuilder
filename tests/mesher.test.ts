@@ -296,7 +296,7 @@ test('un cub izolat n-are nicio ocluzie: toate varfurile la maxim', () => {
   // vecini care nu exista, si atunci nimic din ce urmeaza nu inseamna nimic.
   //
   // Si al doilea rol: tabloul de ocupare al mesher-ului e REFOLOSIT intre apeluri,
-  // deci un chunk plin meshuit inainte lasa urme daca nu se goleste. Pana la 26.09
+  // deci un chunk plin meshuit inainte lasa urme daca nu se goleste. Pana la 25.09
   // testul prindea scurgerea doar prin ORDINEA fisierului — un test anterior lasa
   // tabloul murdar. Harnasamentul de mutatii ruleaza acum doar testul numit, si
   // a strigat DEPENDENTA DE ORDINE; deci testul o provoaca singur: intai un chunk

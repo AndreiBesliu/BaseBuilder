@@ -1,6 +1,6 @@
 /**
  * Mutatii: instrumentele. Deocamdata doar modul „doar testul numit" al harnasamentului
- * (26.09.2026), fiindca fiecare garda a lui, stricata, ar schimba TOATE verdictele
+ * (25.09.2026), fiindca fiecare garda a lui, stricata, ar schimba TOATE verdictele
  * deodata fara ca vreo proba de joc sa se inroseasca: RATATA pe tot (filtrul nu mai
  * prinde nimic) sau un harnasament care crede ca a rulat un test pe care nu l-a rulat.
  */

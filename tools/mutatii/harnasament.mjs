@@ -32,7 +32,7 @@
  * ## Fiecare proba ruleaza DOAR testul numit
  *
  * Verdictul e „a picat testul scris pentru garda?", deci restul fisierului nu intra
- * in el. Pana la 26.09 se rula fisierul intreg la fiecare proba, si costul crestea
+ * in el. Pana la 25.09 se rula fisierul intreg la fiecare proba, si costul crestea
  * cu produsul (probe × durata fisierului), nu cu munca: `saveload.test.ts` dura 39 s
  * si il re-rulau 11 probe (~7 min, 42% din suita), iar pe runner jobul ajunsese la
  * 23 min 34 s. Cand testul numit NU pica, se ruleaza fisierul intreg si el decide —

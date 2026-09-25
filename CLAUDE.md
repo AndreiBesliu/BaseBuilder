@@ -71,7 +71,7 @@ Pe Windows, `kinstead.bat` le adună pe toate: dublu-click deschide un meniu, ia
 
 ```bash
 npm run mutatii -- --lista      # ce suite există
-npm run mutatii                 # toate cele 283, ~4½ min local (26.09, cronometrat, vezi mai jos)
+npm run mutatii                 # toate cele 283, ~4½ min local (25.09, cronometrat, vezi mai jos)
 npm run mutatii -- nevoi        # o singură suită
 npm run mutatii -- nevoi podeaua  # doar mutațiile al căror nume conține „podeaua"
 npm run mutatii -- --izolare    # fiecare test NUMIT de o probă, singur, pe cod nemutat (~2 min)
@@ -100,7 +100,7 @@ potrivește în două locuri editează altul decât cel gândit, rulează testel
 > pentru 221 de probe** (19.09), cu tot cu checkout și `npm ci` — în aceeași bandă, nu „de câteva ori
 > mai mult", cum presupunea `ci.yml` fără să fi măsurat.
 >
-> **26.09.2026: 283 de probe în 262 s local**, după ce harnașamentul rulează doar testul numit. Cu
+> **25.09.2026: 283 de probe în 262 s local**, după ce harnașamentul rulează doar testul numit. Cu
 > fișierul întreg la fiecare probă, jobul ajunsese la **23 min 34 s pe runner** (280 de probe):
 > `saveload.test.ts` (39 s) re-rulat de 11 probe era singur 42% din suită.
 >

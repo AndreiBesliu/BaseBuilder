@@ -46,7 +46,7 @@ function cuProba(corp: string): { status: number | null; iesire: string } {
 type Rulare = { picate: Set<string>; rulate: number; toate: number; eroare: string | null }
 
 test('harnasamentul ruleaza DOAR testul numit, si refuza un filtru de nume care nu prinde nimic', async () => {
-  // Din 26.09 fiecare proba ruleaza doar testul ei, nu tot fisierul: `saveload.test.ts`
+  // Din 25.09 fiecare proba ruleaza doar testul ei, nu tot fisierul: `saveload.test.ts`
   // dura 39 s si il re-rulau 11 probe. Doua lucruri pot strica modul asta fara ca vreo
   // proba sa se inroseasca — fiecare ar da RATATA pe tot, sau PRINSA pe nimic:
   //  - numele au `?`, paranteze, `+`, iar `--test-name-pattern` e o expresie regulata;
