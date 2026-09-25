@@ -277,6 +277,11 @@ export interface JobTickReport {
   voxeliPrabusiti: number
   /** Cate piese s-au zidit in tickul asta. */
   pieseZidite: number
+  /**
+   * Cate tickuri a stat un constructor la ZIDESTE cu celula santierului OCUPATA (un om
+   * pe ea), fara sa munceasca: asteptare, nu refuz. Zero cand nimeni nu sta pe santiere.
+   */
+  santierOcupat: number
   /** Cati pioni au CAZUT odata cu podeaua lor. Nu e acelasi lucru cu `ingropati`. */
   pioniCazuti: number
   /**
@@ -307,7 +312,7 @@ const raport: JobTickReport = {
   tickuriDeLucru: 0, locuriDeLucruRefacute: 0, refuzuriDrum: 0,
   faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0, faraDepozit: 0, refuzatLaStart: 0,
   evaluariDestinatie: 0, itemeProduse: 0, unitatiProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
-  joburiDeNevoie: 0, unitatiMancate: 0, pasiNevoi: 0, plecati: 0, voxeliPrabusiti: 0, pioniCazuti: 0, pieseZidite: 0,
+  joburiDeNevoie: 0, unitatiMancate: 0, pasiNevoi: 0, plecati: 0, voxeliPrabusiti: 0, pioniCazuti: 0, pieseZidite: 0, santierOcupat: 0,
   cautariSursa: 0, pasiCautareSursa: 0, pasiRezumat: 0,
 }
 
@@ -526,6 +531,12 @@ const DIRECTII = [
  * podeaua de sub o celula pe care regiunile o mai declara vie pana la
  * reconstructie).
  *
+ * Nu PE un santier viu de construit, oglinda lui `seSapaLa`: locul de lucru al
+ * peretelui k dintr-un rand era, in ordinea fixa a directiilor, chiar celula
+ * peretelui k + 1 — iar constructorul lui k + 1 era refuzat cu CELULA_OCUPATA de
+ * colegul care zidea alaturi (recenzia din 25.09: 1–3 refuzuri per rand de patru,
+ * timp de ridicare dublat–triplat, fara nicio marfa pierduta).
+ *
  * `null` inseamna „nu exista loc de lucru" cu conditiile date. Cauza o scrie
  * apelantul, dupa cum a intrebat: fara componenta = n-are niciun loc; cu
  * componenta = are, dar nu pentru cine intreaba.
@@ -554,6 +565,8 @@ export function celulaDeLucru(
         const cheie = cellKey(nx, ny, zs)
         if (cheie === evita) continue
         if (seSapaLa(d, nx, ny, zs - 1)) continue
+        const sant = desemnareLaCelula(d, nx, ny, zs)
+        if (sant !== -1 && d.kind[sant] === Desemnare.CONSTRUIESTE) continue
         if (!isWalkable(t, nx, ny, zs, rules)) continue
         return { wx: nx, wy: ny, z: zs }
       }
@@ -2368,6 +2381,18 @@ function zideste(w: World, rules: Rules, slot: number): void {
     terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
     return
   }
+  // Celula santierului trebuie sa fie LIBERA la fiecare tick de munca, nu doar la
+  // capat. Un om pe ea nu e un refuz al santierului, e o asteptare: cu verificarea
+  // abia dupa `lucru`, fiecare constructor platea un drum intreg + 40 de tickuri de
+  // „munca", lasa marfa jos si racea santierul 100 de tickuri, iar un coleg adormit
+  // pe el il tinea asa sute de tickuri (recenzia din 25.09). Cine ajungea NATURAL pe
+  // un santier nu mai ajunge — `celulaDeLucru` sare santierele vii, `pornesteDoarme`
+  // doarme pe vecin — deci ce ramane e trecator, si se asteapta, fara progres.
+  // Sprijinul pierdut si celula plina raman refuzuri ale TINTEI, mai jos.
+  if (!celulaLibera(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!).ok) {
+    raport.santierOcupat++
+    return
+  }
   a.jobProgres[slot] = a.jobProgres[slot]! + unitatiDeMunca(w, rules, slot)
   raport.tickuriDeLucru++
   w.ratiune.tickuriDeLucru++
@@ -3280,8 +3305,16 @@ function pornesteMananca(w: World, rules: Rules, slot: number, is: number, cant:
   return accept()
 }
 
-/** `cs === -1` inseamna „dorm pe loc": fara pat, fara rezervare, dar tot somn. */
-function pornesteDoarme(w: World, _rules: Rules, slot: number, cs: number): Outcome<void> {
+/**
+ * `cs === -1` inseamna „dorm pe loc": fara pat, fara rezervare, dar tot somn.
+ *
+ * Pe loc — dar nu PE un santier viu de construit: un pion adormit pe celula pe care
+ * altul o zideste il tine pe constructor la usa cat doarme (recenzia din 25.09:
+ * 2500–3750 de tickuri, cu marfa la un pas). Atunci doarme pe primul vecin calcabil
+ * din componenta lui (`celulaDeLucru`, care sare santierele); daca nu e niciunul,
+ * tot pe loc — somnul reuseste mereu.
+ */
+function pornesteDoarme(w: World, rules: Rules, slot: number, cs: number): Outcome<void> {
   const a = w.agents
   const c = w.zone.celule
   const jobId = w.nextId
@@ -3289,6 +3322,18 @@ function pornesteDoarme(w: World, _rules: Rules, slot: number, cs: number): Outc
   const out = rezervaToate(w.rezervari, a.id[slot]!, jobId, cereriDoarme(celulaId))
   if (!out.ok) return out
   w.nextId++
+
+  let lx = cellOf(a.x[slot]!)
+  let ly = cellOf(a.y[slot]!)
+  let lz = a.z[slot]!
+  if (cs === -1) {
+    const sant = desemnareLaCelula(w.desemnari, lx, ly, lz)
+    if (sant !== -1 && w.desemnari.kind[sant] === Desemnare.CONSTRUIESTE) {
+      const comp = find(w.regions, regionAt(w.regions, lx, ly, lz))
+      const vecin = celulaDeLucru(w.terrain, w.regions, w.desemnari, lx, ly, lz, rules, comp)
+      if (vecin) { lx = vecin.wx; ly = vecin.wy; lz = vecin.z }
+    }
+  }
 
   a.jobKind[slot] = FelJob.DOARME
   a.jobId[slot] = jobId
@@ -3300,9 +3345,9 @@ function pornesteDoarme(w: World, _rules: Rules, slot: number, cs: number): Outc
   a.jobStep[slot] = PasNevoie.MERGE
   a.jobProgres[slot] = 0
   a.jobIncercari[slot] = 0
-  a.jobWorkX[slot] = cs === -1 ? cellOf(a.x[slot]!) : c.wx[cs]!
-  a.jobWorkY[slot] = cs === -1 ? cellOf(a.y[slot]!) : c.wy[cs]!
-  a.jobWorkZ[slot] = cs === -1 ? a.z[slot]! : c.z[cs]!
+  a.jobWorkX[slot] = cs === -1 ? lx : c.wx[cs]!
+  a.jobWorkY[slot] = cs === -1 ? ly : c.wy[cs]!
+  a.jobWorkZ[slot] = cs === -1 ? lz : c.z[cs]!
   tintesteLocDeLucru(w, slot)
   if (cs !== -1) marcheazaZoneMurdare(w)
   raport.joburiPornite++
@@ -3864,14 +3909,17 @@ const DRIVER_CONSTRUIESTE: DriverJob = {
     if (w.agents.jobStep[slot] === PasConstruieste.RIDICA) ridica(w, rules, slot)
     else zideste(w, rules, slot)
   },
-  incheie(w, rules, slot, motiv, racire, rezultat) {
+  incheie(w, rules, slot, motiv, racire) {
     const a = w.agents
     const ds = slotDesemnare(w.desemnari, a.jobDest[slot]!)
     // Pe piciorul SURSEI tinta e MORMANUL, nu santierul: un drum refuzat spre el nu
-    // e vina santierului si nu-i scrie nici racire, nici cauza. Iar mormanul nu se
-    // raceste GLOBAL (`memoreazaPeItem`) niciodata dintr-un job de construit — vezi
-    // trecerea scumpa: `rezumatMaterial` tine un singur morman per piesa, deci o
-    // racire globala sterge felul pentru toata colonia. Pe PERECHE, ca acolo.
+    // e vina santierului si nu-i scrie nici racire, nici cauza. Iar un morman nu se
+    // raceste GLOBAL (`memoreazaPeItem`) niciodata dintr-un job de construit — nici
+    // sursa, nici marfa lasata la picioare: o racire globala ascunde mormanul de
+    // toata colonia, iar `lasaLaPicioare` CONTOPESTE in mormanul de pe celula, deci
+    // ar raci mormanul comun pe care pionul sta, cu o cauza falsa. Prima versiune o
+    // facea, in ciuda propozitiei de mai sus: 99 de tickuri de racire pe un morman de
+    // 30, al doilea constructor blocat 107 tickuri (recenzia din 25.09). Pe PERECHE.
     if (a.jobStep[slot]! <= PasConstruieste.RIDICA) {
       if (slotItem(w.iteme, a.jobTarget[slot]!) !== -1) evitaTinta(w, slot, a.jobTarget[slot]!, w.tick + rules.jobRetryTicks)
       return
@@ -3884,9 +3932,8 @@ const DRIVER_CONSTRUIESTE: DriverJob = {
         w.desemnari.ultimulMotiv[ds] = codMotiv(motiv ?? Reason.INACCESIBIL)
         w.desemnari.ultimulMotivDetaliu[ds] = detaliuDesemnareDin(motiv ?? Reason.INACCESIBIL)
       }
-      // Si marfa lasata la picioare, daca a ramas: altfel ar fi re-luata imediat
-      // pentru acelasi santier care tocmai a refuzat.
-      if (rezultat !== -1) memoreazaPeItem(w, rules, rezultat, motiv ?? Reason.INACCESIBIL, detaliuItemDin(motiv ?? Reason.INACCESIBIL))
+      // Marfa lasata la picioare NU se raceste: santierul e cel racit, deci nu poate
+      // fi re-luata pentru el, iar pentru orice alt santier e material bun.
       return
     }
     // Drumul MEU e blocat: santierul ramane pentru altii.

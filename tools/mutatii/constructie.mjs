@@ -816,4 +816,44 @@ export const MUTATII = [
     b: "    void 0",
     t: 'tests/constructie.test.ts', e: 'un morman de alt fel, sau sub PRAGUL',
   },
+
+  // --- recenzia adversariala (25.09.2026): santierul ocupat si marfa lasata ---
+  {
+    n: 'zideste verifica mana abia DUPA ce a muncit (ordinea veche: 40 de tickuri de munca din nimic)',
+    f: 'src/sim/joburi.ts',
+    a: "  if (a.caraCantitate[slot]! < spec.cantitate) {\n    w.ratiune.zidiriCuManaGoala++\n    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)\n    return\n  }\n  // Celula santierului",
+    b: "  // Celula santierului",
+    e2: [{ f: 'src/sim/joburi.ts',
+      a: "  if (a.jobProgres[slot]! < spec.lucru) return\n\n  const out = zidesteVoxel",
+      b: "  if (a.jobProgres[slot]! < spec.lucru) return\n  if (a.caraCantitate[slot]! < spec.cantitate) {\n    w.ratiune.zidiriCuManaGoala++\n    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)\n    return\n  }\n\n  const out = zidesteVoxel" }],
+    t: 'tests/constructie.test.ts', e: 'zidirea cu mana goala se incheie pe loc',
+  },
+  {
+    n: 'marfa lasata la un sfarsit de construit raceste GLOBAL mormanul (contopit) de pe celula',
+    f: 'src/sim/joburi.ts',
+    a: "  const rezultat = lasaLaPicioare(w, rules, slot)",
+    b: "  const rezultat = lasaLaPicioare(w, rules, slot)\n  if (rezultat !== -1 && a.jobKind[slot] === FelJob.CONSTRUIESTE) memoreazaPeItem(w, rules, rezultat, Reason.INACCESIBIL, DetaliuItem.COMPONENTE_DIFERITE)",
+    t: 'tests/constructie.test.ts', e: 'marfa lasata la santierul REFUZAT',
+  },
+  {
+    n: 'locul de lucru poate fi un alt santier viu (constructorul sta pe peretele vecin)',
+    f: 'src/sim/joburi.ts',
+    a: "        const sant = desemnareLaCelula(d, nx, ny, zs)\n        if (sant !== -1 && d.kind[sant] === Desemnare.CONSTRUIESTE) continue",
+    b: "        void desemnareLaCelula",
+    t: 'tests/constructie.test.ts', e: 'locul de lucru al unui santier nu e NICIODATA',
+  },
+  {
+    n: 'somnul pe loc nu se fereste de santier (dormitorul tine constructorul la usa)',
+    f: 'src/sim/joburi.ts',
+    a: "      if (vecin) { lx = vecin.wx; ly = vecin.wy; lz = vecin.z }",
+    b: "      void vecin",
+    t: 'tests/constructie.test.ts', e: 'un pion care adoarme PE celula',
+  },
+  {
+    n: 'santierul ocupat se descopera abia la capatul lucrului (refuz, marfa jos, racire)',
+    f: 'src/sim/joburi.ts',
+    a: "  if (!celulaLibera(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!).ok) {\n    raport.santierOcupat++\n    return\n  }",
+    b: "  if (false) {\n    raport.santierOcupat++\n    return\n  }",
+    t: 'tests/constructie.test.ts', e: 'un santier ocupat TRECATOR',
+  },
 ]

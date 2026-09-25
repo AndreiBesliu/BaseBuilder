@@ -98,7 +98,7 @@ jobs:
           OUT=$(node src/harness/cli.ts --seed 12345 --ticks 100000 --agents 40)
           echo "$OUT"
           HASH=$(echo "$OUT" | awk '/^hash/ {print $2}')
-          EXPECTED=d9c0dc04
+          EXPECTED=52b16ed2
           if [ "$HASH" != "$EXPECTED" ]; then
             echo "::error::hash-ul de referinta s-a schimbat: $HASH (asteptat $EXPECTED)"
             echo "Daca schimbarea e intentionata, actualizeaza EXPECTED in acest workflow"

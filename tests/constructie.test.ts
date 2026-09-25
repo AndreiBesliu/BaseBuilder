@@ -1649,6 +1649,133 @@ test('munca falsa: un drum refuzat spre morman NU trimite constructorul la santi
   assert.ok(w.desemnari.reincercaLaTick[ds]! <= w.tick, 'santierul a fost racit pentru un drum refuzat spre morman')
 })
 
+test('marfa lasata la santierul REFUZAT nu raceste mormanul in care s-a contopit: ramane material bun pentru toti', () => {
+  // Recenzia din 25.09: `incheie` pe TINTA racea global mormanul intors de
+  // `lasaLaPicioare` — care e mormanul EXISTENT de pe celula cand marfa se contopeste
+  // — cu o cauza falsa: un morman comun de 30 pe care pionul statea, 99 de tickuri
+  // pentru toata colonia, al doilea constructor blocat 107. Docstringul din aceeasi
+  // functie spunea „niciodata".
+  const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 9)
+  const idSantier = pereteLa(w, T.x0 + 5, T.y0 + 4)
+  const ds = slotDesemnare(w.desemnari, idSantier)
+  const idA = lasaItem(w, Item.PIATRA, 20, T.x0 + 2, T.y0 + 4)
+  // Pe locul de lucru al santierului (primul vecin in ordinea directiilor): mormanul
+  // in care marfa lasata se va contopi.
+  const loc = celulaDeLucru(w.terrain, w.regions, w.desemnari, T.x0 + 5, T.y0 + 4, T.g + 1, R)
+  assert.ok(loc, 'fixtura: santierul n-are loc de lucru')
+  const idB = lasaItem(w, Item.PIATRA, 30, loc!.wx, loc!.wy)
+  const p = pionLa(w, T.x0 + 1, T.y0 + 4)
+  ruleaza(w, 5)
+  pornestePe(w, p, idSantier, idA)
+  const laLucru = panaCand(w, 2000, (w) => w.agents.jobStep[p] === PasConstruieste.ZIDESTE && w.agents.jobProgres[p]! > 0)
+  assert.ok(laLucru >= 0, 'fixtura: pionul n-a ajuns sa munceasca')
+  assert.ok(cellOf(w.agents.x[p]!) === loc!.wx && cellOf(w.agents.y[p]!) === loc!.wy, 'fixtura: pionul nu sta pe locul de lucru asteptat')
+  // Santierul se umple pe sub mana lui: la capatul lucrului, zidirea e refuzata
+  // (CELULA_PLINA), marfa cade la picioare — adica in B.
+  assert.ok(applyCommand(w, { kind: 'fill', wx: T.x0 + 5, wy: T.y0 + 4, z: T.g + 1, material: Material.PIATRA_CONSTRUITA }, R).ok)
+  const laRefuz = panaCand(w, 200, (w) => w.agents.jobKind[p] === 0)
+  assert.ok(laRefuz >= 0, 'fixtura: jobul nu s-a incheiat dupa umplerea santierului')
+  const sB = slotItem(w.iteme, idB)
+  assert.ok(sB !== -1 && w.iteme.cantitate[sB] === 50, `fixtura: marfa trebuia sa se contopeasca in B (are ${sB === -1 ? 'mort' : w.iteme.cantitate[sB]})`)
+  assert.equal(slotItem(w.iteme, idA), -1)
+  assert.ok(w.desemnari.reincercaLaTick[ds]! > w.tick, 'santierul e cel refuzat: el se raceste')
+  assert.equal(w.desemnari.ultimulMotiv[ds], codMotiv(Reason.CELULA_PLINA))
+  assert.ok(w.iteme.reincercaLaTick[sB]! <= w.tick, 'mormanul contopit a fost racit GLOBAL dintr-un job de construit')
+  assert.equal(w.iteme.ultimulMotiv[sB], 0, 'mormanul contopit poarta o cauza care nu e a lui')
+  // Si e material bun, imediat, pentru acelasi pion: sonda il vede.
+  const m = rezumatMaterial(w, R, p)[Piesa.PERETE]!
+  assert.ok(m.exista && m.slot === sB, 'mormanul comun trebuia sa ramana sursa pentru toata lumea')
+  assert.equal(w.ratiune.itemePierdute, 0)
+})
+
+test('locul de lucru al unui santier nu e NICIODATA un alt santier viu: intr-un rand de pereti, constructorul nu sta pe peretele vecin', () => {
+  // Recenzia din 25.09: `celulaDeLucru` sarea doar podelele de sapat; intr-un rand pe
+  // x, primul vecin in ordinea directiilor e chiar peretele urmator, deci constructorul
+  // lui k statea pe k + 1, si constructorul lui k + 1 era refuzat cu CELULA_OCUPATA.
+  const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 9)
+  const idS1 = pereteLa(w, T.x0 + 5, T.y0 + 4)
+  pereteLa(w, T.x0 + 6, T.y0 + 4)
+  const loc = celulaDeLucru(w.terrain, w.regions, w.desemnari, T.x0 + 5, T.y0 + 4, T.g + 1, R)
+  assert.ok(loc, 'santierul cu vecin trebuie sa aiba alt loc de lucru')
+  assert.ok(!(loc!.wx === T.x0 + 6 && loc!.wy === T.y0 + 4), 'locul de lucru e chiar peretele vecin')
+  const idA = lasaItem(w, Item.PIATRA, 20, T.x0 + 2, T.y0 + 4)
+  const p = pionLa(w, T.x0 + 1, T.y0 + 4)
+  ruleaza(w, 5)
+  pornestePe(w, p, idS1, idA)
+  const la = panaCand(w, 2000, (w) => w.agents.jobStep[p] === PasConstruieste.ZIDESTE)
+  assert.ok(la >= 0, 'fixtura: pionul n-a ajuns la zidit')
+  assert.ok(!(w.agents.jobWorkX[p] === T.x0 + 6 && w.agents.jobWorkY[p] === T.y0 + 4), 'constructorul sta pe peretele vecin')
+  const n = panaCand(w, 2000, (w) => slotDesemnare(w.desemnari, idS1) === -1)
+  assert.ok(n >= 0, 'peretele nu s-a ridicat')
+  assert.equal(lastJobReport().lasateLaPicioare, 0)
+})
+
+test('un pion care adoarme PE celula unui santier doarme pe vecin, si peretele se ridica in timp ce el doarme', () => {
+  // Recenzia din 25.09: `pornesteDoarme` cu `cs === -1` dormea pe loc fara sa se
+  // uite daca locul e un santier viu; un dormitor la prag il tinea pe constructor la
+  // usa ~2500 de tickuri, cu marfa la un pas (12–16 refuzuri, 450–650 de tickuri de
+  // munca irosita per perete).
+  const { w, sx, sy, sz, ds, is } = santier(12345)
+  const g = solid(w, sx + 3, sy)
+  assert.notEqual(g, null)
+  const sp = applyCommand(w, { kind: 'spawnAgent', x: (sx + 3) * 1000 + 500, y: sy * 1000 + 500, z: g! + 1, faction: 0 }, R)
+  assert.ok(sp.ok)
+  const dormitor = w.agents.count - 1
+  // Teleportat PE santier (desemnarea refuza un pion aflat deja pe celula, deci
+  // ordinea e: santier, apoi pion), cu odihna sub prag: la primul tick adoarme.
+  w.agents.x[dormitor] = sx * 1000 + 500
+  w.agents.y[dormitor] = sy * 1000 + 500
+  w.agents.z[dormitor] = sz
+  w.agents.nevoi[dormitor * NEVOI + Nevoie.ODIHNA] = 300
+  assert.ok(300 < R.nevoi[Nevoie.ODIHNA]!.prag, 'fixtura: odihna trebuie sa fie sub prag')
+  const adormit = panaCand(w, 60, (w) => w.agents.jobKind[dormitor] === FelJob.DOARME)
+  assert.ok(adormit >= 0, 'fixtura: dormitorul n-a adormit')
+  assert.ok(!(w.agents.jobWorkX[dormitor] === sx && w.agents.jobWorkY[dormitor] === sy), 'dormitorul si-a ales chiar celula santierului')
+  assert.ok(pornesteConstruieste(w, R, 0, ds, is).ok)
+  let ocupat = 0
+  const n = panaCand(w, 2000, (w) => { ocupat += lastJobReport().santierOcupat; return w.ratiune.unitatiZidite > 0 })
+  assert.ok(n >= 0, 'peretele nu s-a ridicat: dormitorul il tine ocupat')
+  assert.equal(w.agents.jobKind[dormitor], FelJob.DOARME, 'fixtura: dormitorul trebuia sa doarma inca')
+  assert.equal(ocupat, 0, `constructorul a asteptat ${ocupat} tickuri la un santier pe care dormea cineva`)
+  assert.equal(lastJobReport().lasateLaPicioare, 0)
+})
+
+test('un santier ocupat TRECATOR se asteapta, fara progres si fara abandon: marfa ramane in mana, santierul nu se raceste', () => {
+  // Recenzia din 25.09: `celulaLibera` se intreba abia la capatul celor 40 de tickuri
+  // de munca — refuz CELULA_OCUPATA, marfa jos, santier racit 100 de tickuri, si de
+  // la capat. Acum ocuparea se verifica la fiecare tick de munca, si se asteapta.
+  const { w, sx, sy, sz, ds, is } = santier(12345)
+  const g = solid(w, sx + 3, sy)
+  assert.notEqual(g, null)
+  assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (sx + 3) * 1000 + 500, y: sy * 1000 + 500, z: g! + 1, faction: 0 }, R).ok)
+  const ocupant = w.agents.count - 1
+  assert.ok(pornesteConstruieste(w, R, 0, ds, is).ok)
+  const la = panaCand(w, 2000, (w) => w.agents.jobStep[0] === PasConstruieste.ZIDESTE)
+  assert.ok(la >= 0, 'fixtura: pionul n-a ajuns la zidit')
+  // Ocupantul e tinut PE santier 150 de tickuri, apoi lasat in pace.
+  let ocupat = 0
+  let lasate = 0
+  const progres0 = w.agents.jobProgres[0]!
+  for (let t = 0; t < 150; t++) {
+    w.agents.x[ocupant] = sx * 1000 + 500
+    w.agents.y[ocupant] = sy * 1000 + 500
+    w.agents.z[ocupant] = sz
+    const r = ruleaza(w, 1)
+    ocupat += r.santierOcupat
+    lasate += r.lasateLaPicioare
+    assert.equal(w.agents.jobKind[0], FelJob.CONSTRUIESTE, `tickul ${w.tick}: jobul s-a incheiat desi santierul era doar ocupat`)
+    assert.ok(w.desemnari.reincercaLaTick[ds]! <= w.tick, `tickul ${w.tick}: santierul a fost racit pentru un ocupant`)
+  }
+  assert.ok(ocupat >= 140, `fixtura: constructorul a asteptat doar ${ocupat} tickuri cu santierul ocupat`)
+  assert.equal(w.agents.jobProgres[0], progres0, 'progresul a crescut cu santierul ocupat')
+  assert.equal(lasate, 0, 'marfa a fost lasata jos pentru un ocupant trecator')
+  assert.equal(w.agents.caraCantitate[0], R.piese[Piesa.PERETE]!.cantitate)
+  const n = panaCand(w, 2000, (w) => w.ratiune.unitatiZidite > 0)
+  assert.ok(n >= 0, 'dupa plecarea ocupantului, peretele trebuia sa se ridice')
+  assert.equal(w.ratiune.ridicariAbandonate, 0)
+  assert.equal(lastJobReport().lasateLaPicioare, 0)
+})
+
 test('dupa ultimul perete, sonda de material nu mai face niciun pas: contorul de santiere vii scade la stergere', () => {
   // Iesirea O(1) din `cautaJob` sta pe `viiConstruieste`, un contor DERIVED cu trei
   // scriitori (desemnare, stergere, reindexare). Recenzia din 25.09: `--` de la stergere
