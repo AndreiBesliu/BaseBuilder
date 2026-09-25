@@ -3485,3 +3485,12 @@ cu verdictul lângă; aici e starea întreagă, într-un singur loc.
 Gate-ul cu D1b (2), mașina-țintă (3), batching-ul (7), plecările (8) — erau deja acolo. **`AO_FACTOR`
 nu era**: în patru intrări la rând îl scriam în DEVLOG „așteaptă owner-ul", iar DEVLOG-ul se citește ca
 istorie, nu ca listă de bifat. A intrat ca punctul 11, cu ce se privește și cum arată bine.
+
+### O durată re-cronometrată, și o afirmație din `ci.yml` pe care n-o măsurase nimeni
+
+CLAUDE.md scria „212 probe, 5 min 31 s" ca fapt curent. Suita are acum 225, re-cronometrată la
+**331–476 s** (capătul de sus cu altă muncă pe mașină — de-aia bandă, nu punct).
+
+Iar `ci.yml` spunea că pe un runner de GitHub jobul durează „de câteva ori mai mult". Nimeni nu
+măsurase, deși jobul rulase deja: **351 s cap-coadă pentru 221 de probe**, cu tot cu checkout și
+`npm ci`, cât pe mașina locală. `check` a durat 78 s. Corectate în commit separat, cu motivul.

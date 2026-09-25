@@ -71,7 +71,7 @@ Pe Windows, `kinstead.bat` le adună pe toate: dublu-click deschide un meniu, ia
 
 ```bash
 npm run mutatii -- --lista      # ce suite există
-npm run mutatii                 # toate cele 212, 5 min 31 s (cronometrat 19.09.2026)
+npm run mutatii                 # toate cele 225, 5½–8 min (cronometrat, vezi mai jos)
 npm run mutatii -- nevoi        # o singură suită
 npm run mutatii -- nevoi podeaua  # doar mutațiile al căror nume conține „podeaua"
 ```
@@ -91,6 +91,11 @@ potrivește în două locuri editează altul decât cel gândit, rulează testel
 > negativă reală stă în afara CI-ului. Cronometrată pe 19.09.2026: 5 min 31 s pentru 212 de
 > probe** — de nouă ori mai puțin. Cifra veche n-a fost măsurată niciodată; era o impresie
 > dintr-o rulare în timpul căreia se lucra altceva.
+>
+> **Re-cronometrată 22–25.09.2026, pe 225 de probe: 331–476 s** local. Capătul de sus a avut altă
+> muncă pe mașină, deci se scrie banda, nu un punct. **Pe runner-ul de GitHub: 351 s cap-coadă
+> pentru 221 de probe** (19.09), cu tot cu checkout și `npm ci` — în aceeași bandă, nu „de câteva ori
+> mai mult", cum presupunea `ci.yml` fără să fi măsurat.
 >
 > `tools/check-mutatii.mjs` a fost scris ca înlocuitor static și rămâne util, dar nu mai e o
 > compensație: el răspunde la „proba ARE ce să măsoare?", nu la „măsoară?". A doua întrebare

@@ -12,8 +12,9 @@ jobs:
   #
   # A stat in afara CI-ului fiindca CLAUDE.md scria „~50 de minute". Cifra aia n-a
   # fost masurata niciodata. Cronometrata pe 19.09.2026, pe 212 de probe: **5 min
-  # 31 s**. Pe un runner de GitHub e de cateva ori mai mult, dar tot e un job de
-  # minute, nu de ore — si ruleaza in PARALEL cu `check`, care raporteaza in ~1 min.
+  # 31 s**. Pe runner, masurat pe 19.09 (221 de probe): **5 min 51 s** cap-coada, cu
+  # checkout si `npm ci` — cat pe masina locala, nu „de cateva ori mai mult", cum
+  # scria aici inainte fara masuratoare. Ruleaza in PARALEL cu `check` (1 min 18 s).
   #
   # Cere arborele curat: el restaureaza prin `git checkout --`. Dupa `actions/checkout`
   # e curat prin constructie, ceea ce e tocmai motivul pentru care poate rula aici si
