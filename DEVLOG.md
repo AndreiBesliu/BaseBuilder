@@ -3919,3 +3919,58 @@ produce sigur, cu contor de viață. Re-ancorate într-un commit separat (`92b1b
 individual: **280/280**. Lecția e cea de la fiecare rulare: o probă leagă pe ce ating fixturile
 și pe drumul pe care îl ia codul AZI; când muți un drum, re-rulezi toate suitele, nu doar pe cele
 noi — două din trei erau în suite pe care reparațiile nu le-au atins direct.
+
+---
+
+## Task Started — costul suitei de mutații: fiecare probă rulează doar testul ei
+
+**Model:** Claude Opus 5.5
+**Prompt de start:** „continua" (după pauza de la sfârșitul recenziei logisticii)
+
+### De ce
+
+Pe runner, jobul `mutatii` crescuse de la 351 s (221 de probe, 19.09) la 15 min 30 s (252) și la
+**23 min 34 s** (280) — cu o felie. Costul creștea cu produsul (probe × durata fișierului de test), nu cu
+munca: fiecare probă re-rula fișierul ÎNTREG. Măsurat: `saveload.test.ts` durează **39 s** (un singur test
+M5 per tick pe lumea fragmentată are 22 s) și îl re-rulau 11 probe — ~7 min, **42% din suită**;
+`constructie.test.ts` e ieftin (3,3 s), dar îl re-rulează 98 de probe.
+
+### Ce s-a schimbat (`b0ef22c`)
+
+Verdictul e „a picat testul scris pentru gardă?", deci restul fișierului nu intră în el. Acum fiecare
+probă rulează doar testele al căror nume începe cu `e`, prin `--test-name-pattern`; când testul numit NU
+pică, fișierul întreg decide — verdictul de dinainte, plus lista „și:" care a pus diagnosticul la mai
+multe ratări. Dacă acolo pică, se strigă `DEPENDENTA DE ORDINE`.
+
+Două capcane găsite înainte să mintă:
+- când filtrul de nume nu prinde niciun test, `node --test` (v26) raportează **`tests 1`** — fișierul
+  însuși, ca test. Numărat de acolo, un filtru mort ar fi trecut drept rulare, și fiecare probă ar fi
+  ieșit RATATĂ — exact semnalul care trimite după un test inexistent. `rulate` se numără pe rezultatele
+  al căror nume începe cu prefixul, iar un filtru care nu prinde nimic e control INVALID;
+- un `node --test` pornit din interiorul unui test moștenește `NODE_TEST_CONTEXT` și își trimite
+  rezultatele serializate către părinte, nu ca text: proba negativă a harnașamentului (în
+  `tests/mutatii.test.ts`) a picat pe asta prima dată. Mediul se curăță, reporterul `spec` se cere.
+Numele se scapă pentru expresia regulată (au `?`, paranteze, `+`); `check-mutatii` cere ca fiecare nume
+să se potrivească cu propriul filtru. Suita nouă `unelte` are trei probe pe gărzile noi.
+
+### Cifre
+
+- **Suita întreagă: 283/283, 262 s local** (cu modul vechi, estimat din duratele fișierelor × probe:
+  ~17 min pe aceeași mașină). Controlul de izolare (`--izolare`, fiecare test numit singur pe cod
+  nemutat): **200/200, 126 s**.
+- Calea RATATĂ, exersată pe o probă construită să nu fie prinsă (textul unui motiv pe care nu-l citește
+  niciun test): testul numit trece, fișierul întreg decide, **„fișierul întreg: 0 teste picate"**,
+  arborele restaurat.
+
+### Ce a găsit modul nou din prima rulare
+
+`DEPENDENTA DE ORDINE` pe „un cub izolat n-are nicio ocluzie": proba „ocuparea nu se golește între
+chunk-uri" îl prindea doar fiindcă un test ANTERIOR din fișier lăsa tabloul de ocupare murdar. O
+reordonare a fișierului ar fi făcut-o RATATĂ fără ca garda să se schimbe. Testul își provoacă acum
+singur scurgerea — meshuiește întâi un chunk plin — și proba leagă pe testul numit (`8459a5c`).
+Modul vechi nu putea vedea asta: rula mereu fișierul întreg, în aceeași ordine.
+
+### Ce nu mai acoperă, scris
+
+Un test care ar pica SINGUR pe cod curat ar da un PRINSA fals. Controlul e `--izolare`; se rulează când
+se adaugă fișiere de test sau teste cu stare comună, nu la fiecare probă (ar dubla costul).

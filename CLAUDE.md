@@ -71,13 +71,16 @@ Pe Windows, `kinstead.bat` le adună pe toate: dublu-click deschide un meniu, ia
 
 ```bash
 npm run mutatii -- --lista      # ce suite există
-npm run mutatii                 # toate cele 225, 5½–8 min (cronometrat, vezi mai jos)
+npm run mutatii                 # toate cele 283, ~4½ min local (26.09, cronometrat, vezi mai jos)
 npm run mutatii -- nevoi        # o singură suită
 npm run mutatii -- nevoi podeaua  # doar mutațiile al căror nume conține „podeaua"
+npm run mutatii -- --izolare    # fiecare test NUMIT de o probă, singur, pe cod nemutat (~2 min)
 ```
 
 Strică pe rând câte o garanție din cod și verifică dacă se înroșește **exact** testul scris pentru
-ea. Asta e proba negativă a suitei; fără ea, un test care nu mai exercită nimic arată la fel cu unul
+ea. Rulează **doar testul numit** (`--test-name-pattern`); fișierul întreg doar când acela nu pică — atunci
+el decide și arată ce alte teste au picat, iar un test care pică doar împreună cu celelalte se strigă
+`DEPENDENTA DE ORDINE`. Asta e proba negativă a suitei; fără ea, un test care nu mai exercită nimic arată la fel cu unul
 care apără ceva. **Cere arborele curat** — restaurarea se face prin `git checkout --`, deci ordinea e
 commit → mutații → reparații → commit. Un `TIPAR LIPSA` e eșec, nu „prinsă": tiparele se învechesc
 când codul de sub ele se mută, deci se rulează **toate** suitele după fiecare tranșă, nu doar cele
@@ -96,6 +99,10 @@ potrivește în două locuri editează altul decât cel gândit, rulează testel
 > muncă pe mașină, deci se scrie banda, nu un punct. **Pe runner-ul de GitHub: 351 s cap-coadă
 > pentru 221 de probe** (19.09), cu tot cu checkout și `npm ci` — în aceeași bandă, nu „de câteva ori
 > mai mult", cum presupunea `ci.yml` fără să fi măsurat.
+>
+> **26.09.2026: 283 de probe în 262 s local**, după ce harnașamentul rulează doar testul numit. Cu
+> fișierul întreg la fiecare probă, jobul ajunsese la **23 min 34 s pe runner** (280 de probe):
+> `saveload.test.ts` (39 s) re-rulat de 11 probe era singur 42% din suită.
 >
 > `tools/check-mutatii.mjs` a fost scris ca înlocuitor static și rămâne util, dar nu mai e o
 > compensație: el răspunde la „proba ARE ce să măsoare?", nu la „măsoară?". A doua întrebare
