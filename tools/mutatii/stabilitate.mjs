@@ -71,8 +71,8 @@ export const MUTATII = [
   {
     n: 'voxelul asezat nu ia scurtatura la suportMax (off-by-one peste tot)',
     f: 'src/sim/stabilitate.ts',
-    a: '  if (esteAsezat(t, wx, wy, z, cazute)) return rules.suportMax',
-    b: '  if (esteAsezat(t, wx, wy, z, cazute) && false) return rules.suportMax',
+    a: '  const s0 = esteAsezat(t, wx, wy, z, ip.cazute, ip.zidite)\n    ? rules.suportMax\n    : caveazaSpreAsezat(t, rules, wx, wy, z, ip.cazute, ip.zidite)',
+    b: '  const s0 = caveazaSpreAsezat(t, rules, wx, wy, z, ip.cazute, ip.zidite)',
     t: 'tests/stabilitate.test.ts', e: 'suportul scade cu exact 1 pe pas lateral',
   },
   // NU exista proba pentru `max(0, ...)` si nici pentru plafonul din BFS, si asta
@@ -96,15 +96,15 @@ export const MUTATII = [
   {
     n: 'celuleAtinse emite chei cu wx din AFARA lumii (aliaseaza la est)',
     f: 'src/sim/stabilitate.ts',
-    a: '      if (nx < 0 || nx >= WORLD_CELLS) continue',
-    b: '      if (nx < -99999) continue',
+    a: '    if (nx < 0 || nx >= WORLD_CELLS) continue',
+    b: '    if (nx < -99999) continue',
     t: 'tests/stabilitate.test.ts', e: 'marginea lumii nu ALIASEAZA',
   },
   {
     n: 'celuleAtinse emite chei cu wy din AFARA lumii (aliaseaza pe cota vecina)',
     f: 'src/sim/stabilitate.ts',
-    a: '        if (ny < 0 || ny >= WORLD_CELLS) continue',
-    b: '        if (ny < -99999) continue',
+    a: '      if (ny < 0 || ny >= WORLD_CELLS) continue',
+    b: '      if (ny < -99999) continue',
     t: 'tests/stabilitate.test.ts', e: 'marginea lumii nu ALIASEAZA',
   },
 
@@ -112,8 +112,8 @@ export const MUTATII = [
   {
     n: 'celuleAtinse acopera doar cota z, nu si z+1',
     f: 'src/sim/stabilitate.ts',
-    a: '  for (const dz of [0, 1]) {',
-    b: '  for (const dz of [0]) {',
+    a: '  for (const dz of [0, 1]) disc(wx, wy, z + dz, raza, out)',
+    b: '  for (const dz of [0]) disc(wx, wy, z + dz, raza, out)',
     t: 'tests/stabilitate.test.ts', e: 'celuleAtinse acopera DOUA cote',
   },
   {
@@ -126,7 +126,7 @@ export const MUTATII = [
   {
     n: 'ce cade nu re-verifica vecinatatea (fara cascada)',
     f: 'src/sim/stabilitate.ts',
-    a: '    // Ce cade poate lua cu el ce se sprijinea pe el: se re-verifica vecinatatea.\n    celuleAtinse(rules, c.wx, c.wy, c.z, deVerificat)',
+    a: '    // Ce cade poate lua cu el ce se sprijinea pe el: se re-verifica vecinatatea.\n    dinDisc.length = 0\n    celuleAtinse(rules, c.wx, c.wy, c.z, dinDisc)\n    for (const k of dinDisc) pune(k)',
     b: '    // Ce cade poate lua cu el ce se sprijinea pe el: se re-verifica vecinatatea.',
     t: 'tests/stabilitate.test.ts', e: 'cascada: ce cade trage dupa sine',
   },

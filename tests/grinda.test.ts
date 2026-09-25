@@ -13,7 +13,12 @@ import { applyCommand } from '../src/sim/commands.ts'
 import { decode, encode } from '../src/sim/save.ts'
 import { hashWorld } from '../src/sim/hash.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
-import { chunkKey, listaGrinzi, materialAt, reconstruiesteGrinzi } from '../src/sim/terrain/terrain.ts'
+import { adaugaGrinda, chunkKey, fill as fillTeren, grinziInRaza, listaGrinzi, materialAt, reconstruiesteGrinzi, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
+import type { IndexGrinzi } from '../src/sim/terrain/terrain.ts'
+import { cadeDaca, constructiaPosibila, contoareStabilitate, esteAsezat, poateSustine, Prefiltru, prefiltruStabilitate, reseteazaContoareStabilitate, Sol, solLa, StareSapat, stareSapat, suportLa } from '../src/sim/stabilitate.ts'
+import { cellKey } from '../src/sim/path.ts'
+import { Reason } from '../src/sim/result.ts'
+import { constructiaPrevizualizata } from '../src/sim/joburi.ts'
 import type { World } from '../src/sim/state.ts'
 import { Piesa } from '../src/sim/state.ts'
 import { Item } from '../src/sim/state.ts'
@@ -110,4 +115,485 @@ test('reconstructia din voxeli e aceeasi functie pe care o foloseste decode: pe 
   reconstruiesteGrinzi(w.terrain)
   assert.deepEqual(listaGrinzi(w.terrain.grinzi), inainte)
   assert.equal(w.terrain.grinzi.size, size)
+})
+
+// ---------------------------------------------------------------------------
+// regula stratificata
+// ---------------------------------------------------------------------------
+
+/**
+ * ORACOLUL: regula din definitie, prin recalcul complet pe o cutie — fara index, fara
+ * `suportLa`, fara invalidare. Citeste terenul doar prin `solLa`/`esteAsezat` (stratul
+ * de citire, nu regula) si materialul prin `materialAt`.
+ *
+ *   s0 = suportMax − d0, d0 = BFS multi-sursa din celulele ASEZATE, prin solid;
+ *   grinda activa ⇔ material GRINDA si s0 > 0;
+ *   s1 = suportRazaGrinda − d1, d1 = BFS multi-sursa din grinzile active, prin solid;
+ *   suport = max(s0, s1); cade tot ce are suport 0, pana la punct fix.
+ *
+ * Doar celulele din cutia INTERIOARA (marginea `m` scoasa) se judeca: la marginea cutiei
+ * un drum de sprijin poate iesi din ea.
+ */
+interface Cutie { x0: number; y0: number; x1: number; y1: number; z0: number; z1: number }
+
+function suportOracol(w: World, c: Cutie, cazute: Set<number>): Map<number, number> {
+  const t = w.terrain
+  const out = new Map<number, number>()
+  for (let z = c.z0; z <= c.z1; z++) {
+    const solid = (x: number, y: number): boolean => x >= c.x0 && x <= c.x1 && y >= c.y0 && y <= c.y1 && solLa(t, x, y, z, cazute) === Sol.SOLID
+    const bfs = (surse: number[][], plafon: number): Map<number, number> => {
+      const d = new Map<number, number>()
+      let coada = surse
+      for (const [x, y] of surse) d.set(cellKey(x!, y!, z), 0)
+      for (let pas = 1; pas <= plafon && coada.length > 0; pas++) {
+        const urm: number[][] = []
+        for (const [x, y] of coada) {
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+            const nx = x! + dx
+            const ny = y! + dy
+            if (!solid(nx, ny) || d.has(cellKey(nx, ny, z))) continue
+            d.set(cellKey(nx, ny, z), pas)
+            urm.push([nx, ny])
+          }
+        }
+        coada = urm
+      }
+      return d
+    }
+    const asezate: number[][] = []
+    for (let x = c.x0; x <= c.x1; x++) for (let y = c.y0; y <= c.y1; y++) if (solid(x, y) && esteAsezat(t, x, y, z, cazute)) asezate.push([x, y])
+    const d0 = bfs(asezate, R.suportMax)
+    const active: number[][] = []
+    for (let x = c.x0; x <= c.x1; x++) {
+      for (let y = c.y0; y <= c.y1; y++) {
+        if (!solid(x, y)) continue
+        const m = materialAt(t, x, y, z)
+        const dd = d0.get(cellKey(x, y, z))
+        if (m.ok && m.value === Material.GRINDA && dd !== undefined && R.suportMax - dd > 0) active.push([x, y])
+      }
+    }
+    const d1 = bfs(active, R.suportRazaGrinda)
+    for (let x = c.x0; x <= c.x1; x++) {
+      for (let y = c.y0; y <= c.y1; y++) {
+        if (!solid(x, y)) continue
+        const k = cellKey(x, y, z)
+        const a = d0.has(k) ? Math.max(0, R.suportMax - d0.get(k)!) : 0
+        const b = d1.has(k) ? Math.max(0, R.suportRazaGrinda - d1.get(k)!) : 0
+        out.set(k, Math.max(a, b))
+      }
+    }
+  }
+  return out
+}
+
+function interior(c: Cutie, m: number): (x: number, y: number) => boolean {
+  return (x, y) => x >= c.x0 + m && x <= c.x1 - m && y >= c.y0 + m && y <= c.y1 - m
+}
+
+/** Ce cade dupa oracol daca dispar `sapate`: punct fix pe cutie. Cheile sortate, fara sapate. */
+function cadeOracol(w: World, c: Cutie, sapate: number[]): number[] {
+  const cazute = new Set<number>(sapate)
+  for (;;) {
+    const s = suportOracol(w, c, cazute)
+    let nou = false
+    for (const [k, v] of s) if (v === 0 && !cazute.has(k)) { cazute.add(k); nou = true }
+    if (!nou) break
+  }
+  const sap = new Set(sapate)
+  return [...cazute].filter((k) => !sap.has(k)).sort((a, b) => a - b)
+}
+
+/** Celulele solide cu suport 0 dupa oracol, in cutia interioara — pe o stare care ar trebui sa fie punct fix. */
+function plutitori(w: World, c: Cutie, m: number): number {
+  const inauntru = interior(c, m)
+  let n = 0
+  for (const [k, v] of suportOracol(w, c, new Set())) {
+    const x = k % WORLD_CELLS
+    const y = Math.floor(k / WORLD_CELLS) % WORLD_CELLS
+    if (v === 0 && inauntru(x, y)) n++
+  }
+  return n
+}
+
+/** Un zid asezat pe sol, pe randul x0, pana la cota zf. */
+function zid(w: World, x0: number, y0: number, lung: number, g: number, zf: number): void {
+  for (let dy = 0; dy < lung; dy++) {
+    for (let z = g + 1; z <= zf; z++) assert.ok(applyCommand(w, { kind: 'fill', wx: x0, wy: y0 + dy, z, material: Material.PIATRA_CONSTRUITA }, R).ok, `fixtura: zidul la ${dy},${z}`)
+  }
+}
+
+/**
+ * Construieste un plan pe calea REALA (comanda `fill`, deci `poateSustine`), in ordinea
+ * data, cu treceri repetate pana la punct fix. Intoarce ce s-a construit.
+ */
+function construiesteIncremental(w: World, plan: readonly (readonly [number, number, number, number])[]): Set<number> {
+  const facute = new Set<number>()
+  for (let adaugat = true; adaugat;) {
+    adaugat = false
+    for (const [x, y, z, mat] of plan) {
+      const k = cellKey(x, y, z)
+      if (facute.has(k)) continue
+      if (applyCommand(w, { kind: 'fill', wx: x, wy: y, z, material: mat as 6 }, R).ok) { facute.add(k); adaugat = true }
+    }
+  }
+  return facute
+}
+
+test('fasia din zid: 3 celule fara grinda; cu o grinda la x = 3 ajunge la 12, iar a 13-a e refuzata', () => {
+  for (const cuGrinda of [false, true]) {
+    const { w, x0, y0, g } = scena(16)
+    const zf = g + 2
+    zid(w, x0, y0, 1, g, zf)
+    const plan: [number, number, number, number][] = []
+    for (let dx = 1; dx <= 14; dx++) plan.push([x0 + dx, y0, zf, cuGrinda && dx === 3 ? Material.GRINDA : Material.PIATRA_CONSTRUITA])
+    const facute = construiesteIncremental(w, plan)
+    let pana = 0
+    for (let dx = 1; dx <= 14; dx++) if (facute.has(cellKey(x0 + dx, y0, zf))) pana = dx
+    assert.equal(facute.size, pana, 'fixtura: fasia trebuie sa fie continua')
+    assert.equal(pana, cuGrinda ? 12 : 3, `${cuGrinda ? 'cu' : 'fara'} grinda: fasia ajunge la ${pana}`)
+    assert.equal(plutitori(w, { x0: x0 - 16, y0: y0 - 16, x1: x0 + 30, y1: y0 + 16, z0: zf, z1: zf }, 14), 0)
+  }
+})
+
+test('grinzile NU se tin una pe alta: o a doua grinda, tinuta doar de prima, nu duce fasia mai departe', () => {
+  const { w, x0, y0, g } = scena(18)
+  const zf = g + 2
+  zid(w, x0, y0, 1, g, zf)
+  const plan: [number, number, number, number][] = []
+  for (let dx = 1; dx <= 17; dx++) plan.push([x0 + dx, y0, zf, dx === 3 || dx === 12 ? Material.GRINDA : Material.PIATRA_CONSTRUITA])
+  const facute = construiesteIncremental(w, plan)
+  assert.ok(facute.has(cellKey(x0 + 12, y0, zf)), 'fixtura: a doua grinda trebuia sa se poata zidi (o tine prima)')
+  assert.ok(!facute.has(cellKey(x0 + 13, y0, zf)), 'a doua grinda, inactiva, a dus fasia mai departe: grinzile s-au inlantuit')
+  assert.equal(suportLa(w.terrain, R, x0 + 12, y0, zf), 1, 'a doua grinda e tinuta de prima, la 9 pasi')
+})
+
+test('o grinda plutitoare nu tine nimic: 31 de grinzi puse direct in cer au suport 0, si nimic nu se zideste langa ele', () => {
+  const { w, x0, y0, g } = scena(8)
+  const z = g + 12
+  for (let dx = 0; dx < 31; dx++) assert.ok(fillTeren(w.terrain, x0 + dx - 8, y0 + 4, z, Material.GRINDA).ok)
+  for (let dx = 0; dx < 31; dx++) assert.equal(suportLa(w.terrain, R, x0 + dx - 8, y0 + 4, z), 0, `grinda plutitoare ${dx} are suport`)
+  const langa = poateSustine(w.terrain, R, x0 + 3, y0 + 5, z)
+  assert.equal(langa.ok, false, 'o piesa langa grinzile plutitoare trebuie refuzata')
+})
+
+test('„De ce nu?" deosebeste: nicio grinda in raza, o grinda INACTIVA, o grinda activa la care nu duce niciun drum', () => {
+  const { w, x0, y0, g } = scena(16)
+  const zf = g + 2
+  zid(w, x0, y0, 1, g, zf)
+  for (let dx = 1; dx <= 3; dx++) assert.ok(applyCommand(w, { kind: 'fill', wx: x0 + dx, wy: y0, z: zf, material: dx === 3 ? Material.GRINDA : Material.PIATRA_CONSTRUITA }, R).ok)
+  // (1) Activa, dar fara drum prin solid: aceeasi cota, doua randuri mai incolo, cu aer intre.
+  const faraDrum = poateSustine(w.terrain, R, x0 + 5, y0 + 2, zf)
+  assert.equal(faraDrum.ok, false)
+  if (!faraDrum.ok) {
+    assert.equal(faraDrum.reason, Reason.FARA_SPRIJIN)
+    assert.equal(faraDrum.params.grindaActiva, 1)
+    assert.equal(faraDrum.params.grindaX, x0 + 3)
+  }
+  // (2) O grinda INACTIVA, pusa direct in teren la 5 pasi de zid (nicio comanda n-o accepta).
+  assert.ok(fillTeren(w.terrain, x0 + 9, y0 + 6, zf, Material.GRINDA).ok)
+  const inactiva = poateSustine(w.terrain, R, x0 + 10, y0 + 6, zf)
+  assert.equal(inactiva.ok, false)
+  if (!inactiva.ok) assert.equal(inactiva.params.grindaActiva, 0, 'grinda de langa trebuia raportata inactiva')
+  // (3) Nicio grinda in raza: departe de toate.
+  const departe = poateSustine(w.terrain, R, x0 + 14, y0 + 14, zf)
+  assert.equal(departe.ok, false)
+  if (!departe.ok) assert.equal(departe.params.grindaX, undefined)
+})
+
+test('S6d: sapi grinda, iar inelul de langa ea e tinut de un STALP — ce cade = previzualizarea = oracolul, zero plutitori', () => {
+  // Defectul CRITIC al panoului, gasit de doua lentile: `sapaVoxel` sapa intai, deci
+  // grinda iesea din index inainte ca invalidarea sa-i emita discul de 9. Cand inelul
+  // de raza 3 din jurul ei e tinut de altceva, cascada nu porneste, si podeaua tinuta
+  // doar de grinda ramane in aer: 58 de voxeli, cu previzualizarea spunand CADE.
+  // Conditia exacta: nicio ALTA grinda la cel mult 9 pe cota ei (altfel discul 3 o
+  // maschează), si stalpul la cel mult 3 pasi. Controlul fara stalp: cascada prinde tot.
+  for (const cuStalp of [true, false]) {
+    const { w, x0, y0, g } = scena(16)
+    const zf = g + 2
+    zid(w, x0, y0, 12, g, zf)
+    if (cuStalp) assert.ok(applyCommand(w, { kind: 'fill', wx: x0 + 5, wy: y0 + 7, z: g + 1, material: Material.PIATRA_CONSTRUITA }, R).ok)
+    const plan: [number, number, number, number][] = []
+    for (let dx = 1; dx <= 14; dx++) {
+      for (let dy = 0; dy < 12; dy++) plan.push([x0 + dx, y0 + dy, zf, dx === 3 && dy === 7 ? Material.GRINDA : Material.PIATRA_CONSTRUITA])
+    }
+    construiesteIncremental(w, plan)
+    assert.deepEqual(listaGrinzi(w.terrain.grinzi), [`${x0 + 3},${y0 + 7},${zf}`], 'fixtura: exact o grinda, fara alta in raza')
+    const cutie = { x0: x0 - 14, y0: y0 - 14, x1: x0 + 28, y1: y0 + 26, z0: zf, z1: zf }
+    assert.equal(plutitori(w, cutie, 12), 0, 'fixtura: constructia porneste fara plutitori')
+    const e = cellKey(x0 + 3, y0 + 7, zf)
+    const previz = cadeDaca(w.terrain, R, [e])
+    const oracol = cadeOracol(w, cutie, [e])
+    // Multimi, nu ordini: `cadeDaca` sorteaza pe (z, x, y), oracolul pe cheie.
+    assert.deepEqual([...previz].sort((a, b) => a - b), oracol, 'previzualizarea difera de oracol')
+    assert.ok(previz.length > 0, 'fixtura: sapatul grinzii trebuia sa doboare ceva')
+    assert.ok(applyCommand(w, { kind: 'dig', wx: x0 + 3, wy: y0 + 7, z: zf }, R).ok)
+    assert.equal(plutitori(w, cutie, 12), 0, `${cuStalp ? 'cu' : 'fara'} stalp: dupa sapat au ramas voxeli cu suport 0 in aer`)
+    for (const k of previz) {
+      const x = k % WORLD_CELLS
+      const y = Math.floor(k / WORLD_CELLS) % WORLD_CELLS
+      const m = materialAt(w.terrain, x, y, zf)
+      assert.ok(m.ok && m.value !== Material.PIATRA_CONSTRUITA, 'o celula din previzualizare n-a cazut')
+    }
+  }
+})
+
+/** Un generator determinist mic (LCG), ca scenele aleatoare sa fie aceleasi la fiecare rulare. */
+function lcg(samanta: number): () => number {
+  let s = samanta >>> 0
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0
+    return s / 4294967296
+  }
+}
+
+test('PROPRIETATE: pe scene aleatoare cu grinzi, orice sapatura = oracolul, previzualizarea = realitatea, zero plutitori', () => {
+  // Acoperirea discurilor din `propaga` (a: grinda care cade; b: grinzile a caror
+  // activitate se schimba; c: drumurile prin celula cazuta) se probeaza aici, pe
+  // configuratii pe care nu le-a desenat nimeni de mana: zid, stalpi, podea cu grinzi
+  // presarate, construita pe calea reala pana la punct fix; apoi sapaturi aleatoare.
+  let sapaturi = 0
+  let cuCadere = 0
+  let deGrinda = 0
+  for (const samanta of [1, 2, 3, 4, 5, 6]) {
+    const rnd = lcg(samanta)
+    const { w, x0, y0, g } = scena(18)
+    const zf = g + 2
+    zid(w, x0, y0, 16, g, zf)
+    for (let k = 0; k < 3; k++) {
+      const sx = x0 + 3 + Math.floor(rnd() * 12)
+      const sy = y0 + Math.floor(rnd() * 16)
+      applyCommand(w, { kind: 'fill', wx: sx, wy: sy, z: g + 1, material: Material.PIATRA_CONSTRUITA }, R)
+    }
+    const plan: [number, number, number, number][] = []
+    for (let dx = 1; dx <= 16; dx++) {
+      for (let dy = 0; dy < 16; dy++) {
+        if (rnd() < 0.08) continue
+        plan.push([x0 + dx, y0 + dy, zf, rnd() < 0.05 ? Material.GRINDA : Material.PIATRA_CONSTRUITA])
+      }
+    }
+    construiesteIncremental(w, plan)
+    const cutie = { x0: x0 - 14, y0: y0 - 14, x1: x0 + 30, y1: y0 + 30, z0: zf, z1: zf }
+    assert.equal(plutitori(w, cutie, 12), 0, `samanta ${samanta}: constructia porneste cu plutitori`)
+    for (let pas = 0; pas < 14; pas++) {
+      const solide: [number, number][] = []
+      for (let dx = 1; dx <= 16; dx++) for (let dy = 0; dy < 16; dy++) if (solLa(w.terrain, x0 + dx, y0 + dy, zf) === Sol.SOLID) solide.push([x0 + dx, y0 + dy])
+      if (solide.length === 0) break
+      // Grinzile se sapa cu prioritate: acolo sunt discurile noi.
+      const grinzi = solide.filter(([x, y]) => { const m = materialAt(w.terrain, x, y, zf); return m.ok && m.value === Material.GRINDA })
+      const alese = grinzi.length > 0 && rnd() < 0.5 ? grinzi : solide
+      const [x, y] = alese[Math.floor(rnd() * alese.length)]!
+      const m = materialAt(w.terrain, x, y, zf)
+      const e = cellKey(x, y, zf)
+      const previz = cadeDaca(w.terrain, R, [e])
+      assert.deepEqual([...previz].sort((a, b) => a - b), cadeOracol(w, cutie, [e]), `samanta ${samanta}, pasul ${pas}: previzualizarea difera de oracol la sapatul lui (${x - x0}, ${y - y0})`)
+      assert.ok(applyCommand(w, { kind: 'dig', wx: x, wy: y, z: zf }, R).ok)
+      assert.equal(plutitori(w, cutie, 12), 0, `samanta ${samanta}, pasul ${pas}: plutitori dupa sapatul lui (${x - x0}, ${y - y0})`)
+      sapaturi++
+      if (previz.length > 0) cuCadere++
+      if (m.ok && m.value === Material.GRINDA) deGrinda++
+    }
+  }
+  assert.ok(sapaturi >= 60 && cuCadere >= 5 && deGrinda >= 8, `fixtura: ${sapaturi} sapaturi, ${cuCadere} cu cadere, ${deGrinda} de grinda — prea putine ca sa probeze ceva`)
+})
+
+test('inchiderea de constructie cu grinzi PLANIFICATE promite exact ce se construieste incremental', () => {
+  for (const cuGrinda of [true, false]) {
+    const { w, x0, y0, g } = scena(16)
+    const zf = g + 2
+    zid(w, x0, y0, 1, g, zf)
+    for (let dx = 1; dx <= 14; dx++) {
+      const out = applyCommand(w, { kind: 'desemneaza', wx: x0 + dx, wy: y0, z: zf, piesa: cuGrinda && dx === 3 ? Piesa.GRINDA : Piesa.PODEA }, R)
+      assert.ok(out.ok, `fixtura: desemnarea ${dx}: ${JSON.stringify(out)}`)
+    }
+    const { construibile, imposibile } = constructiaPrevizualizata(w, R)
+    assert.equal(construibile.length, cuGrinda ? 12 : 3, `${cuGrinda ? 'cu' : 'fara'} grinda planificata: promite ${construibile.length}`)
+    assert.equal(imposibile.length, 14 - construibile.length)
+    // Si pe calea reala, alta lume identica: exact multimea promisa.
+    const { w: w2 } = scena(16)
+    zid(w2, x0, y0, 1, g, zf)
+    const plan: [number, number, number, number][] = []
+    for (let dx = 14; dx >= 1; dx--) plan.push([x0 + dx, y0, zf, cuGrinda && dx === 3 ? Material.GRINDA : Material.PIATRA_CONSTRUITA])
+    const facute = construiesteIncremental(w2, plan)
+    assert.deepEqual([...facute].sort((a, b) => a - b), construibile)
+  }
+})
+
+test('constructiaPosibila fara lista de grinzi planificate ar promite MAI PUTIN — lista e necesara', () => {
+  const { w, x0, y0, g } = scena(16)
+  const zf = g + 2
+  zid(w, x0, y0, 1, g, zf)
+  const celule: number[] = []
+  for (let dx = 1; dx <= 14; dx++) celule.push(cellKey(x0 + dx, y0, zf))
+  assert.equal(constructiaPosibila(w.terrain, R, celule).construibile.length, 3)
+  assert.equal(constructiaPosibila(w.terrain, R, celule, [cellKey(x0 + 3, y0, zf)]).construibile.length, 12)
+})
+
+test('grinziInRaza: doar cota ceruta, doar raza ceruta, si nimic de la capatul opus al lumii', () => {
+  const index: IndexGrinzi = new Map()
+  adaugaGrinda(index, 100, 100, 5)
+  adaugaGrinda(index, 100, 100, 6)
+  adaugaGrinda(index, 100, 100, 4)
+  adaugaGrinda(index, 109, 100, 5)
+  adaugaGrinda(index, 110, 100, 5)
+  const out: number[] = []
+  grinziInRaza(index, 100, 100, 5, 9, out)
+  assert.deepEqual(out, [100, 100, 109, 100], 'alta cota sau dincolo de raza a intrat in raspuns')
+  // chunkKey(-1, 21) === chunkKey(511, 20): fara taiere la lume, o grinda de la estul
+  // extrem ar aparea „la un pas" de marginea de vest.
+  const est: IndexGrinzi = new Map()
+  adaugaGrinda(est, WORLD_CELLS - 1, 20 * 32 + 29, 25)
+  const vest: number[] = []
+  grinziInRaza(est, 0, 21 * 32 + 29, 25, 9, vest)
+  assert.deepEqual(vest, [], 'grinda de la estul lumii a aparut la vest')
+  const control: number[] = []
+  grinziInRaza(est, WORLD_CELLS - 3, 20 * 32 + 29, 25, 9, control)
+  assert.deepEqual(control, [WORLD_CELLS - 1, 20 * 32 + 29])
+})
+
+test('o intrare VECHE in index nu devine grinda: candidatul trebuie sa fie chiar din material GRINDA', () => {
+  // Fara filtrul pe material, o desincronizare a indexului DERIVED ar fi devenit fizica
+  // doar in lumea continua: masurat de panou, 9 celule zidite peste limita.
+  const { w, x0, y0, g } = scena(16)
+  const zf = g + 2
+  zid(w, x0, y0, 1, g, zf)
+  for (let dx = 1; dx <= 3; dx++) assert.ok(applyCommand(w, { kind: 'fill', wx: x0 + dx, wy: y0, z: zf, material: Material.PIATRA_CONSTRUITA }, R).ok)
+  adaugaGrinda(w.terrain.grinzi, x0 + 3, y0, zf)
+  assert.equal(poateSustine(w.terrain, R, x0 + 4, y0, zf).ok, false, 'piatra obisnuita a tinut ca o grinda')
+})
+
+test('K05: o grinda departe nu costa nimic; un tavan numai din grinzi are un plafon scris', () => {
+  // Pe o cavitate 9×9 sapata langa sit: previzualizarea costa la fel cu si fara o grinda
+  // la 400 de celule — prima amanare a grinzii a venit exact din contrariul (9,4 → 404,8 ms).
+  const masoara = (cuGrinda: boolean): { s1: number; verificari: number } => {
+    const { w, x0, y0, g } = scena(12)
+    if (cuGrinda) {
+      const gd = solid(w, x0 + 400, y0)
+      assert.notEqual(gd, null, 'fixtura: sol la 400 de celule')
+      assert.ok(fillTeren(w.terrain, x0 + 400, y0, gd! + 1, Material.GRINDA).ok)
+    }
+    const celule: number[] = []
+    for (let dx = 0; dx < 9; dx++) for (let dy = 0; dy < 9; dy++) celule.push(cellKey(x0 + 1 + dx, y0 + 1 + dy, g - 3))
+    reseteazaContoareStabilitate()
+    cadeDaca(w.terrain, R, celule)
+    return { s1: contoareStabilitate.interogariS1, verificari: contoareStabilitate.verificari }
+  }
+  const fara = masoara(false)
+  const cu = masoara(true)
+  assert.equal(cu.s1, 0, 'o grinda la 400 de celule a intrat in interogari')
+  assert.equal(cu.verificari, fara.verificari)
+
+  // Un tavan 21×21 numai din grinzi, ancorat de jur-imprejur: o sapatura sub el. Plafonul
+  // pe activitati e ce face costul marginit de munca: fara memorie, ~160 de BFS de
+  // activitate pe interogare (masurat de panou: 2,4 milioane la 441 de sapaturi).
+  // Tavanul se ridica deasupra celui mai inalt sol din patrat, cu marginea zidita din
+  // sol pana la el: nu cere teren plat, doar uscat.
+  const { w, sit } = laSit(12345, 0)
+  const x0 = sit.wx
+  const y0 = sit.wy
+  let gmax = -1 << 20
+  for (let dx = 0; dx <= 22; dx++) {
+    for (let dy = 0; dy <= 22; dy++) {
+      const gs = solid(w, x0 + dx, y0 + dy)
+      assert.notEqual(gs, null, 'fixtura: apa sub tavan')
+      if (gs! > gmax) gmax = gs!
+    }
+  }
+  const zf = gmax + 2
+  for (let dx = 0; dx <= 22; dx++) {
+    for (let dy = 0; dy <= 22; dy++) {
+      const margine = dx === 0 || dy === 0 || dx === 22 || dy === 22
+      if (margine) for (let z = solid(w, x0 + dx, y0 + dy)! + 1; z <= zf; z++) assert.ok(fillTeren(w.terrain, x0 + dx, y0 + dy, z, Material.PIATRA_CONSTRUITA).ok)
+      else assert.ok(fillTeren(w.terrain, x0 + dx, y0 + dy, zf, Material.GRINDA).ok)
+    }
+  }
+  reseteazaContoareStabilitate()
+  const cad = cadeDaca(w.terrain, R, [cellKey(x0 + 11, y0 + 11, zf)])
+  assert.equal(cad.length, 0, 'fixtura: tavanul de grinzi trebuia sa tina fara grinda din centru')
+  // Marginea din GEOMETRIE, nu din cifra masurata: cu memoria, fiecare grinda se
+  // calculeaza o data pe propagare, deci cel mult grinzile de la 2·(R−1) de sapatura
+  // (aici tot tavanul, 441) plus cele de langa samanta, inainte si dupa (≤ 2 × 25).
+  // Masurat: 453. Fara memorie, fiecare interogare `s1` le-ar recalcula pe toate ~160
+  // din raza ei — de ordinul miilor.
+  const grinzi = 21 * 21
+  assert.ok(contoareStabilitate.activitati <= grinzi + 2 * 25, `${contoareStabilitate.activitati} calcule de activitate pentru o singura sapatura`)
+  // Verificarile: discul grinzii sapate (181) si discurile de sol (50), deduplicate.
+  assert.ok(contoareStabilitate.verificari <= 181 + 50, `${contoareStabilitate.verificari} verificari pentru o singura sapatura`)
+})
+
+
+test('prefiltrul overlay-ului: langa o grinda raza e a GRINZII — si grinda poate sta in afara ferestrei', () => {
+  // Fixtura panoului (podea de doua straturi) o prinde acum sursa „solid neasezat",
+  // nu raza. Aici doar raza o poate prinde. Grinda e ASEZATA in roca, cu roca si
+  // deasupra; la est, tavanul unei pivnite de 7×7. Celula din mijlocul tavanului
+  // (E+4) are s0 = 0 si sta DOAR prin grinda, la d1 = 9 exact, pe drumul drept. Doua
+  // celule ingropate sunt periculoase, amandoua la mai mult de `suportMax` de orice
+  // sursa: grinda (sapata, nu mai tine nimic) si vecina ei de pe drum (sapata, ocolul
+  // are 11 pasi). Cu raza de sol ies SIGUR fara sa fie intrebate.
+  //
+  // A doua fereastra incepe CHIAR dupa grinda: vecina e inauntru, grinda afara. Fara
+  // cautarea pe fereastra largita, prefiltrul n-ar sti ca exista vreo grinda.
+  //
+  // Nu cere teren plat, doar roca la zA si zA+1: cota se ia sub cel mai jos sol.
+  const { w, sit } = laSit(12345, 0)
+  const gx = sit.wx
+  const yc = sit.wy
+  const E = gx + 5
+  const raza = 12
+  const lat = 2 * raza + 1
+  let gmin = 1 << 20
+  for (let x = gx - raza; x <= gx + 1 + 2 * raza; x++) {
+    for (let y = yc - raza; y <= yc + raza; y++) {
+      const gs = solid(w, x, y)
+      assert.notEqual(gs, null, 'fixtura: apa in fereastra')
+      if (gs! < gmin) gmin = gs!
+    }
+  }
+  const zA = gmin - 2
+  assert.ok(applyCommand(w, { kind: 'dig', wx: gx, wy: yc, z: zA }, R).ok)
+  assert.ok(applyCommand(w, { kind: 'fill', wx: gx, wy: yc, z: zA, material: Material.GRINDA }, R).ok, 'fixtura: grinda in roca')
+  for (let x = E + 1; x <= E + 7; x++) {
+    for (let y = yc - 3; y <= yc + 3; y++) assert.ok(applyCommand(w, { kind: 'dig', wx: x, wy: y, z: zA - 1 }, R).ok, `fixtura: pivnita la ${x - E},${y - yc}`)
+  }
+  for (let x = E + 1; x <= E + 7; x++) {
+    for (let y = yc - 3; y <= yc + 3; y++) assert.ok(suportLa(w.terrain, R, x, y, zA) > 0, `fixtura: tavanul pluteste la ${x - E},${y - yc}`)
+  }
+  assert.equal(suportLa(w.terrain, R, E + 4, yc, zA), 1, 'fixtura: mijlocul tavanului sta prin grinda, la d1 = 9')
+
+  const ascunse = (fx: number, fy: number): { periculoase: number; ascunse: number; filtru: Uint8Array } => {
+    const filtru = prefiltruStabilitate(w.terrain, R, fx, fy, lat, zA)
+    let p = 0
+    let a = 0
+    for (let i = 0; i < lat; i++) {
+      for (let j = 0; j < lat; j++) {
+        if (solLa(w.terrain, fx + i, fy + j, zA) !== Sol.SOLID) continue
+        const stare = stareSapat(w.terrain, R, fx + i, fy + j, zA)
+        if (stare !== StareSapat.CADE && stare !== StareSapat.ULTIMA_CELULA) continue
+        p++
+        if (filtru[i * lat + j] !== Prefiltru.DE_SCANAT) a++
+      }
+    }
+    return { periculoase: p, ascunse: a, filtru }
+  }
+  // Fixtura chiar cere raza grinzii: cea mai apropiata sursa (aer la zA/zA+1, sau
+  // solid neasezat la zA) e mai departe de `suportMax`, si pentru grinda, si pentru
+  // vecina ei; iar sapate, amandoua doboara tavanul.
+  for (const x of [gx, gx + 1]) {
+    let sursa = 1 << 20
+    for (let i = -raza; i <= raza; i++) {
+      for (let j = -raza; j <= raza; j++) {
+        const e = solLa(w.terrain, x + i, yc + j, zA) !== Sol.SOLID || solLa(w.terrain, x + i, yc + j, zA + 1) !== Sol.SOLID || !esteAsezat(w.terrain, x + i, yc + j, zA)
+        if (e) sursa = Math.min(sursa, Math.abs(i) + Math.abs(j))
+      }
+    }
+    assert.ok(sursa > R.suportMax, `fixtura: celula ${x - gx} e la ${sursa} de o sursa, deci raza de sol ar prinde-o oricum`)
+    assert.equal(stareSapat(w.terrain, R, x, yc, zA), StareSapat.CADE, `sapand celula ${x - gx} trebuia sa cada mijlocul tavanului`)
+  }
+
+  const peGrinda = ascunse(gx - raza, yc - raza)
+  assert.equal(peGrinda.filtru[raza * lat + raza], Prefiltru.DE_SCANAT, 'grinda care tine tavanul a iesit SIGUR fara scanare')
+  assert.equal(peGrinda.ascunse, 0, `fereastra pe grinda: ${peGrinda.ascunse} din ${peGrinda.periculoase} celule periculoase declarate SIGUR fara scanare`)
+
+  const dupaGrinda = ascunse(gx + 1, yc - raza)
+  assert.equal(dupaGrinda.filtru[raza], Prefiltru.DE_SCANAT, 'vecina grinzii, cu grinda in afara ferestrei, a iesit SIGUR fara scanare')
+  assert.equal(dupaGrinda.ascunse, 0, `fereastra dupa grinda: ${dupaGrinda.ascunse} din ${dupaGrinda.periculoase} celule periculoase declarate SIGUR fara scanare`)
 })

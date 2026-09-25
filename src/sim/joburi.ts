@@ -89,7 +89,7 @@ import type { Rules } from './content.ts'
 import type { Outcome, ReasonCode } from './result.ts'
 import { accept, codMotiv, refuse, Reason } from './result.ts'
 import type { FelJobId, World } from './state.ts'
-import { Categorie, CATEGORII, FelJob, Gand, GAND_PENTRU_NEVOIE, ITEME, Nevoie, NEVOI, PasCara, PasConstruieste, PasJob, pasDeMers, PasNevoie, puneGand } from './state.ts'
+import { Categorie, CATEGORII, FelJob, Gand, GAND_PENTRU_NEVOIE, ITEME, Nevoie, NEVOI, PasCara, PasConstruieste, PasJob, pasDeMers, PasNevoie, Piesa, puneGand } from './state.ts'
 import { cellOf, clearPath } from './drumuri.ts'
 import { blockOfCell, ensureArea, find, isWalkable, markDirty, NO_REGION, regionAt, REGION_SIZE } from './regions.ts'
 import type { RegionStore } from './regions.ts'
@@ -2777,6 +2777,17 @@ export function sapaVoxel(w: World, wx: number, wy: number, z: number, rules: Ru
   }
   const mat = materialAt(w.terrain, wx, wy, z)
   if (!mat.ok) return mat
+  // Ce cade se calculeaza ACUM, pe terenul de dinaintea sapaturii, cu celula sapata ca
+  // AER in ipoteza — exact functia din previzualizare si din `stareSapat`. O singura
+  // adevarata: ecranul si sapatura nu mai pot raspunde diferit la aceeasi intrebare.
+  //
+  // Calculata DUPA `dig`, pierdea grinzile: `editAt` scotea grinda sapata din index
+  // inainte ca invalidarea sa-i emita discul, iar podeaua tinuta doar de ea ramanea in
+  // aer daca inelul de langa grinda era tinut de altceva (un stalp). Masurat de doua
+  // lentile ale panoului, independent: previzualizarea spunea CADE, 58 (respectiv 10)
+  // voxeli, iar sapatura reala nu dobora nimic si ii lasa cu suport 0. Intre calcul si
+  // aplicare terenul nu se schimba: se muta doar iteme si celule de zona.
+  const cad = multimeaCareCade(w.terrain, rules, wx, wy, z)
   const out = dig(w.terrain, wx, wy, z)
   if (!out.ok) return out
   markDirty(w.regions, wx, wy, z, rules)
@@ -2794,11 +2805,10 @@ export function sapaVoxel(w: World, wx: number, wy: number, z: number, rules: Ru
     raport.itemeProduse++
     raport.unitatiProduse += y.cantitate
   }
-  // Si abia acum stabilitatea: sapatul a terminat, deci terenul e cel pe care se
-  // judeca. Prabusirea se intampla in ACELASI tick — un tavan care sta un tick
-  // in aer si cade la urmatorul e o stare pe care jucatorul o vede si n-o poate
-  // explica.
-  prabuseste(w, rules, wx, wy, z)
+  // Si abia acum prabusirea, cu multimea calculata inainte de sapat. In ACELASI tick —
+  // un tavan care sta un tick in aer si cade la urmatorul e o stare pe care jucatorul
+  // o vede si n-o poate explica.
+  prabuseste(w, rules, cad)
   return accept()
 }
 
@@ -2827,11 +2837,17 @@ export function sapaVoxel(w: World, wx: number, wy: number, z: number, rules: Ru
 export function constructiaPrevizualizata(w: World, rules: Rules): { construibile: number[]; imposibile: number[] } {
   const d = w.desemnari
   const celule: number[] = []
+  // Grinzile PLANIFICATE: fara ele inchiderea promite mai putin decat se poate construi
+  // (masurat de panou: 81 din 120 de planuri, 5.682 de celule).
+  const grinzi: number[] = []
   for (let i = 0; i < d.count; i++) {
-    if (d.alive[i] === 1 && d.kind[i] === Desemnare.CONSTRUIESTE) celule.push(cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!))
+    if (d.alive[i] !== 1 || d.kind[i] !== Desemnare.CONSTRUIESTE) continue
+    const k = cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!)
+    celule.push(k)
+    if (d.piesa[i] === Piesa.GRINDA) grinzi.push(k)
   }
   if (celule.length === 0) return { construibile: [], imposibile: [] }
-  return constructiaPosibila(w.terrain, rules, celule)
+  return constructiaPosibila(w.terrain, rules, celule, grinzi)
 }
 
 export function prabusireaPrevizualizata(w: World, rules: Rules): number[] {
@@ -2879,8 +2895,7 @@ function cotaDeRefugiu(t: Terrain, wx: number, wy: number, cota: number): number
   return cotaDeAsezare(t, wx, wy, z)
 }
 
-export function prabuseste(w: World, rules: Rules, wx: number, wy: number, z: number): number {
-  const chei = multimeaCareCade(w.terrain, rules, wx, wy, z)
+export function prabuseste(w: World, rules: Rules, chei: readonly number[]): number {
   if (chei.length === 0) return 0
 
   // Faza 2, in ordinea (z crescator, wx, wy) in care `multimeaCareCade` le-a

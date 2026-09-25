@@ -114,22 +114,22 @@ export const MUTATII = [
   {
     n: 'poarta accepta si suportul ZERO',
     f: 'src/sim/stabilitate.ts',
-    a: '  if (suport > 0) return accept()',
-    b: '  if (suport >= 0) return accept()',
+    a: '  if (suportNouPanaLa(t, rules, wx, wy, z, FARA_IPOTEZA, 1) > 0) return accept()',
+    b: '  if (suportNouPanaLa(t, rules, wx, wy, z, FARA_IPOTEZA, 1) >= 0) return accept()',
     t: 'tests/constructie.test.ts', e: 'nu se mai poate zidi in aer',
   },
   {
     n: 'suportDacaZidesc crede ca orice celula noua e ASEZATA',
     f: 'src/sim/stabilitate.ts',
-    a: '  if (sub === Sol.SOLID || sub === Sol.ANCORA) return rules.suportMax\n  return caveazaSpreAsezat(t, rules, wx, wy, z, null, zidite)',
-    b: '  void sub\n  return rules.suportMax',
+    a: '  const s0 = sub === Sol.SOLID || sub === Sol.ANCORA\n    ? rules.suportMax\n    : caveazaSpreAsezat(t, rules, wx, wy, z, null, ip.zidite)',
+    b: '  const s0 = rules.suportMax\n  void sub',
     t: 'tests/constructie.test.ts', e: 'nu se mai poate zidi in aer',
   },
   {
     n: 'suportDacaZidesc nu cauta lateral (doar asezat sau nimic)',
     f: 'src/sim/stabilitate.ts',
-    a: '  return caveazaSpreAsezat(t, rules, wx, wy, z, null, zidite)',
-    b: '  return 0',
+    a: '    : caveazaSpreAsezat(t, rules, wx, wy, z, null, ip.zidite)',
+    b: '    : 0',
     t: 'tests/constructie.test.ts', e: 'consola se intinde exact 3 celule',
   },
   {
@@ -158,8 +158,8 @@ export const MUTATII = [
   {
     n: '`suportDacaZidesc` nu duce ipotezele mai departe in BFS',
     f: 'src/sim/stabilitate.ts',
-    a: '  return caveazaSpreAsezat(t, rules, wx, wy, z, null, zidite)',
-    b: '  return caveazaSpreAsezat(t, rules, wx, wy, z, null, null)',
+    a: '    : caveazaSpreAsezat(t, rules, wx, wy, z, null, ip.zidite)',
+    b: '    : caveazaSpreAsezat(t, rules, wx, wy, z, null, null)',
     t: 'tests/constructie.test.ts', e: 'ACCEPTANTA: casa de 9x9',
   },
   {
@@ -213,8 +213,8 @@ export const MUTATII = [
   {
     n: 'previzualizarea de constructie nu filtreaza pe fel',
     f: 'src/sim/joburi.ts',
-    a: '    if (d.alive[i] === 1 && d.kind[i] === Desemnare.CONSTRUIESTE) celule.push(cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!))',
-    b: '    if (d.alive[i] === 1) celule.push(cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!))',
+    a: '    if (d.alive[i] !== 1 || d.kind[i] !== Desemnare.CONSTRUIESTE) continue\n    const k = cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!)',
+    b: '    if (d.alive[i] !== 1) continue\n    const k = cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!)',
     t: 'tests/constructie.test.ts', e: 'la DESENARE nu se verifica sprijinul',
   },
 

@@ -37,6 +37,29 @@
  * O interogare costa, masurat, 0,058 µs pe un voxel asezat (o citire) si 4,345 µs
  * pe unul atarnat (BFS marginit). Iar voxelii atarnati sunt rari: 12 in tot
  * scenariul standard.
+ *
+ * ## Grinda: surse STRATIFICATE (taietura 4)
+ *
+ * DESIGN §5.2: „grinda reintroduce un punct de sprijin cu raza 10". Tot ca
+ * definitie, pe doua niveluri, fara nicio recurenta:
+ *
+ *     s0(c) = max(0, suportMax − d0(c))           (neschimbat)
+ *     grinda ACTIVA  ⇔  material GRINDA si s0 > 0 (nu se tin una pe alta)
+ *     s1(c) = max(0, suportRazaGrinda − d1(c))    d1 = pasi prin SOLID pana la o grinda activa
+ *     suport(c) = max(s0(c), s1(c))
+ *
+ * `s0` depinde doar de teren, activitatea doar de `s0`, `s1` doar de activitate: punct
+ * fix unic, verificat de panoul grinzii cu un oracol pe 300 de multimi × 4 ordini, 0
+ * diferente. Monotona: a adauga un voxel poate doar scadea `d0`/`d1` si activa grinzi,
+ * deci inchiderea de constructie ramane unica. Cele trei variante nestratificate le-a
+ * masurat panoul taieturii 2 (o grinda aruncata in cer tinea o fortareata; alta pierdea
+ * punctul fix unic).
+ *
+ * **Raza e a GRINZII, nu a rezolvatorului.** Prima amanare a grinzii (taietura 2) a
+ * venit din costul razei globale: cu o singura grinda pe harta, oricat de departe,
+ * previzualizarea 9×9 urca de la 9,4 la 404,8 ms. Aici `s1` se cauta doar printre
+ * grinzile din index la cel mult `suportRazaGrinda − 1` de celula; fara niciuna,
+ * interogarea costa cat inainte plus cateva `Map.get`.
  */
 
 import type { Rules } from './content.ts'
@@ -45,9 +68,9 @@ import { accept, refuse, Reason } from './result.ts'
 import { cellKey, decodeCell, decodeCellIn } from './path.ts'
 import type { Celula } from './path.ts'
 import { materialFast } from './regions.ts'
-import { bazaVoxeli, WORLD_CELLS } from './terrain/terrain.ts'
-import type { Terrain } from './terrain/terrain.ts'
-import { isSolid, VOXEL_LEVELS } from './terrain/chunk.ts'
+import { adaugaGrinda, bazaVoxeli, grinziInRaza, WORLD_CELLS } from './terrain/terrain.ts'
+import type { IndexGrinzi, Terrain } from './terrain/terrain.ts'
+import { isSolid, Material, VOXEL_LEVELS } from './terrain/chunk.ts'
 
 /** Ce e la o celula, din perspectiva stabilitatii. */
 export const Sol = {
@@ -130,19 +153,22 @@ const vazute = new Set<number>()
 const DIRECTII: readonly (readonly [number, number])[] = [[1, 0], [-1, 0], [0, 1], [0, -1]]
 
 /**
- * Suportul unui voxel: `max(0, suportMax − d)`.
+ * Suportul unui voxel, EXACT: `max(s0, s1)` — vezi antetul.
  *
- * 0 pentru ce nu e solid — nu e nimic de sustinut. `suportMax` pentru un voxel
- * asezat, dintr-o singura citire. Pentru restul, BFS lateral prin SOLID pana la
- * primul asezat, marginit la `suportMax` pasi: peste atat raspunsul e 0 oricum.
+ * 0 pentru ce nu e solid — nu e nimic de sustinut. `s0 = suportMax` pentru un voxel
+ * asezat, dintr-o singura citire; pentru restul, BFS lateral prin SOLID pana la primul
+ * asezat, marginit la `suportMax` pasi. Iar `s1` din grinzile active din raza.
  *
- * Ordinea de explorare e fixa, dar rezultatul nu depinde de ea — BFS-ul da
- * distanta minima, care e o proprietate a terenului.
+ * Ordinea de explorare e fixa, dar rezultatul nu depinde de ea — BFS-ul da distanta
+ * minima, care e o proprietate a terenului.
+ *
+ * Valoarea e cea din definitie, nu o scurtatura: panoul a semnalat ca o varianta care
+ * se oprea la `s0 > 0` dadea alta cifra decat definitia langa grinzi — capcana in care
+ * `stareSapat` a mintit o data, la taietura 1. Cine are nevoie doar de „cade?" sau de
+ * „e ultima?" foloseste `suportPanaLa`, cu plafon.
  */
 export function suportLa(t: Terrain, rules: Rules, wx: number, wy: number, z: number, cazute: Set<number> | null = null): number {
-  if (solLa(t, wx, wy, z, cazute) !== Sol.SOLID) return 0
-  if (esteAsezat(t, wx, wy, z, cazute)) return rules.suportMax
-  return caveazaSpreAsezat(t, rules, wx, wy, z, cazute)
+  return suportPanaLa(t, rules, wx, wy, z, cazute === null ? FARA_IPOTEZA : { ...FARA_IPOTEZA, cazute }, Infinity)
 }
 
 /**
@@ -199,6 +225,165 @@ function caveazaSpreAsezat(
   return 0
 }
 
+// ---------------------------------------------------------------------------
+// grinda — surse stratificate
+// ---------------------------------------------------------------------------
+
+/**
+ * Ipoteza unei intrebari despre stabilitate: ce se trateaza ca AER (`cazute`), ce ca
+ * ZIDIT (`zidite`), care dintre cele zidite sunt GRINZI planificate (`grinziPlan`), si
+ * memoria activitatii grinzilor (`activ`).
+ */
+interface Ipoteza {
+  readonly cazute: ReadonlySet<number> | null
+  readonly zidite: ReadonlySet<number> | null
+  readonly grinziPlan: IndexGrinzi | null
+  /**
+   * TRANSIENT, cat tine o intrebare: cellKey(grinda) → activa. O tine si o invalideaza
+   * cine o creeaza: `propaga`, la fiecare cadere, pentru grinzile la cel mult
+   * `suportMax − 1` de celula cazuta, la z si z+1 (singurele a caror activitate se
+   * poate schimba); `constructiaPosibila` retine doar „activa" (`doarPozitive`),
+   * fiindca o adaugare nu dezactiveaza nicio grinda.
+   *
+   * Masurat de panou de ce trebuie: fara ea, activitatea se calcula cu cate un BFS
+   * pentru fiecare grinda candidata, la fiecare interogare — sub un tavan 21×21 numai
+   * din grinzi, 160 de candidati pe interogare si 215–246 ms pe o singura sapatura.
+   */
+  readonly activ: Map<number, boolean> | null
+  readonly doarPozitive: boolean
+}
+
+const FARA_IPOTEZA: Ipoteza = { cazute: null, zidite: null, grinziPlan: null, activ: null, doarPozitive: false }
+
+/**
+ * TRANSIENT: ce a costat stabilitatea, pentru bugetele din teste si din DEVLOG. Nu
+ * intra in hash si nu decide nimic.
+ */
+export const contoareStabilitate = {
+  /** Interogari `s1` care au avut macar o grinda candidata in raza. */
+  interogariS1: 0,
+  /** Calcule de activitate (BFS `s0` pe o grinda), fara cele luate din memorie. */
+  activitati: 0,
+  /** Celule verificate de `propaga`. */
+  verificari: 0,
+}
+
+export function reseteazaContoareStabilitate(): void {
+  contoareStabilitate.interogariS1 = 0
+  contoareStabilitate.activitati = 0
+  contoareStabilitate.verificari = 0
+}
+
+/**
+ * E GRINDA IN PICIOARE la (x, y, z), in ipoteza? Solida si de material GRINDA — nu
+ * doar solida: o intrare veche din index ar fi devenit altfel grinda-fantoma, adica
+ * fizica diferita intre lumea continua si cea incarcata (masurat de panou: 9 celule
+ * zidite peste limita, si 9 plutitori intr-o singura lume). Una PLANIFICATA e grinda
+ * doar dupa ce ipoteza a zidit-o.
+ */
+function grindaInPicioare(t: Terrain, x: number, y: number, z: number, ip: Ipoteza, dinPlan: boolean): boolean {
+  if (solLa(t, x, y, z, ip.cazute, ip.zidite) !== Sol.SOLID) return false
+  if (dinPlan) return ip.zidite !== null && ip.zidite.has(cellKey(x, y, z))
+  return materialFast(t, x, y, z) === Material.GRINDA
+}
+
+/** `s0 > 0` pentru celula solida (x, y, z), in ipoteza — fara memorie. */
+function s0Pozitiv(t: Terrain, rules: Rules, x: number, y: number, z: number, ip: Ipoteza): boolean {
+  contoareStabilitate.activitati++
+  if (esteAsezat(t, x, y, z, ip.cazute, ip.zidite)) return true
+  return caveazaSpreAsezat(t, rules, x, y, z, ip.cazute, ip.zidite) > 0
+}
+
+/** Grinda (x, y, z), deja stiuta IN PICIOARE, e activa? Prin memoria ipotezei, daca are. */
+function activa(t: Terrain, rules: Rules, x: number, y: number, z: number, ip: Ipoteza): boolean {
+  const k = cellKey(x, y, z)
+  const m = ip.activ?.get(k)
+  if (m !== undefined) return m
+  const a = s0Pozitiv(t, rules, x, y, z, ip)
+  if (ip.activ !== null && (a || !ip.doarPozitive)) ip.activ.set(k, a)
+  return a
+}
+
+// Tampoane reusite. `candidati` tine perechi (x, y); BFS-ul lui `s1` are coada lui,
+// separata de a lui `caveazaSpreAsezat`, pe care o foloseste activitatea.
+const candidati: number[] = []
+const activeGasite = new Set<number>()
+const coada1X: number[] = []
+const coada1Y: number[] = []
+const coada1D: number[] = []
+const vazute1 = new Set<number>()
+
+/**
+ * `s1(c)`: `suportRazaGrinda − d1`, cu `d1` pasii prin SOLID (la cota lui c) pana la
+ * cea mai apropiata grinda ACTIVA; 0 daca nu e niciuna in raza.
+ *
+ * Candidatii vin din index (si din grinzile planificate ale ipotezei), la distanta
+ * Manhattan cel mult `suportRazaGrinda − 1` — o margine inferioara a drumului, deci
+ * niciun candidat pierdut. Fara candidati, raspunsul e 0 fara niciun BFS.
+ */
+function suportDinGrinzi(t: Terrain, rules: Rules, wx: number, wy: number, z: number, ip: Ipoteza): number {
+  const R = rules.suportRazaGrinda
+  candidati.length = 0
+  grinziInRaza(t.grinzi, wx, wy, z, R - 1, candidati)
+  const dinTeren = candidati.length
+  if (ip.grinziPlan !== null) grinziInRaza(ip.grinziPlan, wx, wy, z, R - 1, candidati)
+  if (candidati.length === 0) return 0
+  contoareStabilitate.interogariS1++
+  activeGasite.clear()
+  for (let i = 0; i < candidati.length; i += 2) {
+    const x = candidati[i]!
+    const y = candidati[i + 1]!
+    if (!grindaInPicioare(t, x, y, z, ip, i >= dinTeren)) continue
+    if (!activa(t, rules, x, y, z, ip)) continue
+    activeGasite.add(cellKey(x, y, z))
+  }
+  if (activeGasite.size === 0) return 0
+  const k0 = cellKey(wx, wy, z)
+  if (activeGasite.has(k0)) return R
+
+  vazute1.clear()
+  coada1X.length = 0
+  coada1Y.length = 0
+  coada1D.length = 0
+  coada1X.push(wx)
+  coada1Y.push(wy)
+  coada1D.push(0)
+  vazute1.add(k0)
+  for (let cap = 0; cap < coada1X.length; cap++) {
+    const x = coada1X[cap]!
+    const y = coada1Y[cap]!
+    const d = coada1D[cap]!
+    if (d >= R - 1) continue
+    for (const [dx, dy] of DIRECTII) {
+      const nx = x + dx
+      const ny = y + dy
+      if (solLa(t, nx, ny, z, ip.cazute, ip.zidite) !== Sol.SOLID) continue
+      const cheie = cellKey(nx, ny, z)
+      if (vazute1.has(cheie)) continue
+      vazute1.add(cheie)
+      if (activeGasite.has(cheie)) return R - (d + 1)
+      coada1X.push(nx)
+      coada1Y.push(ny)
+      coada1D.push(d + 1)
+    }
+  }
+  return 0
+}
+
+/**
+ * `min(suport, plafon)`, cu scurtaturile pe care le permite plafonul: daca `s0` il
+ * atinge deja, `s1` nu se mai calculeaza. `propaga` cere plafonul 2 — pentru „cade?"
+ * si pentru „e ultima celula?" conteaza doar 0, 1 si „cel putin 2".
+ */
+function suportPanaLa(t: Terrain, rules: Rules, wx: number, wy: number, z: number, ip: Ipoteza, plafon: number): number {
+  if (solLa(t, wx, wy, z, ip.cazute, ip.zidite) !== Sol.SOLID) return 0
+  const s0 = esteAsezat(t, wx, wy, z, ip.cazute, ip.zidite)
+    ? rules.suportMax
+    : caveazaSpreAsezat(t, rules, wx, wy, z, ip.cazute, ip.zidite)
+  if (s0 >= plafon) return plafon
+  return Math.min(plafon, Math.max(s0, suportDinGrinzi(t, rules, wx, wy, z, ip)))
+}
+
 /**
  * Celulele al caror suport se poate schimba dupa o editare la (wx, wy, z).
  *
@@ -225,21 +410,28 @@ function caveazaSpreAsezat(
  *
  * Garda din `solLa` era corecta si nu ajuta cu nimic: nimeni n-o intreba.
  * Dupa `cellKey`, informatia „era in afara lumii" nu mai exista in cheie — deci
- * singurul loc in care se poate taia e inainte de ea. BFS-ul din `suportLa` e
- * deja in siguranta: intreaba `solLa(nx, ny, z)` INAINTE sa construiasca cheia.
+ * singurul loc in care se poate taia e inainte de ea: in `disc`, UNA pentru toate
+ * discurile, si ale grinzii. BFS-ul din `suportLa` e deja in siguranta: intreaba
+ * `solLa(nx, ny, z)` INAINTE sa construiasca cheia.
+ *
+ * Discurile GRINZII (raza `suportRazaGrinda − 1`) le emite `propaga`, fiindca au
+ * nevoie de terenul, de indexul si de ipoteza de DINAINTEA editarii — vezi acolo.
  */
 export function celuleAtinse(rules: Rules, wx: number, wy: number, z: number, out: number[]): void {
   const raza = rules.suportMax - 1
-  for (const dz of [0, 1]) {
-    for (let dx = -raza; dx <= raza; dx++) {
-      const nx = wx + dx
-      if (nx < 0 || nx >= WORLD_CELLS) continue
-      const rest = raza - Math.abs(dx)
-      for (let dy = -rest; dy <= rest; dy++) {
-        const ny = wy + dy
-        if (ny < 0 || ny >= WORLD_CELLS) continue
-        out.push(cellKey(nx, ny, z + dz))
-      }
+  for (const dz of [0, 1]) disc(wx, wy, z + dz, raza, out)
+}
+
+/** Discul Manhattan de raza `raza` in jurul lui (wx, wy), la cota z, TAIAT la lume. */
+function disc(wx: number, wy: number, z: number, raza: number, out: number[]): void {
+  for (let dx = -raza; dx <= raza; dx++) {
+    const nx = wx + dx
+    if (nx < 0 || nx >= WORLD_CELLS) continue
+    const rest = raza - Math.abs(dx)
+    for (let dy = -rest; dy <= rest; dy++) {
+      const ny = wy + dy
+      if (ny < 0 || ny >= WORLD_CELLS) continue
+      out.push(cellKey(nx, ny, z))
     }
   }
 }
@@ -294,47 +486,138 @@ export function multimeaCareCade(t: Terrain, rules: Rules, wx: number, wy: numbe
 function propaga(t: Terrain, rules: Rules, sapate: readonly number[]): { cazute: Set<number>; minim: number } {
   const cazute = new Set<number>(sapate)
   const deVerificat: number[] = []
+  // DEDUPLICAREA COZII, pe „in asteptare": o celula deja in coada si inca neverificata
+  // nu se mai adauga. Sigur, fiindca va fi verificata oricum cu `cazute` la zi, dupa
+  // orice cadere care ar fi re-adaugat-o; iar dupa ce e verificata, o cadere
+  // ulterioara o poate re-adauga — re-verificarea ramane scopul cascadei. Punctul fix
+  // nu se schimba (e unic), nici `minim` (ultima verificare a fiecarei celule vine
+  // dupa ultima cadere care o atinge). Masurat de panou pe doi stalpi cu cate 5 etaje
+  // si 40 de grinzi, cu o parte din structura ramasa in picioare: 12.971 de verificari
+  // si ~650 ms fara ea, 1961 si ~60 ms cu ea.
+  const inAsteptare = new Set<number>()
+  const activ = new Map<number, boolean>()
+  const ip: Ipoteza = { cazute, zidite: null, grinziPlan: null, activ, doarPozitive: false }
   // UN obiect de decodare per apel, nu unul per iteratie.
   const c: Celula = { wx: 0, wy: 0, z: 0 }
-
-  // Seeding-ul initial se DEDUPLICA, cascada nu.
-  //
-  // Discurile a doua celule vecine se suprapun aproape complet, iar
-  // previzualizarea cheama functia asta peste TOATE desemnarile deodata: la o
-  // pivnita de 7x7 sunt 49 de discuri a cate 50 de celule, adica 2450 de intrari
-  // peste ~200 de celule distincte. Fiecare duplicat costa un BFS.
-  //
-  // Deduplicarea e sigura exact cat e si raza de invalidare: daca o celula isi
-  // schimba suportul mai tarziu, o face fiindca a cazut ceva la cel mult
-  // `suportMax − 1` pasi de ea — iar aia o re-pune in coada prin cascada. Deci
-  // cascada NU se deduplica: acolo re-verificarea e scopul.
-  const semanate = new Set<number>()
+  const cg: Celula = { wx: 0, wy: 0, z: 0 }
   const dinDisc: number[] = []
+  const lista: number[] = []
+  const R = rules.suportRazaGrinda
+  const pune = (k: number): void => {
+    if (inAsteptare.has(k)) return
+    inAsteptare.add(k)
+    deVerificat.push(k)
+  }
+  const discGrinda = (x: number, y: number, z: number): void => {
+    dinDisc.length = 0
+    disc(x, y, z, R - 1, dinDisc)
+    for (const k of dinDisc) pune(k)
+  }
+
+  // Activitatea grinzilor de langa samante INAINTE de sapaturi — pe terenul neatins,
+  // fara nicio ipoteza. Discul unei grinzi se emite doar daca activitatea ei CHIAR se
+  // schimba: `s1` depinde doar de care grinzi sunt active, nu de cat `s0` au.
+  const inainte = new Map<number, boolean>()
+  for (const e of sapate) {
+    decodeCellIn(e, cg)
+    for (const dz of [0, 1]) {
+      lista.length = 0
+      grinziInRaza(t.grinzi, cg.wx, cg.wy, cg.z + dz, rules.suportMax - 1, lista)
+      for (let i = 0; i < lista.length; i += 2) {
+        const k = cellKey(lista[i]!, lista[i + 1]!, cg.z + dz)
+        if (inainte.has(k) || !grindaInPicioare(t, lista[i]!, lista[i + 1]!, cg.z + dz, FARA_IPOTEZA, false)) continue
+        inainte.set(k, s0Pozitiv(t, rules, lista[i]!, lista[i + 1]!, cg.z + dz, FARA_IPOTEZA))
+      }
+    }
+  }
+
+  /**
+   * Ce trebuie re-verificat din cauza GRINZILOR cand dispare celula `k` (sapata sau
+   * cazuta chiar acum). Trei cazuri, fiecare necesar (fara al doilea, 9 din 105
+   * prabusiri de grinda gresite; fara al treilea, 39 din 105 — masurat de panou):
+   *
+   *  (a) `k` era ea insasi GRINDA: toate celulele tinute prin ea, discul ei. O data —
+   *      o grinda cazuta mai devreme nu mai emite nimic;
+   *  (b) grinzile IN PICIOARE la cel mult `suportMax − 1` de `k`, la z si z+1 — doar
+   *      ale lor isi pot schimba activitatea — si doar daca activitatea CHIAR se schimba;
+   *  (c) un drum spre o grinda activa putea trece prin `k`: discul lui `k`, daca exista
+   *      o grinda activa in raza.
+   *
+   * Totul pe terenul DINAINTEA editarii: `k` e AER doar in ipoteza, materialul lui e
+   * inca in teren, grinda e inca in index. Asta e contractul: a citi indexul DUPA
+   * editare pierdea exact grinda sapata (defectul CRITIC al panoului, gasit de doua
+   * lentile: 58 de voxeli ramasi in aer langa un stalp, cu previzualizarea spunand CADE).
+   */
+  const emiteGrinzi = (k: number, samanta: boolean): void => {
+    decodeCellIn(k, cg)
+    const x = cg.wx
+    const y = cg.wy
+    const z = cg.z
+    if (materialFast(t, x, y, z) === Material.GRINDA) discGrinda(x, y, z)
+    for (const dz of [0, 1]) {
+      lista.length = 0
+      grinziInRaza(t.grinzi, x, y, z + dz, rules.suportMax - 1, lista)
+      for (let i = 0; i < lista.length; i += 2) {
+        const bx = lista[i]!
+        const by = lista[i + 1]!
+        const bz = z + dz
+        if (!grindaInPicioare(t, bx, by, bz, ip, false)) continue
+        const kb = cellKey(bx, by, bz)
+        let anterior = activ.get(kb)
+        if (anterior === undefined) {
+          if (samanta) {
+            anterior = inainte.get(kb) ?? false
+          } else {
+            // Starea dinaintea caderii lui `k`: `k` scos din ipoteza, o clipa.
+            cazute.delete(k)
+            anterior = s0Pozitiv(t, rules, bx, by, bz, ip)
+            cazute.add(k)
+          }
+        }
+        activ.delete(kb)
+        if (activa(t, rules, bx, by, bz, ip) !== anterior) discGrinda(bx, by, bz)
+      }
+    }
+    lista.length = 0
+    grinziInRaza(t.grinzi, x, y, z, R - 1, lista)
+    for (let i = 0; i < lista.length; i += 2) {
+      if (!grindaInPicioare(t, lista[i]!, lista[i + 1]!, z, ip, false)) continue
+      if (!activa(t, rules, lista[i]!, lista[i + 1]!, z, ip)) continue
+      discGrinda(x, y, z)
+      break
+    }
+  }
+
+  // Seeding-ul: discul de suport al fiecarei samante, plus discurile grinzii. Discurile
+  // a doua celule vecine se suprapun aproape complet (la o pivnita de 7x7, 49 de
+  // discuri a cate 50 de celule peste ~200 distincte); coada deduplicata le strange.
   for (const cheie of sapate) {
+    emiteGrinzi(cheie, true)
     decodeCellIn(cheie, c)
     dinDisc.length = 0
     celuleAtinse(rules, c.wx, c.wy, c.z, dinDisc)
-    for (const k of dinDisc) {
-      if (semanate.has(k)) continue
-      semanate.add(k)
-      deVerificat.push(k)
-    }
+    for (const k of dinDisc) pune(k)
   }
 
   let minim = rules.suportMax
   for (let i = 0; i < deVerificat.length; i++) {
     const cheie = deVerificat[i]!
+    inAsteptare.delete(cheie)
     if (cazute.has(cheie)) continue
     decodeCellIn(cheie, c)
     if (solLa(t, c.wx, c.wy, c.z, cazute) !== Sol.SOLID) continue
-    const suport = suportLa(t, rules, c.wx, c.wy, c.z, cazute)
+    contoareStabilitate.verificari++
+    const suport = suportPanaLa(t, rules, c.wx, c.wy, c.z, ip, 2)
     if (suport > 0) {
       if (suport < minim) minim = suport
       continue
     }
     cazute.add(cheie)
+    emiteGrinzi(cheie, false)
     // Ce cade poate lua cu el ce se sprijinea pe el: se re-verifica vecinatatea.
-    celuleAtinse(rules, c.wx, c.wy, c.z, deVerificat)
+    dinDisc.length = 0
+    celuleAtinse(rules, c.wx, c.wy, c.z, dinDisc)
+    for (const k of dinDisc) pune(k)
   }
   return { cazute, minim }
 }
@@ -390,9 +673,21 @@ export function suportDacaZidesc(
   // orice alt apelant il vede, si l-a vazut: prima versiune a testului de
   // supra-promisiune raporta 0 din 393.
   if (solLa(t, wx, wy, z) === Sol.SOLID) return suportLa(t, rules, wx, wy, z)
-  const sub = solLa(t, wx, wy, z - 1, null, zidite)
-  if (sub === Sol.SOLID || sub === Sol.ANCORA) return rules.suportMax
-  return caveazaSpreAsezat(t, rules, wx, wy, z, null, zidite)
+  return suportNouPanaLa(t, rules, wx, wy, z, { ...FARA_IPOTEZA, zidite }, Infinity)
+}
+
+/**
+ * Suportul unei celule INCA NEZIDITE, daca s-ar zidi, cu plafon. Celula de plecare nu
+ * conteaza pentru BFS-uri (se uita doar la vecini); singurul lucru care tine de ea
+ * insasi e daca e ASEZATA.
+ */
+function suportNouPanaLa(t: Terrain, rules: Rules, wx: number, wy: number, z: number, ip: Ipoteza, plafon: number): number {
+  const sub = solLa(t, wx, wy, z - 1, null, ip.zidite)
+  const s0 = sub === Sol.SOLID || sub === Sol.ANCORA
+    ? rules.suportMax
+    : caveazaSpreAsezat(t, rules, wx, wy, z, null, ip.zidite)
+  if (s0 >= plafon) return plafon
+  return Math.min(plafon, Math.max(s0, suportDinGrinzi(t, rules, wx, wy, z, ip)))
 }
 
 /**
@@ -439,8 +734,23 @@ export function constructiaPosibila(
   t: Terrain,
   rules: Rules,
   celule: readonly number[],
+  grinzi: readonly number[] = [],
 ): { construibile: number[]; imposibile: number[] } {
   const zidite = new Set<number>()
+  // Grinzile PLANIFICATE ale multimii, ca index spatial — acelasi tip si aceeasi
+  // cautare ca indexul din teren. Construit o data pe apel: ca multime plata, fiecare
+  // interogare `s1` parcurgea toate grinzile planificate din lume (masurat de panou:
+  // 400 de grinzi planificate intr-o alta cladire urcau inchiderea de la 15 la 20 ms,
+  // 2000 la 35, cu acelasi raspuns).
+  const plan: IndexGrinzi = new Map()
+  const cg: Celula = { wx: 0, wy: 0, z: 0 }
+  for (const k of grinzi) {
+    decodeCellIn(k, cg)
+    adaugaGrinda(plan, cg.wx, cg.wy, cg.z)
+  }
+  // O adaugare nu dezactiveaza nicio grinda, deci „activa" ramane adevarat pana la
+  // capat; „inactiva" poate deveni activa, deci nu se memoreaza.
+  const ip: Ipoteza = { cazute: null, zidite, grinziPlan: grinzi.length > 0 ? plan : null, activ: new Map(), doarPozitive: true }
   const ramase = new Set<number>(celule)
   // Celulele deja solide nu sunt „de construit": ies din multime de la inceput,
   // ca sa nu fie numarate nici construibile, nici imposibile.
@@ -462,7 +772,7 @@ export function constructiaPosibila(
     // 0,59 — masurat, nu estimat.
     for (const cheie of [...ramase]) {
       const c = decodeCell(cheie)
-      if (suportDacaZidesc(t, rules, c.wx, c.wy, c.z, zidite) === 0) continue
+      if (suportNouPanaLa(t, rules, c.wx, c.wy, c.z, ip, 1) === 0) continue
       zidite.add(cheie)
       ramase.delete(cheie)
       adaugat = true
@@ -483,14 +793,38 @@ export function poateSustine(t: Terrain, rules: Rules, wx: number, wy: number, z
   // crea, dar un save de dinaintea taieturii poate sa-l contina — ar raspunde
   // „n-are sprijin": adevarat, si inutil.
   if (solLa(t, wx, wy, z) === Sol.SOLID) return accept()
-  const suport = suportDacaZidesc(t, rules, wx, wy, z)
-  if (suport > 0) return accept()
+  if (suportNouPanaLa(t, rules, wx, wy, z, FARA_IPOTEZA, 1) > 0) return accept()
+  // „De ce nu?" are TREI raspunsuri de cand exista grinda, si jucatorul care tocmai a
+  // pus una intreaba exact asta: nimic in raza; o grinda in raza, dar INACTIVA (nu e
+  // prinsa de nimic asezat); o grinda activa, dar drumul prin solid pana la ea e prea
+  // lung. Cea mai apropiata grinda in picioare, pe Manhattan, cu departajare pe ordinea
+  // indexului (cota, rand, coloana) — determinista.
+  const R = rules.suportRazaGrinda
+  const lista: number[] = []
+  grinziInRaza(t.grinzi, wx, wy, z, R - 1, lista)
+  let bx = 0
+  let by = 0
+  let dMin = -1
+  for (let i = 0; i < lista.length; i += 2) {
+    if (!grindaInPicioare(t, lista[i]!, lista[i + 1]!, z, FARA_IPOTEZA, false)) continue
+    const d = Math.abs(lista[i]! - wx) + Math.abs(lista[i + 1]! - wy)
+    if (dMin !== -1 && d >= dMin) continue
+    dMin = d
+    bx = lista[i]!
+    by = lista[i + 1]!
+  }
+  if (dMin === -1) {
+    return refuse(Reason.FARA_SPRIJIN, {
+      wx, wy, z, raza: rules.suportMax, razaGrinda: R,
+      motiv: 'nimic asezat la mai putin de suportMax pasi, si nicio grinda in raza: piesa ar cadea in acelasi tick',
+    })
+  }
+  const eActiva = s0Pozitiv(t, rules, bx, by, z, FARA_IPOTEZA)
   return refuse(Reason.FARA_SPRIJIN, {
-    wx,
-    wy,
-    z,
-    raza: rules.suportMax,
-    motiv: 'nimic asezat la mai putin de suportMax pasi: piesa ar cadea in acelasi tick',
+    wx, wy, z, raza: rules.suportMax, razaGrinda: R, grindaX: bx, grindaY: by, grindaActiva: eActiva ? 1 : 0,
+    motiv: eActiva
+      ? 'grinda din raza e activa, dar drumul prin solid pana la ea e mai lung de suportRazaGrinda - 1 pasi'
+      : 'grinda din raza nu tine nimic: nu e prinsa de nimic asezat (e la mai mult de suportMax - 1 pasi de sol)',
   })
 }
 
@@ -584,6 +918,23 @@ export const Prefiltru = {
 export function prefiltruStabilitate(t: Terrain, rules: Rules, x0: number, y0: number, lat: number, zA: number): Uint8Array {
   const MARE = 1 << 20
   const n = lat * lat
+  // Cu o grinda in preajma, o sapatura schimba suportul pana la `suportRazaGrinda − 1`
+  // pasi, nu `suportMax − 1`: raza prefiltrului creste. Grinda se cauta pe fereastra
+  // largita cu raza ei — una aflata chiar in afara ferestrei tine celule din ea, prin
+  // drumuri care trec prin fereastra.
+  //
+  // DOAR la zA. O celula la mai mult de `suportMax` de orice sursa are in jur, pana la
+  // `suportMax`, solid asezat la zA si solid la zA+1. Deci o grinda de la zA+1 aflata
+  // la cel mult `suportMax − 1` de ea are cel putin un vecin asezat si dupa sapatura —
+  // ramane activa — iar drumurile `s1` de la zA+1 trec prin solid, asezat sau nu.
+  // Efectele cu raza grinzii sunt toate la zA: celula sapata era grinda, sau un drum
+  // spre o grinda activa trecea prin ea. (Fixtura panoului, o podea de doua straturi
+  // tinuta de o grinda — 19 din 123 de celule periculoase ascunse — o prinde acum
+  // sursa „solid neasezat"; cea care cere raza e o grinda ingropata in roca.)
+  const jum = lat >> 1
+  const aproape: number[] = []
+  grinziInRaza(t.grinzi, x0 + jum, y0 + jum, zA, 2 * jum + rules.suportRazaGrinda, aproape)
+  const raza = aproape.length > 0 ? Math.max(rules.suportMax, rules.suportRazaGrinda) : rules.suportMax
   const dist = new Int32Array(n).fill(MARE)
   const out = new Uint8Array(n)
   for (let i = 0; i < lat; i++) {
@@ -595,7 +946,7 @@ export function prefiltruStabilitate(t: Terrain, rules: Rules, x0: number, y0: n
       const solidSus = solLa(t, x, y, zA + 1) === Sol.SOLID
       out[k] = solidJos ? Prefiltru.SIGUR : Prefiltru.NIMIC
       if (!solidJos || !solidSus || !esteAsezat(t, x, y, zA)) dist[k] = 0
-      else if (i === 0 || j === 0 || i === lat - 1 || j === lat - 1) dist[k] = rules.suportMax
+      else if (i === 0 || j === 0 || i === lat - 1 || j === lat - 1) dist[k] = raza
     }
   }
   for (let i = 0; i < lat; i++) {
@@ -613,7 +964,7 @@ export function prefiltruStabilitate(t: Terrain, rules: Rules, x0: number, y0: n
     }
   }
   for (let k = 0; k < n; k++) {
-    if (out[k] === Prefiltru.SIGUR && dist[k]! <= rules.suportMax) out[k] = Prefiltru.DE_SCANAT
+    if (out[k] === Prefiltru.SIGUR && dist[k]! <= raza) out[k] = Prefiltru.DE_SCANAT
   }
   return out
 }
