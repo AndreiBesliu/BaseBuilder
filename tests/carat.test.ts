@@ -12,7 +12,7 @@ import { find, isWalkable, markDirty, NO_REGION, regionAt } from '../src/sim/reg
 import { drumRefuzat, esteEvitata, evitaTinta, existaTinta, lastJobReport, StareRatiune } from '../src/sim/joburi.ts'
 import { itemLaCelula, locPeCelula, slotItem } from '../src/sim/iteme.ts'
 import { celulaDeZonaLa, indexZone } from '../src/sim/zone.ts'
-import { dumpRezervari, verificaRezervari } from '../src/sim/rezervari.ts'
+import { dumpRezervari, rezervariPentru, rezervaToate, Strat, verificaRezervari } from '../src/sim/rezervari.ts'
 import { decode, encode } from '../src/sim/save.ts'
 import { hashWorld } from '../src/sim/hash.ts'
 import { cuJob, desemneaza, itemeInZona, laSit, lasaItem, marfaTotala, panaCand, patratPlat, picteaza, R, ruleaza, solid } from './fixturi.ts'
@@ -1067,4 +1067,32 @@ test('un morman tinut cu totul de altii nu mai porneste un caraus: cererea de ze
   assert.ok(alTreileaLiber, 'al treilea caraus a pornit un job pe un morman fara nimic liber')
   assert.ok(refuzat > 0, 'al treilea nu a spus niciodata REZERVAT')
   assert.equal(marfaTotala(w), R.itemStackMax)
+})
+
+test('un morman care cade si se contopeste PARTIAL isi pastreaza id-ul cu mai putin — si cine il tinea se reconciliaza', () => {
+  // `asazaItem` cu id contopeste intai in vecini si abia restul primeste id-ul
+  // vechi: A = 75 langa B = 70 (loc 5); sapat sub A → A viu cu 70, B cu 75.
+  // Masurat de panou: 8 scene din 8. Rezervarea de 20 pe A ramanea, si A o putea
+  // onora — dar contractul e „id viu ⇒ cantitate neschimbata": un fragment e o
+  // moarte pentru cine il tinea, altfel un morman de 75 tinut cu 60 devine 5.
+  const { w, sit } = laSit(12345, 1)
+  const p = patratPlat(w, sit, 3, 2, 30)
+  assert.ok(p, 'fixtura: niciun patrat plat')
+  const x = p!.x0 + 1
+  const y = p!.y0 + 1
+  const g = p!.g
+  const idA = lasaItem(w, Item.PIATRA, 75, x, y)
+  const idB = lasaItem(w, Item.PIATRA, 70, x + 1, y)
+  const rez = rezervaToate(w.rezervari, w.agents.id[0]!, 4711, [{ targetId: idA, layer: Strat.CARAT, count: 20, maxCount: R.itemStackMax, maxClaimants: R.itemClaimantsMax }])
+  assert.ok(rez.ok)
+  // Podeaua celulei in care ar cadea A e desemnata la sapat: prima trecere a lui
+  // `asazaItem` o sare, deci A se contopeste in B cat incape si restul cade alaturi.
+  assert.ok(applyCommand(w, { kind: 'desemneaza', wx: x, wy: y, z: g - 1 }, R).ok)
+  assert.ok(applyCommand(w, { kind: 'dig', wx: x, wy: y, z: g }, R).ok)
+  const sA = slotItem(w.iteme, idA)
+  assert.notEqual(sA, -1, 'fixtura: A trebuia sa supravietuiasca (fragment cu id vechi)')
+  assert.ok(w.iteme.cantitate[sA]! < 75, `fixtura: A trebuia sa piarda ceva prin contopire (are ${w.iteme.cantitate[sA]})`)
+  assert.equal(w.iteme.cantitate[slotItem(w.iteme, idB)], 75, 'fixtura: B trebuia sa primeasca restul')
+  assert.equal(w.ratiune.itemePierdute, 0)
+  assert.equal(rezervariPentru(w.rezervari, idA, Strat.CARAT).length, 0, 'rezervarea de pe fragment trebuia reconciliata')
 })

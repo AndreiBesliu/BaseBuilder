@@ -51,8 +51,8 @@ export const MUTATII = [
   {
     n: 'si un carat cu mana plina se intrerupe pentru nevoi',
     f: 'src/sim/joburi.ts',
-    a: '  return !(a.jobKind[slot] === FelJob.CARA && a.jobStep[slot]! >= PasCara.MERGE_DEST)',
-    b: '  void a\n  return true',
+    a: '  return w.agents.caraCantitate[slot] === 0',
+    b: '  return slot >= 0',
     t: 'tests/nevoi.test.ts', e: 'un pion cu marfa in mana NU se intrerupe',
   },
   {

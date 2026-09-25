@@ -33,7 +33,8 @@ import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { CATEGORII, Categorie, FelJob, Piesa } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { applyCommand } from '../src/sim/commands.ts'
-import { anuleazaDesemnare, celulaDeLucru, comparaCandidati, constructiaPrevizualizata, evitaTinta, lastJobReport, pornesteConstruieste, unitatiDeMunca } from '../src/sim/joburi.ts'
+import { anuleazaDesemnare, celulaDeLucru, comparaCandidati, constructiaPrevizualizata, esteEvitata, evitaTinta, lastJobReport, pornesteConstruieste, unitatiDeMunca } from '../src/sim/joburi.ts'
+import { Nevoie, NEVOI } from '../src/sim/state.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { slotItem } from '../src/sim/iteme.ts'
 import { rezervariPentru, Strat } from '../src/sim/rezervari.ts'
@@ -1566,4 +1567,82 @@ test('doua mormane de 20, doi constructori: al doilea ia AL DOILEA morman, nu e 
   assert.ok(ambii >= 0 && ambii <= 2 * R.jobRescanTicks, `cei doi n-au tinut mormane DIFERITE in doua tacte de rescanare (${ambii})`)
   assert.equal(refuzatLaStart, 0, 'verificat la scan, refuzat la start')
   assert.ok(slotItem(w.iteme, a) === -1 && slotItem(w.iteme, b) === -1, 'ambele mormane trebuie consumate')
+})
+
+test('munca falsa: un drum refuzat spre morman NU trimite constructorul la santier cu mana goala', () => {
+  // Masurat de panoul din 25.09, pe codul de dinainte: ostil pinuit pe morman →
+  // `refaTinta` scria MERGE_SANTIER neconditionat → 73 din 74 de joburi in 3000 de
+  // tickuri, 2586 de tickuri de „zidire" din nimic, niciun zavor tras.
+  const { w, ds, is } = santier(12345)
+  const idItem = w.iteme.id[is]!
+  const lx = w.iteme.wx[is]!
+  const ly = w.iteme.wy[is]!
+  const lz = w.iteme.z[is]!
+  const ostil = applyCommand(w, { kind: 'spawnAgent', x: lx * 1000 + 500, y: ly * 1000 + 500, z: lz, faction: Faction.SALBATIC }, R)
+  assert.ok(ostil.ok)
+  assert.ok(pornesteConstruieste(w, R, 0, ds, is).ok)
+  let joburi = 1
+  let ultimJob = w.agents.jobId[0]!
+  let laSantierCuManaGoala = 0
+  let refuzuri = 0
+  for (let t = 0; t < 3000; t++) {
+    w.agents.x[1] = lx * 1000 + 500
+    w.agents.y[1] = ly * 1000 + 500
+    w.agents.z[1] = lz
+    refuzuri += ruleaza(w, 1).refuzuriDrum
+    if (w.agents.jobKind[0] === FelJob.CONSTRUIESTE) {
+      if (w.agents.jobId[0] !== ultimJob) { joburi++; ultimJob = w.agents.jobId[0]! }
+      if (w.agents.caraCantitate[0] === 0 && w.agents.jobStep[0]! >= PasConstruieste.MERGE_SANTIER) laSantierCuManaGoala++
+    }
+  }
+  assert.ok(refuzuri >= 1, 'fixtura: drumul spre morman nu a fost refuzat niciodata')
+  assert.equal(laSantierCuManaGoala, 0, `constructorul a stat ${laSantierCuManaGoala} tickuri pe piciorul santierului cu mana goala`)
+  assert.equal(w.ratiune.zidiriCuManaGoala, 0)
+  assert.equal(w.ratiune.unitatiZidite, 0, 'fixtura: cu mormanul blocat nu se poate zidi nimic')
+  // Marginit: o incercare la fiecare `jobRetryTicks`, nu o bucla la fiecare tick.
+  assert.ok(joburi <= 2 + Math.ceil(3000 / R.jobRetryTicks), `${joburi} joburi pornite in 3000 de tickuri`)
+  // Cauza e a PERECHII: pionul evita mormanul, dar mormanul NU e racit pentru toti.
+  assert.ok(esteEvitata(w, 0, idItem), 'pionul ar trebui sa evite mormanul blocat')
+  assert.ok(w.iteme.reincercaLaTick[slotItem(w.iteme, idItem)]! <= w.tick, 'mormanul a fost racit GLOBAL dintr-un job de construit')
+})
+
+test('zidirea cu mana goala se incheie pe loc, nu dupa 40 de tickuri de munca din nimic', () => {
+  // Nicio cale corecta nu ajunge aici; e zavorul. Se simuleaza un pion la ZIDESTE
+  // caruia i-a disparut materialul din mana (save editat, sau un defect viitor).
+  const { w, ds, is } = santier(12345)
+  assert.ok(pornesteConstruieste(w, R, 0, ds, is).ok)
+  const la = panaCand(w, 2000, (ww) => ww.agents.jobStep[0] === PasConstruieste.ZIDESTE)
+  assert.ok(la >= 0, 'fixtura: pionul n-a ajuns la ZIDESTE')
+  w.agents.caraCantitate[0] = 0
+  w.agents.caraKind[0] = 0
+  const lucruInainte = w.ratiune.tickuriDeLucru
+  const t = ruleaza(w, 2)
+  assert.equal(w.agents.jobKind[0], 0, 'jobul trebuia sa se incheie in cel mult doua tickuri')
+  assert.equal(w.ratiune.tickuriDeLucru, lucruInainte, 'a muncit cu mana goala')
+  assert.equal(w.ratiune.zidiriCuManaGoala, 1, 'zavorul trebuia tras exact o data')
+  assert.equal(w.ratiune.unitatiZidite, 0, 'peretele a iesit din nimic')
+  void t
+})
+
+test('foamea critica nu arunca mana plina: constructorul zideste, APOI mananca', () => {
+  // `poateFiIntrerupt` spunea „carat, de la MERGE_DEST incolo"; constructorul cu
+  // 20 in mana la 390/400 era intrerupt, marfa cadea langa santier, progresul se
+  // pierdea. Un adevar: mana plina, indiferent de fel.
+  const { w, ds, is } = santier(12345)
+  const sit = { wx: w.iteme.wx[is]! - 1, wy: w.iteme.wy[is]! }
+  lasaItem(w, Item.HRANA, 75, sit.wx, sit.wy - 2)
+  assert.ok(pornesteConstruieste(w, R, 0, ds, is).ok)
+  const la = panaCand(w, 2000, (ww) => ww.agents.jobStep[0] === PasConstruieste.MERGE_SANTIER)
+  assert.ok(la >= 0, 'fixtura: pionul n-a ridicat materialul')
+  assert.equal(w.agents.caraCantitate[0], R.piese[Piesa.PERETE]!.cantitate)
+  w.agents.nevoi[0 * NEVOI + Nevoie.FOAME] = 20
+  assert.ok(20 < R.nevoi[Nevoie.FOAME]!.pragCritic, 'fixtura: foamea trebuie sa fie sub pragul critic')
+  const zidit = panaCand(w, 2000, (ww) => ww.ratiune.unitatiZidite > 0)
+  assert.ok(zidit >= 0, 'peretele nu s-a ridicat: constructorul a fost intrerupt cu mana plina')
+  assert.equal(lastJobReport().lasateLaPicioare, 0)
+  assert.equal(w.ratiune.intreruperiDeNevoie, 0, 'a fost intrerupt de nevoie cu mana plina')
+  // Si abia apoi mananca — nevoia nu s-a pierdut, s-a amanat.
+  const mananca = panaCand(w, 2000, (ww) => ww.agents.jobKind[0] === FelJob.MANANCA)
+  assert.ok(mananca >= 0, 'dupa perete, pionul flamand trebuia sa mearga sa manance')
+  assert.equal(w.ratiune.itemePierdute, 0)
 })

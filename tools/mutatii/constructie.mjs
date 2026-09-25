@@ -298,6 +298,35 @@ export const MUTATII = [
     b: "  if (false) {",
     t: 'tests/constructie.test.ts', e: "un morman de alt fel, sau prea mic, se refuza la PORNIRE",
   },
+  // --- logistica constructiei, commit 2a: trei defecte pre-existente (25.09.2026) ---
+  {
+    n: "refaTinta ignora pasul: un drum refuzat spre morman trimite constructorul la santier cu mana goala",
+    f: "src/sim/joburi.ts",
+    a: "    if (a.jobStep[slot]! <= PasConstruieste.RIDICA) return false\n    // La construit santierul e in `jobDest`",
+    b: "    // La construit santierul e in `jobDest`",
+    t: 'tests/constructie.test.ts', e: "munca falsa",
+  },
+  {
+    n: "zideste verifica mana abia DUPA ce a muncit (zavorul nu se trage, peretele iese din nimic)",
+    f: "src/sim/joburi.ts",
+    a: "  if (a.caraCantitate[slot]! < spec.cantitate) {\n    w.ratiune.zidiriCuManaGoala++",
+    b: "  if (false) {\n    w.ratiune.zidiriCuManaGoala++",
+    t: 'tests/constructie.test.ts', e: "zidirea cu mana goala se incheie pe loc",
+  },
+  {
+    n: "pe piciorul sursei, un drum refuzat raceste mormanul GLOBAL in loc de pereche",
+    f: "src/sim/joburi.ts",
+    a: "      if (slotItem(w.iteme, a.jobTarget[slot]!) !== -1) evitaTinta(w, slot, a.jobTarget[slot]!, w.tick + rules.jobRetryTicks)\n      return",
+    b: "      { const is = slotItem(w.iteme, a.jobTarget[slot]!); if (is !== -1) memoreazaPeItem(w, rules, is, Reason.INACCESIBIL, DetaliuItem.COMPONENTE_DIFERITE) }\n      return",
+    t: 'tests/constructie.test.ts', e: "munca falsa",
+  },
+  {
+    n: "foamea critica intrerupe constructorul cu mana plina (predicatul vechi, doar pentru carat)",
+    f: "src/sim/joburi.ts",
+    a: "  return w.agents.caraCantitate[slot] === 0",
+    b: "  return !(w.agents.jobKind[slot] === FelJob.CARA && w.agents.jobStep[slot]! >= PasCara.MERGE_DEST)",
+    t: 'tests/constructie.test.ts', e: "foamea critica nu arunca mana plina",
+  },
   // --- logistica constructiei, commit 1 (25.09.2026) ---
   {
     n: "itemClaimantsMax ignorat: lacatul exclusiv pe morman revine",

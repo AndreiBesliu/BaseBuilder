@@ -176,6 +176,15 @@ export interface RatiuneStore {
    * fi vazuta de niciun zavor existent.
    */
   intreruperiDeNevoie: number
+  /**
+   * De cate ori un pion a ajuns la ZIDESTE fara materialul intreg in mana. E o
+   * stare pe care nicio cale corecta n-o produce — zavor, asertat 0 in toate
+   * suitele. Panoul din 25.09 a masurat ce insemna lipsa lui: cu un ostil pe
+   * morman, `refaTinta` trimitea constructorul la santier cu mana goala, 73 din 74
+   * de joburi intr-o bucla de 3000 de tickuri, 2586 de tickuri de „zidire" din
+   * nimic, si niciun zavor tras — `joburiFaraProgres` vedea progres.
+   */
+  zidiriCuManaGoala: number
   /** ZAVOR, per lume: de cate ori o nevoie sub prag N-A putut fi rezolvata si a primit racire. */
   nevoiNerezolvate: number
 }
@@ -194,6 +203,7 @@ export function makeRatiuneStore(capacity: number): RatiuneStore {
     tickuriDeLucru: 0,
     intreruperiDeNevoie: 0,
     nevoiNerezolvate: 0,
+    zidiriCuManaGoala: 0,
   }
 }
 
@@ -2031,17 +2041,20 @@ function zideste(w: World, rules: Rules, slot: number): void {
   }
 
   const spec = rules.piese[d.piesa[ds]!]!
+  // Materialul trebuie sa fie in mana INAINTE de a munci, nu dupa 40 de tickuri.
+  // Prima versiune verifica abia la capatul lucrului: un pion trimis aici cu mana
+  // goala muncea `lucru` unitati din nimic si abia atunci afla. Un pion care ajunge
+  // aici fara materialul intreg e un DEFECT, nu un caz — se numara in zavor si se
+  // incheie pe loc.
+  if (a.caraCantitate[slot]! < spec.cantitate) {
+    w.ratiune.zidiriCuManaGoala++
+    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
+    return
+  }
   a.jobProgres[slot] = a.jobProgres[slot]! + unitatiDeMunca(w, rules, slot)
   raport.tickuriDeLucru++
   w.ratiune.tickuriDeLucru++
   if (a.jobProgres[slot]! < spec.lucru) return
-
-  // Materialul trebuie sa fie inca in mana. Daca nu mai e, jobul s-a rupt pe drum
-  // si nu se zideste din nimic.
-  if (a.caraCantitate[slot]! < spec.cantitate) {
-    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
-    return
-  }
 
   const out = zidesteVoxel(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, spec.material)
   if (!out.ok) {
@@ -2231,7 +2244,14 @@ function mutaItem(w: World, rules: Rules, is: number, wx: number, wy: number, z:
   stergeItem(it, is)
   const r = asazaItem(w, rules, kind, cant, wx, wy, z, id)
   marcheazaZoneMurdare(w)
-  if (slotItem(it, id) !== -1) return
+  // Post-conditia: id VIU ⇒ cantitate NESCHIMBATA. `asazaItem` cu id contopeste
+  // intai in vecinii cu loc si abia RESTUL primeste id-ul vechi — deci un morman
+  // poate supravietui cu mai putin decat avea, sub rezervari care il credeau
+  // intreg. Masurat de panoul din 25.09: 8 scene din 8 (A = 75 langa B = 70, dig
+  // sub A → A viu cu 70, B cu 75). Un fragment se trateaza ca o moarte: cine il
+  // tinea se reconciliaza acum, nu descopera lipsa la ridicare.
+  const nou = slotItem(it, id)
+  if (nou !== -1 && it.cantitate[nou]! >= cant) return
   reconciliazaTintaMoarta(w, rules, id)
   void r
 }
@@ -3056,13 +3076,20 @@ export function scurgeNevoile(w: World, rules: Rules, slot: number): void {
  * Se poate intrerupe jobul curent?
  *
  * Mana plina e singurul caz in care intreruperea poate DISTRUGE marfa
- * (`asazaItem` poate sa n-aiba unde s-o puna), iar munca ramasa pana la depozit
- * e marginita prin constructie. Research: pionii TERMINA task-ul curent inainte
- * sa reciteasca orarul.
+ * (`asazaItem` poate sa n-aiba unde s-o puna), iar munca ramasa pana la capatul
+ * jobului e marginita prin constructie. Research: pionii TERMINA task-ul curent
+ * inainte sa reciteasca orarul.
+ *
+ * UN adevar, nu doua: „mana plina", indiferent de felul jobului. Prima versiune
+ * spunea „carat, de la MERGE_DEST incolo" — adevarat pentru carat si FALS pentru
+ * construit, unde pionul are 20 de unitati in mana de la RIDICA pana la ZIDESTE:
+ * foamea critica il intrerupea la 390/400 de progres, marfa cadea langa santier,
+ * progresul se pierdea (panoul din 25.09). Bugetul de amanare ramane marginit:
+ * un job de construit intreg dureaza ~300 de tickuri, iar de la pragul critic la
+ * zero foamea are 6250.
  */
 function poateFiIntrerupt(w: World, slot: number): boolean {
-  const a = w.agents
-  return !(a.jobKind[slot] === FelJob.CARA && a.jobStep[slot]! >= PasCara.MERGE_DEST)
+  return w.agents.caraCantitate[slot] === 0
 }
 
 /**
@@ -3487,6 +3514,15 @@ const DRIVER_CONSTRUIESTE: DriverJob = {
   incheie(w, rules, slot, motiv, racire, rezultat) {
     const a = w.agents
     const ds = slotDesemnare(w.desemnari, a.jobDest[slot]!)
+    // Pe piciorul SURSEI tinta e MORMANUL, nu santierul: un drum refuzat spre el nu
+    // e vina santierului si nu-i scrie nici racire, nici cauza. Iar mormanul nu se
+    // raceste GLOBAL (`memoreazaPeItem`) niciodata dintr-un job de construit — vezi
+    // trecerea scumpa: `rezumatMaterial` tine un singur morman per piesa, deci o
+    // racire globala sterge felul pentru toata colonia. Pe PERECHE, ca acolo.
+    if (a.jobStep[slot]! <= PasConstruieste.RIDICA) {
+      if (slotItem(w.iteme, a.jobTarget[slot]!) !== -1) evitaTinta(w, slot, a.jobTarget[slot]!, w.tick + rules.jobRetryTicks)
+      return
+    }
     if (racire === Racire.TINTA) {
       // Santierul e cel care nu se poate zidi acum: racirea si cauza merg pe el,
       // ca overlay-ul si panoul „De ce nu?" sa aiba ce arata.
@@ -3502,10 +3538,6 @@ const DRIVER_CONSTRUIESTE: DriverJob = {
     }
     // Drumul MEU e blocat: santierul ramane pentru altii.
     evitaTinta(w, slot, a.jobDest[slot]!, w.tick + rules.jobRetryTicks)
-    if (a.jobStep[slot]! <= PasConstruieste.RIDICA) {
-      const is = slotItem(w.iteme, a.jobTarget[slot]!)
-      if (is !== -1) evitaTinta(w, slot, a.jobTarget[slot]!, w.tick + rules.jobRetryTicks)
-    }
     if (ds !== -1 && motiv) {
       w.desemnari.ultimulMotiv[ds] = codMotiv(motiv)
       w.desemnari.ultimulMotivDetaliu[ds] = DetaliuMotiv.NICIUNUL
@@ -3513,6 +3545,15 @@ const DRIVER_CONSTRUIESTE: DriverJob = {
   },
   refaTinta(w, rules, slot) {
     const a = w.agents
+    // Pe piciorul SURSEI nu exista „alta celula": mormanul e unde e — oglinda lui
+    // `DRIVER_CARA.refaTinta`. Fara garda asta, un drum refuzat spre morman il
+    // trimitea pe pion la SANTIER cu mana goala (jobStep = MERGE_SANTIER scris
+    // neconditionat), unde `zideste` aduna progres 40 de tickuri si abia la capat
+    // afla ca n-are din ce zidi: INTRERUPT, fara racire, rescanare, de la capat.
+    // Masurat de panoul din 25.09, cu un ostil pinuit pe morman: 73 din 74 de
+    // joburi intr-o bucla de 3000 de tickuri, 2586 de tickuri de „zidire" din
+    // nimic, `nextId` +74, niciun zavor tras.
+    if (a.jobStep[slot]! <= PasConstruieste.RIDICA) return false
     // La construit santierul e in `jobDest`, nu in `jobTarget` — acolo e sursa.
     return refaLoculDeLucruEvitandCurentul(w, rules, slot, a.jobDest[slot]!, PasConstruieste.MERGE_SANTIER)
   },
