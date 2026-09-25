@@ -3587,3 +3587,30 @@ Runner-ul e la −20% de ea; 205 era la +18%. Re-etalonarea s-a făcut în commi
 cum cere antetul protocolului; celelalte apariții ale lui 205 din GATE.md s-au aliniat (12 cadre
 pierdute la remesh devin 10), în afară de cea istorică din perechea „219 → 205", care e o
 măsurătoare de atunci, nu o afirmație despre azi.
+
+### Hash-ul de referință: 6ff16b2a → 79035d35, mutat de reconciliere — și pasul care l-a mascat
+
+După re-etalonarea GATE.md, `check` a picat din nou, pe pasul **următor**: hash-ul de referință.
+Runner-ul scoate `79035d35`, CI aștepta `6ff16b2a`. Local, același `79035d35` — deci nu e o
+problemă de determinism între mașini, e o schimbare de comportament neconsemnată.
+
+Atribuită pe instantanee `git archive`, nu prin deducție:
+
+| commit | `reconciliazaTintaMoarta` în cod | hash | coloniști vii |
+|---|---|---|---|
+| `184502b` (dinainte) | 0 apariții | `6ff16b2a` | 32 |
+| `336dc8e` (reconcilierea) | 4 | `79035d35` | **33** |
+
+Reconcilierea la moartea țintei a mutat hash-ul — firesc, joburile se încheie cu un tick mai
+devreme — și **un colonist în plus supraviețuiește** în scenariul standard. E un efect de joc
+vizibil, nu doar un bit de hash, și trebuia scris în intrarea reconcilierii. Nu a fost, fiindcă
+nimeni n-a rulat scenariul: `npm run check` nu avea pasul de hash, iar în CI pasul a fost **mascat**
+trei commit-uri la rând — în aceeași rulare picase întâi `check-gate-numbers`, iar pasul de hash nu
+mai rula deloc. Un roșu care se oprește la primul pas nu spune tot ce știe.
+
+Trei reparații, în același commit fiindcă sunt aceeași lecție:
+- `EXPECTED=79035d35` în `ci.yml`, cu motivul aici, cum cere regula de la S1-2;
+- pasul de hash primește `if: ${{ !cancelled() }}`, ca să raporteze și când a picat un pas dinaintea lui;
+- `tools/check-hash.mjs` intră în `npm run check` (~9 s): citește `EXPECTED` **din `ci.yml`**, nu
+  dintr-o copie, rulează scenariul standard și compară. Ce rulează poarta din CI trebuie să ruleze
+  și poarta locală — altfel se livrează orb pe felia aia.

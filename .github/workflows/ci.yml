@@ -86,12 +86,19 @@ jobs:
 
       # Regresie de determinism pe un scenariu fix. Daca hash-ul se schimba fara
       # ca cineva sa fi vrut asta, build-ul pica aici si nu peste trei luni.
+      #
+      # Ruleaza si cand a picat un pas dinaintea lui: pe 25.09.2026 pasul cu cifrele
+      # din GATE.md a picat primul si l-a MASCAT pe asta o rulare intreaga — hash-ul
+      # era mutat de trei commit-uri si nimeni n-a vazut. Un rosu trebuie sa spuna
+      # tot ce stie dintr-o singura rulare. Local il ruleaza `npm run check`
+      # (tools/check-hash.mjs), care citeste EXPECTED de AICI.
       - name: hash de referinta
+        if: ${{ !cancelled() }}
         run: |
           OUT=$(node src/harness/cli.ts --seed 12345 --ticks 100000 --agents 40)
           echo "$OUT"
           HASH=$(echo "$OUT" | awk '/^hash/ {print $2}')
-          EXPECTED=6ff16b2a
+          EXPECTED=79035d35
           if [ "$HASH" != "$EXPECTED" ]; then
             echo "::error::hash-ul de referinta s-a schimbat: $HASH (asteptat $EXPECTED)"
             echo "Daca schimbarea e intentionata, actualizeaza EXPECTED in acest workflow"

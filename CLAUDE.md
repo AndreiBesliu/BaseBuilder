@@ -55,7 +55,7 @@ Acoperă doar iterarea nesortată, **niciodată** interdicțiile dure. Te oblig�
 ## Comenzi
 
 ```bash
-npm run check        # disciplină + typecheck + teste. Asta e poarta.
+npm run check        # disciplină + typecheck + teste + hash-ul de referință. Asta e poarta.
 npm run discipline   # doar scanerul de determinism
 npm run typecheck    # tsc --noEmit
 npm test             # node --test
