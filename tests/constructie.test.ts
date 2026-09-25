@@ -1704,6 +1704,12 @@ test('ridicarea in mai multe randuri: 30 de mormane de cate 10, fara depozit, ri
   // toata piesa dintr-un SINGUR morman, iar singurul mecanism care contopea era
   // caratul spre depozit — deci o colonie fara depozit sau fara carausi statea.
   const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 9)
+  // Un morman DEPARTE, primul in ordinea sloturilor, in afara discurilor de acoperire
+  // dar in raza de scanare: nu e ales niciodata (cheia lui e de zeci de ori mai mare),
+  // dar un coridor de acoperire intins spre el s-ar VEDEA in `regions.keys`. Pe un
+  // patrat plat, fara el, totul e deja acoperit si K05 n-ar avea ce masura.
+  const departe = solidLaDistanta(w, T.x0, T.y0, T.g, 60, 80)
+  lasaItem(w, Item.PIATRA, 10, departe.wx, departe.wy)
   let puse = 0
   for (let dx = 0; dx < 6 && puse < 30; dx++) for (let dy = 0; dy < 5 && puse < 30; dy++) { lasaItem(w, Item.PIATRA, 10, T.x0 + dx, T.y0 + dy); puse++ }
   for (let k = 0; k < 3; k++) pereteLa(w, T.x0 + 7, T.y0 + k)
@@ -1941,4 +1947,28 @@ test('SCARA cere 5, deci pragul ei e 5: porneste dintr-un morman de 5 lemn', () 
   assert.equal(pragRidicare(R, R.piese[Piesa.SCARA]!), R.piese[Piesa.SCARA]!.cantitate)
   assert.ok(pornesteConstruieste(w, R, p, ds, is).ok, 'scara nu porneste din singurul morman care o acopera intreg')
   assert.equal(w.agents.jobCantitate[p], R.piese[Piesa.SCARA]!.cantitate)
+})
+
+test('un morman cu prea putin LIBER nu e sursa, chiar daca are destul in el: 5 libere din 25 nu merita drumul', () => {
+  // Cu `liber = 0` o sonda care s-ar uita la cat E in morman ar fi mascata de refuzul
+  // cererilor de zero. Cu 5 libere (sub prag, dar peste zero) ar propune mormanul de
+  // langa pion cu un count de 5, si jobul ar porni sub prag.
+  let scena: { w: World; wx: number; wy: number; g: number } | null = null
+  for (const seed of [12345, 7, 12, 17, 18]) { try { scena = sitPlat(seed, 15); break } catch { /* alta samanta */ } }
+  assert.ok(scena, 'fixtura: niciun sit plat de 15')
+  const { w, wx, wy, g } = scena!
+  const idSantier = pereteLa(w, wx + 14, wy + 9)
+  const idAproape = lasaItem(w, Item.PIATRA, 25, wx + 2, wy + 7)  // la o celula de al doilea pion
+  const idDeparte = lasaItem(w, Item.PIATRA, 20, wx + 14, wy + 7) // la 13 celule
+  const tine = pionLa(w, wx + 3, wy + 7)
+  const p = pionLa(w, wx + 1, wy + 7)
+  ruleaza(w, 5)
+  pornestePe(w, tine, idSantier, idAproape)
+  assert.equal(w.agents.jobCantitate[tine], R.piese[Piesa.PERETE]!.cantitate, 'fixtura: primul tine 20 din 25')
+  const prag = pragRidicare(R, R.piese[Piesa.PERETE]!)
+  assert.ok(25 - 20 < prag, 'fixtura: restul liber trebuie sa fie sub prag')
+  void g
+  const m = rezumatMaterial(w, R, p)[Piesa.PERETE]!
+  assert.ok(m.exista && m.slot !== -1, 'fixtura: sonda n-a gasit material')
+  assert.equal(w.iteme.id[m.slot], idDeparte, `sonda a propus mormanul cu 5 libere (${idAproape}) in loc de cel intreg`)
 })

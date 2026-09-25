@@ -360,7 +360,9 @@ export const MUTATII = [
     f: "src/sim/joburi.ts",
     a: "    rezumatMat[p] = { exista: m.slot !== -1 && sumaLibera[p]! >= spec.cantitate, dMin: m.dMin, slot: m.slot }",
     b: "    rezumatMat[p] = { exista: m.slot !== -1, dMin: m.dMin, slot: m.slot }",
-    t: 'tests/constructie.test.ts', e: "doi constructori, doua mormane de 10",
+    // Testul cu doi constructori pe 2x10 trece si fara poarta (cei doi se descurca prin
+    // lasat si reluat); ce o prinde e MARGINEA de pe materialul de neatins.
+    t: 'tests/constructie.test.ts', e: "materialul de neatins nu produce un ciclu",
   },
   {
     n: "matOriunde nu cere suma bruta ≥ cantitate (un singur morman de 10 trece drept material destul)",
@@ -432,7 +434,9 @@ export const MUTATII = [
     f: "src/sim/joburi.ts",
     a: "      if (liber < pragSursa(rules, spec, spec.cantitate)) continue",
     b: "      if (cant < pragSursa(rules, spec, spec.cantitate)) continue",
-    t: 'tests/constructie.test.ts', e: "doua mormane de 20, doi constructori",
+    // Cu liber = 0 mutatia e mascata de refuzul cererilor de zero; leaga doar cand
+    // e liber CEVA sub prag — scenariul de mai jos, cu 5 libere din 25.
+    t: 'tests/constructie.test.ts', e: "un morman cu prea putin LIBER",
   },
   {
     n: "sursa se verifica si DUPA ce materialul e in mana",
