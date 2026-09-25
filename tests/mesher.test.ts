@@ -294,6 +294,16 @@ function indiceFata(m: ReturnType<typeof meshChunk>, face: number, x: number, y:
 test('un cub izolat n-are nicio ocluzie: toate varfurile la maxim', () => {
   // Controlul de jos al scarii. Daca un cub singur primeste ocluzie, regula vede
   // vecini care nu exista, si atunci nimic din ce urmeaza nu inseamna nimic.
+  //
+  // Si al doilea rol: tabloul de ocupare al mesher-ului e REFOLOSIT intre apeluri,
+  // deci un chunk plin meshuit inainte lasa urme daca nu se goleste. Pana la 26.09
+  // testul prindea scurgerea doar prin ORDINEA fisierului — un test anterior lasa
+  // tabloul murdar. Harnasamentul de mutatii ruleaza acum doar testul numit, si
+  // a strigat DEPENDENTA DE ORDINE; deci testul o provoaca singur: intai un chunk
+  // cu trei straturi pline in jurul celulei, apoi cubul izolat.
+  const plin = emptyChunk()
+  for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) for (const z of [4, 5, 6]) setVoxel(plin, x, y, z, Material.ROCA)
+  meshChunk(plin)
   const c = emptyChunk()
   setVoxel(c, 5, 5, 5, Material.ROCA)
   const m = meshChunk(c)
