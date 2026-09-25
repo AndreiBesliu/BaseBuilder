@@ -1766,6 +1766,9 @@ export function pornesteConstruieste(
   const liber = liberPeItem(w, is)
   const necesar = pragSursa(rules, spec, spec.cantitate)
   if (liber < necesar) {
+    // E in morman, dar e al altora: REZERVAT, nu „lipsa" — jucatorul vede „il tine
+    // cineva", nu „n-ai piatra". Doua raspunsuri actionabile, doua motive.
+    if (w.iteme.cantitate[is]! >= necesar) return refuse(Reason.REZERVAT, { cerut: necesar, liber, inMorman: w.iteme.cantitate[is]! })
     return refuse(Reason.LIPSA_MATERIAL, { cerut: necesar, gasit: liber })
   }
   const count = Math.min(spec.cantitate, liber)
@@ -2456,8 +2459,10 @@ function ridica(w: World, rules: Rules, slot: number): void {
       if (!sursa.ok) abandoneazaRidicarea(w, rules, slot, sursa.reason)
       return
     }
-    // Mana e plina: count-ul pe sursa nu mai inseamna nimic. Zero, ca decode sa aiba
-    // o singura forma de acceptat dupa RIDICA.
+    // Mana e plina: count-ul pe sursa nu mai inseamna nimic, si codul scrie zero.
+    // Decode accepta dupa RIDICA orice intre 0 si totalul piesei, fiindca save-urile
+    // de schema 7 poarta totalul acolo — deci zeroul e o conventie a scriitorului, nu
+    // o forma pe care usa o cere; nimeni nu-l citeste dupa RIDICA.
     a.jobCantitate[slot] = 0
     // IN COMPONENTA pionului, care acum sta pe morman. Fara ea, `celulaDeLucru`
     // intoarce prima celula calcabila in ordinea fixa, indiferent daca pionul

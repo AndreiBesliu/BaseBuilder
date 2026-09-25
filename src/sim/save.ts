@@ -611,9 +611,11 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
  * SURSA CURENTA (nu totalul piesei — ala e `piese[].cantitate`, citit de `zideste`),
  * deci pana la RIDICA inclusiv e intre 1 si ce mai lipseste; dupa, codul scrie 0,
  * dar un save de dinaintea taieturii 3 a logisticii are acolo totalul piesei si se
- * ACCEPTA (fixtura golden de schema 7): nu se citeste dupa RIDICA. Un santier
- * disparut nu se valideaza aici — reconstructia anuleaza jobul, cu raport.
- * Contradictia se REFUZA, nu se repara tacit.
+ * ACCEPTA (fixtura golden de schema 7): nu se citeste dupa RIDICA. Ce e in mana e
+ * cel mult piesa si e de FELUL ei: `zideste` citeste doar cantitatea, deci un save
+ * cu pamant in mana pe un job de perete ar zidi piatra din pamant (recenzia din
+ * 25.09). Un santier disparut nu se valideaza aici — reconstructia anuleaza jobul,
+ * cu raport. Contradictia se REFUZA, nu se repara tacit.
  */
 function valideazaJoburiDeConstruit(w: World, rules: Rules): Outcome<void> {
   const a = w.agents
@@ -626,6 +628,9 @@ function valideazaJoburiDeConstruit(w: World, rules: Rules): Outcome<void> {
     const cant = a.jobCantitate[i]!
     if (cara > spec.cantitate) {
       return refuse(Reason.VALOARE_INVALIDA, { camp: `agents.caraCantitate[${i}]`, valoare: cara, max: spec.cantitate, motiv: 'mai mult in mana decat costa piesa' })
+    }
+    if (cara > 0 && a.caraKind[i] !== rules.digYield[spec.material]!.fel) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `agents.caraKind[${i}]`, valoare: a.caraKind[i]!, asteptat: rules.digYield[spec.material]!.fel, motiv: 'alt fel in mana decat cere piesa' })
     }
     if (a.jobStep[i]! <= PasConstruieste.RIDICA) {
       if (cant < 1 || cant > spec.cantitate - cara) {

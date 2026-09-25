@@ -738,6 +738,13 @@ test('un morman de alt fel, sau sub PRAGUL de ridicare, se refuza la PORNIRE; un
   assert.ok(pornesteConstruieste(c.w, R, 0, c.ds, c.is).ok, 'un morman de exact prag trebuie sa porneasca')
   assert.equal(c.w.agents.jobCantitate[0], prag)
   assert.equal(c.w.rezervari.total, 2)
+
+  // E in morman, dar e al altora: REZERVAT, nu LIPSA — jucatorul vede „il tine cineva".
+  const d = santier(12345, Item.PIATRA, 20)
+  assert.ok(rezervaToate(d.w.rezervari, 990001, 880001, [cerereCarat(R, d.w.iteme.id[d.is]!, 20)]).ok)
+  const r4 = pornesteConstruieste(d.w, R, 0, d.ds, d.is)
+  assert.equal(r4.ok, false)
+  assert.equal(r4.ok ? '' : r4.reason, Reason.REZERVAT, 'material tinut de altii nu e „lipsa material"')
 })
 
 test('pionul mutat de pe locul de lucru nu zideste de la distanta', () => {
@@ -1600,7 +1607,7 @@ test('munca falsa: un drum refuzat spre morman NU trimite constructorul la santi
   // Masurat de panoul din 25.09, pe codul de dinainte: ostil pinuit pe morman →
   // `refaTinta` scria MERGE_SANTIER neconditionat → 73 din 74 de joburi in 3000 de
   // tickuri, 2586 de tickuri de „zidire" din nimic, niciun zavor tras.
-  const { w, ds, is } = santier(12345)
+  const { w, ds, is, idSantier } = santier(12345)
   const idItem = w.iteme.id[is]!
   const lx = w.iteme.wx[is]!
   const ly = w.iteme.wy[is]!
@@ -1612,11 +1619,13 @@ test('munca falsa: un drum refuzat spre morman NU trimite constructorul la santi
   let ultimJob = w.agents.jobId[0]!
   let laSantierCuManaGoala = 0
   let refuzuri = 0
+  let santierEvitat = 0
   for (let t = 0; t < 3000; t++) {
     w.agents.x[1] = lx * 1000 + 500
     w.agents.y[1] = ly * 1000 + 500
     w.agents.z[1] = lz
     refuzuri += ruleaza(w, 1).refuzuriDrum
+    if (esteEvitata(w, 0, idSantier)) santierEvitat++
     if (w.agents.jobKind[0] === FelJob.CONSTRUIESTE) {
       if (w.agents.jobId[0] !== ultimJob) { joburi++; ultimJob = w.agents.jobId[0]! }
       if (w.agents.caraCantitate[0] === 0 && w.agents.jobStep[0]! >= PasConstruieste.MERGE_SANTIER) laSantierCuManaGoala++
@@ -1631,6 +1640,58 @@ test('munca falsa: un drum refuzat spre morman NU trimite constructorul la santi
   // Cauza e a PERECHII: pionul evita mormanul, dar mormanul NU e racit pentru toti.
   assert.ok(esteEvitata(w, 0, idItem), 'pionul ar trebui sa evite mormanul blocat')
   assert.ok(w.iteme.reincercaLaTick[slotItem(w.iteme, idItem)]! <= w.tick, 'mormanul a fost racit GLOBAL dintr-un job de construit')
+  // Si NU e vina santierului: un drum refuzat spre morman nu-i scrie nici evitare pe
+  // pereche, nici racire, nici cauza (recenzia din 25.09: jumatatea asta a contractului
+  // n-avea nicio asertiune — cu ea incalcata, santierul era evitat 2559 din 3000 de
+  // tickuri si purta o cauza falsa).
+  assert.equal(santierEvitat, 0, `santierul a fost evitat pe pereche ${santierEvitat} tickuri din 3000 desi drumul refuzat era spre MORMAN`)
+  assert.equal(w.desemnari.ultimulMotiv[ds], 0, 'santierul poarta o cauza pentru un drum refuzat spre morman')
+  assert.ok(w.desemnari.reincercaLaTick[ds]! <= w.tick, 'santierul a fost racit pentru un drum refuzat spre morman')
+})
+
+test('dupa ultimul perete, sonda de material nu mai face niciun pas: contorul de santiere vii scade la stergere', () => {
+  // Iesirea O(1) din `cautaJob` sta pe `viiConstruieste`, un contor DERIVED cu trei
+  // scriitori (desemnare, stergere, reindexare). Recenzia din 25.09: `--` de la stergere
+  // n-avea nicio proba — un contor ramas in urma nu schimba nicio stare si niciun
+  // hash, doar costul: sonda parcurgea mormanele la fiecare scanare, fara santiere.
+  const { w, sx, sy, sz, is } = santier(12345)
+  assert.ok(pornesteConstruieste(w, R, 0, slotDesemnare(w.desemnari, w.desemnari.id[0]!), is).ok)
+  const n = panaCand(w, 2000, (w) => santiereVii(w) === 0)
+  assert.ok(n >= 0, 'fixtura: peretele nu s-a ridicat')
+  assert.equal(w.desemnari.viiConstruieste, 0, 'contorul trebuie sa scada odata cu santierul')
+  // O sapatura departe, ca scanarea sa treaca de `shouldSkip` si sa ajunga la categoria
+  // de construit — unde trebuie sa NU plateasca nimic.
+  const s = solidLaDistanta(w, sx, sy, sz, 6, 10)
+  desemneaza(w, s.wx, s.wy)
+  const t = ruleaza(w, 200)
+  assert.ok(t.scanari > 0 && t.vizite > 0, 'fixtura: scanarea n-a ajuns la categorii')
+  assert.equal(t.pasiRezumat, 0, `${t.pasiRezumat} pasi de sonda fara niciun santier viu`)
+})
+
+test('constructorul cu mana GOALA a carui sursa moare e INTRERUPT (rescaneaza), nu retintit pe loc', () => {
+  // Retintirea din reconciliere e pentru cine are deja o parte din piesa in mana:
+  // marfa nu se arunca. Cu mana goala nu e nimic de pastrat, iar o rescanare aduce
+  // TOTI candidatii (alte santiere, alte feluri de munca), nu doar alta sursa.
+  const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 7)
+  const idSantier = pereteLa(w, T.x0 + 6, T.y0 + 3)
+  const idA = lasaItem(w, Item.PIATRA, 10, T.x0 + 3, T.y0 + 3)
+  const idB = lasaItem(w, Item.PIATRA, 10, T.x0 + 4, T.y0 + 3)
+  const p = pionLa(w, T.x0, T.y0 + 3)
+  ruleaza(w, 5)
+  pornestePe(w, p, idSantier, idA)
+  assert.equal(w.agents.caraCantitate[p], 0)
+  const cautariInainte = lastJobReport().cautariSursa
+  // A cade (podeaua sapata, cu celula de dedesubt desemnata ca prima trecere s-o sara)
+  // si se contopeste INTREG in vecinul B: id-ul A moare.
+  assert.ok(applyCommand(w, { kind: 'desemneaza', wx: T.x0 + 3, wy: T.y0 + 3, z: T.g - 1 }, R).ok)
+  assert.ok(applyCommand(w, { kind: 'dig', wx: T.x0 + 3, wy: T.y0 + 3, z: T.g }, R).ok)
+  assert.equal(slotItem(w.iteme, idA), -1, 'fixtura: A trebuia sa moara prin contopire')
+  assert.equal(w.iteme.cantitate[slotItem(w.iteme, idB)], 20, 'fixtura: B trebuia sa primeasca tot A')
+  assert.equal(w.agents.jobKind[p], 0, 'cu mana goala jobul se INTRERUPE, nu se retinteste')
+  assert.equal(lastJobReport().cautariSursa - cautariInainte, 0, 'nicio cautare de a doua sursa pentru o mana goala')
+  const n = panaCand(w, 2000, (w) => santiereVii(w) === 0)
+  assert.ok(n >= 0, 'dupa rescanare, peretele se ridica din B')
+  assert.equal(w.ratiune.itemePierdute, 0)
 })
 
 test('zidirea cu mana goala se incheie pe loc, nu dupa 40 de tickuri de munca din nimic', () => {

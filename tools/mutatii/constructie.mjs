@@ -430,7 +430,7 @@ export const MUTATII = [
     t: 'tests/constructie.test.ts', e: "munca falsa",
   },
   {
-    n: "zideste verifica mana abia DUPA ce a muncit (zavorul nu se trage, peretele iese din nimic)",
+    n: "zideste nu verifica mana deloc (zavorul nu se trage, peretele iese din nimic)",
     f: "src/sim/joburi.ts",
     a: "  if (a.caraCantitate[slot]! < spec.cantitate) {\n    w.ratiune.zidiriCuManaGoala++",
     b: "  if (false) {\n    w.ratiune.zidiriCuManaGoala++",
@@ -757,5 +757,63 @@ export const MUTATII = [
     a: "      evitaTinta(w, slot, veche, w.tick + rules.jobRetryTicks)\n      const sursa = refaSursa(w, rules, slot)",
     b: "      const sursa = refaSursa(w, rules, slot)",
     t: 'tests/constructie.test.ts', e: 'ostil pe a doua sursa si NICIO alta',
+  },
+
+  // --- recenzia adversariala (25.09.2026): garzi care n-aveau proba ---
+  {
+    n: 'viiConstruieste nu se recalculeaza la incarcare (lumea incarcata nu mai construieste)',
+    f: 'src/sim/desemnari.ts',
+    a: "    if (d.kind[i] === Desemnare.CONSTRUIESTE) d.viiConstruieste++",
+    b: "    void i",
+    t: 'tests/saveload.test.ts', e: 'M5 pe lumea FRAGMENTATA: 150 + load + 300',
+  },
+  {
+    n: 'viiConstruieste nu scade la stergere (sonda plateste O(mormane) si dupa ultimul santier)',
+    f: 'src/sim/desemnari.ts',
+    a: "  if (d.kind[slot] === Desemnare.CONSTRUIESTE) d.viiConstruieste--",
+    b: "  void slot",
+    t: 'tests/constructie.test.ts', e: 'dupa ultimul perete',
+  },
+  {
+    n: 'pe piciorul sursei, un drum refuzat invinuieste SI santierul (evitare pe pereche + cauza), cu `return`-ul pastrat',
+    f: 'src/sim/joburi.ts',
+    a: "      if (slotItem(w.iteme, a.jobTarget[slot]!) !== -1) evitaTinta(w, slot, a.jobTarget[slot]!, w.tick + rules.jobRetryTicks)\n      return",
+    b: "      if (slotItem(w.iteme, a.jobTarget[slot]!) !== -1) evitaTinta(w, slot, a.jobTarget[slot]!, w.tick + rules.jobRetryTicks)\n      evitaTinta(w, slot, a.jobDest[slot]!, w.tick + rules.jobRetryTicks)\n      if (ds !== -1 && motiv) { w.desemnari.ultimulMotiv[ds] = codMotiv(motiv); w.desemnari.ultimulMotivDetaliu[ds] = DetaliuMotiv.NICIUNUL }\n      return",
+    t: 'tests/constructie.test.ts', e: 'munca falsa',
+  },
+  {
+    n: 'decode accepta un count pe sursa peste ce mai LIPSESTE (marginea `- cara` dispare)',
+    f: 'src/sim/save.ts',
+    a: "      if (cant < 1 || cant > spec.cantitate - cara) {",
+    b: "      if (cant < 1 || cant > spec.cantitate) {",
+    t: 'tests/saveload.test.ts', e: 'un count pe sursa in afara marginilor',
+  },
+  {
+    n: 'decode nu valideaza count-ul dupa RIDICA (negativ sau peste piesa la ZIDESTE)',
+    f: 'src/sim/save.ts',
+    a: "    } else if (cant < 0 || cant > spec.cantitate) {",
+    b: "    } else if (false) {",
+    t: 'tests/saveload.test.ts', e: 'un count pe sursa in afara marginilor',
+  },
+  {
+    n: 'decode nu verifica felul din mana contra piesei (piatra din pamant)',
+    f: 'src/sim/save.ts',
+    a: "    if (cara > 0 && a.caraKind[i] !== rules.digYield[spec.material]!.fel) {",
+    b: "    if (false) {",
+    t: 'tests/saveload.test.ts', e: 'un count pe sursa in afara marginilor',
+  },
+  {
+    n: 'reconcilierea retinteste si constructorul cu mana GOALA in loc sa-l intrerupa',
+    f: 'src/sim/joburi.ts',
+    a: "        if (a.jobKind[i] === FelJob.CONSTRUIESTE && a.jobStep[i]! <= PasConstruieste.RIDICA && a.caraCantitate[i]! > 0) {",
+    b: "        if (a.jobKind[i] === FelJob.CONSTRUIESTE && a.jobStep[i]! <= PasConstruieste.RIDICA) {",
+    t: 'tests/constructie.test.ts', e: 'constructorul cu mana GOALA',
+  },
+  {
+    n: 'pornirea refuza cu LIPSA_MATERIAL si cand materialul e in morman, dar al altora',
+    f: 'src/sim/joburi.ts',
+    a: "    if (w.iteme.cantitate[is]! >= necesar) return refuse(Reason.REZERVAT, { cerut: necesar, liber, inMorman: w.iteme.cantitate[is]! })",
+    b: "    void 0",
+    t: 'tests/constructie.test.ts', e: 'un morman de alt fel, sau sub PRAGUL',
   },
 ]

@@ -499,6 +499,65 @@ test('un count pe sursa in afara marginilor e REFUZAT la usa, nu reparat tacit',
   assert.equal(manaPlina.ok, false, 'mai mult in mana decat costa piesa trebuie refuzat')
   // Controlul negativ: neatins, se incarca.
   assert.equal(decode(strica(() => {}), R).ok, true)
+
+  // Marginea „ce mai LIPSESTE" si felul din mana (recenzia din 25.09: slotul de mai
+  // sus are mana goala, unde `spec + 1` pica oricum, deci `- cara` n-avea proba; iar
+  // ramura de dupa RIDICA n-avea niciuna).
+  let cuMana = -1
+  const la2 = panaCandLocal(w, 800, () => {
+    for (let i = 0; i < w.agents.count; i++) {
+      if (w.agents.alive[i] === 1 && w.agents.jobKind[i] === FelJob.CONSTRUIESTE && w.agents.jobStep[i]! <= PasConstruieste.RIDICA && w.agents.caraCantitate[i]! > 0) { cuMana = i; return true }
+    }
+    return false
+  })
+  assert.ok(la2 >= 0 && cuMana !== -1, 'fixtura: niciun constructor pe piciorul sursei cu prima parte in mana')
+  const spec2 = R.piese[w.desemnari.piesa[slotDesemnare(w.desemnari, w.agents.jobDest[cuMana]!)]!]!
+  const cara = w.agents.caraCantitate[cuMana]!
+  assert.ok(cara > 0 && cara < spec2.cantitate, 'fixtura: mana partiala')
+  assert.equal(decode(strica((a) => { a.jobCantitate![cuMana] = spec2.cantitate - cara + 1 }), R).ok, false, 'un count peste ce mai lipseste trebuie refuzat')
+  assert.equal(decode(strica((a) => { a.jobCantitate![cuMana] = spec2.cantitate - cara }), R).ok, true, 'exact ce mai lipseste se accepta')
+  assert.equal(decode(strica((a) => { a.caraKind![cuMana] = Item.PAMANT }), R).ok, false, 'alt fel in mana decat cere piesa trebuie refuzat')
+  let laZid = -1
+  const la3 = panaCandLocal(w, 800, () => {
+    for (let i = 0; i < w.agents.count; i++) {
+      if (w.agents.alive[i] === 1 && w.agents.jobKind[i] === FelJob.CONSTRUIESTE && w.agents.jobStep[i] === PasConstruieste.ZIDESTE) { laZid = i; return true }
+    }
+    return false
+  })
+  assert.ok(la3 >= 0 && laZid !== -1, 'fixtura: niciun constructor la ZIDESTE')
+  const spec3 = R.piese[w.desemnari.piesa[slotDesemnare(w.desemnari, w.agents.jobDest[laZid]!)]!]!
+  assert.equal(decode(strica((a) => { a.jobCantitate![laZid] = -1 }), R).ok, false, 'un count negativ la ZIDESTE trebuie refuzat')
+  assert.equal(decode(strica((a) => { a.jobCantitate![laZid] = spec3.cantitate + 1 }), R).ok, false, 'un count peste piesa la ZIDESTE trebuie refuzat')
+  assert.equal(decode(strica((a) => { a.jobCantitate![laZid] = spec3.cantitate }), R).ok, true, 'totalul piesei (schema 7) se accepta la ZIDESTE')
+})
+
+test('M5 pe lumea FRAGMENTATA: 150 + load + 300 == 450, cu santiere fara pion la salvare — contorul de santiere vii se REFACE la incarcare', () => {
+  // `viiConstruieste` e DERIVED si e singurul lucru care deschide sonda in `cautaJob`.
+  // Recenzia din 25.09: recalcularea lui la incarcare n-avea proba in saveload — M5 pe
+  // lumeFragmentata compara doar la granita, iar la tickul 400 fixtura e epuizata.
+  // La 150 raman santiere pe care nu lucreaza nimeni: fara recalculare, lumea
+  // incarcata nu le mai ia niciodata (masurat: 3 vs 0 santiere vii dupa +1500, hash
+  // divergent), si nici o desemnare noua n-o mai trezeste.
+  for (const seed of [12345, 7]) {
+    const continuu = lumeFragmentata(seed)
+    advance(continuu, 450, R)
+    const w = lumeFragmentata(seed)
+    advance(w, 150, R)
+    let faraPion = 0
+    for (let s = 0; s < w.desemnari.count; s++) {
+      if (w.desemnari.alive[s] !== 1 || w.desemnari.kind[s] !== Desemnare.CONSTRUIESTE) continue
+      let luat = false
+      for (let i = 0; i < w.agents.count; i++) if (w.agents.alive[i] === 1 && w.agents.jobKind[i] === FelJob.CONSTRUIESTE && w.agents.jobDest[i] === w.desemnari.id[s]) luat = true
+      if (!luat) faraPion++
+    }
+    assert.ok(faraPion > 0, `seed ${seed}: fixtura moarta — la tickul 150 toate santierele au deja un constructor`)
+    const out = decode(encode(w), R)
+    assert.ok(out.ok)
+    const incarcat = out.value
+    assert.equal(incarcat.desemnari.viiConstruieste, w.desemnari.viiConstruieste, 'contorul DERIVED trebuie refacut la incarcare')
+    advance(incarcat, 300, R)
+    assert.equal(hashWorld(incarcat), hashWorld(continuu), `seed ${seed}: lumea incarcata a luat alt drum`)
+  }
 })
 
 /** Ruleaza pana cand conditia e adevarata, cel mult `max` tickuri. */

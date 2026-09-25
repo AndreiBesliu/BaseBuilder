@@ -324,6 +324,7 @@ test('un save de schema 7 cu constructori in curs se incarca, isi pastreaza pasi
   let santiere = 0
   for (let i = 0; i < w.desemnari.count; i++) if (w.desemnari.alive[i] === 1 && w.desemnari.kind[i] === Desemnare.CONSTRUIESTE) santiere++
   assert.ok(santiere >= 2, `fixtura: ${santiere} santiere vii`)
+  assert.equal(w.desemnari.viiConstruieste, santiere, 'contorul DERIVED de santiere vii se reface la incarcare')
   advance(w, 600)
   santiere = 0
   for (let i = 0; i < w.desemnari.count; i++) if (w.desemnari.alive[i] === 1 && w.desemnari.kind[i] === Desemnare.CONSTRUIESTE) santiere++
