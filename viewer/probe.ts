@@ -349,8 +349,13 @@ export function checkGuards(ctx: GuardContext): string[] {
     fails.push(`renderer „${ctx.rendererName}" nu contine „${ctx.expectGpu}" — posibil iGPU sau SwiftShader`)
   }
   if (ctx.isDevServer) fails.push('rulezi pe dev server, nu pe build de productie')
+  // In microsecunde ROTUNJITE, nu `g > 0.1`: tocirea Spectre din Chromium e exact 100 µs,
+  // iar diferenta a doua `performance.now()` multiplu de 0,1 iese, dupa cum cad octetii,
+  // 0,09999990 sau 0,10000002. Masurat pe 25.09, sub Electron: aceeasi masina, doua
+  // rulari, o data sub prag si o data peste. O garda care decide prin rotunjire flotanta
+  // nu e o garda; pragul real e „mai grosier decat tocirea implicita", adica > 100 µs.
   const g = clockGranularityMs()
-  if (g > 0.1) fails.push(`granularitatea ceasului ${g.toFixed(3)} ms — nicio cifra sub 1 ms nu e credibila`)
+  if (Math.round(g * 1000) > 100) fails.push(`granularitatea ceasului ${g.toFixed(3)} ms — nicio cifra sub 1 ms nu e credibila`)
   return fails
 }
 

@@ -901,6 +901,11 @@ function finishGateRun(): void {
       // Vite injecteaza `hot` doar pe dev server. Daca e prezent, rularea e
       // invalida prin protocol: module netranspilate, HMR, sourcemaps.
       isDevServer: 'hot' in import.meta,
+      // Gazda (GATE.md §12, golul 3): Chrome curat sau Electron cu flagurile de
+      // livrare. UA-ul e al browserului — nu se poate declara din URL. `hostFlags` e
+      // doar ce SPUNE lansatorul ca a pus pe linia de comanda; Chrome nu declara nimic.
+      userAgent: navigator.userAgent,
+      hostFlags: params.get('flags') ?? 'nedeclarate',
     },
     // Contorul de geometrii: proba negativa B nu se poate verifica fara el.
     geometrii: renderer.info.memory.geometries,
@@ -922,7 +927,10 @@ function finishGateRun(): void {
   const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
-  a.download = `gate-${result.meta.scenario}-${probe.count}cadre.json`
+  // Gazda in nume, ca doua rulari identice pe Chrome si pe Electron sa nu se
+  // suprascrie si sa nu se confunde. Derivata din UA, nu din URL.
+  const gazda = /Electron\//.test(navigator.userAgent) ? 'electron' : 'chrome'
+  a.download = `gate-${gazda}-${result.meta.scenario}-${probe.count}cadre.json`
   a.click()
   URL.revokeObjectURL(a.href)
 

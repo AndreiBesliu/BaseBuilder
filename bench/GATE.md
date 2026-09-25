@@ -450,15 +450,31 @@ de măsurare: `document.hidden === true`, contor de cadre 0, iar HUD-ul arăta �
 Deci rularea de gate e o acțiune de OM, într-o fereastră reală:
 
 ```
-bench
-uleaza-gate.cmd            # bisecția pentru X_max
-bench
-uleaza-gate.cmd fortress   # un scenariu anume
+bench\ruleaza-gate.cmd                          # bisecția pentru X_max, pe Chrome curat
+bench\ruleaza-gate.cmd fortress                 # un scenariu anume
+bench\ruleaza-gate.cmd fortress electron        # același scenariu, sub Electron cu --in-process-gpu
+bench\ruleaza-gate.cmd fortress electron-curat  # sub Electron FĂRĂ flagul de livrare (ablația)
 ```
 
-Scriptul construiește build-ul de producție, pornește serverul de preview, deschide Chrome pe un
-profil curat cu flagurile din protocol, și la final pagina **descarcă singură** un `.json` cu
+Scriptul construiește build-ul de producție, pornește serverul de preview, deschide gazda cerută pe
+un profil curat cu flagurile din protocol, și la final pagina **descarcă singură** un `.json` cu
 rezultatul și metadatele. Fișierul e singurul lucru care supraviețuiește momentului.
+
+**Gazda Electron (25.09.2026).** `bench/gate-electron.mjs` deschide *aceeași* pagină, cu *aceiași*
+parametri, sub Electron 44.4.5 cu `--in-process-gpu` (cerut de overlay-ul Steam) — adică ce se
+livrează, nu ce se măsura până acum. Ambele gazde deschid fereastra la 1600×900, ca `canvasPx` să
+fie același și comparația să fie pe gazdă, nu pe pixeli. JSON-ul poartă `userAgent` (al browserului,
+nedeclarabil din URL) și `hostFlags` (ce SPUNE lansatorul că a pus pe linia de comandă), iar numele
+fișierului începe cu gazda. Trei rulări — Chrome, Electron-curat, Electron-livrare — separă costul
+gazdei de costul flagului; pragul de 5% din §12 e pe **flag**.
+
+Lansatorul are o probă de fum fără om (`--fum`): fereastră ascunsă, deci rulare invalidă prin
+protocol — dar verifică restul lanțului: flagurile ajung pe linia de comandă, pagina se încarcă
+fără erori, GPU-ul raportat e 3060-ul, descărcarea din pagină ajunge pe disc. Fumul a găsit două
+lucruri în prima lui rulare. Unul e la §7.1. Celălalt: pragul de granularitate a ceasului se compara
+`g > 0.1`, iar diferența a două `performance.now()` tocite la 100 µs iese, după cum cad octeții,
+0,0999999 sau 0,1000000 — pe aceeași mașină, două rulări, o dată sub prag și o dată peste. Se
+compară acum în microsecunde rotunjite: mai grosier decât tocirea implicită, adică > 100 µs.
 
 Sonda se **autodeclară invalidă** dacă ceva din §7 nu e în regulă — inclusiv „fereastra era ascunsă
 la pornire", cazul pe care prima versiune a gărzii l-a ratat, fiindcă asculta doar `visibilitychange`
@@ -522,6 +538,14 @@ afirmația care legitimează sau respinge portarea.
 1. Orice `visibilitychange`, sau `document.visibilityState !== 'visible'` la orice cadru.
    *(`requestAnimationFrame` pur și simplu nu mai e apelat când panoul e ascuns — deja plătit o dată
    în sesiunea asta: HUD-ul arăta „fps 0, p99 9008 ms".)*
+   **Sub Electron condiția asta e oarbă pe un caz, măsurat 25.09.2026:** o fereastră creată cu
+   `show: false` și niciodată arătată raportează în pagină `visibilityState = 'visible'`, iar rAF-ul
+   nu se oprește — se târăște la **~2,5 Hz** (5 cadre în 2 s). O rulare așa ar dura 24 de minute și
+   ar ieși VALIDĂ, cu intervale de 400 ms. `win.hide()` și `win.minimize()` dau `hidden` corect. De
+   aceea lansatorul Electron are **a doua gardă, în procesul principal** (`win.isVisible()`,
+   `win.isMinimized()`, plus evenimentele `hide`/`minimize`), care invalidează prin aceeași
+   `probe.invalidate`. Proba ei negativă e chiar fumul: fereastră nearătată ⇒ pagina spune „vizibil",
+   procesul principal spune „nu", fișierul iese INVALID.
 2. `UNMASKED_RENDERER` nu conține **RTX 3060** — mașina are și un iGPU AMD, iar un fallback tăcut pe
    el sau pe SwiftShader explică singur diferențe de 3×.
 3. `renderer.info.render.calls` diferit față de rularea de referință.
@@ -767,7 +791,7 @@ Amândouă scrise acum, ca să nu pot descoperi după rezultat că unul e mai gr
 |---|---|---|
 | 1 | **Hardware de clasă țintă și rapoartele R.** Fără ele, orice STAY e o presupunere în direcția pe care o prefer | un 1050 Ti second-hand, ~200–300 EUR. **Cea mai ieftină măsurătoare din tot proiectul** |
 | 2 | **D1b — panoul dens.** **JUMĂTATE ÎNCHIS, 14.09.2026.** Partea de TypeScript e construită (`viewer/panel-dens.ts`, `?d1b=1`): 40 de pioni × 25 de coloane + 300 de stocuri, 1.300 de celule live la 20 Hz. Măsurat: **0,336 ms medie, 1,70 ms maxim** — sub bugetul de 1,5 ms din §2. **Dar sunt două limite inferioare suprapuse:** (a) e DOM țintit, nu React — un panou React cu 1.000 de componente e alt număr; (b) cronometrul acoperă doar scrierea în DOM, iar recalcularea de stiluri, layout-ul și desenarea cad în afara ferestrei — aceeași clasă de eroare ca `CPU_busy` care nu vede procesul GPU. Costul întreg se vede doar în intervalul de prezentare al unei rulări reale, cu și fără `?d1b=1`. Unity rămâne complet nemăsurat | ablație în rularea reală + 1 zi Unity |
-| 3 | **Electron nu e instalat.** Gate-ul măsoară Chrome curat; livrarea e Electron cu `in-process-gpu` (cerut de overlay-ul Steam), care schimbă calea de randare | gate D1-B separat, 4–5 zile. Dacă flagurile costă peste 5% din mediană, toate cifrele se re-măsoară |
+| 3 | ~~**Electron nu e instalat.**~~ **JUMĂTATE ÎNCHIS, 25.09.2026.** Electron 44.4.5 e instalat, `bench/gate-electron.mjs` deschide pagina de gate sub el cu `--in-process-gpu`, iar `ruleaza-gate.cmd` are jetoanele `electron` și `electron-curat` (§5b). Lanțul e probat prin fum, fără om. **Ce rămâne e măsurătoarea**, care cere o fereastră vizibilă: trei rulări (Chrome, Electron-curat, Electron-livrare) pe același scenariu. Criteriul rămâne cel pre-înregistrat: dacă flagul costă peste 5% din mediană, toate cifrele se re-măsoară | rularea, în OWNER_VERIFY 2 |
 | 4 | **Asimetria 10:2 e nemăsurată** și dă forma întregii reguli | spike-ul de portare de 2 zile |
 | ~~5~~ | ~~**CI-ul n-a rulat niciodată**~~ — **ÎNCHIS 14.09.2026.** Remote: `AndreiBesliu/BaseBuilder`. Prima rulare a **picat în 21 de secunde**, pe cea mai simplă comandă din workflow (`node --test tests/` merge pe Node 26 local, nu și pe 24). Fișierul exista de la S1-2 și arăta a verificare. De acum commit-urile de protocol au o dată emisă de alt sistem — `GIT_COMMITTER_DATE` se falsifică într-o secundă, un timestamp de GitHub Actions nu | ✅ |
 | 6 | **Atribuirea CPU/GPU poate rămâne grosieră.** `EXT_disjoint_timer_query_webgl2` e dezactivată implicit în Chrome (Spectre/rowhammer) și cere `--enable-webgl-developer-extensions` | dacă flagul nu prinde, rămâne sweep-ul de rezoluție: spune „CPU sau GPU", nu „câte ms fiecare" |

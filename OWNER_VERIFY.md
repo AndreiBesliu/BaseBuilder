@@ -41,7 +41,15 @@ stabilitatea și slice view-ul. E o discuție mult mai mare și merită purtată
 **Ce faci.** Dublu-clic pe `bench\ruleaza-gate.cmd`, argument `fortress d1b`. Fereastra **nu
 minimizată**, ~60 de secunde. Scoate un `.json`.
 
-**Cum arată bine.** Fișierul există și nu conține `INVALID`.
+**Și încă două rulări, de pe 25.09 (Electron e instalat):** același script cu `fortress d1b electron`
+și cu `fortress d1b electron-curat`. Aceeași regulă — fereastra vizibilă, nu minimizată. JSON-ul se
+salvează în Downloads și titlul ferestrei spune unde. Așa avem în sfârșit ce livrăm (Electron cu
+`--in-process-gpu`, cerut de overlay-ul Steam), nu doar Chrome curat; iar rularea „curat" separă
+costul gazdei de costul flagului. Dacă flagul costă peste 5% din mediană, toate cifrele din GATE.md
+se re-măsoară — e criteriul pre-înregistrat acolo, la §12.
+
+**Cum arată bine.** Fiecare fișier există și nu conține `INVALID`. Numele începe cu gazda
+(`gate-chrome-…`, `gate-electron-…`).
 
 **De ce nu pot eu.** `requestAnimationFrame` nu rulează într-o fereastră ascunsă, iar sonda o
 raportează corect ca `INVALID · pagina nu e vizibilă`. Măsurătoarea cere un ecran adevărat, vizibil.

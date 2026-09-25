@@ -3494,3 +3494,79 @@ CLAUDE.md scria „212 probe, 5 min 31 s" ca fapt curent. Suita are acum 225, re
 Iar `ci.yml` spunea că pe un runner de GitHub jobul durează „de câteva ori mai mult". Nimeni nu
 măsurase, deși jobul rulase deja: **351 s cap-coadă pentru 221 de probe**, cu tot cu checkout și
 `npm ci`, cât pe mașina locală. `check` a durat 78 s. Corectate în commit separat, cu motivul.
+
+---
+
+## Electron pentru gate — și două găuri în gardă pe care le-a găsit fumul
+
+**Model:** Claude Fable 5.1
+**Prompt de start:** „da la ambele" (push + instalarea lui Electron)
+
+### Ce era
+
+Golul nr. 3 din `bench/GATE.md` §12: gate-ul măsura Chrome curat, dar livrarea e Electron cu
+`--in-process-gpu` (cerut de overlay-ul Steam), care schimbă calea de randare. Costul flagului era
+nemăsurat, cu un criteriu pre-înregistrat — peste 5% din mediană, toate cifrele se re-măsoară — și
+fără nimic care să-l poată măsura.
+
+### Ce s-a făcut
+
+- **Electron 44.4.5**, devDependency pinuită exact. `npm install` a ieșit 0 dar n-a descărcat
+  binarul: postinstall-ul lui Electron nu rulase (`node_modules/electron/dist/` lipsea, `path.txt`
+  lipsea). Rulat manual `node install.js` — 246 MB. Deci „npm a zis 0" nu era „Electron e instalat".
+- **`bench/gate-electron.mjs`**: deschide *aceeași* pagină de gate cu *aceiași* parametri, sub
+  Electron, cu flagurile de livrare, pe profil nou; prinde descărcarea din pagină (`will-download`)
+  și o salvează fără să suprascrie. `--curat` scoate `--in-process-gpu`: trei rulări (Chrome,
+  Electron-curat, Electron-livrare) separă costul gazdei de costul flagului, iar pragul de 5% e pe
+  flag.
+- **`ruleaza-gate.cmd`** primește jetoanele `electron` / `electron-curat` (și `d1b` ca jeton, nu ca
+  poziție). Ambele gazde deschid fereastra la **1600×900** — constrângere nouă, nepre-înregistrată,
+  scrisă aici: fără ea, `canvasPx` ar diferi între gazde și comparația ar fi pe pixeli. Fișierul e
+  acum CRLF: `cmd.exe` pierde etichete de `goto` în fișiere cu LF.
+- JSON-ul poartă `userAgent` (al browserului, nedeclarabil din URL) și `hostFlags` (ce SPUNE
+  lansatorul); numele fișierului începe cu gazda, derivată din UA.
+- **Proba de fum** (`--fum`): fereastră ascunsă, deci rulare invalidă prin protocol, dar tot lanțul
+  verificat fără om — flaguri pe linia de comandă, pagina fără erori, `EXT_disjoint_timer_query_webgl2`
+  disponibilă, GPU-ul raportat e 3060-ul (nu iGPU-ul AMD, nu SwiftShader), descărcarea ajunge pe
+  disc. Rulată prin serverul de preview pe build-ul de producție, ca rularea adevărată.
+
+### Ce a găsit fumul, la prima rulare
+
+Două verificări roșii, niciuna despre lansator — amândouă despre **gardă**.
+
+**1. Garda de vizibilitate e oarbă sub Electron, pe un caz.** Măsurat: o fereastră creată cu
+`show: false` și niciodată arătată raportează în pagină `visibilityState = 'visible'`, iar rAF-ul nu
+se oprește — se târăște la **~2,5 Hz** (5 cadre în 2 s; 4 la a doua măsurătoare). Deci o rulare
+într-o fereastră pe care n-o vede nimeni ar dura 24 de minute și ar ieși **VALIDĂ**, cu intervale de
+400 ms. Exact clasa pe care §5b o numește cea mai importantă. `win.hide()` și `win.minimize()` dau
+`hidden` corect, deci acolo garda paginii ține.
+
+Reparația e **a doua gardă, în procesul care chiar știe**: `win.isVisible()` / `win.isMinimized()`
+la pornire, plus evenimentele `hide` și `minimize`, toate invalidând prin aceeași `probe.invalidate`
+din pagină. Nu s-a atins `backgroundThrottling` și nu s-a forțat rAF-ul: ar fi făcut rularea „să
+meargă" singură, adică ar fi măsurat altceva decât ce vede jucătorul. Proba negativă a gardei e chiar
+fumul: fereastră nearătată ⇒ pagina spune „vizibil", procesul principal spune „nu", fișierul iese
+INVALID cu motivul din procesul principal.
+
+**2. Pragul de granularitate a ceasului decidea prin rotunjire flotantă.** `checkGuards` compara
+`g > 0.1`; tocirea Spectre din Chromium e exact 100 µs, iar diferența a două `performance.now()`
+iese, după cum cad octeții, **0,0999999** sau **0,1000000**. Pe aceeași mașină: 0,100 la fum (roșu),
+0,0999999 la măsurătoarea următoare (verde). Chrome trecuse din noroc. Acum se compară în
+microsecunde rotunjite — mai grosier decât tocirea implicită, adică > 100 µs. La a doua rulare a
+fumului motivul de invalidare a fost cel din procesul principal, nu granularitatea: reparația ține.
+
+**Ce nu are probă de mutație, spus cinstit:** `viewer/probe.ts` nu e în nicio suită de mutații —
+are nevoie de DOM. Pragul nou e exercitat doar de fum, sub Electron. E un gol cunoscut al suitei,
+nu unul nou.
+
+### Și o corupție în GATE.md
+
+`bench\ruleaza-gate.cmd` apărea în §5b ca „bench" + linie nouă + „uleaza-gate.cmd": un heredoc de
+altădată a colapsat `\r`. Scriptul de editare de azi a picat întâi din același motiv — `\r` într-un
+șir Python — și a reparat corupția cu șiruri brute. A patra oară în memoriile de shell aceeași capcană.
+
+### Ce rămâne
+
+- **Măsurătoarea**, care e a unui om: trei rulări cu fereastra vizibilă. E în OWNER_VERIFY 2.
+- **Granularitatea rămâne 100 µs** și sub Electron. Izolarea cross-origin (COOP/COEP) ar da 5 µs;
+  `vite preview` nu trimite anteturile. Rezoluția bisecției e 0,25 ms, deci deocamdată nu leagă.
