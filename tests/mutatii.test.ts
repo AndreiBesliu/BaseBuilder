@@ -14,7 +14,7 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { writeFileSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const RADACINA = join(dirname(fileURLToPath(import.meta.url)), '..')
 const PROBA = join(RADACINA, 'tools', 'mutatii', '__proba_check.mjs')
@@ -41,6 +41,28 @@ function cuProba(corp: string): { status: number | null; iesire: string } {
   writeFileSync(PROBA, `export const MUTATII = [\n${corp}\n]\n`, 'utf8')
   return ruleaza(PROBA)
 }
+
+/** Forma lui `ruleazaTeste` din `tools/mutatii/harnasament.mjs` (JS, fara declaratii de tip). */
+type Rulare = { picate: Set<string>; rulate: number; toate: number; eroare: string | null }
+
+test('harnasamentul ruleaza DOAR testul numit, si refuza un filtru de nume care nu prinde nimic', async () => {
+  // Din 26.09 fiecare proba ruleaza doar testul ei, nu tot fisierul: `saveload.test.ts`
+  // dura 39 s si il re-rulau 11 probe. Doua lucruri pot strica modul asta fara ca vreo
+  // proba sa se inroseasca — fiecare ar da RATATA pe tot, sau PRINSA pe nimic:
+  //  - numele au `?`, paranteze, `+`, iar `--test-name-pattern` e o expresie regulata;
+  //  - cand filtrul nu prinde niciun test, `node --test` raporteaza `tests 1`: fisierul
+  //    insusi, ca test. Numarat de acolo, un filtru mort ar parea ca a rulat ceva.
+  const cale = pathToFileURL(join(RADACINA, 'tools', 'mutatii', 'harnasament.mjs')).href
+  const h = (await import(cale)) as { ruleazaTeste: (t: string, prefix?: string) => Rulare }
+  const bun = h.ruleazaTeste('tests/constructie.test.ts', 'De ce nu? deosebeste')
+  assert.equal(bun.eroare, null, `un nume cu \`?\` nu se potriveste cu propriul filtru: ${bun.eroare}`)
+  assert.equal(bun.rulate, 1, 'exact un test incepe cu numele asta')
+  assert.equal(bun.toate, 1, `au rulat ${bun.toate} teste: filtrul nu a filtrat`)
+  assert.equal(bun.picate.size, 0, 'pe cod nemutat, testul numit trece')
+  const mort = h.ruleazaTeste('tests/constructie.test.ts', 'un nume pe care nu-l poarta niciun test')
+  assert.equal(mort.rulate, 0)
+  assert.notEqual(mort.eroare, null, 'un filtru care nu prinde niciun test trebuie sa fie o EROARE, nu un verdict')
+})
 
 test('suitele de mutatii sunt intregi', () => {
   const r = ruleaza()

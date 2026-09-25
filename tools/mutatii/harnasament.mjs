@@ -25,12 +25,27 @@
  *    scris cu `\n` nu se mai potriveste. `TIPAR LIPSA` se raporteaza ca ESEC,
  *    nu se inghite: un tipar invechit trece drept „prinsa" si minte.
  *
- * NU se ruleaza in CI si NU face parte din `npm run check`: modifica fisiere
- * sursa, si toate suitele impreuna trec de o jumatate de ora.
+ * NU face parte din `npm run check`: modifica fisiere sursa, iar `check` se
+ * ruleaza tocmai cu modificari necomise in arbore. Ruleaza in CI, in jobul
+ * `mutatii`, la fiecare push.
+ *
+ * ## Fiecare proba ruleaza DOAR testul numit
+ *
+ * Verdictul e „a picat testul scris pentru garda?", deci restul fisierului nu intra
+ * in el. Pana la 26.09 se rula fisierul intreg la fiecare proba, si costul crestea
+ * cu produsul (probe × durata fisierului), nu cu munca: `saveload.test.ts` dura 39 s
+ * si il re-rulau 11 probe (~7 min, 42% din suita), iar pe runner jobul ajunsese la
+ * 23 min 34 s. Cand testul numit NU pica, se ruleaza fisierul intreg si el decide —
+ * exact verdictul de dinainte, plus lista „si:" care a pus diagnosticul la mai
+ * multe probe ratate (ce ALTE teste au picat).
+ *
+ * Ce nu mai acopera: un test care pica SINGUR pe cod curat (dependenta de ordine
+ * intre testele unui fisier) ar da un PRINSA fals. Controlul e
+ * `ruleaza.mjs --izolare`, care ruleaza fiecare test numit singur, pe cod nemutat.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
-import { execSync } from 'node:child_process'
+import { execSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
@@ -44,16 +59,51 @@ export const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 /** Semnul cu care `node --test` marcheaza un test picat. */
 const X = '✖'
 
-/** Numele testelor PICATE dintr-un fisier de teste. */
+/**
+ * Un nume de test ca PREFIX literal, pentru `--test-name-pattern` (care e o expresie
+ * regulata). Numele din suite au paranteze, puncte, `?`, `+`, `/` si `|`: nescapat,
+ * „De ce nu? deosebeste" nu se mai potriveste cu el insusi.
+ */
+export function tiparDeNume(prefix) {
+  const literal = prefix.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+  return '^' + literal
+}
+
+/**
+ * Ruleaza un fisier de teste — tot, sau doar testele al caror nume incepe cu
+ * `prefix` — si intoarce numele celor PICATE si cate teste NUMITE au rulat.
+ *
+ * Fara shell (`spawnSync` pe `process.execPath`): numele au ghilimele romanesti,
+ * backtick-uri si `|`, pe care `cmd.exe` le-ar citi ca sintaxa.
+ *
+ * `rulate` se numara pe rezultatele al caror nume incepe cu prefixul, NU din
+ * `ℹ tests`: cand filtrul nu prinde niciun test, `node --test` raporteaza
+ * `tests 1` — fisierul insusi, ca test (masurat pe Node 26). Un harnasament care
+ * ar fi numarat de acolo ar fi crezut ca a rulat testul si ar fi dat RATATA pe
+ * fiecare proba, adica exact semnalul care trimite dupa un test inexistent.
+ * Filtrul care nu prinde nimic e o EROARE a harnasamentului, nu un verdict.
+ */
+export function ruleazaTeste(fisierDeTest, prefix) {
+  // Reporterul `spec` cerut EXPLICIT, si mediul fara `NODE_TEST_CONTEXT`: pornit din
+  // interiorul unui test (proba negativa din `tests/mutatii.test.ts`), un `node --test`
+  // mosteneste variabila si isi trimite rezultatele serializate catre parinte, nu ca
+  // text — iar harnasamentul n-ar mai vedea niciun `✔`.
+  const args = ['--test', '--test-reporter=spec', ...(prefix === undefined ? [] : ['--test-name-pattern', tiparDeNume(prefix)]), fisierDeTest]
+  const env = { ...process.env }
+  delete env.NODE_TEST_CONTEXT
+  const r = spawnSync(process.execPath, args, { cwd: REPO, encoding: 'utf8', timeout: 900000, env })
+  const out = `${r.stdout ?? ''}${r.stderr ?? ''}`
+  const rezultate = [...out.matchAll(/^([✔✖]) (.+?) \(\d/gm)]
+  const picate = new Set(rezultate.filter((x) => x[1] === X).map((x) => x[2]))
+  const toate = rezultate.length
+  if (prefix === undefined) return { picate, rulate: toate, toate, eroare: null }
+  const rulate = new Set(rezultate.map((x) => x[2]).filter((n) => n.startsWith(prefix))).size
+  return { picate, rulate, toate, eroare: rulate < 1 ? `filtrul de nume nu prinde niciun test din ${fisierDeTest}` : null }
+}
+
+/** Numele testelor PICATE dintr-un fisier de teste, rulat intreg. */
 export function testePicate(fisierDeTest) {
-  let out = ''
-  try {
-    out = execSync(`node --test ${fisierDeTest}`, { cwd: REPO, encoding: 'utf8', stdio: 'pipe', timeout: 900000 })
-  } catch (e) {
-    out = `${e.stdout ?? ''}${e.stderr ?? ''}`
-  }
-  const re = new RegExp(`^${X} (.+?) \\(\\d`, 'gm')
-  return new Set([...out.matchAll(re)].map((x) => x[1]))
+  return ruleazaTeste(fisierDeTest).picate
 }
 
 /**
@@ -214,16 +264,37 @@ export function ruleazaSuita(nume, mutatii, baza, filtru) {
       continue
     }
 
-    const picate = testePicate(m.t)
+    // Intai DOAR testul numit (vezi antetul). Un filtru care nu prinde niciun test e
+    // o eroare a harnasamentului — control invalid, nu RATATA.
+    const singur = ruleazaTeste(m.t, m.e)
+    if (singur.eroare !== null) {
+      const curat = restaureaza(aplicate)
+      console.log(`  ?? ${m.n}: ${singur.eroare} — control invalid; restaurat: ${curat ? 'da' : 'NU'}`)
+      invalide.push(m.n)
+      continue
+    }
+    let picate = singur.picate
     for (const p of baza.get(m.t) ?? []) picate.delete(p)
-    const picat = [...picate].some((p) => p.startsWith(m.e))
+    let picat = [...picate].some((p) => p.startsWith(m.e))
+    let unde = 'testul numit'
+    if (!picat) {
+      // RATATA pe testul singur: fisierul intreg decide, ca inainte — si arata ce
+      // ALTE teste au picat, lista care a pus diagnosticul la mai multe ratari.
+      picate = testePicate(m.t)
+      for (const p of baza.get(m.t) ?? []) picate.delete(p)
+      picat = [...picate].some((p) => p.startsWith(m.e))
+      unde = 'fisierul intreg'
+      // Picat in fisier, dar nu singur: testul depinde de ce ruleaza INAINTEA lui.
+      // Verdictul e al fisierului (ca inainte), dar se striga.
+      if (picat) console.log(`  !! DEPENDENTA DE ORDINE: „${m.e.slice(0, 50)}" pica in \`${m.t}\` doar rulat cu celelalte`)
+    }
     const curat = restaureaza(aplicate)
 
     valide++
     if (picat) prinse++
     else ratate.push(m.n)
     const altele = [...picate].filter((p) => !p.startsWith(m.e)).map((p) => p.slice(0, 36))
-    const detalii = `${picate.size} teste picate${altele.length ? '; si: ' + altele.join(' | ') : ''}; restaurat: ${curat ? 'da' : 'NU'}`
+    const detalii = `${unde}: ${picate.size} teste picate${altele.length ? '; si: ' + altele.join(' | ') : ''}; restaurat: ${curat ? 'da' : 'NU'}`
     console.log(`  ${picat ? 'PRINSA' : '!! RATATA'}  ${m.n}  [${detalii}]`)
   }
 

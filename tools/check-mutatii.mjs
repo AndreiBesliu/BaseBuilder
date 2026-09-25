@@ -27,7 +27,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
-import { potrivit } from './mutatii/harnasament.mjs'
+import { potrivit, tiparDeNume } from './mutatii/harnasament.mjs'
 
 const RADACINA = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -118,8 +118,17 @@ function verificaSuita(nume, M) {
       erori.push(`${unde}: in \`${m.t}\` s-au extras ${teste.length} nume din ${declaratii} declaratii — extractorul e stricat, nu proba`)
       return
     }
-    if (!teste.some((x) => x.startsWith(m.e))) {
+    const numite = teste.filter((x) => x.startsWith(m.e))
+    if (numite.length === 0) {
       erori.push(`${unde}: niciun test din \`${m.t}\` nu incepe cu „${m.e}" — verdictul ar iesi RATATA pe cod corect`)
+      return
+    }
+    // Harnasamentul ruleaza DOAR testul numit, prin `--test-name-pattern`, care e o
+    // expresie regulata: numele trebuie sa se potriveasca cu propriul filtru. Altfel
+    // filtrul nu prinde nimic, si proba iese control invalid la rulare, dupa minute.
+    const filtru = new RegExp(tiparDeNume(m.e))
+    for (const x of numite) {
+      if (!filtru.test(x)) erori.push(`${unde}: numele „${x.slice(0, 50)}" nu se potriveste cu propriul filtru \`${filtru.source.slice(0, 60)}\``)
     }
   })
 }
