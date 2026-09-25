@@ -9,6 +9,7 @@
  * c), multimea care cade calculata INAINTE de sapat, memoria activitatii si coada
  * deduplicata (cele doua din urma sunt cost, nu corectitudine: le prind plafoanele
  * K05), grinzile planificate ale inchiderii, prefiltrul overlay-ului si „De ce nu?".
+ * Si scanarea overlay-ului, feliata pe cadre de la grinda: bugetul, cursorul, repornirea.
  */
 
 export const MUTATII = [
@@ -186,5 +187,26 @@ export const MUTATII = [
     a: 'grindaActiva: eActiva ? 1 : 0,',
     b: 'grindaActiva: 1,',
     t: 'tests/grinda.test.ts', e: '„De ce nu?" deosebeste',
+  },
+  {
+    n: 'scanarea overlay-ului ignora bugetul (o trecere de secunde intr-un singur cadru)',
+    f: 'viewer/scanare-stabilitate.ts',
+    a: '    if (ceas() - t0 >= buget) break',
+    b: '    void buget',
+    t: 'tests/scanare-stabilitate.test.ts', e: 'bugetul se respecta',
+  },
+  {
+    n: 'trecerea din curs nu se reporneste nici pentru alta raza',
+    f: 'viewer/scanare-stabilitate.ts',
+    a: '  return s.zActiv === zActiv && s.cx === cx && s.cy === cy && s.raza === raza',
+    b: '  return s.zActiv === zActiv && s.cx === cx && s.cy === cy',
+    t: 'tests/scanare-stabilitate.test.ts', e: 'trecerea din curs nu se reporneste',
+  },
+  {
+    n: 'scanarea feliata judeca alta celula decat cea din filtru',
+    f: 'viewer/scanare-stabilitate.ts',
+    a: '    const wy = y0 + (k % lat)',
+    b: '    const wy = y0 + Math.floor(k / lat)',
+    t: 'tests/scanare-stabilitate.test.ts', e: 'felierea nu schimba trecerea',
   },
 ]

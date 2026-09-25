@@ -34,19 +34,30 @@
  *    tocmai deasupra planului de taiere. Se proiecteaza acum pe nivelul activ,
  *    cu un contur mai stramt, ca sa se vada si cand cade in aceeasi coloana cu un
  *    patrat de stare.
+ *
+ * ## Feliat pe cadre, de la grinda
+ *
+ * Langa o grinda, o trecere intreaga costa secunde (masurat: 3,2 s intr-o sala 23×23
+ * cu 4 grinzi, 5,6 s sub un tavan numai din grinzi, fata de ~26 ms fara ele), iar
+ * viewer-ul o reface la fiecare 30 de cadre. Scanarea sta acum in
+ * `scanare-stabilitate.ts`, fara THREE si cu test: `pornesteStabilitate` cere o
+ * trecere, `avanseazaStabilitate` o avanseaza cu un buget pe cadru, iar la capat
+ * `redeseneazaStabilitate` o deseneaza. Pana atunci ramane desenul vechi.
  */
 
 import * as THREE from 'three'
 import type { World } from '../src/sim/state.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { decodeCell } from '../src/sim/path.ts'
-import { Prefiltru, prefiltruStabilitate, StareSapat, stareSapat } from '../src/sim/stabilitate.ts'
+import { StareSapat } from '../src/sim/stabilitate.ts'
 import { constructiaPrevizualizata, prabusireaPrevizualizata } from '../src/sim/joburi.ts'
+import { aceeasiScanare, avanseazaScanare, pornesteScanare } from './scanare-stabilitate.ts'
+import type { Scanare } from './scanare-stabilitate.ts'
 
 export interface StabilityOverlay {
   readonly group: THREE.Group
   visible: boolean
-  /** Cate celule de pe nivelul activ sunt in fiecare stare. Pentru HUD. */
+  /** Cate celule de pe nivelul activ sunt in fiecare stare, la ultima trecere TERMINATA. Pentru HUD. */
   sigur: number
   ultima: number
   cade: number
@@ -61,12 +72,19 @@ export interface StabilityOverlay {
   scanate: number
   /** Ce sa scrie in HUD cand overlay-ul nu poate desena nimic. Gol daca poate. */
   piedica: string
+  /** Trecerea in curs, feliata pe cadre; `null` = nicio trecere. */
+  scanare: Scanare | null
+  /** Ultima trecere TERMINATA: ea se deseneaza. */
+  ultimaScanare: Scanare | null
 }
 
 export function createStabilityOverlay(): StabilityOverlay {
   const group = new THREE.Group()
   group.visible = false
-  return { group, visible: false, sigur: 0, ultima: 0, cade: 0, previzualizate: 0, imposibile: 0, scanate: 0, piedica: '' }
+  return {
+    group, visible: false, sigur: 0, ultima: 0, cade: 0, previzualizate: 0, imposibile: 0, scanate: 0, piedica: '',
+    scanare: null, ultimaScanare: null,
+  }
 }
 
 function goleste(group: THREE.Group): void {
@@ -76,6 +94,18 @@ function goleste(group: THREE.Group): void {
     m.geometry.dispose()
     ;(m.material as THREE.Material).dispose()
   }
+}
+
+/** Sterge desenul si cifrele: nimic judecat pentru intrebarea de acum. */
+function uita(o: StabilityOverlay): void {
+  goleste(o.group)
+  o.ultimaScanare = null
+  o.sigur = 0
+  o.ultima = 0
+  o.cade = 0
+  o.previzualizate = 0
+  o.imposibile = 0
+  o.scanate = 0
 }
 
 // Luminozitatea poarta valoarea, nuanta poarta ACTIUNEA. Vezi DESIGN §9 regula 9.
@@ -98,12 +128,18 @@ const INSET_PREVIZ = 0.26
 const INSET_IMPOSIBIL = 0.17
 
 /**
- * Reconstruieste overlay-ul pentru nivelul activ.
+ * Cere o trecere pentru nivelul activ. Scanarea o face `avanseazaStabilitate`, cate
+ * putin pe cadru; pana termina, ramane pe ecran desenul trecerii anterioare — daca
+ * intreba acelasi lucru. Altfel (alt nivel, alt focus) se sterge pe loc: patrate de
+ * la alta cota ar sta, taiate sau nu, peste teren care nu mai e cel judecat.
+ *
+ * Trecerea DIN CURS nu se reporneste pentru aceeasi intrebare: pornita la fiecare 30
+ * de cadre, o trecere de cateva sute de cadre n-ar ajunge niciodata la capat.
  *
  * `zActiv` e cota pe care se JUDECA (ultimul nivel vizibil intreg), sau `null`
  * cand slice view-ul e oprit si nu exista un nivel activ de judecat.
  */
-export function rebuildStabilityOverlay(
+export function pornesteStabilitate(
   o: StabilityOverlay,
   w: World,
   rules: Rules,
@@ -112,45 +148,56 @@ export function rebuildStabilityOverlay(
   cy: number,
   raza: number,
 ): void {
-  goleste(o.group)
-  o.sigur = 0
-  o.ultima = 0
-  o.cade = 0
-  o.previzualizate = 0
-  o.imposibile = 0
-  o.scanate = 0
-  o.piedica = ''
-  if (!o.visible) return
+  if (!o.visible) {
+    o.scanare = null
+    uita(o)
+    return
+  }
   if (zActiv === null) {
+    o.scanare = null
+    uita(o)
     o.piedica = 'stabilitatea cere slice view (Q/E/R)'
     return
   }
+  o.piedica = ''
+  if (o.scanare !== null && aceeasiScanare(o.scanare, zActiv, cx, cy, raza)) return
+  if (o.ultimaScanare !== null && !aceeasiScanare(o.ultimaScanare, zActiv, cx, cy, raza)) uita(o)
+  o.scanare = pornesteScanare(w, rules, zActiv, cx, cy, raza)
+}
 
+/** Avanseaza trecerea din curs cu cel mult `bugetMs` de lucru (plus celula din curs); la capat, o deseneaza. */
+export function avanseazaStabilitate(o: StabilityOverlay, w: World, rules: Rules, bugetMs: number): void {
+  if (!o.visible || o.scanare === null) return
+  if (!avanseazaScanare(o.scanare, w, rules, () => performance.now(), bugetMs)) return
+  o.ultimaScanare = o.scanare
+  o.scanare = null
+  redeseneazaStabilitate(o, w, rules)
+}
+
+/** Cat din trecerea in curs s-a facut, 0..1; `null` fara trecere. Pentru HUD. */
+export function progresStabilitate(o: StabilityOverlay): number | null {
+  return o.scanare === null ? null : o.scanare.cursor / o.scanare.filtru.length
+}
+
+/**
+ * Deseneaza ultima trecere TERMINATA, plus cele doua previzualizari pe desemnarile de
+ * ACUM. Fara `stareSapat`, deci ieftin: se cheama si cand s-au schimbat doar
+ * desemnarile — o piesa desenata isi vede pe loc eticheta de „imposibil".
+ */
+export function redeseneazaStabilitate(o: StabilityOverlay, w: World, rules: Rules): void {
+  const s = o.ultimaScanare
+  if (!o.visible || s === null) return
+  goleste(o.group)
+  o.sigur = s.sigur
+  o.ultima = s.ultima
+  o.cade = s.cade
+  o.scanate = s.scanate
+  const { zActiv, cx, cy, raza } = s
   const pozitii: number[] = []
   const culori: number[] = []
-  const lat = 2 * raza + 1
-  const x0 = cx - raza
-  const y0 = cy - raza
 
-  // --- prefiltru: unde poate fi altceva decat SIGUR (vezi `prefiltruStabilitate`) ---
-  //
-  // Scris intai AICI, si livrat cu o gaura: cauta doar aerul, deci pe tavanul unei
-  // pivnite declara SIGUR tot. Mutat in `src/sim/stabilitate.ts` ca sa aiba test.
-  const filtru = prefiltruStabilitate(w.terrain, rules, x0, y0, lat, zActiv)
-
-  // --- scanarea propriu-zisa, doar unde prefiltrul o cere ---
-  for (let i = 0; i < lat; i++) {
-    for (let j = 0; j < lat; j++) {
-      const k = i * lat + j
-      if (filtru[k] === Prefiltru.NIMIC) continue
-      if (filtru[k] === Prefiltru.SIGUR) { o.sigur++; continue }
-      o.scanate++
-      const stare = stareSapat(w.terrain, rules, x0 + i, y0 + j, zActiv)
-      if (stare === StareSapat.SIGUR || stare === StareSapat.NIMIC) { o.sigur++; continue }
-      if (stare === StareSapat.ULTIMA_CELULA) o.ultima++
-      else o.cade++
-      patrat(pozitii, culori, x0 + i, y0 + j, zActiv + 0.96, INSET_STARE, CULOARE[stare]!)
-    }
+  for (let i = 0; i < s.marcate.length; i += 3) {
+    patrat(pozitii, culori, s.marcate[i]!, s.marcate[i + 1]!, zActiv + 0.96, INSET_STARE, CULOARE[s.marcate[i + 2]!]!)
   }
 
   // --- ce s-ar prabusi daca s-ar sapa tot ce a cerut jucatorul ---

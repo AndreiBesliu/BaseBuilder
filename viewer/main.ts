@@ -28,7 +28,8 @@ import { Ballast, Bisector, checkGuards, clockGranularityMs, FrameProbe, heapMB 
 import { createRegionOverlay, rebuildRegionOverlay } from './overlay-regions.ts'
 import { createAmprentaOverlay, FORME, rebuildAmprentaOverlay } from './overlay-amprenta.ts'
 import { createJobOverlay, rebuildJobOverlay, rezumatJoburi } from './overlay-joburi.ts'
-import { createStabilityOverlay, rebuildStabilityOverlay } from './overlay-stabilitate.ts'
+import { avanseazaStabilitate, createStabilityOverlay, pornesteStabilitate, progresStabilitate, redeseneazaStabilitate } from './overlay-stabilitate.ts'
+import { Piesa } from '../src/sim/state.ts'
 import { desemnareLaCelula } from '../src/sim/desemnari.ts'
 import { celulaDeZonaLa } from '../src/sim/zone.ts'
 import { decodeCell } from '../src/sim/path.ts'
@@ -570,6 +571,12 @@ const jobOverlay = createJobOverlay()
 scene.add(jobOverlay.group)
 const stabOverlay = createStabilityOverlay()
 scene.add(stabOverlay.group)
+/**
+ * Cat lucru de stabilitate intra intr-un cadru, in ms, plus celula din curs. Langa
+ * grinzi o trecere intreaga costa secunde (3,2 s intr-o sala 23×23 cu 4 grinzi, masurat
+ * la S20-23 t.4); feliata, se intinde pe cateva sute de cadre in loc sa inghete unul.
+ */
+const BUGET_STABILITATE_MS = 4
 
 /**
  * Nivelul pe care se judeca stabilitatea, si raza in jurul focusului.
@@ -586,7 +593,7 @@ scene.add(stabOverlay.group)
  */
 function refaStabilitate(): void {
   const zActiv = sliceLevel >= VOXEL_LEVELS ? null : sliceLevel - 1
-  rebuildStabilityOverlay(stabOverlay, world, DEFAULT_RULES, zActiv, focusCx * CHUNK_CELLS + 16, focusCy * CHUNK_CELLS + 16, 16)
+  pornesteStabilitate(stabOverlay, world, DEFAULT_RULES, zActiv, focusCx * CHUNK_CELLS + 16, focusCy * CHUNK_CELLS + 16, 16)
 }
 
 function refreshAmprenta(): void {
@@ -629,6 +636,18 @@ const DRAG_PX = 4
 let tastaZ = false
 let tastaX = false
 let coltZona: { wx: number; wy: number; z: number } | null = null
+// Piesa aleasa cu P. Pe NICIUNA, click-ul cere o SAPATURA, ca pana acum; pe o piesa,
+// cere piesa in celula de aer din fata fetei atinse — fara asta, viewer-ul nu putea
+// desena nicio constructie, deci nici grinda.
+const PIESE_VIEWER: readonly number[] = [Piesa.NICIUNA, Piesa.PERETE, Piesa.PODEA, Piesa.SCARA, Piesa.GRINDA]
+const NUME_PIESA_VIEWER: Readonly<Record<number, string>> = {
+  [Piesa.NICIUNA]: 'sapa (P)',
+  [Piesa.PERETE]: 'perete',
+  [Piesa.PODEA]: 'podea',
+  [Piesa.SCARA]: 'scara',
+  [Piesa.GRINDA]: 'grinda',
+}
+let piesaAleasa: number = Piesa.NICIUNA
 window.addEventListener('keydown', (ev) => { if (ev.key === 'z' || ev.key === 'Z') tastaZ = true; if (ev.key === 'x' || ev.key === 'X') tastaX = true })
 window.addEventListener('keyup', (ev) => { if (ev.key === 'z' || ev.key === 'Z') tastaZ = false; if (ev.key === 'x' || ev.key === 'X') tastaX = false })
 let downX = 0
@@ -664,7 +683,10 @@ renderer.domElement.addEventListener('click', (ev) => {
   // e intreaga si punctul cade fix pe granita dintre doua celule).
   const hit = hits[0]!
   const normal = hit.face ? hit.face.normal : new THREE.Vector3(0, 1, 0)
-  const target = hit.point.clone().addScaledVector(normal, ev.shiftKey ? 0.5 : -0.5)
+  // Cu o piesa aleasa, celula e cea de AER din fata fetei, ca la Shift+click — si tot
+  // acolo tinteste Ctrl+click, ca sa poata retrage o piesa desenata.
+  const cuPiesa = piesaAleasa !== Piesa.NICIUNA && !ev.altKey && !tastaZ && !tastaX
+  const target = hit.point.clone().addScaledVector(normal, ev.shiftKey || cuPiesa ? 0.5 : -0.5)
 
   const wx = Math.floor(target.x)
   const wy = Math.floor(target.z)
@@ -700,7 +722,7 @@ renderer.domElement.addEventListener('click', (ev) => {
       ? applyCommand(world, { kind: 'anuleazaDesemnarea', id: -1 })
       : applyCommand(world, { kind: 'anuleazaDesemnarea', id: world.desemnari.id[ds]! })
   } else {
-    out = applyCommand(world, { kind: 'desemneaza', wx, wy, z })
+    out = applyCommand(world, { kind: 'desemneaza', wx, wy, z, piesa: cuPiesa ? piesaAleasa : undefined })
   }
 
   // Un refuz care nu se vede e un buton care „nu face nimic". Contractul de
@@ -715,6 +737,8 @@ renderer.domElement.addEventListener('click', (ev) => {
     // (Zidirea DA — prima versiune iesea si pentru Shift+click, iar zidul exista
     // in simulare si nu se vedea. Exact punctul orb K13.)
     if (jobOverlay.visible) rebuildJobOverlay(jobOverlay, world)
+    // „Imposibil" si previzualizarea se refac pe loc — sunt ieftine; scanarea nu.
+    redeseneazaStabilitate(stabOverlay, world, DEFAULT_RULES)
     return
   }
 
@@ -758,6 +782,11 @@ window.addEventListener('keydown', (ev) => {
     if (ev.key === 'n' || ev.key === 'N') { amprentaOverlay.forma = (amprentaOverlay.forma + 1) % FORME.length; refreshAmprenta(); return }
     if (ev.key === 'm' || ev.key === 'M') { amprentaOverlay.ancorat = !amprentaOverlay.ancorat; refreshAmprenta(); return }
   }
+  if (ev.key === 'p' || ev.key === 'P') {
+    piesaAleasa = PIESE_VIEWER[(PIESE_VIEWER.indexOf(piesaAleasa) + 1) % PIESE_VIEWER.length]!
+    el('piesa').textContent = NUME_PIESA_VIEWER[piesaAleasa]!
+    return
+  }
   if (ev.key === 'g' || ev.key === 'G') {
     regionOverlay.visible = !regionOverlay.visible
     regionOverlay.group.visible = regionOverlay.visible
@@ -790,6 +819,8 @@ window.addEventListener('keydown', (ev) => {
   else if (ev.key === 'r' || ev.key === 'R') sliceLevel = VOXEL_LEVELS
   else return
   applySlice()
+  // Alt nivel = alta intrebare: trecerea veche se lasa, desenul ei se sterge.
+  refaStabilitate()
 })
 
 // --------------------------------------------------------------------------
@@ -1133,6 +1164,8 @@ function stepFrame(ts: number): void {
     // sapaturile pionilor si acoperirea desemnarilor il schimba fara niciun click.
     if (regionOverlay.visible && world.regions.epoca !== epocaDesenata) refreshOverlay()
   }
+  // Trecerea de stabilitate, feliata: cel mult bugetul pe cadru, si doar cu overlay-ul pornit.
+  avanseazaStabilitate(stabOverlay, world, DEFAULT_RULES, BUGET_STABILITATE_MS)
   driveScenario(frameIndex)
   stepNegativeProbe()
   stepTraverse(dt)
@@ -1198,7 +1231,8 @@ function stepFrame(ts: number): void {
           ? ` · ${stabOverlay.piedica}`
           : ` · ultima-celula ${stabOverlay.ultima} cade ${stabOverlay.cade}` +
             (stabOverlay.previzualizate > 0 ? ` · desemnarile ar prabusi ${stabOverlay.previzualizate}` : '') +
-            (stabOverlay.imposibile > 0 ? ` · ${stabOverlay.imposibile} piese NU se pot zidi` : '')
+            (stabOverlay.imposibile > 0 ? ` · ${stabOverlay.imposibile} piese NU se pot zidi` : '') +
+            (progresStabilitate(stabOverlay) !== null ? ` · scanare ${Math.floor(100 * progresStabilitate(stabOverlay)!)}%` : '')
       el('jobs').textContent = `${d} desemnari · idle ${r.idle} merg ${r.merg} lucreaza ${r.lucreaza} cara ${r.cara}${o}${m}${n}${av}${fm}${st}`
       el('jobs').className = r.faraMuncitori || r.faraCarausi ? 'warn' : ''
       if (r.faraMuncitori) el('jobs').textContent += ' · NIMENI NU SAPA'
