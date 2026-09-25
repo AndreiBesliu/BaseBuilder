@@ -3614,3 +3614,66 @@ Trei reparații, în același commit fiindcă sunt aceeași lecție:
 - `tools/check-hash.mjs` intră în `npm run check` (~9 s): citește `EXPECTED` **din `ci.yml`**, nu
   dintr-o copie, rulează scenariul standard și compară. Ce rulează poarta din CI trebuie să ruleze
   și poarta locală — altfel se livrează orb pe felia aia.
+
+---
+
+## S20-23, tăietura 3 — logistica construcției: măsurători, design v2, panou, design v3
+
+**Model:** Claude Fable 5.1 · panoul de design cu 5 lentile (1,20 M tokeni, 62 de constatări)
+**Prompt de start:** cele două numere din panoul de usage (51% din fereastra de 5 ore, resetare în 1 h 57)
+
+### Bugetul, și tranșa
+
+Felia întreagă (~6–8 M) nu încăpea în ce rămăsese fără riscul auditului din 04.09. Tranșa 1 = măsurători
++ design + panou (~1,35 M estimat, **1,20 M** cheltuit); codul îl scriu eu; recenzia de cod cu reproducere
+(~4 M) după resetare.
+
+### Ce s-a măsurat ÎNAINTE de design (`scratchpad/masoara-logistica.mjs`, 3–7 semințe)
+
+| punct din registru | măsurat | verdict |
+|---|---|---|
+| plafonul piciorului doi | scenariu natural: mers real = mers optim, **0 exces**; scenariu construit să doară (mormane la 8 celule într-o direcție, șantiere la 40 în cea opusă): toate joburile iau din mormanele „greșite", exces **8–22 celule/job**, +12–23% | **nu se construiește**: pierderea e mărginită de 2·dMin; un plafon ar refuza șantiere ca să economisească atât |
+| un morman per constructor | 1 morman de 75, 3 pereți, 3 constructori: **220/420/241** tickuri; 3 mormane de 25: **112/112/120** | real, 2–3,5×; mecanismul e lacătul exclusiv + `jobRescanTicks: 30` |
+| fragmentarea | 30×10: fără depozit **0 pereți în 20.000**; cu depozit 3 pereți la 193, dar 21 de mormane rămân; fără cărăuși 0 | real, structural |
+
+Deci felia are două defecte, nu trei.
+
+### Designul v2, și ce i-a făcut panoul
+
+v2 propunea D-B (rezervări cu cantitate, `maxCount` = Q vie în tuplu) și D-C (ridicare în mai multe
+rânduri, câmp nou `jobSursaCant`, schema 8). Cinci lentile independente — determinism, rezervări, joc,
+performanță, probe — au lovit **aceeași rădăcină**, fiecare cu dovadă proprie:
+
+- **`maxCount = Q vie` e greșit**, și invariantul pe care se sprijinea („Σcount CARAT ≤ Q") e **deja fals
+  azi**: 6 din 3600 de tickuri pe `lumeBogata` (HRANA mâncată pe stratul MANCAT sub un cărăuș) și 8/8
+  scene cu `mutaItem`, care păstrează id-ul pe un FRAGMENT mai mic (`asazaItem` cu id contopește întâi
+  și abia restul primește id-ul vechi). Reconstrucția la încărcare ar fi anulat joburi vii; oracolul propus
+  s-ar fi născut roșu. Reparația: `maxCount` constant, Q vie doar la cererea nouă ca `liber = Q − Σcount`.
+- **Schema 8 e inutilă**: `jobCantitate` = count pe sursa curentă (precedent `refaDestinatia`), totalul e
+  în content, pe care `zideste` îl citește deja.
+- **„`ridica` cu sursa moartă → `refaSursa`" e cod mort** (moartea trece prin `reconciliazaTintaMoarta`
+  în același tick); **„eșecul consolidează" e un no-op** (pionul lasă marfa pe celula sursei golite).
+- **Argumentul 2·dMin cade** dacă a doua sursă se alege după celula curentă (19% din 3000 de câmpuri
+  peste, până la 12·dMin) și **revine complet** ordonată pe `d(curent, M) + d(M, șantier)` (0/3000).
+- **`constructPickupMinUnits: 10` era respins de propriul validator** (SCARA cere 5) — pragul e per piesă.
+
+Și trei defecte care există **azi**, găsite de panou:
+
+- **Munca falsă** (măsurat): `refaTinta` la MERGE_SURSA trimite constructorul la șantier cu mâna goală;
+  cu un ostil pe morman, **73 din 74 de joburi** într-o buclă de 3000 de tickuri, 2586 de tickuri de
+  „zidire" din nimic, `nextId` +74, zăvor mut. Se repară în felie (garda pe pas + zăvor `zidiriCuManaGoala`).
+- **`poateFiIntrerupt` nu apără mâna plină a constructorului**: foamea critică aruncă 20 de unități la
+  390/400 de progres.
+- **`mutaItem` cu contopire parțială** lasă un id viu cu Q mai mic sub rezervări, fără reconciliere.
+
+Designul v3 (`scratchpad/design-s20-logistica-v3.md`) e ce se construiește: tabelul „v2 spunea / v3 face"
+are 12 rânduri; 18 teste cu contor de viață și mutația fiecăruia; pasul 0 e captura fixturii golden de
+schema 7 la HEAD, înainte de orice cod.
+
+### Ce rămâne deschis, cu cifra
+
+- reconstrucția indexului per ridicare: ~180 µs la 3000 de mormane; sortarea candidaților: ~590 µs la
+  n = 3000 — ambele pre-existente, se scriu, nu se repară aici;
+- D-D (trezirea la eliberare) după, pe o fixtură de 3000, cu `jobRescanTicks` fix;
+- praful sub prag: D-C creează clienții căratului de consolidare — reintră în registru;
+- 2·dMin e în Manhattan, costul e drumul: de măsurat pe sit neplat.
