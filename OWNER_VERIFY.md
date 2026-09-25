@@ -200,3 +200,32 @@ citește fereastra **coloanei**, nu a chunkului, deci ancora e corectă și acee
 voxeli diferiți după cum cade pe o graniță. Tavanul nu e rezolvat: deasupra ferestrei chiar nu există
 voxel și `setVoxel` refuză pe drept — dar refuzul cade pe cote diferite în coloane vecine. N-am
 reparat fiindcă reparația e o decizie de arhitectură (fereastră globală vs. per coloană), nu un bug.
+
+---
+
+## 11. Ocluzia ambientală — cât de întunecate sunt colțurile?
+
+**Ce te uiți.** Pornește viewerul (`Kinstead.cmd`) și privește terenul săpat din jurul așezării de la
+20–40 m, din unghi, nu de sus: treptele de 1 m de lângă suprafețe plate, colțurile interioare ale unei
+gropi, piciorul unui perete.
+
+**Cum arată bine.** Colțurile se citesc ca adâncime: piciorul unei trepte e puțin mai închis decât
+platoul ei, iar un colț interior, unde se întâlnesc trei fețe, e cel mai închis. **Cum arată rău, în
+două feluri:** *prea tare* — muchiile arată murdare, ca un contur negru, iar piatra deschisă se face
+gri în colțuri; *prea slab* — terenul săpat arată plat, iar treptele se citesc doar din lumină.
+
+**Ce e numărul.** `AO_FACTOR = [0.52, 0.70, 0.86, 1.0]` în `src/render/palette.ts`: câtă culoare
+păstrează un vârf după câți vecini îl acoperă (trei, doi, unul, niciunul). Colțul cel mai închis
+păstrează **52%**.
+
+**De ce nu pot eu.** E singurul număr din arcul de grafică ieșit dintr-o judecată vizuală, nu dintr-o
+măsurătoare. Tot restul — pe ce fețe se aplică, continuitatea peste granițele de chunk, ordinea
+vârfurilor — e probat de suita `render`. Dar „cât de închis" n-are o valoare corectă de găsit prin
+măsurare.
+
+**În același cadru, un lucru înrudit.** Terenul de departe (nepromovat) nu primește ocluzie deloc, deci
+zona promovată e în medie cu **4,3%** mai închisă. E sub variația naturală a terenului (~8,7%), dar
+granița e o linie dreaptă. Dacă o vezi, spune — reparația e un arc întreg, nu o constantă.
+
+**Dacă răspunsul e „prea tare" sau „prea slab":** spune doar direcția; schimb eu și refac cadrul. Iar
+dacă e greu de judecat fără o comparație, spune și pun o tastă care comută între trei scale pe loc.

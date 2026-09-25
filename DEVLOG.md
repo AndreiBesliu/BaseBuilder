@@ -355,7 +355,7 @@ Un program de verdict care nu poate produce roșu n-are dreptul să producă ver
   verdict poartă eticheta „prag bazat pe presupunere de hardware nevalidată".
 - **D1b — panoul dens** rămâne nemăsurat în ambele stive. E criteriul pe care D1 și-l declară singur.
 - **Electron nu e instalat.** Gate-ul măsoară Chrome curat; livrarea e Electron cu `in-process-gpu`.
-- **CI-ul n-a rulat niciodată** — `git remote -v` e gol. Pre-înregistrarea prin commit-uri locale
+- ~~**CI-ul n-a rulat niciodată**~~ **ÎNCHIS (reconciliat 25.09):** remote-ul e `AndreiBesliu/BaseBuilder`, CI rulează la fiecare push, verde pe ambele joburi, cu hash-ul de referință reprodus pe runner. *Era:* `git remote -v` e gol. Pre-înregistrarea prin commit-uri locale
   n-are nicio dată emisă de alt sistem.
 
 ### Trei defecte găsite privind viewerul, nu citind codul
@@ -2559,14 +2559,14 @@ fiecare tranșă, nu doar pe cele noi — tocmai cele vechi putrezesc. Reancorat
 
 ### Ce rămâne, cu cifra lui
 
-- **pasul 6, driverul.** `anuleazaDesemnare` filtrează pe `jobTarget`, iar șantierul ar sta în
+- ~~**pasul 6, driverul.**~~ **ÎNCHIS (reconciliat 25.09):** `anuleazaDesemnare` filtrează acum pe `jobTarget` **sau** `jobDest`, cu un comentariu care numește exact cazul constructorului. *Constatarea de atunci:* `anuleazaDesemnare` filtrează pe `jobTarget`, iar șantierul ar sta în
   `jobDest` — măsurat de panou: job orfan, rezervare pe id mort, M5 roșu din prima zidire. Se repară
   în același pas cu primul job de construcție, nu după.
-- **`rang(FARA_SPRIJIN)`** — se adaugă când un scaner chiar îl emite. O cauză pe care nimeni n-o
+- ~~**`rang(FARA_SPRIJIN)`**~~ **NU SE FACE (reconciliat 25.09):** scanerul din 6c sare șantierele nesprijinite FĂRĂ cauză — o poziție în coadă, nu un refuz — deci condiția nu se împlinește pe designul ăsta; vezi „nelegabil în v2 prin construcție", mai jos. *Era:* se adaugă când un scaner chiar îl emite. O cauză pe care nimeni n-o
   produce nu poate fi legată de nimic.
 - **grinda** (`suportRazaGrinda: 10`), amânată cu cifra ei: o singură editare lângă o cavitate de
   21×21 trece de la 13,3 la 173,3 ms, iar discul de invalidare de la 50 la 362 de celule.
-- **overlay-ul de construcție** — previzualizarea există în nucleu; desenarea ei pe ecran nu.
+- ~~**overlay-ul de construcție** — previzualizarea există în nucleu; desenarea ei pe ecran nu.~~ **LIVRAT (reconciliat 25.09):** `viewer/overlay-stabilitate.ts` desenează piesele IMPOSIBILE din `constructiaPrevizualizata`, proiectate pe nivelul activ.
 
 ---
 
@@ -2655,9 +2655,9 @@ e M5, nu acceptanța. M5 chiar se înroșise; eu mă uitam în altă parte.
 
 - **pasul 6c, scanerul.** Alegerea automată a blueprinturilor, citind închiderea, ca să nu propună
   niciodată o piesă nezidibilă — panoul D4 a măsurat 1,2 drumuri irosite pe piesă altfel.
-- **`rang(FARA_SPRIJIN)`** — se adaugă când scanerul chiar îl emite.
+- ~~**`rang(FARA_SPRIJIN)`** — se adaugă când scanerul chiar îl emite.~~ **NU SE FACE (reconciliat 25.09):** scanerul sare șantierele nesprijinite fără cauză, deliberat.
 - **grinda** (`suportRazaGrinda: 10`), amânată cu cifra ei.
-- **overlay-ul de construcție** — previzualizarea există în nucleu; desenarea ei pe ecran nu.
+- ~~**overlay-ul de construcție** — previzualizarea există în nucleu; desenarea ei pe ecran nu.~~ **LIVRAT (reconciliat 25.09):** `viewer/overlay-stabilitate.ts` desenează piesele IMPOSIBILE din `constructiaPrevizualizata`, proiectate pe nivelul activ.
 
 ---
 
@@ -2850,13 +2850,13 @@ același tick.
 
 ### Ce rămâne
 
-- **Prioritățile personale asimetrice sunt netestate.** `spawnAgent` scrie
+- ~~**Prioritățile personale asimetrice sunt netestate.**~~ **ÎNCHIS 19.09:** test cu specializare totală, oglindă și control uniform; mecanismul s-a dovedit a fi exclusivitatea, nu ponderarea. *Era:* `spawnAgent` scrie
   `personalPriorityDefault` în toate categoriile, deci în orice fixtură `persS === persC === persB`
   și tăierea devreme nu e probată pe cazul în care ele diferă. Era așa și înainte de 6c.
 - **Plafonul piciorului doi** (morman → șantier) nu există: un pion poate lua un morman la 90 de
   celule într-o direcție pentru un șantier la 90 în cealaltă. `haulDestRadiusCells = 96`, deci
   fixtura evidentă nu ar lega — are nevoie de una construită pe cifra ei.
-- **`racireDesemnare` numără `vii` peste toate felurile**: 4096 de șantiere fac ca un refuz de
+- ~~**`racireDesemnare` numără `vii` peste toate felurile**~~ **ÎNCHIS 19.09, fără schimbare de cod:** abaterea e conservatoare (fereastră de 330 de tickuri în loc de 100, debit neschimbat), iar justificarea a devenit proprietate probată. *Era:* 4096 de șantiere fac ca un refuz de
   săpat să răcească 540 de tickuri în loc de 100.
 - **Un morman hrănește un singur constructor** (`maxClaimants: 1` pe `Strat.CARAT`), deși unul de
   75 ține trei pereți.
@@ -2864,7 +2864,7 @@ același tick.
   perete. Răspunsul de azi e „le consolidează căratul", deci o colonie cu CARA pe 0 se blochează.
 - **Gaura de conținut SCARA/LEMN** — blocaj circular permanent; costul de a-l suferi e zero,
   reparația e o decizie de conținut.
-- **Overlay-ul de construcție** — previzualizarea există în nucleu; desenarea ei pe ecran nu.
+- ~~**Overlay-ul de construcție** — previzualizarea există în nucleu; desenarea ei pe ecran nu.~~ **LIVRAT (reconciliat 25.09):** desenat în `viewer/overlay-stabilitate.ts`.
 
 ---
 
@@ -2959,7 +2959,7 @@ Peste jumătate primesc ocluzie.
 
 - **Scara `AO_FACTOR = [0.52, 0.70, 0.86, 1.0]` e o judecată vizuală neverificată de owner.** E
   singurul număr din tot arcul care n-a ieșit dintr-o măsurătoare.
-- **Variația de culoare per poziție** — tot în `src/render/`, tot portabilă, **zero cost în
+- ~~**Variația de culoare per poziție**~~ **LIVRAT (reconciliat 25.09):** `variatiaLocului` în `src/render/palette.ts`, aceeași funcție pe voxeli și pe heightfield. *Nota de atunci:* tot în `src/render/`, tot portabilă, **zero cost în
   quaduri** fiindcă se calculează din poziția vârfului, deci e continuă peste quaduri și peste
   granițe de chunk.
 - **Terenul ne-promovat nu primește AO**, și asta e o discontinuitate pe care am introdus-o eu.
@@ -3061,7 +3061,7 @@ verde · `GATE.md` re-etalonat de două ori, fiecare într-un commit separat.
 
 ### Ce rămâne
 
-- **Garda de mai sus, fără probă.** Dacă cineva găsește formularea, e cea mai valoroasă adăugare.
+- ~~**Garda de mai sus, fără probă.** Dacă cineva găsește formularea, e cea mai valoroasă adăugare.~~ **ÎNCHIS (reconciliat 25.09):** formularea s-a găsit — testul „INVELISUL NETEZIT e ETANS" din `tests/mesher.test.ts` leagă garda, iar proba ei din `render.mjs` iese PRINSĂ.
 - **Scara `AO_FACTOR`** — singurul număr din tot arcul care n-a ieșit dintr-o măsurătoare.
 - **Predicția „NU pică pe GPU"** e acum la 694.458 de triunghiuri, de patru ori cifra pe care a fost
   scrisă. Sweep-ul de rezoluție se rulează pe geometria asta.
@@ -3175,12 +3175,12 @@ separat, cu motivul scris.
 
 - **`AO_FACTOR`** — tot singurul număr din arcul de grafică ieșit dintr-o judecată vizuală, nu dintr-o
   măsurătoare.
-- **Cei 205 ms din GATE.md** s-au luat dimineața, cu serverul de dev pe mașină; `check-gate-numbers`
+- ~~**Cei 205 ms din GATE.md**~~ **ÎNCHIS (reconciliat 25.09):** cifra nu mai există; GATE.md s-a re-etalonat de atunci, fiecare dată în commit separat, iar `check-gate-numbers` o compară la fiecare `npm run check` (175,3 ms ±31,0 la ultima rulare). *Era:* s-au luat dimineața, cu serverul de dev pe mașină; `check-gate-numbers`
   măsoară azi 179,9 (±22,2). Poarta trece, deci cifra e în toleranța ei — dar e o cifră de mașină
   zgomotoasă. A o re-etalona de două ori într-o zi ar fi mai rău decât a o nota.
-- **Bucla de reîncercare din S-DIG** e probată prin `sapaturaUrmatoare`, dar ce face viewerul CU
+- ~~**Bucla de reîncercare din S-DIG**~~ **ÎNCHIS 19.09** — `remeshAfterEdit` a ieșit în `chunkuriDeRefacut`, headless, cu teste. *Era:* e probată prin `sapaturaUrmatoare`, dar ce face viewerul CU
   rezultatul ei (`remeshAfterEdit`) rămâne cod de browser fără test.
-- **Prioritățile personale asimetrice**, plafonul pe al doilea picior, și `racireDesemnare` care
+- ~~**Prioritățile personale asimetrice**~~ (ÎNCHIS 19.09), **plafonul pe al doilea picior** (DESCHIS — vezi registrul reconciliat) și ~~`racireDesemnare`~~ (ÎNCHIS 19.09) care
   numără `vii` peste toate felurile — netestate, de la recenzia dinainte.
 - **Deadlock-ul de conținut SCARA/LEMN** — acum măcar se vede în panou, portocaliu.
 
@@ -3424,3 +3424,64 @@ corect, **1811 din 2643** cu reordonarea. Prinde exact clasa la care celelalte d
 
 **432 de teste**, **225 de probe de mutație**, toate prinse. Trei commit-uri: reparația cu cele două
 plase per tick și 4 probe; scoaterea centurii; a treia plasă cu proba ei retintită.
+
+---
+
+## Registrul de restanțe, reconciliat pe cod
+
+**Model:** Claude Opus 5.5
+**Prompt de start:** „continua"
+
+### De ce
+
+Fiecare intrare din DEVLOG își are lista ei „Ce rămâne". Ultima dintre ele — cea pe care o citește o
+sesiune nouă, fiindcă citește coada — mai avea un singur punct deschis, `AO_FACTOR`. Dar între liste
+**căzuseră pe drum, fără să fie închise, douăzeci și unu de puncte**. Cine citea coada credea că proiectul
+n-are nimic deschis; cine citea o listă veche era trimis să facă lucruri deja făcute.
+
+Fiecare punct s-a verificat **pe cod**, pe un instantaneu `git archive HEAD` (suita de mutații rula
+în paralel și rescria fișiere sursă), nu pe text. Punctele închise sunt tăiate pe loc în listele lor,
+cu verdictul lângă; aici e starea întreagă, într-un singur loc.
+
+### Închise, fără să scrie nicăieri — șapte
+
+| punct | cum s-a închis |
+|---|---|
+| overlay-ul de construcție (trei liste) | desenat: `viewer/overlay-stabilitate.ts` arată piesele imposibile |
+| variația de culoare per poziție | `variatiaLocului`, aceeași funcție pe voxeli și pe heightfield |
+| garda peretelui „fără probă" | o leagă testul de etanșeitate; proba iese PRINSĂ |
+| pasul 6, driverul | `anuleazaDesemnare` filtrează pe `jobTarget` sau `jobDest` |
+| CI-ul n-a rulat niciodată | rulează la fiecare push, verde |
+| cei 205 ms din GATE.md | cifră înlocuită, păzită de `check-gate-numbers` |
+| `rang(FARA_SPRIJIN)` (două liste) | **nu se face**: scanerul sare deliberat șantierele nesprijinite fără cauză |
+
+### Deschise, de joc — fiecare re-verificat pe cod azi
+
+- **Plafonul piciorului doi.** `candDist2` (morman → șantier) intră doar în departajare, nu într-un
+  plafon. Cazul din lista originală — morman la 90 de celule într-o parte, șantier la 90 în cealaltă —
+  rămâne posibil prin construcție.
+- **Un morman hrănește un singur constructor.** `maxClaimants: 1` pe `Strat.CARAT` în cererile
+  jobului de construit, deși un morman de 75 ține trei pereți.
+- **Fragmentarea.** Zero cod de consolidare în `src/sim/`. După o prăbușire, 30 de mormane de câte 10
+  nu ridică niciun perete; singurul leac e căratul, deci o colonie cu CARA pe 0 se blochează.
+- **Gaura de conținut SCARA/LEMN.** LEMN vine numai din săparea lui `LEMN_CONSTRUIT`, care vine numai
+  din SCARA, care cere LEMN (`content/rules.json`). Circular și permanent. E o decizie de conținut.
+- **Producția de hrană** nu există: HRANA n-are niciun producător, se pune în lume cu comanda.
+- **Grinda.** `suportRazaGrinda: 10` e validat în `content.ts` (inclusiv invariantul față de
+  `suportMax`), dar `stabilitate.ts` nu-l citește. Piesa nu există.
+- **6 joburi pentru 5 pereți** — o cursă între pioni, văzută o dată. Singurul punct de aici
+  nere-verificat azi: cere o măsurătoare la scară, nu o căutare în cod.
+
+### Deschise, ale mele, blocate
+
+- **Electron nu e instalat.** Gate-ul măsoară Chrome curat; livrarea e Electron cu `in-process-gpu`.
+  Cere descărcarea pachetului, adică permisiunea lui Andrei.
+- **Predicția „NU pică pe GPU"** — 694.458 de triunghiuri. O rezolvă doar rularea gate-ului.
+- **Terenul nepromovat fără ocluzie** — 4,3% mai deschis, sub variația naturală de ~8,7%. Reparația
+  adevărată e ocluzia derivată din înălțimi, adică un arc.
+
+### La owner — în OWNER_VERIFY, unde le e locul
+
+Gate-ul cu D1b (2), mașina-țintă (3), batching-ul (7), plecările (8) — erau deja acolo. **`AO_FACTOR`
+nu era**: în patru intrări la rând îl scriam în DEVLOG „așteaptă owner-ul", iar DEVLOG-ul se citește ca
+istorie, nu ca listă de bifat. A intrat ca punctul 11, cu ce se privește și cum arată bine.
