@@ -3974,3 +3974,121 @@ Modul vechi nu putea vedea asta: rula mereu fișierul întreg, în aceeași ordi
 
 Un test care ar pica SINGUR pe cod curat ar da un PRINSA fals. Controlul e `--izolare`; se rulează când
 se adaugă fișiere de test sau teste cu stare comună, nu la fiecare probă (ar dubla costul).
+
+## Task Completed — costul suitei de mutații
+
+Pe runner (rularea 36160560499, `6ba8fe8`): jobul `mutatii` **3 min 9 s**, față de **23 min 34 s**
+înainte; `check` 2 min 20 s. Local, după grinda: **311/311 în 277 s**.
+
+---
+
+## Task Started — grinda (S20-23, tăietura 4)
+
+**Model:** Claude Opus 5.5
+**Prompt de start:** „continua"
+
+Grinda fusese amânată o dată, la tăietura 2: varianta cu rază globală ducea previzualizarea unei
+cavități de la 9,4 la 404,8 ms. Designul v1 a mers la un panou de 3 lentile (regulă, cost, contracte),
+cu buget anunțat și cu cifrele de consum cerute înainte: **24 de constatări, 5 CRITIC/MARE confirmate
+de câte doi verificatori**. Designul v2 (`scratchpad/design-grinda-v2.md`) a păstrat regula și a
+schimbat execuția. Două CRITIC-uri: `sapaVoxel` calcula ce cade DUPĂ `dig`, deci grinda săpată ieșea
+din index înainte să-și emită discul (58 de voxeli rămași în aer lângă un stâlp, cu previzualizarea
+spunând CADE); iar fără memorie, activitatea costa un BFS per candidat per interogare, adică 215–246 ms
+pe o săpătură sub un tavan de grinzi.
+
+## Task Completed — grinda
+
+### Regula
+
+`s0 = max(0, suportMax − d0)`; o grindă e **activă** dacă e din material GRINDA și are `s0 > 0` (fără
+înlănțuire); `s1 = max(0, suportRazaGrinda − d1)`, cu `d1` pașii prin solid până la cea mai apropiată
+grindă activă; `suport = max(s0, s1)`. Punct fix unic, monoton. În `content/rules.json`: 4 și 10.
+
+### Ce s-a livrat
+
+- `ecae421` — **două defecte pre-existente** găsite de panou, în commit separat: prefiltrul overlay-ului
+  declara SIGUR tot tavanul unei pivnițe (căuta doar aer; 48 din 48 de celule periculoase ascunse la
+  6×7, 6 CADE); `fill` și `decode` acceptau orice număr ca material.
+- `9af60e6` — materialul, piesa (20 de piatră, ca podeaua), indexul DERIVED `Terrain.grinzi` (chei
+  locale sortate per chunk, ținut în `editAt`, reconstruit la încărcare, egal cu cel continuu).
+- `5a541b9` — regula: mulțimea care cade se calculează ÎNAINTE de `dig`, cu aceeași funcție ca
+  previzualizarea; invalidarea pe terenul de dinainte, cu trei discuri ale grinzii (a: grinda care cade;
+  b: grinzile ≤ 3 a căror activitate chiar se schimbă; c: un drum prin celula căzută); coada
+  deduplicată; activitatea memorată per propagare; închiderea de construcție cu grinzile PLANIFICATE;
+  „De ce nu?" cu trei răspunsuri; raza prefiltrului crește lângă grinzi.
+- `b78bbe6` — testul S6e (mai jos).
+- `76105ab` — viewer: **P** alege piesa (viewer-ul nu putea desena nicio construcție), iar overlay-ul
+  **S** se feliază pe cadre.
+- `119e4d6` — data corectată: scrisesem „26.09" peste tot în ziua asta; commit-urile sunt din 25.09.
+
+### Cifre (local, pe fixturi LEGITIME)
+
+Prima rundă de măsurători era greșită: fixturile umpleau podele direct, fără regulă, deci aveau masă
+plutitoare, iar fiecare săpătură ipotetică declanșa o cascadă care în joc nu poate exista (18,6 s pentru
+un overlay). Acum fiecare fixtură scoate, până la punct fix, tot ce are suport 0 înainte de măsurare.
+
+| fixtura | săpătură | previz. 9×9 | overlay S (o trecere) |
+|---|---|---|---|
+| cavitate 9×9 în rocă, fără grinzi / grindă la 400 de celule | — | 1,47 / 1,08 ms, 0 interogări `s1` | — |
+| cameră 7×7 fără grinzi (HEAD) | 0,14 ms (0,08) | 0,26 ms (0,14) | 10,8 ms (7,6) |
+| sală 23×23, 4 grinzi — **529/529 celule stau** | 10,8 ms centru, 6,7 lângă zid | 13,9 ms | **3,2 s**, 625 scanate |
+| tavan 21×21 numai din grinzi | 18,7 ms | 25,2 ms | **5,6 s**, 537 scanate |
+| stâlp pe 5 etaje, 4 grinzi pe etaj | baza săpată: 1578 cad, **25 ms** | — | — |
+
+Pe HEAD, aceeași sală ține doar 240 din 529 de celule, cu overlay-ul de 28 ms. Poarta de sprijin a
+scanerului (`poateSustine` pe fiecare șantier nezidit al sălii): **3,8 ms pe trecere** (13 µs/șantier),
+față de 0,5 ms fără grinzi. Scenariul standard: hash **52b16ed2 neschimbat**, 81 µs/tick. Cifrele 2D ale
+regulii, măsurate pe codul livrat: fâșia din zid 3 → **12**; placa peste un stâlp **25 → 181 → 313** (0 /
+1 / 4 grinzi); sala 6×6 → **23×23** cu 4 grinzi.
+
+Profilul overlay-ului sub tavanul dens: 149 de verificări, 103 interogări `s1` și 357 de calcule de
+activitate pe fiecare celulă scanată; jumătate din timp e citirea de material (`ensureChunk`, `locate`,
+`voxelAt`). Memoria e per propagare, deci fiecare dintre cele 537 de săpături ipotetice le reface.
+Săpătura reală e un eveniment și intră în plicul acceptat de panou (5–10 ms lângă grinzi). Overlay-ul
+însă se reface la 30 de cadre, deci ar fi înghețat fereastra secunde întregi. Leacul din tăietura asta
+e în viewer: scanarea s-a mutat în `viewer/scanare-stabilitate.ts` (fără THREE, cu teste), cu un buget
+de 4 ms pe cadru plus celula din curs. Trecerea din curs nu se repornește pentru aceeași întrebare,
+desenul vechi rămâne până la capăt, iar alt nivel îl șterge pe loc. HUD: „scanare N%".
+
+### Probele: 20/25 la prima rulare, și ce lipsea
+
+Patru ratări aveau aceeași cauză: nicio fixtură nu construia **o grindă care se dezactivează fără să
+cadă**, adică ținută prin `s1` de altă grindă. Discul (b), activitatea de dinaintea săpăturii, golirea
+memoriei la cădere și memoria doar-pozitivă a închiderii apără exact cazul ăsta. Scenele aleatoare din
+PROPRIETATE nu-l nimeresc. Testul S6e îl construiește. B' e lângă zid și ține prin `s1` grinda B; B e
+activă printr-o celulă k și un stâlp. Celula h stă doar prin B, la 9 pași de ea și la 10 de k, deci în
+afara discului (c). Drumul până la h e ținut de un al doilea stâlp, deci nicio cascadă nu ajunge acolo.
+Trei întrebări, fiecare cu oracolul: săpând k, apoi pinten + baza stâlpului (dezactivarea în cascadă,
+după ce activitatea lui B a fost memorată), apoi închiderea cu B zidită înaintea drumului ei. A cincea
+ratare era o țintă greșită: „s1 ignorat la propagare" nu se vede în S6d, unde se sapă singura grindă.
+
+Apoi **28/28** în suita `grinda`, **311/311 în 277 s** pe toate suitele, izolare **217/217**.
+
+Tot la probe, prefiltrul: căutarea grinzilor la zA+1 era o centură fără probă. N-am putut construi o
+fixtură care s-o ceară, și argumentul spune de ce: o celulă aflată la mai mult de `suportMax` de orice
+sursă are în jur solid așezat la zA și solid la zA+1. Deci orice grindă de la zA+1 din preajmă rămâne
+activă după săpătură, iar drumurile `s1` trec prin solid, așezat sau nu. Am scos căutarea, cu
+argumentul scris în cod. Fixtura panoului (podea de două straturi) o prinde acum sursa „solid
+neașezat", deci testul razei e altul: o grindă îngropată în rocă ține tavanul unei pivnițe, iar a doua
+fereastră începe chiar după grindă, ca să probeze și lărgirea căutării.
+
+### Fum în viewer
+
+Panoul de browser era ascuns, deci `requestAnimationFrame` nu rula; Electron cu fereastra ascunsă dă
+~1 cadru/s. Cu randare **offscreen la 60 fps** (script în scratchpad, nu în poartă): P ciclează, click cu
+grinda aleasă = o desemnare, S fără slice spune „cere slice view", cu slice trecerile se termină,
+schimbarea nivelului pornește una nouă. Zero erori.
+
+### În registru, cu cifra
+
+- **Overlay-ul pe câmpuri** (16–20 ms prototipat de panou, exact pe un singur nivel): trecerea feliată
+  nu îngheață, dar lângă grinzi se actualizează în secunde (3,2 s de lucru la sală).
+- **`d1` ca câmp per propagare**, cât timp nu cade nimic: un singur BFS multi-sursă din grinzile active
+  în loc de ~100 de BFS-uri `s1` pe verificare. Exact pentru o singură sămânță, înainte de prima cădere,
+  adică pentru cazul SIGUR, care e aproape tot overlay-ul. NEMĂSURAT.
+- **ULTIMA_CELULA** are precizie slabă și fără grinzi (pe o podea 25×25: 186 din 218 false pe HEAD); în
+  sala cu 4 grinzi, 525 din 625 de celule ies ULTIMA. Arc de overlay separat.
+- **Grinzi în tavanele de rocă:** locul de lucru e la cel mult un pas pe verticală; limită a oricărei
+  piese de tavan.
+
+La owner: OWNER_VERIFY 12 (cifrele, alternativa `s1 = R − d0(b) − d1`, grinda de lemn, tavanele de rocă).

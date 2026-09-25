@@ -71,7 +71,7 @@ Pe Windows, `kinstead.bat` le adună pe toate: dublu-click deschide un meniu, ia
 
 ```bash
 npm run mutatii -- --lista      # ce suite există
-npm run mutatii                 # toate cele 283, ~4½ min local (25.09, cronometrat, vezi mai jos)
+npm run mutatii                 # toate cele 314, ~4½ min local (25.09, cronometrat, vezi mai jos)
 npm run mutatii -- nevoi        # o singură suită
 npm run mutatii -- nevoi podeaua  # doar mutațiile al căror nume conține „podeaua"
 npm run mutatii -- --izolare    # fiecare test NUMIT de o probă, singur, pe cod nemutat (~2 min)
@@ -103,6 +103,7 @@ potrivește în două locuri editează altul decât cel gândit, rulează testel
 > **25.09.2026: 283 de probe în 262 s local**, după ce harnașamentul rulează doar testul numit. Cu
 > fișierul întreg la fiecare probă, jobul ajunsese la **23 min 34 s pe runner** (280 de probe):
 > `saveload.test.ts` (39 s) re-rulat de 11 probe era singur 42% din suită.
+> Pe runner, după schimbare: **3 min 9 s** (rularea 36160560499). După grinda: **311 probe în 277 s** local.
 >
 > `tools/check-mutatii.mjs` a fost scris ca înlocuitor static și rămâne util, dar nu mai e o
 > compensație: el răspunde la „proba ARE ce să măsoare?", nu la „măsoară?". A doua întrebare
