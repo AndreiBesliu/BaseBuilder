@@ -41,11 +41,11 @@ export const MUTATII = [
     t: 'tests/grinda.test.ts', e: 'indexul de grinzi e DERIVED',
   },
   {
-    n: 's1 ignorat la propagare: podeaua tinuta de grinda cade in previzualizare, nu si in oracol',
+    n: 's1 ignorat la propagare: tot ce sta prin grinzi cade in previzualizare, nu si in oracol',
     f: 'src/sim/stabilitate.ts',
     a: '    : caveazaSpreAsezat(t, rules, wx, wy, z, ip.cazute, ip.zidite)\n  if (s0 >= plafon) return plafon\n  return Math.min(plafon, Math.max(s0, suportDinGrinzi(t, rules, wx, wy, z, ip)))',
     b: '    : caveazaSpreAsezat(t, rules, wx, wy, z, ip.cazute, ip.zidite)\n  if (s0 >= plafon) return plafon\n  return Math.min(plafon, s0)',
-    t: 'tests/grinda.test.ts', e: 'S6d: sapi grinda',
+    t: 'tests/grinda.test.ts', e: 'PROPRIETATE: pe scene aleatoare',
   },
   {
     n: 's1 ignorat la zidire: grinda nu mai duce fasia dincolo de 3',
@@ -80,7 +80,7 @@ export const MUTATII = [
     f: 'src/sim/stabilitate.ts',
     a: '  if (ip.activ !== null && (a || !ip.doarPozitive)) ip.activ.set(k, a)',
     b: '  if (ip.activ !== null) ip.activ.set(k, a)',
-    t: 'tests/grinda.test.ts', e: 'inchiderea de constructie cu grinzi PLANIFICATE',
+    t: 'tests/grinda.test.ts', e: 'S6e: o grinda care se DEZACTIVEAZA',
   },
   {
     n: 'inchiderea ignora grinzile planificate',
@@ -108,7 +108,7 @@ export const MUTATII = [
     f: 'src/sim/stabilitate.ts',
     a: '        if (activa(t, rules, bx, by, bz, ip) !== anterior) discGrinda(bx, by, bz)',
     b: '        activa(t, rules, bx, by, bz, ip)',
-    t: 'tests/grinda.test.ts', e: 'PROPRIETATE: pe scene aleatoare',
+    t: 'tests/grinda.test.ts', e: 'S6e: o grinda care se DEZACTIVEAZA',
   },
   {
     n: 'discul (b) fara conditie: fiecare grinda din preajma isi emite discul',
@@ -122,14 +122,14 @@ export const MUTATII = [
     f: 'src/sim/stabilitate.ts',
     a: '        activ.delete(kb)',
     b: '        void kb',
-    t: 'tests/grinda.test.ts', e: 'PROPRIETATE: pe scene aleatoare',
+    t: 'tests/grinda.test.ts', e: 'S6e: o grinda care se DEZACTIVEAZA',
   },
   {
     n: 'activitatea dinaintea sapaturii nu se tine minte (samanta nu schimba nimic, in aparenta)',
     f: 'src/sim/stabilitate.ts',
     a: '            anterior = inainte.get(kb) ?? false',
     b: '            anterior = s0Pozitiv(t, rules, bx, by, bz, ip)',
-    t: 'tests/grinda.test.ts', e: 'PROPRIETATE: pe scene aleatoare',
+    t: 'tests/grinda.test.ts', e: 'S6e: o grinda care se DEZACTIVEAZA',
   },
   {
     n: 'discul (c) lipseste: un drum spre o grinda activa care trecea prin celula cazuta',

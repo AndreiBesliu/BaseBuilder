@@ -337,6 +337,61 @@ test('S6d: sapi grinda, iar inelul de langa ea e tinut de un STALP — ce cade =
   }
 })
 
+test('S6e: o grinda care se DEZACTIVEAZA fara sa cada isi re-verifica discul — la sapat, in cascada si in inchidere', () => {
+  // Discul (b) exista pentru un singur caz: o grinda B ramane in picioare (o tine prin
+  // s1 alta grinda, B'), dar isi pierde activitatea. Ce tinea DOAR B, la 9 pasi de ea,
+  // e la 10 de sapatura — in afara discului (c) — iar celulele de pe drum le tine un
+  // stalp, deci nicio cascada nu ajunge acolo. Scena aleatoare nu o nimereste.
+  //
+  //   zid ── B'(3) ─────── B(11) ─ pinten(12)           (randul yr)
+  //                         │
+  //                  k (yr+1), S1 (yr+2, pe stalp)       (coloana x = 11)
+  //                  yr−1 … yr−8 (S2 pe stalp la yr−5), h (yr−9)
+  //
+  // B e activa prin k → S1 (d0 = 2). h sta doar prin B (d1 = 9; S2 e la 4).
+  const { w, x0, y0, g } = scena(16)
+  const zf = g + 3
+  const yr = y0 + 12
+  const cx = x0 + 11
+  zid(w, x0, yr, 1, g, zf)
+  for (const sy of [yr + 2, yr - 5]) {
+    for (let z = g + 1; z < zf; z++) assert.ok(applyCommand(w, { kind: 'fill', wx: cx, wy: sy, z, material: Material.PIATRA_CONSTRUITA }, R).ok, `fixtura: stalpul de la ${sy - yr}`)
+  }
+  // Ordinea din plan conteaza pentru inchidere: B se zideste (prin s1 din B') INAINTE ca
+  // drumul ei spre S1 sa existe, deci prima ei activitate e „inactiva".
+  const plan: [number, number, number, number][] = []
+  for (let dx = 1; dx <= 11; dx++) plan.push([x0 + dx, yr, zf, dx === 3 || dx === 11 ? Material.GRINDA : Material.PIATRA_CONSTRUITA])
+  for (let dy = 1; dy <= 9; dy++) plan.push([cx, yr - dy, zf, Material.PIATRA_CONSTRUITA])
+  plan.push([cx, yr + 1, zf, Material.PIATRA_CONSTRUITA], [cx, yr + 2, zf, Material.PIATRA_CONSTRUITA], [cx + 1, yr, zf, Material.PIATRA_CONSTRUITA])
+  const h = cellKey(cx, yr - 9, zf)
+
+  // Inchiderea, pe lumea cu stalpii dar fara plan, = constructia incrementala.
+  const celule = plan.map(([x, y, z]) => cellKey(x, y, z))
+  const grinzi = [cellKey(x0 + 3, yr, zf), cellKey(cx, yr, zf)]
+  const { construibile } = constructiaPosibila(w.terrain, R, celule, grinzi)
+  assert.ok(construibile.includes(h), 'inchiderea nu promite capatul tinut doar de B: o activitate „inactiva" a ramas in memorie')
+  const facute = construiesteIncremental(w, plan)
+  assert.equal(facute.size, plan.length, 'fixtura: planul trebuia construit intreg')
+  assert.deepEqual([...facute].sort((a, b) => a - b), construibile, 'inchiderea difera de constructia incrementala')
+  const cutie = { x0: x0 - 14, y0: y0 - 14, x1: x0 + 28, y1: y0 + 28, z0: g + 1, z1: zf }
+  assert.equal(plutitori(w, cutie, 12), 0, 'fixtura: constructia porneste fara plutitori')
+  assert.equal(suportLa(w.terrain, R, cx, yr - 9, zf), 1, 'fixtura: h sta prin B, la d1 = 9')
+
+  // La sapat: k e samanta; B se dezactiveaza, iar h trebuie sa cada.
+  const k = cellKey(cx, yr + 1, zf)
+  const laSapat = cadeDaca(w.terrain, R, [k])
+  assert.deepEqual([...laSapat].sort((a, b) => a - b), cadeOracol(w, cutie, [k]), 'sapand k: previzualizarea difera de oracol')
+  assert.ok(laSapat.includes(h), 'fixtura: sapand k, h trebuia sa cada')
+
+  // In cascada: stalpul de sub S1 cade de la baza, iar B se dezactiveaza abia cand cade
+  // celula de sub S1 — dupa ce activitatea ei a fost deja intrebata (si memorata) de
+  // verificarile din jurul pintenului, sapat primul.
+  const seminte = [cellKey(cx + 1, yr, zf), cellKey(cx, yr + 2, g + 1)]
+  const inCascada = cadeDaca(w.terrain, R, seminte)
+  assert.deepEqual([...inCascada].sort((a, b) => a - b), cadeOracol(w, cutie, seminte), 'pinten + baza stalpului: previzualizarea difera de oracol')
+  assert.ok(inCascada.includes(cellKey(cx, yr + 2, zf)), 'fixtura: S1 trebuia sa cada odata cu stalpul')
+})
+
 /** Un generator determinist mic (LCG), ca scenele aleatoare sa fie aceleasi la fiecare rulare. */
 function lcg(samanta: number): () => number {
   let s = samanta >>> 0
