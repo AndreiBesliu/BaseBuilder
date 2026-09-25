@@ -5,7 +5,7 @@ import { decode, encode } from '../src/sim/save.ts'
 import { hashWorld } from '../src/sim/hash.ts'
 import { advance, createWorld } from '../src/sim/world.ts'
 import { applyCommand } from '../src/sim/commands.ts'
-import { CATEGORII, Categorie, Piesa, SCHEMA_VERSION } from '../src/sim/state.ts'
+import { CATEGORII, Categorie, FelJob, PasConstruieste, Piesa, SCHEMA_VERSION } from '../src/sim/state.ts'
 import { Desemnare } from '../src/sim/desemnari.ts'
 import { Reason } from '../src/sim/result.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
@@ -285,4 +285,57 @@ test('felul si piesa trebuie sa se potriveasca: ambele contradictii sunt REFUZAT
 
   // Controlul negativ: neatinsa, aceeasi lume se incarca.
   assert.equal(decode(strica(() => {})).ok, true, 'fixtura: saveul neatins trebuie sa se incarce')
+})
+
+// ---------------------------------------------------------------------------
+// schema 7, capturata INAINTE de logistica constructiei (S20-23, taietura 3)
+// ---------------------------------------------------------------------------
+
+const SCHEMA7 = readFileSync(new URL('./fixtures/save-schema7.json', import.meta.url), 'utf8')
+
+test('fixtura de schema 7 e chiar de schema 7: un constructor la RIDICA si unul la ZIDESTE, cu `jobCantitate` = totalul piesei', () => {
+  // Felia de logistica nu ridica schema, dar schimba SEMANTICA lui `jobCantitate`
+  // la CONSTRUIESTE: din „totalul piesei" in „cat s-a rezervat din sursa curenta".
+  // Un save de dinainte are 20 si la ZIDESTE, unde codul nou scrie 0. Fixtura asta
+  // exista ca usa veche sa ramana deschisa — si ca sa se vada ce era inauntru.
+  const env = JSON.parse(SCHEMA7) as { schema: number; data: { agents: { jobKind: number[]; jobStep: number[]; jobCantitate: number[] } } }
+  assert.equal(env.schema, 7)
+  const a = env.data.agents
+  const laRidica = a.jobKind.map((k, i) => k === FelJob.CONSTRUIESTE && a.jobStep[i] === PasConstruieste.RIDICA ? i : -1).filter((i) => i !== -1)
+  const laZideste = a.jobKind.map((k, i) => k === FelJob.CONSTRUIESTE && a.jobStep[i] === PasConstruieste.ZIDESTE ? i : -1).filter((i) => i !== -1)
+  assert.ok(laRidica.length >= 1, 'fixtura trebuie sa CONTINA un constructor la RIDICA')
+  assert.ok(laZideste.length >= 1, 'fixtura trebuie sa CONTINA un constructor la ZIDESTE')
+  for (const i of [...laRidica, ...laZideste]) {
+    assert.equal(a.jobCantitate[i], DEFAULT_RULES.piese[Piesa.PERETE]!.cantitate, `slotul ${i}: la schema 7 jobCantitate e totalul piesei, la orice pas`)
+  }
+})
+
+test('un save de schema 7 cu constructori in curs se incarca, isi pastreaza pasii, si ajunge sa zideasca', () => {
+  const out = decode(SCHEMA7)
+  assert.ok(out.ok, `refuzat: ${JSON.stringify(out)}`)
+  const w = out.value
+  assert.equal(w.schema, SCHEMA_VERSION)
+  assert.equal(w.rezervari.anulateLaIncarcare, 0, 'niciun job din fixtura n-are voie sa fie anulat la incarcare')
+  const raw = JSON.parse(SCHEMA7) as { data: { agents: { jobKind: number[]; jobStep: number[] } } }
+  for (let i = 0; i < w.agents.count; i++) {
+    assert.equal(w.agents.jobKind[i], raw.data.agents.jobKind[i], `slotul ${i}: felul jobului`)
+    assert.equal(w.agents.jobStep[i], raw.data.agents.jobStep[i], `slotul ${i}: pasul jobului`)
+  }
+  let santiere = 0
+  for (let i = 0; i < w.desemnari.count; i++) if (w.desemnari.alive[i] === 1 && w.desemnari.kind[i] === Desemnare.CONSTRUIESTE) santiere++
+  assert.ok(santiere >= 2, `fixtura: ${santiere} santiere vii`)
+  advance(w, 600)
+  santiere = 0
+  for (let i = 0; i < w.desemnari.count; i++) if (w.desemnari.alive[i] === 1 && w.desemnari.kind[i] === Desemnare.CONSTRUIESTE) santiere++
+  assert.equal(santiere, 0, 'peretii din fixtura trebuie sa se ridice dupa incarcare')
+})
+
+test('schema 7 e idempotenta: rescris de codul nou si reincarcat, acelasi hash', () => {
+  const out = decode(SCHEMA7)
+  assert.ok(out.ok)
+  if (!out.ok) return
+  const rescris = decode(encode(out.value))
+  assert.ok(rescris.ok, `refuzat la reincarcare: ${JSON.stringify(rescris)}`)
+  if (!rescris.ok) return
+  assert.equal(hashWorld(rescris.value), hashWorld(out.value))
 })
