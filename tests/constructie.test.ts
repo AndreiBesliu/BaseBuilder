@@ -2474,6 +2474,30 @@ test('3000 de mormane: fara santiere, sonda de material nu face niciun pas', () 
   assert.equal(t.pasiRezumat, 0, `${t.pasiRezumat} pasi de sonda fara niciun santier`)
 })
 
+test('3000 de mormane de PIATRA in raza, cu santiere de piatra: sonda le parcurge pe toate, cel mult o data pe scanare — clasa de cost e O(mormanele felului CERUT)', () => {
+  // Recenzia din 25.09: commit-ul 3 al feliei revendica „costul creste cu MUNCA, nu cu
+  // mormanele din lume" — adevarat doar pentru felurile NEcerute (`peFel`). Pentru felul
+  // cerut sonda ramane liniara in mormanele din raza, si nimic nu masura cazul in care
+  // felul cerut E majoritar (o cariera). Aici e clasa, cu cifra in DEVLOG (bench-ul
+  // recenziei: 98 µs/apel la 3000 inainte de un singur predicat, 72 dupa, cu
+  // verificarea scumpa platita lenes).
+  const { w, sit, puse } = lume3000(12345, 0, 3000)
+  assert.ok(puse >= 2500, `fixtura: doar ${puse} mormane puse`)
+  let santiere = 0
+  for (let d = 30; d <= 45 && santiere < 3; d++) {
+    const g = solid(w, sit.wx + d, sit.wy)
+    if (g === null) continue
+    if (applyCommand(w, { kind: 'desemneaza', wx: sit.wx + d, wy: sit.wy, z: g + 1, piesa: Piesa.PERETE }, R).ok) santiere++
+  }
+  assert.equal(santiere, 3, 'fixtura: santierele')
+  const piatra = indexZone(w, R).peFel[Item.PIATRA]!.length
+  assert.ok(piatra >= 2500, `fixtura: ${piatra} mormane de piatra`)
+  const t = ruleaza(w, 120)
+  assert.ok(t.scanari > 0 && t.pasiRezumat > 0, 'fixtura: sonda nu a rulat')
+  assert.ok(t.pasiRezumat <= t.scanari * piatra, `${t.pasiRezumat} pasi in ${t.scanari} scanari, cu ${piatra} mormane de piatra: mai mult de o trecere pe scanare`)
+  assert.ok(t.pasiRezumat >= piatra, 'fixtura: nicio scanare n-a parcurs felul cerut intreg')
+})
+
 test('3000 de mormane: cu un santier de PIATRA, sonda parcurge doar mormanele de piatra', () => {
   const { w, sit, puse } = lume3000(12345, 3000, 20)
   assert.ok(puse >= 2500, `fixtura: doar ${puse} mormane puse`)
