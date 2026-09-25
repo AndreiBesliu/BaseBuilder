@@ -375,6 +375,7 @@ const NUME_MATERIALE: readonly (readonly [string, number])[] = [
   ['LEMN_CONSTRUIT', Material.LEMN_CONSTRUIT],
   ['PIATRA_CONSTRUITA', Material.PIATRA_CONSTRUITA],
   ['MOLOZ', Material.MOLOZ],
+  ['GRINDA', Material.GRINDA],
 ]
 const NUME_ITEME: readonly (readonly [string, number])[] = [
   ['PIATRA', Item.PIATRA],
@@ -390,6 +391,7 @@ const NUME_PIESE: readonly (readonly [string, number])[] = [
   ['PERETE', Piesa.PERETE],
   ['PODEA', Piesa.PODEA],
   ['SCARA', Piesa.SCARA],
+  ['GRINDA', Piesa.GRINDA],
 ]
 const MAX_YIELD = 10000
 const MAX_LUCRU = 1000000
@@ -989,6 +991,8 @@ export const DEFAULT_RULES: Rules = {
     // Molozul da inapoi jumatate din ce ar fi dat roca: prabusirea costa munca,
     // nu materie. Si se sapa mai repede — vezi `digWorkUnitsMoloz`.
     { fel: Item.PIATRA, cantitate: 10 },
+    // Grinda de piatra da inapoi cat a costat (invariantul piesa ↔ digYield).
+    { fel: Item.PIATRA, cantitate: 20 },
   ],
   // Kitul de constructie, indexat cu `PiesaId`. Intrarea 0 e santinela.
   // `cantitate` e legata de `digYield` printr-un invariant: vezi `parseRules`.
@@ -997,6 +1001,7 @@ export const DEFAULT_RULES: Rules = {
     { material: Material.PIATRA_CONSTRUITA, cantitate: 20, lucru: 400 },
     { material: Material.PIATRA_CONSTRUITA, cantitate: 20, lucru: 300 },
     { material: Material.LEMN_CONSTRUIT, cantitate: 5, lucru: 250 },
+    { material: Material.GRINDA, cantitate: 20, lucru: 500 },
   ],
   // Nevoile. La 20 Hz: FOAME scade 6 la 250 de tickuri, deci 1000/6 × 250 =
   // ~41.700 de tickuri ≈ 35 de minute de la satul la zero; prefera sa manance la

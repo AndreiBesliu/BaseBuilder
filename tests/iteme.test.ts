@@ -46,7 +46,7 @@ test('sapatul PRODUCE: comanda dig lasa pe celula sapata mormanul din digYield[m
 
 test('content: digYield trebuie sa acopere TOATE materialele solide, si nu accepta unul nesolid sau un fel necunoscut', async () => {
   const { parseRules } = await import('../src/sim/content.ts')
-  const baza = { ...R, digYield: { ROCA: { fel: 'PIATRA', cantitate: 20 }, PAMANT: { fel: 'PAMANT', cantitate: 10 }, IARBA: { fel: 'PAMANT', cantitate: 10 }, LEMN_CONSTRUIT: { fel: 'LEMN', cantitate: 5 }, PIATRA_CONSTRUITA: { fel: 'PIATRA', cantitate: 20 }, MOLOZ: { fel: 'PIATRA', cantitate: 10 } } }
+  const baza = { ...R, digYield: { ROCA: { fel: 'PIATRA', cantitate: 20 }, PAMANT: { fel: 'PAMANT', cantitate: 10 }, IARBA: { fel: 'PAMANT', cantitate: 10 }, LEMN_CONSTRUIT: { fel: 'LEMN', cantitate: 5 }, PIATRA_CONSTRUITA: { fel: 'PIATRA', cantitate: 20 }, MOLOZ: { fel: 'PIATRA', cantitate: 10 }, GRINDA: { fel: 'PIATRA', cantitate: 20 } } }
   assert.ok(parseRules(baza).ok, JSON.stringify(parseRules(baza)))
   // IARBA lipsa: e suprafata, cel mai comun prim gest al jucatorului — un item de 0 bucati ar fi carat la nesfarsit.
   const faraIarba = { ...baza, digYield: { ...baza.digYield, IARBA: undefined } }

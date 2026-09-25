@@ -74,6 +74,8 @@ export const Piesa = {
   PERETE: 1,
   PODEA: 2,
   SCARA: 3,
+  /** Grinda de piatra: sprijin cu raza `suportRazaGrinda`, daca e ea insasi sprijinita de sol. */
+  GRINDA: 4,
 } as const
 export type PiesaId = (typeof Piesa)[keyof typeof Piesa]
 

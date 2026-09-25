@@ -23,7 +23,7 @@ import type { PathStore } from './drumuri.ts'
 import { DEFAULT_RULES } from './content.ts'
 import type { Rules } from './content.ts'
 import { esteMaterialCunoscut, MATERIAL_MAX, runCount } from './terrain/chunk.ts'
-import { createTerrain, ensureChunk, inWorld, WORLD_CELLS } from './terrain/terrain.ts'
+import { createTerrain, ensureChunk, inWorld, reconstruiesteGrinzi, WORLD_CELLS } from './terrain/terrain.ts'
 import { Desemnare, makeDesignationStore, reindexeazaDesemnari } from './desemnari.ts'
 import type { DesignationStore } from './desemnari.ts'
 import { createReservations } from './rezervari.ts'
@@ -564,6 +564,9 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
       columnStart: Uint32Array.from(saved.columnStart),
     }
   }
+
+  // Indexul grinzilor e DERIVED din voxeli: se reconstruieste, nu se citeste.
+  reconstruiesteGrinzi(terrain)
 
   const drumuri = incarcaDrumuri(makePathStore(capacity, rules.maxPathCells), agents, agentsRaw)
   if (!drumuri.ok) return drumuri

@@ -13,6 +13,7 @@ import { MUTATII as stabilitate } from './stabilitate.mjs'
 import { MUTATII as constructie } from './constructie.mjs'
 import { MUTATII as render } from './render.mjs'
 import { MUTATII as unelte } from './unelte.mjs'
+import { MUTATII as grinda } from './grinda.mjs'
 
 export const SUITE = [
   { nume: 'carat', despre: 'taietura 2: iteme, carat, zone pictate', M: carat },
@@ -21,5 +22,6 @@ export const SUITE = [
   { nume: 'stabil', despre: 'S20-23 t.1: stabilitate, prabusire, previzualizare', M: stabilitate },
   { nume: 'constr', despre: 'S20-23 t.2: constructia (pasii 1-5: poarta, schema, kit, sprijin, inchidere)', M: constructie },
   { nume: 'render', despre: 'S6-8: mesher-ul, ocluzia ambientala, scenariul S-DIG', M: render },
+  { nume: 'grinda', despre: 'S20-23 t.4: grinda — indexul DERIVED si regula stratificata', M: grinda },
   { nume: 'unelte', despre: 'instrumentele: harnasamentul de mutatii (doar testul numit)', M: unelte },
 ]

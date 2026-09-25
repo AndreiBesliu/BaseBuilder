@@ -44,6 +44,15 @@ export const Material = {
    * contin, deci nu cere schema noua.
    */
   MOLOZ: 7,
+  /**
+   * GRINDA (S20-23, taietura 4): un punct de sprijin cu raza `suportRazaGrinda`,
+   * DACA e ea insasi sprijinita de sol (`s0 > 0`) — vezi `src/sim/stabilitate.ts`.
+   * De PIATRA, nu de lemn: LEMN vine doar din sapatul lui LEMN_CONSTRUIT, care vine
+   * doar din SCARA, care cere LEMN — o grinda de lemn n-ar putea fi construita
+   * niciodata. Valoare noua intr-un `Uint8Array` deja persistat, ca MOLOZ: fara
+   * schema noua, fiindca `fill` si decode refuza de acum un material necunoscut.
+   */
+  GRINDA: 8,
 } as const
 export type MaterialId = (typeof Material)[keyof typeof Material]
 
@@ -55,7 +64,7 @@ export function isSolid(m: number): boolean {
  * Cea mai mare valoare din `Material`. Se schimba odata cu tabelul — un test cere
  * egalitatea cu maximul valorilor, ca un material nou sa nu ramana in afara lui.
  */
-export const MATERIAL_MAX = Material.MOLOZ
+export const MATERIAL_MAX = Material.GRINDA
 
 /**
  * E `m` un material pe care jocul il CUNOASTE? `isSolid` raspunde „da" pentru orice

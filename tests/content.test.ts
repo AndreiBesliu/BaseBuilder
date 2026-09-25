@@ -87,6 +87,7 @@ const PIESE_BUNE = {
   PERETE: { material: 'PIATRA_CONSTRUITA', cantitate: 20, lucru: 400 },
   PODEA: { material: 'PIATRA_CONSTRUITA', cantitate: 20, lucru: 300 },
   SCARA: { material: 'LEMN_CONSTRUIT', cantitate: 5, lucru: 250 },
+  GRINDA: { material: 'GRINDA', cantitate: 20, lucru: 500 },
 }
 
 test('fisierul si forma deja parsata dau ACELASI tabel de piese', () => {

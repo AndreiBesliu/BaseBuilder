@@ -35,6 +35,158 @@ export interface Terrain {
   focusCy: number
   /** Raza discului rezident, in chunk-uri. */
   readonly radius: number
+  /**
+   * DERIVED: indexul voxelilor de GRINDA, pe chunk. Tinut la zi in `editAt` —
+   * singura cale de scriere a voxelilor la runtime — si reconstruit la incarcare din
+   * coloanele RLE (`reconstruiesteGrinzi`). Nu intra in hash si nu se salveaza.
+   * Se citeste DOAR prin `get` (vezi `grinziInRaza`), niciodata iterat: ordinea de
+   * insertie a unui Map difera intre lumea continua si cea incarcata.
+   */
+  readonly grinzi: IndexGrinzi
+}
+
+/**
+ * Un index de grinzi: chunkKey → chei LOCALE sortate (`cheieLocala`). Acelasi tip
+ * pentru grinzile din teren (`Terrain.grinzi`) si pentru cele PLANIFICATE ale unei
+ * intrebari de constructie.
+ *
+ * Cheia e locala chunk-ului, nu `cellKey`, ca modulul de teren sa nu depinda de
+ * `path.ts` (care depinde de el). Ordinea ei e (z, ly, lx), deci grinzile unei
+ * cote si ale unui interval de randuri stau CONTIGUU: o interogare e doua cautari
+ * binare, nu o parcurgere a listei (masurat de panou: la 400 de grinzi pe 5 etaje,
+ * 63.560 de candidati scanati liniar fata de 4.854).
+ */
+export type IndexGrinzi = Map<number, number[]>
+
+/** Cota se deplaseaza ca sa ramana nenegativa: ferestrele de voxeli coboara sub 0. */
+const Z_GRINDA = 1024
+
+function cheieLocala(lx: number, ly: number, z: number): number {
+  return ((z + Z_GRINDA) * CHUNK_CELLS + ly) * CHUNK_CELLS + lx
+}
+
+/** Pozitia inferioara (lower bound) a lui `cheie` intr-o lista sortata. */
+function pozitie(lista: readonly number[], cheie: number): number {
+  let lo = 0
+  let hi = lista.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (lista[mid]! < cheie) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
+/** Adauga o grinda in index (idempotent). Lista chunk-ului ramane sortata. */
+export function adaugaGrinda(index: IndexGrinzi, wx: number, wy: number, z: number): void {
+  const cx = Math.floor(wx / CHUNK_CELLS)
+  const cy = Math.floor(wy / CHUNK_CELLS)
+  const ck = chunkKey(cx, cy)
+  const cheie = cheieLocala(wx - cx * CHUNK_CELLS, wy - cy * CHUNK_CELLS, z)
+  let lista = index.get(ck)
+  if (lista === undefined) {
+    lista = []
+    index.set(ck, lista)
+  }
+  const i = pozitie(lista, cheie)
+  if (lista[i] !== cheie) lista.splice(i, 0, cheie)
+}
+
+/**
+ * Scoate o grinda din index. O lista ramasa GOALA se sterge: altfel indexul lumii
+ * continue ar avea `chunk → []` acolo unde cel reconstruit n-are nimic, si orice
+ * comparatie de egalitate ar iesi rosie fals.
+ */
+export function scoateGrinda(index: IndexGrinzi, wx: number, wy: number, z: number): void {
+  const cx = Math.floor(wx / CHUNK_CELLS)
+  const cy = Math.floor(wy / CHUNK_CELLS)
+  const ck = chunkKey(cx, cy)
+  const lista = index.get(ck)
+  if (lista === undefined) return
+  const cheie = cheieLocala(wx - cx * CHUNK_CELLS, wy - cy * CHUNK_CELLS, z)
+  const i = pozitie(lista, cheie)
+  if (lista[i] !== cheie) return
+  lista.splice(i, 1)
+  if (lista.length === 0) index.delete(ck)
+}
+
+/**
+ * Grinzile din `index` de la cota `z`, la distanta Manhattan cel mult `raza` de
+ * (wx, wy), ca perechi (x, y) adaugate in `out`.
+ *
+ * Chunk-urile se enumera TAIATE la lume: `chunkKey` nu e injectiv in afara ei
+ * (`chunkKey(-1, 5) === chunkKey(511, 4)`), deci fara taiere cutia de la marginea
+ * de vest ar aduce grinzile de la capatul de est. Filtrul Manhattan se face pe
+ * coordonatele DECODATE, nu pe chei.
+ */
+export function grinziInRaza(index: IndexGrinzi, wx: number, wy: number, z: number, raza: number, out: number[]): void {
+  const cx0 = Math.max(0, Math.floor((wx - raza) / CHUNK_CELLS))
+  const cx1 = Math.min(CHUNK_GRID - 1, Math.floor((wx + raza) / CHUNK_CELLS))
+  const cy0 = Math.max(0, Math.floor((wy - raza) / CHUNK_CELLS))
+  const cy1 = Math.min(CHUNK_GRID - 1, Math.floor((wy + raza) / CHUNK_CELLS))
+  for (let cy = cy0; cy <= cy1; cy++) {
+    for (let cx = cx0; cx <= cx1; cx++) {
+      const lista = index.get(chunkKey(cx, cy))
+      if (lista === undefined) continue
+      const bx = cx * CHUNK_CELLS
+      const by = cy * CHUNK_CELLS
+      const lyMin = Math.max(0, wy - raza - by)
+      const lyMax = Math.min(CHUNK_CELLS - 1, wy + raza - by)
+      if (lyMin > lyMax) continue
+      const sus = cheieLocala(CHUNK_CELLS - 1, lyMax, z)
+      for (let i = pozitie(lista, cheieLocala(0, lyMin, z)); i < lista.length && lista[i]! <= sus; i++) {
+        const c = lista[i]!
+        const x = bx + (c % CHUNK_CELLS)
+        const y = by + (Math.floor(c / CHUNK_CELLS) % CHUNK_CELLS)
+        if (Math.abs(x - wx) + Math.abs(y - wy) <= raza) out.push(x, y)
+      }
+    }
+  }
+}
+
+/**
+ * Reconstruieste `t.grinzi` din coloanele RLE ale chunk-urilor PROMOVATE, in
+ * ordinea lui `t.keys` (sortata). Chunk-urile fara nicio grinda se sar dintr-o
+ * cautare in `runMaterial`, fara sa se desfaca vreo coloana: masurat de panou,
+ * 1,2 ms la 900 de chunk-uri fara grinzi, 14,5 ms la 1024 cu cate o grinda.
+ */
+export function reconstruiesteGrinzi(t: Terrain): void {
+  t.grinzi.clear()
+  for (const key of t.keys) {
+    const chunk = t.chunks.get(key)!
+    const v = chunk.voxels
+    if (!v || !v.runMaterial.includes(Material.GRINDA)) continue
+    const bx = chunk.cx * CHUNK_CELLS
+    const by = chunk.cy * CHUNK_CELLS
+    for (let col = 0; col < CHUNK_CELLS * CHUNK_CELLS; col++) {
+      let z = v.zBaseM
+      const end = v.columnStart[col + 1]!
+      for (let r = v.columnStart[col]!; r < end; r++) {
+        const len = v.runLength[r]!
+        if (v.runMaterial[r] === Material.GRINDA) {
+          for (let k = 0; k < len; k++) adaugaGrinda(t.grinzi, bx + (col % CHUNK_CELLS), by + Math.floor(col / CHUNK_CELLS), z + k)
+        }
+        z += len
+      }
+    }
+  }
+}
+
+/** Grinzile din index ca lista sortata (x, y, z) — pentru comparatii in teste. */
+export function listaGrinzi(index: IndexGrinzi): string[] {
+  const out: string[] = []
+  const chei = [...index.keys()].sort((a, b) => a - b)
+  for (const ck of chei) {
+    const cx = ck % CHUNK_GRID
+    const cy = Math.floor(ck / CHUNK_GRID)
+    for (const c of index.get(ck)!) {
+      const lx = c % CHUNK_CELLS
+      const ly = Math.floor(c / CHUNK_CELLS) % CHUNK_CELLS
+      const z = Math.floor(c / (CHUNK_CELLS * CHUNK_CELLS)) - Z_GRINDA
+      out.push(`${cx * CHUNK_CELLS + lx},${cy * CHUNK_CELLS + ly},${z}`)
+    }
+  }
+  return out
 }
 
 export function chunkKey(cx: number, cy: number): number {
@@ -42,7 +194,7 @@ export function chunkKey(cx: number, cy: number): number {
 }
 
 export function createTerrain(seed: number, radius: number): Terrain {
-  return { seed, chunks: new Map(), keys: [], focusCx: 0, focusCy: 0, radius }
+  return { seed, chunks: new Map(), keys: [], focusCx: 0, focusCy: 0, radius, grinzi: new Map() }
 }
 
 function insertKey(t: Terrain, key: number): void {
@@ -223,6 +375,10 @@ function editAt(t: Terrain, wx: number, wy: number, z: number, material: Materia
     const zBase = ref.chunk.voxels!.zBaseM
     return refuse(Reason.IN_AFARA_LUMII, { z, min: zBase, max: zBase + VOXEL_LEVELS - 1 })
   }
+  // Indexul DERIVED al grinzilor, tinut aici fiindca aici trece ORICE scriere de voxel
+  // la runtime (sapat de job si de comanda, zidire, prabusire, moloz).
+  if (current.value === Material.GRINDA) scoateGrinda(t.grinzi, wx, wy, z)
+  if (material === Material.GRINDA) adaugaGrinda(t.grinzi, wx, wy, z)
   return accept()
 }
 

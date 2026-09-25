@@ -43,6 +43,10 @@ export const MATERIAL_COLOR: Record<number, Rgb> = {
   // Mai deschis si mai rece decat roca: molozul trebuie sa se citeasca de la
   // distanta ca „aici s-a intamplat ceva", nu ca inca un perete.
   [Material.MOLOZ]: rgb(0x9a958c),
+  // Mai calda si mai inchisa decat piatra zidita: grinda e o piesa cu REGULA proprie
+  // (tine 9 pasi in jurul ei, daca e prinsa de ceva asezat), deci trebuie sa se
+  // deosebeasca de zidul in care sta, nu sa se piarda in el.
+  [Material.GRINDA]: rgb(0x7a6552),
 }
 
 const IMPLICIT: Rgb = rgb(0x999999)
