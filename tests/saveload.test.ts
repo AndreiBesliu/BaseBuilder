@@ -331,6 +331,38 @@ test('nicio rezervare pe o tinta care nu mai exista, la FIECARE tick', () => {
     }
   }
   assert.equal(granite, SEMINTE_REZERVARI.length * TICKURI_REZERVARI)
+  // Si cazul in care un morman MOARE sub un claimant de pe ALT strat: doi flamanzi il
+  // golesc pe MANCAT in timp ce un caraus de la 16–24 de celule il tine pe CARAT (panoul,
+  // 25.09). `mananca` trebuie sa reconcilieze claimantii la moarte; altfel ramane o
+  // rezervare pe un id mort si un job viu fara tinta. Pe lumeBogata coincidenta depinde
+  // de ordinea joburilor, si dupa reparatiile din 25.09 nu se mai nimerea: contor de viata.
+  let mortSubClaimant = 0
+  for (const seed of [12345, 7, 12, 99]) {
+    const { w, sit } = laSit(seed, 1)
+    picteaza(w, sit.wx + 2, sit.wy + 2, 3)
+    const T = solidLaDistanta(w, sit.wx, sit.wy, sit.g, 16, 24)
+    const idH = lasaItem(w, Item.HRANA, 75, T.wx, T.wy)
+    let flamanzi = 0
+    for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]] as const) {
+      if (flamanzi === 2) break
+      const g = solid(w, T.wx + dx, T.wy + dy)
+      if (g === null) continue
+      const out = applyCommand(w, { kind: 'spawnAgent', x: (T.wx + dx) * 1000 + 500, y: (T.wy + dy) * 1000 + 500, z: g + 1, faction: 0 }, R)
+      if (!out.ok) continue
+      w.agents.nevoi[(w.agents.count - 1) * NEVOI + Nevoie.FOAME] = 200
+      flamanzi++
+    }
+    let caratInainte = 0
+    for (let t = 0; t < 600; t++) {
+      advance(w, 1, R)
+      const v = verificaRezervari(w.rezervari, w.agents, existaTinta(w))
+      assert.ok(v.ok, `HRANA, seed ${seed}, tickul ${w.tick}: ${JSON.stringify(v)}`)
+      const viu = slotItem(w.iteme, idH) !== -1
+      if (!viu && caratInainte > 0) { mortSubClaimant++; caratInainte = 0 }
+      if (viu) caratInainte = rezervariPentru(w.rezervari, idH, Strat.CARAT).reduce((a, r) => a + r.count, 0)
+    }
+  }
+  assert.ok(mortSubClaimant > 0, 'fixtura: niciun morman de hrana n-a murit cu un claimant CARAT pe el — reconcilierea de la mancat nu s-a probat')
 })
 
 test('suma rezervata pe un morman nu depaseste ce e in el, la FIECARE tick — pe felurile necomestibile; pe HRANA se probeaza conservarea', () => {

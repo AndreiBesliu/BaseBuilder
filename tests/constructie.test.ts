@@ -1620,12 +1620,14 @@ test('munca falsa: un drum refuzat spre morman NU trimite constructorul la santi
   let laSantierCuManaGoala = 0
   let refuzuri = 0
   let santierEvitat = 0
+  let mormanRacit = 0
   for (let t = 0; t < 3000; t++) {
     w.agents.x[1] = lx * 1000 + 500
     w.agents.y[1] = ly * 1000 + 500
     w.agents.z[1] = lz
     refuzuri += ruleaza(w, 1).refuzuriDrum
     if (esteEvitata(w, 0, idSantier)) santierEvitat++
+    if (w.iteme.reincercaLaTick[slotItem(w.iteme, idItem)]! > w.tick) mormanRacit++
     if (w.agents.jobKind[0] === FelJob.CONSTRUIESTE) {
       if (w.agents.jobId[0] !== ultimJob) { joburi++; ultimJob = w.agents.jobId[0]! }
       if (w.agents.caraCantitate[0] === 0 && w.agents.jobStep[0]! >= PasConstruieste.MERGE_SANTIER) laSantierCuManaGoala++
@@ -1639,7 +1641,9 @@ test('munca falsa: un drum refuzat spre morman NU trimite constructorul la santi
   assert.ok(joburi <= 2 + Math.ceil(3000 / R.jobRetryTicks), `${joburi} joburi pornite in 3000 de tickuri`)
   // Cauza e a PERECHII: pionul evita mormanul, dar mormanul NU e racit pentru toti.
   assert.ok(esteEvitata(w, 0, idItem), 'pionul ar trebui sa evite mormanul blocat')
-  assert.ok(w.iteme.reincercaLaTick[slotItem(w.iteme, idItem)]! <= w.tick, 'mormanul a fost racit GLOBAL dintr-un job de construit')
+  // La FIECARE tick, nu doar la capat: o racire de 100 de tickuri scrisa la ultimul job
+  // ar expira pana la 3000 si ar trece neobservata.
+  assert.equal(mormanRacit, 0, `mormanul a fost racit GLOBAL ${mormanRacit} tickuri dintr-un job de construit`)
   // Si NU e vina santierului: un drum refuzat spre morman nu-i scrie nici evitare pe
   // pereche, nici racire, nici cauza (recenzia din 25.09: jumatatea asta a contractului
   // n-avea nicio asertiune — cu ea incalcata, santierul era evitat 2559 din 3000 de

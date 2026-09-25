@@ -883,7 +883,8 @@ export function rezumatMaterial(w: World, rules: Rules, slot: number): readonly 
     maxSubPragPion[p] = 0
     if (p === 0) { pragPiesa[p] = 0; cantPiesa[p] = 0; felPiesa[p] = -1; continue }
     const spec = rules.piese[p]!
-    pragPiesa[p] = pragRidicare(rules, spec)
+    // Prin `pragSursa`, cu `lipsa` = toata piesa: acelasi drum ca retintirea si pornirea.
+    pragPiesa[p] = pragSursa(rules, spec, spec.cantitate)
     cantPiesa[p] = spec.cantitate
     felPiesa[p] = rules.digYield[spec.material]!.fel
   }
