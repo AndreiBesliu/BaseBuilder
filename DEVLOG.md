@@ -3457,13 +3457,17 @@ cu verdictul lângă; aici e starea întreagă, într-un singur loc.
 
 ### Deschise, de joc — fiecare re-verificat pe cod azi
 
-- **Plafonul piciorului doi.** `candDist2` (morman → șantier) intră doar în departajare, nu într-un
-  plafon. Cazul din lista originală — morman la 90 de celule într-o parte, șantier la 90 în cealaltă —
-  rămâne posibil prin construcție.
-- **Un morman hrănește un singur constructor.** `maxClaimants: 1` pe `Strat.CARAT` în cererile
-  jobului de construit, deși un morman de 75 ține trei pereți.
-- **Fragmentarea.** Zero cod de consolidare în `src/sim/`. După o prăbușire, 30 de mormane de câte 10
-  nu ridică niciun perete; singurul leac e căratul, deci o colonie cu CARA pe 0 se blochează.
+- ~~**Plafonul piciorului doi.**~~ **NU SE CONSTRUIEȘTE (25.09, măsurat):** pierderea alegerii mormanului
+  după pion e mărginită de 2·dMin; într-un aranjament construit să doară, 8–22 celule/job; într-unul
+  natural, 0. Un plafon ar refuza șantiere ca să economisească atât. Marginea ține cu a doua sursă
+  aleasă pe `d(curent, M) + d(M, șantier)` — panoul a arătat că fără șantier în cheie ajunge la 12·dMin.
+- ~~**Un morman hrănește un singur constructor.**~~ **ÎNCHIS 25.09** (logistica 1/4): `itemClaimantsMax`
+  (4) pe CARAT, `liber = Q − Σcount` la cererea nouă. Măsurat: 3 constructori pe un morman de 75,
+  220/420/241 → în banda variantei cu trei mormane (112–120) plus cel mult un tact de rescanare.
+- ~~**Fragmentarea.**~~ **ÎNCHIS 25.09** (logistica 2b/4): ridicarea în mai multe rânduri. 30 de mormane
+  de câte 10, fără depozit: **0 pereți în 20.000 de tickuri → 3 pereți**, cu K05 neatins.
+  **Redeschis, mai mic:** praful sub prag (resturi de 1..9) nu-l mai ia decât căratul — D-C îi creează
+  clienții căratului de consolidare morman→morman, care reintră în registru cu motivul ăsta.
 - **Gaura de conținut SCARA/LEMN.** LEMN vine numai din săparea lui `LEMN_CONSTRUIT`, care vine numai
   din SCARA, care cere LEMN (`content/rules.json`). Circular și permanent. E o decizie de conținut.
 - **Producția de hrană** nu există: HRANA n-are niciun producător, se pune în lume cu comanda.
@@ -3677,3 +3681,93 @@ schema 7 la HEAD, înainte de orice cod.
 - D-D (trezirea la eliberare) după, pe o fixtură de 3000, cu `jobRescanTicks` fix;
 - praful sub prag: D-C creează clienții căratului de consolidare — reintră în registru;
 - 2·dMin e în Manhattan, costul e drumul: de măsurat pe sit neplat.
+
+---
+
+## S20-23, tăietura 3 — logistica construcției, livrată: 4 commit-uri, 3 hash-uri, 252 de probe
+
+**Model:** Claude Fable 5.1
+**Prompt de start:** „continua" (după panoul de design din dimineață)
+
+### Ce s-a livrat, în ordinea în care a trecut poarta
+
+| commit | ce | hash |
+|---|---|---|
+| `e970292` **1/4** | rezervări cu O SINGURĂ formă pe CARAT: tuplul constant (`maxCount = itemStackMax`, `maxClaimants = itemClaimantsMax`), cantitatea vie o singură dată la cererea nouă ca `liber = Q − Σcount`; storeul refuză cererile de zero; oracol de cantitate separat, cu toleranța pe HRANA scrisă; contor `refuzatLaStart`, cerut zero | `79035d35 → a8d20cc5` |
+| `1e5ae34` **2a/4** | trei defecte care existau azi: munca falsă (`refaTinta` pe pas + zăvor `zidiriCuManaGoala`), `poateFiIntrerupt = mâna plină` indiferent de fel, `mutaItem` cu post-condiția „id viu ⇒ cantitate neschimbată" | neschimbat |
+| `193f7c1` **2b/4** | ridicarea în mai multe rânduri: prag per piesă, a doua sursă pe `d(curent, M) + d(M, șantier)` cu filtru de componentă, retintirea în reconciliere, suma LIBERĂ în rază ca poartă, `MATERIAL_IMPRASTIAT`, decode contra conținutului; fără schemă nouă | `a8d20cc5 → d9c0dc04` |
+| `9ffdf8e` **3/4** | costul sondei crește cu munca, nu cu lumea: `viiConstruieste` (ieșire O(1)), `IndexZone.peFel`, fixtura `lume3000` | neschimbat |
+
+Plus două commit-uri de probe RATATE aduse la aprindere (`b11af11`, `5d27c2a`); re-ancorarea lui
+`nevoi[5]` a intrat în 2a.
+**462 de teste, 252 de probe.** Suita întreagă de mutații s-a rulat la capăt (rezultatul în ultimul
+paragraf).
+
+### Cifrele feliei
+
+- **Serializarea pe morman**: 3 constructori pe un morman de 75 — înainte 220/420/241 tickuri, trei
+  mormane de 25 în 112/112/120. Testul cere acum, pe aceeași sămânță, ca varianta cu un morman să nu
+  piardă mai mult de un tact de rescanare față de cea cu trei, ȘI ca lacătul vechi (`itemClaimantsMax:
+  1`, controlul) să fie vizibil mai lent. Amândouă trec.
+- **Fragmentarea**: 30 × 10 fără depozit — 0 pereți în 20.000 → **3 pereți**, cu ≥ 1 job cu două
+  ridicări, `zidiriCuManaGoala` 0, `ridicariAbandonate ≤ 1`, `regions.keys` constant (K05).
+- **Materialul de neatins** (10 accesibile + 10 sigilate, 2 pioni, 2 șantiere, 3000 de tickuri):
+  joburi pornite ≤ 2 × (1 + ⌈3000/600⌉) = 12, `nextId` mărginit la fel, marfa constantă.
+- **Scenariul standard**: 86,7 µs/tick înainte de felie; **98–108 după 2b** (sonda plătea un `Map.get`
+  per morman pentru `liber`); **88–92 după 3**. Banda de dinainte, recuperată din `peFel` + ieșirea O(1).
+- **`lume3000`** (3040 de mormane, 500 de tickuri): fără șantiere **0 pași de sondă/scanare**, 1
+  reconstrucție de index; cu 3 șantiere **31,5 pași/scanare** (cele 40 de mormane de piatră, nu 3040),
+  3 căutări de a doua sursă a câte 38 de pași, 9 reconstrucții, 54,7 pași de index/tick, 60 de unități
+  zidite. Cifrele de index (perf#5 din panou) rămân în registru, nu se repară aici.
+
+### Ce a schimbat codul față de designul v3
+
+- **Evitarea mormanului lăsat jos (pasul 4) s-a scos înainte de a fi scrisă.** Analiza pe scenariul cu
+  doi pioni: mormanul lăsat primește id NOU la fiecare lăsare, deci o pereche (pion, morman) nu poate
+  opri nimic, iar celălalt pion îl vede oricum. Ce mărginește bucla e evitarea pe pereche a sursei de
+  neatins (în `refaSursa`) plus suma LIBERĂ în rază — și pe alea stau probele. O centură fără probă e
+  un orb; nu s-a scris.
+- **`terminaJob` nu întoarce nimic** — nu mai avea cine să citească.
+- **Fixturile „a doua sursă" pornesc jobul explicit.** Urma per tick a arătat ce presupuneam greșit:
+  pionul hoinărește până la prima lui scanare (`(tick + id) % 30`), măsurat 4 celule, deci „cel mai
+  apropiat morman de spawn" nu e ce vede sonda. Mecanismul era corect; fixturile nu.
+
+### Probele care au ieșit RATATE prima dată, și de ce (opt din 45)
+
+- `nevoi[5]` ancorată pe corpul vechi al lui `poateFiIntrerupt` — re-ancorată.
+- coridorul din `refaSursa` (K05): pe un pătrat plat totul e deja acoperit — testul a primit un morman
+  departe, în afara discurilor, ca la K05 de la cărat.
+- `m.exista` fără suma liberă: prinsă, dar de marginea de pe materialul de neatins, nu de testul cu doi
+  constructori, care se descurcă și fără poartă.
+- sonda pe `cant` în loc de `liber`: mascată de refuzul cererilor de zero; leagă doar cu `liber` între 1
+  și prag−1 — scenariu dedicat (5 libere din 25).
+- ieșirea O(1) fără șantiere: fără nicio desemnare, `shouldSkip` iese din scanare înainte de sondă —
+  fixtura a primit o săpătură departe.
+- „parcurge toate itemele": mutația număra pasul DUPĂ filtrul pe fel, adică la fel ca originalul.
+- două din 2b re-ancorate mecanic (`liber < necesar`, blocul din `refaTinta`).
+
+Niciuna nu era o gaură în cod. Toate erau găuri în FIXTURI sau în MUTAȚII — exact ce spune regula:
+proba dovedește că testul leagă pe ce ating fixturile, nu pe ce spune numele lui.
+
+### Ce rămâne, cu cifra
+
+- **Reconstrucția indexului per ridicare**: ~180 µs la 3000 de mormane (panou); pe `lume3000` cu 3
+  șantiere, 9 reconstrucții și 54,7 pași/tick în 500 de tickuri. Nu se repară aici.
+- **Sortarea candidaților**: ~590 µs la n = 3000 în `deMutat`, înaintea plafonului. Pre-existentă.
+- **D-D (trezirea la eliberare)**: după D-B, serializarea rămasă e sub un tact; se măsoară pe `lume3000`
+  dacă vreodată doare, niciodată prin scăderea lui `jobRescanTicks`.
+- **Praful sub prag** — reintră în registrul de mai sus.
+- **2·dMin e în Manhattan**, costul e drumul A*: nemăsurat pe sit neplat.
+- **`deMutat` e supra-aproximare**: a doua rezervare pe un morman de 75 nu pornește când singurul loc
+  din depozit e sub 50. Limitare cunoscută.
+
+### Suita întreagă de mutații, la capăt
+
+**251 din 252 prinse, 0 controale invalide, 663 s.** Cea ratată era o probă veche, din 6c: „cauza pe
+desemnare vine din rezumatul PER-PION, nu din lume", ancorată pe testul cu materialul REZERVAT de alt
+pion. Testul ăla nu mai deosebește cele două variante: ridicarea durează 10 tickuri, scanarea vine la
+30, deci al doilea pion vede mormanul deja consumat și LIPSA e legitimă oricum. Cine deosebește per-pion
+de lume e testul cu mormanul EVITAT — evitarea e a perechii, lumea tot îl are — și mutația l-a înroșit
+în aceeași rulare. Proba s-a re-ancorat pe el, într-un commit separat, și s-a confirmat singură. Deci
+**252/252** după re-ancorare, iar testul cu materialul rezervat rămâne cu o gaură cunoscută: apără
+în continuare ce-i spune numele, dar nu mai e proba negativă a acestei linii.
