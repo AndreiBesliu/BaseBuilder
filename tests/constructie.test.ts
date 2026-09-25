@@ -33,7 +33,7 @@ import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { CATEGORII, Categorie, FelJob, Piesa } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { applyCommand } from '../src/sim/commands.ts'
-import { anuleazaDesemnare, celulaDeLucru, comparaCandidati, constructiaPrevizualizata, esteEvitata, evitaTinta, lastJobReport, pornesteConstruieste, unitatiDeMunca } from '../src/sim/joburi.ts'
+import { anuleazaDesemnare, celulaDeLucru, comparaCandidati, constructiaPrevizualizata, esteEvitata, evitaTinta, lastJobReport, pornesteConstruieste, pragRidicare, rezumatMaterial, unitatiDeMunca } from '../src/sim/joburi.ts'
 import { Nevoie, NEVOI } from '../src/sim/state.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { slotItem } from '../src/sim/iteme.ts'
@@ -714,19 +714,27 @@ test('ACCEPTANTA: pionul cara materialul si RIDICA peretele', () => {
   assert.equal(Math.max(Math.abs(px - sx), Math.abs(py - sy)), 1, `pionul a zidit de la (${px},${py}), santierul e la (${sx},${sy})`)
 })
 
-test('un morman de alt fel, sau prea mic, se refuza la PORNIRE', () => {
-  // `ridica` ia `min(cerut, gasit)`: fara garda, un morman de 10 ar trimite pionul
-  // sa munceasca 400 de tickuri si sa descopere abia la final ca n-are din ce zidi.
+test('un morman de alt fel, sau sub PRAGUL de ridicare, se refuza la PORNIRE; unul de la prag in sus porneste cu count-ul lui', () => {
+  // `ridica` ia `min(cerut, gasit)`: fara garda, un morman de praf ar trimite pionul
+  // dupa 20 de ridicari. De la prag in sus, restul piesei vine din a doua sursa.
   const a = santier(12345, Item.LEMN)
   const r1 = pornesteConstruieste(a.w, R, 0, a.ds, a.is)
   assert.equal(r1.ok, false, 'lemnul nu e piatra')
   assert.equal(r1.ok ? '' : r1.reason, Reason.LIPSA_MATERIAL)
 
-  const b = santier(12345, Item.PIATRA, R.piese[Piesa.PERETE]!.cantitate - 1)
+  const prag = pragRidicare(R, R.piese[Piesa.PERETE]!)
+  assert.ok(prag < R.piese[Piesa.PERETE]!.cantitate, 'fixtura: pragul trebuie sa fie sub cantitatea piesei')
+  const b = santier(12345, Item.PIATRA, prag - 1)
   const r2 = pornesteConstruieste(b.w, R, 0, b.ds, b.is)
-  assert.equal(r2.ok, false, 'un perete nu se zideste din jumatate de morman')
+  assert.equal(r2.ok, false, 'un morman sub prag nu merita drumul')
   assert.equal(r2.ok ? '' : r2.reason, Reason.LIPSA_MATERIAL)
   assert.equal(b.w.rezervari.total, 0, 'si un refuz nu lasa rezervari in urma')
+
+  // Controlul: exact pragul porneste, cu count-ul pe SURSA, nu totalul piesei.
+  const c = santier(12345, Item.PIATRA, prag)
+  assert.ok(pornesteConstruieste(c.w, R, 0, c.ds, c.is).ok, 'un morman de exact prag trebuie sa porneasca')
+  assert.equal(c.w.agents.jobCantitate[0], prag)
+  assert.equal(c.w.rezervari.total, 2)
 })
 
 test('pionul mutat de pe locul de lucru nu zideste de la distanta', () => {
@@ -1477,11 +1485,27 @@ test('cauza „lipsa material" nu mosteneste detaliul cauzei dinainte', () => {
 // ---------------------------------------------------------------------------
 
 /** Un santier de PERETE pe solul de la (wx, wy). */
-function pereteLa(w: World, wx: number, wy: number, rules: Rules = R): void {
+function pereteLa(w: World, wx: number, wy: number, rules: Rules = R): number {
   const g = solid(w, wx, wy)
   assert.notEqual(g, null, `nu e sol la ${wx},${wy}`)
   const r = applyCommand(w, { kind: 'desemneaza', wx, wy, z: g! + 1, piesa: Piesa.PERETE }, rules)
   assert.ok(r.ok, `santier refuzat la ${wx},${wy}: ${JSON.stringify(r)}`)
+  return r.ok ? r.value : -1
+}
+
+/**
+ * Porneste explicit jobul pionului `p` pe sursa `idItem` pentru santierul `idSantier`.
+ * Pionul HOINARESTE pana la prima lui scanare (`(tick + id) % jobRescanTicks`), deci
+ * „cel mai apropiat morman de locul de spawn" nu e ce vede sonda 25 de tickuri mai
+ * tarziu — masurat: 4 celule mai incolo. Cand testul e despre A DOUA sursa, prima se
+ * fixeaza aici, iar a doua se alege determinist de la celula primei.
+ */
+function pornestePe(w: World, p: number, idSantier: number, idItem: number): void {
+  const ds = slotDesemnare(w.desemnari, idSantier)
+  const is = slotItem(w.iteme, idItem)
+  assert.ok(ds !== -1 && is !== -1, 'fixtura: santierul sau mormanul nu exista')
+  const out = pornesteConstruieste(w, R, p, ds, is)
+  assert.ok(out.ok, `fixtura: pornirea pe ${idItem} refuzata: ${JSON.stringify(out)}`)
 }
 
 /** Cate santiere de construit mai sunt vii. */
@@ -1645,4 +1669,276 @@ test('foamea critica nu arunca mana plina: constructorul zideste, APOI mananca',
   const mananca = panaCand(w, 2000, (ww) => ww.agents.jobKind[0] === FelJob.MANANCA)
   assert.ok(mananca >= 0, 'dupa perete, pionul flamand trebuia sa mearga sa manance')
   assert.equal(w.ratiune.itemePierdute, 0)
+})
+
+// ---------------------------------------------------------------------------
+// ridicarea in mai multe randuri (logistica, 2b)
+// ---------------------------------------------------------------------------
+
+/** Un patrat plat de `latura` langa un sit, pe prima samanta care il are. */
+function scenaPlata(seminte: readonly number[], latura: number, dMin = 2, dMax = 40): { w: World; T: { x0: number; y0: number; g: number } } {
+  for (const seed of seminte) {
+    const { w, sit } = laSit(seed, 0)
+    const T = patratPlat(w, sit, latura, dMin, dMax)
+    if (T) return { w, T }
+  }
+  assert.fail('fixtura: niciun patrat plat pe semintele date')
+}
+
+/** Un pion al asezarii pe solul de la (wx, wy). Intoarce slotul. */
+function pionLa(w: World, wx: number, wy: number): number {
+  const g = solid(w, wx, wy)
+  assert.notEqual(g, null, `nu e sol la ${wx},${wy}`)
+  const r = applyCommand(w, { kind: 'spawnAgent', x: wx * 1000 + 500, y: wy * 1000 + 500, z: g! + 1, faction: 0 }, R)
+  assert.ok(r.ok, `pion refuzat la ${wx},${wy}: ${JSON.stringify(r)}`)
+  return w.agents.count - 1
+}
+
+/** Ce sursa are pionul cand merge dupa a DOUA parte (prima e in mana). */
+function aDouaSursa(w: World, slot: number): number {
+  return w.agents.jobKind[slot] === FelJob.CONSTRUIESTE && w.agents.jobStep[slot] === PasConstruieste.MERGE_SURSA && w.agents.caraCantitate[slot]! > 0 ? w.agents.jobTarget[slot]! : -1
+}
+
+test('ridicarea in mai multe randuri: 30 de mormane de cate 10, fara depozit, ridica 3 pereti — si K05 ramane', () => {
+  // Masurat inainte (25.09): 0 pereti in 20.000 de tickuri. `rezumatMaterial` cerea
+  // toata piesa dintr-un SINGUR morman, iar singurul mecanism care contopea era
+  // caratul spre depozit — deci o colonie fara depozit sau fara carausi statea.
+  const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 9)
+  let puse = 0
+  for (let dx = 0; dx < 6 && puse < 30; dx++) for (let dy = 0; dy < 5 && puse < 30; dy++) { lasaItem(w, Item.PIATRA, 10, T.x0 + dx, T.y0 + dy); puse++ }
+  for (let k = 0; k < 3; k++) pereteLa(w, T.x0 + 7, T.y0 + k)
+  for (let i = 0; i < 6; i++) pionLa(w, T.x0 + 8, T.y0 + (i % 5))
+  ruleaza(w, 5) // regiunile se aseaza
+  const blocuri = w.regions.keys.length
+  let douaRidicari = 0
+  const n = panaCand(w, 6000, (w) => {
+    for (let i = 0; i < w.agents.count; i++) if (aDouaSursa(w, i) !== -1) douaRidicari++
+    return santiereVii(w) === 0
+  })
+  assert.ok(n >= 0, 'peretii nu s-au ridicat din mormane de 10')
+  assert.ok(douaRidicari > 0, 'fixtura: nimeni n-a mers dupa a doua sursa cu prima in mana')
+  assert.equal(w.ratiune.zidiriCuManaGoala, 0)
+  assert.equal(w.ratiune.unitatiZidite, 3 * R.piese[Piesa.PERETE]!.cantitate)
+  assert.equal(w.ratiune.itemePierdute, 0)
+  assert.ok(w.ratiune.ridicariAbandonate <= 1, `${w.ratiune.ridicariAbandonate} ridicari abandonate cu material din belsug`)
+  // K05: a doua sursa nu intinde coridoare. Acoperirea e cea de dupa asezare.
+  assert.equal(w.regions.keys.length, blocuri, `acoperirea a crescut cu ${w.regions.keys.length - blocuri} blocuri in timpul constructiei`)
+})
+
+test('doi constructori, doua mormane de 10, UN santier, fara depozit: peretele se ridica', () => {
+  // Fara suma LIBERA in raza, fiecare ar lua cate un morman, niciunul n-ar gasi
+  // a doua sursa, si 20 de unitati ar zace la doua celule de santier pe veci.
+  const { w, T } = scenaPlata([7, 12345, 12, 17, 18], 6)
+  lasaItem(w, Item.PIATRA, 10, T.x0, T.y0)
+  lasaItem(w, Item.PIATRA, 10, T.x0, T.y0 + 2)
+  pereteLa(w, T.x0 + 4, T.y0 + 1)
+  pionLa(w, T.x0 + 2, T.y0)
+  pionLa(w, T.x0 + 2, T.y0 + 2)
+  let refuzatLaStart = 0
+  const n = panaCand(w, 600, (w) => { refuzatLaStart += lastJobReport().refuzatLaStart; return santiereVii(w) === 0 })
+  assert.ok(n >= 0, 'peretele nu s-a ridicat in 600 de tickuri: cei doi si-au impartit materialul')
+  assert.equal(refuzatLaStart, 0)
+  assert.equal(w.ratiune.zidiriCuManaGoala, 0)
+  assert.equal(w.ratiune.itemePierdute, 0)
+})
+
+test('materialul de neatins nu produce un ciclu de ridicari: 10 accesibile + 10 sigilate, 2 pioni, 2 santiere', () => {
+  // Suma pe LUME ar porni joburi pe material din alta componenta la fiecare tact;
+  // suma LIBERA in raza plus evitarea pe pereche a mormanului de neatins le
+  // marginesc la o incercare per (pion, morman) per `jobRetryTicks`.
+  const { w, wx, wy, g } = sitPlat(12345, 11)
+  const px = wx + 1
+  const py = wy + 5
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
+    for (const dz of [1, 2]) assert.ok(applyCommand(w, { kind: 'fill', wx: px + dx, wy: py + dy, z: g + dz, material: Material.PIATRA_CONSTRUITA }, R).ok)
+  }
+  lasaItem(w, Item.PIATRA, 10, px, py)
+  lasaItem(w, Item.PIATRA, 10, wx + 5, wy + 5)
+  pereteLa(w, wx + 8, wy + 4)
+  pereteLa(w, wx + 8, wy + 6)
+  pionLa(w, wx + 5, wy + 3)
+  pionLa(w, wx + 5, wy + 7)
+  ruleaza(w, 5)
+  const nextId0 = w.nextId
+  const marfa0 = marfaTotala(w)
+  let porniri = 0
+  const vazut = new Int32Array(w.agents.capacity)
+  ruleaza(w, 3000, R, (w) => {
+    for (let i = 0; i < w.agents.count; i++) if (w.agents.jobKind[i] === FelJob.CONSTRUIESTE && w.agents.jobId[i] !== vazut[i]) { vazut[i] = w.agents.jobId[i]!; porniri++ }
+  })
+  const margine = 2 * (1 + Math.ceil(3000 / R.jobRetryTicks))
+  assert.ok(w.ratiune.ridicariAbandonate >= 1, 'fixtura: nimeni n-a ridicat prima parte si n-a ramas fara a doua')
+  assert.ok(porniri <= margine, `${porniri} joburi pornite in 3000 de tickuri; marginea e ${margine}`)
+  assert.ok(w.nextId - nextId0 <= 2 * margine + 2, `nextId a crescut cu ${w.nextId - nextId0}`)
+  assert.equal(marfaTotala(w), marfa0)
+  assert.equal(w.ratiune.itemePierdute, 0)
+  assert.equal(w.ratiune.unitatiZidite, 0, 'fixtura: cu 10 de neatins nu se poate zidi nimic')
+})
+
+test('a doua sursa moare sub constructor (contopire partiala): se retinteste, marfa ramane in mana', () => {
+  const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 7)
+  const idSantier = pereteLa(w, T.x0 + 6, T.y0 + 3)
+  const idA = lasaItem(w, Item.PIATRA, 10, T.x0 + 1, T.y0 + 3)
+  const idB = lasaItem(w, Item.PIATRA, 10, T.x0 + 3, T.y0 + 1)
+  const idD = lasaItem(w, Item.PIATRA, 70, T.x0 + 4, T.y0 + 1)
+  const idC = lasaItem(w, Item.PIATRA, 10, T.x0 + 3, T.y0 + 5)
+  const p = pionLa(w, T.x0, T.y0 + 3)
+  // D exista doar ca sa PRIMEASCA restul lui B la cadere; ca sursa ar fi luat
+  // peretele intreg (70 ≥ 20, fara penalizare, cheie 6 < 11). Pionul il evita.
+  evitaTinta(w, p, idD, w.tick + 100000)
+  ruleaza(w, 5)
+  pornestePe(w, p, idSantier, idA)
+  const spreB = panaCand(w, 600, (w) => aDouaSursa(w, p) === idB)
+  assert.ok(spreB >= 0, `fixtura: a doua sursa trebuia sa fie B (prima A=${idA}); acum tinta e ${w.agents.jobTarget[p]}`)
+  // B cade (podeaua sapata, cu celula de dedesubt desemnata ca prima trecere s-o
+  // sara): 5 se contopesc in D, restul pastreaza id-ul B cu mai putin decat avea.
+  assert.ok(applyCommand(w, { kind: 'desemneaza', wx: T.x0 + 3, wy: T.y0 + 1, z: T.g - 1 }, R).ok)
+  assert.ok(applyCommand(w, { kind: 'dig', wx: T.x0 + 3, wy: T.y0 + 1, z: T.g }, R).ok)
+  const sB = slotItem(w.iteme, idB)
+  assert.ok(sB !== -1 && w.iteme.cantitate[sB]! < 10, 'fixtura: B trebuia sa supravietuiasca cu mai putin')
+  assert.equal(w.iteme.cantitate[slotItem(w.iteme, idD)], 75, 'fixtura: D trebuia sa primeasca restul')
+  assert.equal(aDouaSursa(w, p), idC, 'constructorul trebuia retintit spre C, cu prima parte inca in mana')
+  assert.equal(w.agents.caraCantitate[p], 10)
+  assert.equal(lastJobReport().lasateLaPicioare, 0)
+  const n = panaCand(w, 2000, (w) => santiereVii(w) === 0)
+  assert.ok(n >= 0, 'peretele nu s-a ridicat dupa retintire')
+  assert.equal(w.ratiune.itemePierdute, 0)
+})
+
+test('a doua sursa e in alta componenta: se sare fara niciun refuz de drum, si se evita pe pereche', () => {
+  const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 7)
+  const idSantier = pereteLa(w, T.x0 + 6, T.y0 + 3)
+  const idA = lasaItem(w, Item.PIATRA, 10, T.x0 + 1, T.y0 + 3)
+  const idB = lasaItem(w, Item.PIATRA, 10, T.x0 + 3, T.y0 + 1)
+  const idC = lasaItem(w, Item.PIATRA, 10, T.x0 + 3, T.y0 + 5)
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
+    for (const dz of [1, 2]) assert.ok(applyCommand(w, { kind: 'fill', wx: T.x0 + 3 + dx, wy: T.y0 + 1 + dy, z: T.g + dz, material: Material.PIATRA_CONSTRUITA }, R).ok)
+  }
+  const p = pionLa(w, T.x0, T.y0 + 3)
+  ruleaza(w, 5)
+  pornestePe(w, p, idSantier, idA)
+  let refuzuri = 0
+  let sursa2 = -1
+  const n = panaCand(w, 2000, (w) => {
+    refuzuri += lastJobReport().refuzuriDrum
+    if (sursa2 === -1 && aDouaSursa(w, p) !== -1) sursa2 = aDouaSursa(w, p)
+    return santiereVii(w) === 0
+  })
+  assert.ok(n >= 0, 'peretele nu s-a ridicat')
+  assert.equal(sursa2, idC, 'a doua sursa trebuia sa fie C, nu mormanul sigilat')
+  assert.equal(refuzuri, 0, 'pionul a plecat spre mormanul sigilat si a ars refuzuri de drum')
+  assert.ok(esteEvitata(w, p, idB), 'mormanul de neatins trebuia evitat pe pereche')
+})
+
+test('ostil pe a doua sursa: constructorul ia ALTA sursa, nu pleaca la santier cu mana goala', () => {
+  const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 7)
+  const idSantier = pereteLa(w, T.x0 + 6, T.y0 + 3)
+  const idA = lasaItem(w, Item.PIATRA, 10, T.x0 + 1, T.y0 + 3)
+  const idB = lasaItem(w, Item.PIATRA, 10, T.x0 + 3, T.y0 + 1)
+  const idC = lasaItem(w, Item.PIATRA, 10, T.x0 + 3, T.y0 + 5)
+  const p = pionLa(w, T.x0, T.y0 + 3)
+  ruleaza(w, 5)
+  pornestePe(w, p, idSantier, idA)
+  const ostil = applyCommand(w, { kind: 'spawnAgent', x: (T.x0 + 3) * 1000 + 500, y: (T.y0 + 1) * 1000 + 500, z: T.g + 1, faction: Faction.SALBATIC }, R)
+  assert.ok(ostil.ok)
+  const o = w.agents.count - 1
+  let refuzuriCuMarfa = 0
+  let sursa2 = -1
+  let n = -1
+  for (let t = 0; t < 3000; t++) {
+    w.agents.x[o] = (T.x0 + 3) * 1000 + 500
+    w.agents.y[o] = (T.y0 + 1) * 1000 + 500
+    w.agents.z[o] = T.g + 1
+    const r = ruleaza(w, 1)
+    if (r.refuzuriDrum > 0 && w.agents.caraCantitate[p]! > 0) refuzuriCuMarfa += r.refuzuriDrum
+    if (sursa2 === -1 && aDouaSursa(w, p) !== -1) sursa2 = aDouaSursa(w, p)
+    if (santiereVii(w) === 0) { n = t; break }
+  }
+  assert.notEqual(n, -1, 'peretele nu s-a ridicat')
+  assert.equal(sursa2, idB, 'fixtura: a doua sursa aleasa intai trebuia sa fie B (cea cu ostilul)')
+  assert.ok(refuzuriCuMarfa >= 1, 'fixtura: drumul spre B nu a fost refuzat cu marfa in mana')
+  assert.equal(w.ratiune.zidiriCuManaGoala, 0)
+  assert.equal(w.ratiune.itemePierdute, 0)
+  void idC
+})
+
+test('a doua sursa se alege dupa drumul curent → morman → santier, nu dupa cel mai apropiat de pion', () => {
+  // Panoul a simulat regula „cel mai apropiat de celula curenta" pe 3000 de campuri:
+  // 19% peste marginea de 2·dMin, pana la 12·dMin; cu santierul in cheie, 0.
+  const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 7)
+  const idSantier = pereteLa(w, T.x0 + 6, T.y0 + 3)
+  const idA = lasaItem(w, Item.PIATRA, 10, T.x0 + 2, T.y0 + 3)
+  const idB = lasaItem(w, Item.PIATRA, 10, T.x0, T.y0 + 3)      // in spatele lui A, mai aproape de A
+  const idC = lasaItem(w, Item.PIATRA, 10, T.x0 + 4, T.y0 + 3)  // spre santier, la fel de departe de A
+  const p = pionLa(w, T.x0 + 3, T.y0 + 3)
+  ruleaza(w, 5)
+  pornestePe(w, p, idSantier, idA)
+  let sursa2 = -1
+  const n = panaCand(w, 2000, (w) => {
+    if (sursa2 === -1 && aDouaSursa(w, p) !== -1) sursa2 = aDouaSursa(w, p)
+    return santiereVii(w) === 0
+  })
+  assert.ok(n >= 0)
+  assert.equal(sursa2, idC, `a doua sursa trebuia sa fie C (spre santier), nu B=${idB} (in spate)`)
+})
+
+test('un morman de 10 la 3 celule pierde in fata unui morman de 20 la 5: o ridicare in plus costa cat mersul', () => {
+  const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 7)
+  pereteLa(w, T.x0 + 6, T.y0 + 1)
+  const id10 = lasaItem(w, Item.PIATRA, 10, T.x0 + 3, T.y0 + 3)
+  const id20 = lasaItem(w, Item.PIATRA, 20, T.x0 + 5, T.y0 + 3)
+  const p = pionLa(w, T.x0, T.y0 + 3)
+  ruleaza(w, 5)
+  // Sonda, intrebata direct din pozitia pionului: pana la prima lui scanare el
+  // hoinareste, si „la 3 celule" ar deveni altceva.
+  const m = rezumatMaterial(w, R, p)[Piesa.PERETE]!
+  assert.ok(m.exista && m.slot !== -1, 'fixtura: sonda n-a gasit material')
+  assert.equal(w.iteme.id[m.slot], id20, `a ales mormanul de 10 (${id10}) in loc de cel intreg`)
+})
+
+test('un morman sub prag nu e sursa: praful se lasa carausilor', () => {
+  let scena: { w: World; wx: number; wy: number; g: number } | null = null
+  for (const seed of [12345, 7, 12, 17, 18]) { try { scena = sitPlat(seed, 15); break } catch { /* alta samanta */ } }
+  assert.ok(scena, 'fixtura: niciun sit plat de 15')
+  const { w, wx, wy, g } = scena!
+  const sant = applyCommand(w, { kind: 'desemneaza', wx: wx + 14, wy: wy + 9, z: g + 1, piesa: Piesa.PERETE }, R)
+  assert.ok(sant.ok)
+  const prag = pragRidicare(R, R.piese[Piesa.PERETE]!)
+  const idPraf = lasaItem(w, Item.PIATRA, prag - 1, wx + 2, wy + 7)   // la o celula de pion
+  const id20 = lasaItem(w, Item.PIATRA, 20, wx + 14, wy + 7)          // la 13 celule
+  const p = pionLa(w, wx + 1, wy + 7)
+  ruleaza(w, 5)
+  const m = rezumatMaterial(w, R, p)[Piesa.PERETE]!
+  assert.ok(m.exista && m.slot !== -1, 'fixtura: sonda n-a gasit material')
+  assert.equal(w.iteme.id[m.slot], id20, `sonda a propus praful (${idPraf}) in loc de mormanul intreg`)
+})
+
+test('De ce nu? deosebeste „nu e destul" de „e destul, dar praf": LIPSA_MATERIAL cu detaliu NICIUNUL, respectiv MATERIAL_IMPRASTIAT', () => {
+  const putin = santier(12345, Item.PIATRA, pragRidicare(R, R.piese[Piesa.PERETE]!))
+  ruleaza(putin.w, 40)
+  assert.equal(putin.w.desemnari.ultimulMotiv[putin.ds], codMotiv(Reason.LIPSA_MATERIAL), 'un singur morman de 10 nu ajunge pentru 20')
+  assert.equal(putin.w.desemnari.ultimulMotivDetaliu[putin.ds], DetaliuMotiv.NICIUNUL)
+
+  const praf = santier(12345, Item.PIATRA, 5)
+  const { w, ds } = praf
+  const px = w.iteme.wx[praf.is]!
+  const py = w.iteme.wy[praf.is]!
+  for (let k = 1; k <= 3; k++) lasaItem(w, Item.PIATRA, 5, px, py + k)
+  ruleaza(w, 40)
+  assert.equal(w.desemnari.ultimulMotiv[ds], codMotiv(Reason.LIPSA_MATERIAL))
+  assert.equal(w.desemnari.ultimulMotivDetaliu[ds], DetaliuMotiv.MATERIAL_IMPRASTIAT, '20 de unitati in mormane de 5: destul, dar de la niciunul nu merita drumul')
+  assert.equal(w.ratiune.unitatiZidite, 0)
+})
+
+test('SCARA cere 5, deci pragul ei e 5: porneste dintr-un morman de 5 lemn', () => {
+  const { w, wx, wy, g } = sitPlat(12345, 11)
+  const sant = applyCommand(w, { kind: 'desemneaza', wx: wx + 5, wy: wy + 5, z: g + 1, piesa: Piesa.SCARA }, R)
+  assert.ok(sant.ok, JSON.stringify(sant))
+  const idItem = lasaItem(w, Item.LEMN, R.piese[Piesa.SCARA]!.cantitate, wx + 1, wy + 5)
+  const p = pionLa(w, wx + 2, wy + 5)
+  const ds = slotDesemnare(w.desemnari, sant.ok ? sant.value : -1)
+  const is = slotItem(w.iteme, idItem)
+  assert.equal(pragRidicare(R, R.piese[Piesa.SCARA]!), R.piese[Piesa.SCARA]!.cantitate)
+  assert.ok(pornesteConstruieste(w, R, p, ds, is).ok, 'scara nu porneste din singurul morman care o acopera intreg')
+  assert.equal(w.agents.jobCantitate[p], R.piese[Piesa.SCARA]!.cantitate)
 })

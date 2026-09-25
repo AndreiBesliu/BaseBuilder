@@ -240,11 +240,17 @@ export function lumeBogata(seed: number): World {
 export function lumeFragmentata(seed: number): World {
   const w = lumeBogata(seed)
   const sit = gasesteSit(w, seed)
-  lasaItem(w, Item.PIATRA, 75, sit.wx + 3, sit.wy + 5)
-  for (let i = 0; i < 4; i++) lasaItem(w, Item.PIATRA, 10, sit.wx + 1 + (i % 2), sit.wy + 3 + Math.floor(i / 2))
-  for (let i = 0; i < 2; i++) {
-    const g = solid(w, sit.wx + 6 + i, sit.wy + 1)
-    if (g !== null) applyCommand(w, { kind: 'desemneaza', wx: sit.wx + 6 + i, wy: sit.wy + 1, z: g + 1, piesa: Piesa.PERETE }, R)
+  // Materialul intreg din lumeBogata (3 x 20 + acest 75) ajunge pentru ~6 pereti;
+  // cu 8 pereti, cel putin doi se aduna din mormanele mici — asa ajung sursele
+  // partiale in fereastra testelor per tick, nu doar in coada rularii.
+  const pune = (fel: number, cant: number, wx: number, wy: number): void => { if (solid(w, wx, wy) !== null) lasaItem(w, fel, cant, wx, wy) }
+  pune(Item.PIATRA, 75, sit.wx + 8, sit.wy + 4)
+  for (let i = 0; i < 8; i++) pune(Item.PIATRA, 10, sit.wx + 1 + (i % 4), sit.wy + 7 + Math.floor(i / 4))
+  for (let i = 0; i < 6; i++) {
+    const wx = sit.wx + 6 + (i % 3)
+    const wy = sit.wy + 9 + Math.floor(i / 3)
+    const g = solid(w, wx, wy)
+    if (g !== null) applyCommand(w, { kind: 'desemneaza', wx, wy, z: g + 1, piesa: Piesa.PERETE }, R)
   }
   return w
 }

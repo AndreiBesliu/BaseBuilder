@@ -38,6 +38,7 @@
   "haulDestMaxCells": 512,
   "haulDestRadiusCells": 96,
   "itemClaimantsMax": 4,
+  "constructPickupMinUnits": 10,
   "itemCapacity": 4096,
   "zoneCapacity": 256,
   "zoneCellCapacity": 4096,

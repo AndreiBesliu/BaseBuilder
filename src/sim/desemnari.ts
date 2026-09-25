@@ -36,6 +36,12 @@ export const DetaliuMotiv = {
   FARA_LOC_DE_LUCRU: 1,
   /** Are loc de lucru, dar nu in componenta pionului care a intrebat. Actionabil: leaga zonele. */
   COMPONENTE_DIFERITE: 2,
+  /**
+   * Material DESTUL in lume, dar in mormane de la care nu merita un drum (toate sub
+   * pragul de ridicare). Actionabil: picteaza un depozit — caratul le contopeste.
+   * Proprietate a lumii, nu a unui pion: se decide pe sume brute, nu pe raze.
+   */
+  MATERIAL_IMPRASTIAT: 3,
 } as const
 
 export interface DesignationStore {

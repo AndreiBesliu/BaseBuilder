@@ -175,3 +175,15 @@ test('o grinda nu poate sprijini mai putin decat solul', () => {
   const egal = parseRules({ ...DEFAULT_RULES, suportRazaGrinda: DEFAULT_RULES.suportMax })
   assert.equal(egal.ok, true)
 })
+
+test('pragul de ridicare nu poate depasi stiva, si nu poate fi zero', () => {
+  // Peste stiva, niciun morman n-ar mai fi sursa; la zero, praful ar fi sursa.
+  const peste = parseRules({ ...DEFAULT_RULES, constructPickupMinUnits: DEFAULT_RULES.itemStackMax + 1 })
+  assert.equal(peste.ok, false)
+  if (!peste.ok) {
+    assert.equal(peste.reason, Reason.VALOARE_INVALIDA)
+    assert.equal(peste.params.camp, 'constructPickupMinUnits')
+  }
+  assert.equal(parseRules({ ...DEFAULT_RULES, constructPickupMinUnits: 0 }).ok, false)
+  assert.equal(parseRules({ ...DEFAULT_RULES, constructPickupMinUnits: DEFAULT_RULES.itemStackMax }).ok, true, 'controlul: exact stiva trece')
+})

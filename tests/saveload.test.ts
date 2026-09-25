@@ -8,11 +8,12 @@ import { Faction, SCHEMA_VERSION } from '../src/sim/state.ts'
 import { Reason } from '../src/sim/result.ts'
 import { groundLevelM, materialAt, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 import { isSolid } from '../src/sim/terrain/chunk.ts'
-import { FelJob } from '../src/sim/state.ts'
-import { Desemnare } from '../src/sim/desemnari.ts'
-import { rezervariPentru, Strat, verificaRezervari } from '../src/sim/rezervari.ts'
+import { FelJob, PasConstruieste } from '../src/sim/state.ts'
+import { Desemnare, slotDesemnare } from '../src/sim/desemnari.ts'
+import { dumpRezervari, rezervariPentru, Strat, verificaRezervari } from '../src/sim/rezervari.ts'
 import { existaTinta, verificaCantitatiRezervate } from '../src/sim/joburi.ts'
-import { lumeBogata, lumeFragmentata, R } from './fixturi.ts'
+import { laSit, lasaItem, lumeBogata, lumeFragmentata, picteaza, R, solid, solidLaDistanta } from './fixturi.ts'
+import { Item, Nevoie, NEVOI } from '../src/sim/state.ts'
 
 /**
  * Agenti asezati PE SOL.
@@ -355,5 +356,105 @@ test('suma rezervata pe un morman nu depaseste ce e in el, la FIECARE tick — c
     }
   }
   assert.ok(doiPeAcelasi > 0, 'niciun morman n-a fost tinut de doi claimanti CARAT deodata: fixtura nu atinge ce pretinde')
+  // Toleranta pe HRANA se probeaza pe scenariul care o produce SIGUR (panoul, 25.09:
+  // fereastra de 26–60 de tickuri): un caraus la 16–24 de celule, cu depozit langa
+  // el, si doi flamanzi lipiti de mormanul de hrana. Pe lumeFragmentata coincidenta
+  // depinde de asezare, si o fixtura care „se nimereste" nu e o proba.
+  for (const seed of [12345, 7, 12, 99]) {
+    const { w, sit } = laSit(seed, 1)
+    picteaza(w, sit.wx + 2, sit.wy + 2, 3)
+    const T = solidLaDistanta(w, sit.wx, sit.wy, sit.g, 16, 24)
+    lasaItem(w, Item.HRANA, 75, T.wx, T.wy)
+    let flamanzi = 0
+    for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]] as const) {
+      if (flamanzi === 2) break
+      const g = solid(w, T.wx + dx, T.wy + dy)
+      if (g === null) continue
+      const out = applyCommand(w, { kind: 'spawnAgent', x: (T.wx + dx) * 1000 + 500, y: (T.wy + dy) * 1000 + 500, z: g + 1, faction: 0 }, R)
+      if (!out.ok) continue
+      w.agents.nevoi[(w.agents.count - 1) * NEVOI + Nevoie.FOAME] = 200
+      flamanzi++
+    }
+    for (let t = 0; t < 600; t++) {
+      advance(w, 1, R)
+      const v = verificaCantitatiRezervate(w, R)
+      assert.ok(v.ok, `HRANA, seed ${seed}, tickul ${w.tick}: ${JSON.stringify(v)}`)
+      for (let s = 0; s < w.iteme.count; s++) {
+        if (w.iteme.alive[s] === 0 || R.nutritie[w.iteme.kind[s]!]! === 0) continue
+        if (rezervariPentru(w.rezervari, w.iteme.id[s]!, Strat.CARAT).reduce((a, r) => a + r.count, 0) > w.iteme.cantitate[s]!) hranaPesteQ++
+      }
+    }
+  }
   assert.ok(hranaPesteQ > 0, 'niciun morman de HRANA n-a fost tinut pe CARAT peste cat avea: toleranta nu s-a probat')
 })
+
+test('M5 la FIECARE tick pe lumea FRAGMENTATA: hash, tuplurile rezervarilor si zero anulari — cu surse partiale si a doua ridicare', () => {
+  // A cincea plasa, si prima care compara TUPLURILE: hash-ul e orb la rezervari, iar
+  // plasa a doua (`verificaRezervari`) ruleaza doar pe lumea continua. Cu count-uri
+  // pe morman si retintire, un `jobCantitate` reconstruit gresit ar schimba hash-ul
+  // abia tickuri mai tarziu — aici se vede la granita.
+  let cuSursaPartiala = 0
+  let cuDouaRidicari = 0
+  let granite = 0
+  for (const seed of [12345, 7]) {
+    const w = lumeFragmentata(seed)
+    for (let t = 0; t < 400; t++) {
+      advance(w, 1, R)
+      granite++
+      for (let i = 0; i < w.agents.count; i++) {
+        if (w.agents.alive[i] !== 1 || w.agents.jobKind[i] !== FelJob.CONSTRUIESTE || w.agents.jobStep[i]! > PasConstruieste.RIDICA) continue
+        const ds = slotDesemnare(w.desemnari, w.agents.jobDest[i]!)
+        if (ds !== -1 && w.agents.jobCantitate[i]! < R.piese[w.desemnari.piesa[ds]!]!.cantitate) cuSursaPartiala++
+        if (w.agents.caraCantitate[i]! > 0) cuDouaRidicari++
+      }
+      const out = decode(encode(w), R)
+      assert.ok(out.ok, `seed ${seed}, tickul ${w.tick}: decode a refuzat propriul encode: ${JSON.stringify(out)}`)
+      if (out.ok) {
+        assert.equal(hashWorld(out.value), hashWorld(w), `seed ${seed}, tickul ${w.tick}: roundtrip-ul schimba lumea`)
+        assert.equal(dumpRezervari(out.value.rezervari), dumpRezervari(w.rezervari), `seed ${seed}, tickul ${w.tick}: tuplurile rezervarilor difera`)
+        assert.equal(out.value.rezervari.anulateLaIncarcare, 0, `seed ${seed}, tickul ${w.tick}: joburi anulate la incarcare`)
+      }
+    }
+  }
+  assert.equal(granite, 800)
+  assert.ok(cuSursaPartiala > 0, 'fixtura: niciun constructor n-a tinut o sursa PARTIALA in fereastra')
+  assert.ok(cuDouaRidicari > 0, 'fixtura: niciun constructor n-a mers dupa a doua sursa cu prima in mana')
+})
+
+test('un count pe sursa in afara marginilor e REFUZAT la usa, nu reparat tacit', () => {
+  const w = lumeFragmentata(12345)
+  let slot = -1
+  const la = panaCandLocal(w, 800, () => {
+    for (let i = 0; i < w.agents.count; i++) {
+      if (w.agents.alive[i] === 1 && w.agents.jobKind[i] === FelJob.CONSTRUIESTE && w.agents.jobStep[i]! <= PasConstruieste.RIDICA) { slot = i; return true }
+    }
+    return false
+  })
+  assert.ok(la >= 0 && slot !== -1, 'fixtura: niciun constructor pe piciorul sursei')
+  const ds = slotDesemnare(w.desemnari, w.agents.jobDest[slot]!)
+  assert.notEqual(ds, -1)
+  const spec = R.piese[w.desemnari.piesa[ds]!]!
+  const strica = (f: (a: Record<string, number[]>) => void): string => {
+    const raw = JSON.parse(encode(w)) as { data: { agents: Record<string, number[]> } }
+    f(raw.data.agents)
+    return JSON.stringify(raw)
+  }
+  const preaMult = decode(strica((a) => { a.jobCantitate![slot] = spec.cantitate + 1 }), R)
+  assert.equal(preaMult.ok, false, 'un count peste piesa trebuie refuzat')
+  if (!preaMult.ok) assert.equal(preaMult.reason, Reason.VALOARE_INVALIDA)
+  const zero = decode(strica((a) => { a.jobCantitate![slot] = 0 }), R)
+  assert.equal(zero.ok, false, 'un count de zero pe piciorul sursei trebuie refuzat')
+  const manaPlina = decode(strica((a) => { a.caraCantitate![slot] = spec.cantitate + 1 }), R)
+  assert.equal(manaPlina.ok, false, 'mai mult in mana decat costa piesa trebuie refuzat')
+  // Controlul negativ: neatins, se incarca.
+  assert.equal(decode(strica(() => {}), R).ok, true)
+})
+
+/** Ruleaza pana cand conditia e adevarata, cel mult `max` tickuri. */
+function panaCandLocal(w: ReturnType<typeof lumeFragmentata>, max: number, cond: () => boolean): number {
+  for (let i = 0; i < max; i++) {
+    if (cond()) return i
+    advance(w, 1, R)
+  }
+  return cond() ? max : -1
+}

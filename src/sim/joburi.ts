@@ -185,6 +185,13 @@ export interface RatiuneStore {
    * nimic, si niciun zavor tras — `joburiFaraProgres` vedea progres.
    */
   zidiriCuManaGoala: number
+  /**
+   * De cate ori un constructor a ridicat prima parte a unei piese si n-a mai
+   * gasit a doua sursa: marfa la picioare, mormanul lasat evitat pe pereche,
+   * reincercare la un tact. Marginit prin constructie — cel mult o data per
+   * (pion, morman) per `jobRetryTicks` — si testele cer marginea, nu zero.
+   */
+  ridicariAbandonate: number
   /** ZAVOR, per lume: de cate ori o nevoie sub prag N-A putut fi rezolvata si a primit racire. */
   nevoiNerezolvate: number
 }
@@ -204,6 +211,7 @@ export function makeRatiuneStore(capacity: number): RatiuneStore {
     intreruperiDeNevoie: 0,
     nevoiNerezolvate: 0,
     zidiriCuManaGoala: 0,
+    ridicariAbandonate: 0,
   }
 }
 
@@ -279,6 +287,12 @@ export interface JobTickReport {
    * K05 a taieturii 3.
    */
   pasiNevoi: number
+  /** Cate cautari de a DOUA sursa (ridicarea in mai multe randuri) s-au facut. */
+  cautariSursa: number
+  /** Cate INTRARI au parcurs cautarile de a doua sursa. Cifra de cost, ca `pasiNevoi`. */
+  pasiCautareSursa: number
+  /** Cate INTRARI a parcurs `rezumatMaterial`. O colonie fara santiere: 0. */
+  pasiRezumat: number
 }
 
 const raport: JobTickReport = {
@@ -288,6 +302,7 @@ const raport: JobTickReport = {
   faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0, faraDepozit: 0, refuzatLaStart: 0,
   evaluariDestinatie: 0, itemeProduse: 0, unitatiProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
   joburiDeNevoie: 0, unitatiMancate: 0, pasiNevoi: 0, plecati: 0, voxeliPrabusiti: 0, pioniCazuti: 0, pieseZidite: 0,
+  cautariSursa: 0, pasiCautareSursa: 0, pasiRezumat: 0,
 }
 
 export function lastJobReport(): JobTickReport {
@@ -701,6 +716,41 @@ const rezumatMat: MaterialPentruPiesa[] = []
  * Se reseteaza STRUCTURAL odata cu rezumatul, din acelasi motiv ca el.
  */
 const matOriunde: boolean[] = []
+/** Indexat cu `PiesaId`: material DESTUL in lume, dar niciun morman de la care merita un drum. */
+const matImprastiat: boolean[] = []
+const sumaBruta: number[] = []
+const existaMorman: boolean[] = []
+const sumaLibera: number[] = []
+const cheiaMin: number[] = []
+
+type SpecPiesa = Rules['piese'][number]
+
+/**
+ * Pragul de ridicare al unei piese: sub cat nu merita un drum pentru o parte din
+ * ea. Taiat la cantitatea piesei — SCARA cere 5, deci pragul ei e 5, nu 10.
+ */
+export function pragRidicare(rules: Rules, spec: SpecPiesa): number {
+  return Math.min(rules.constructPickupMinUnits, spec.cantitate)
+}
+
+/**
+ * Cat trebuie sa aiba LIBER un morman ca sa fie sursa, cand mai lipsesc `lipsa`
+ * unitati: cel putin cat mai lipseste, sau cel putin pragul. UNA pentru sonda
+ * si pentru a doua sursa — doua predicate ar insemna ca sonda propune un morman
+ * pe care retintirea nu l-ar mai gasi.
+ */
+export function pragSursa(rules: Rules, spec: SpecPiesa, lipsa: number): number {
+  return Math.min(lipsa, pragRidicare(rules, spec))
+}
+
+/**
+ * O ridicare in plus valoreaza cat mersul in acelasi numar de tickuri: DERIVATA
+ * din content, nu constanta noua. Sonda prefera un morman intreg la d + atat
+ * celule unuia partial la d.
+ */
+function penalizareRidicare(rules: Rules): number {
+  return Math.ceil(rules.haulPickupUnits / rules.workUnitsPerTick)
+}
 
 export function rezumatMaterial(w: World, rules: Rules, slot: number): readonly MaterialPentruPiesa[] {
   const a = w.agents
@@ -709,14 +759,21 @@ export function rezumatMaterial(w: World, rules: Rules, slot: number): readonly 
   const ax = cellOf(a.x[slot]!)
   const ay = cellOf(a.y[slot]!)
   const az = a.z[slot]!
+  const penalizare = penalizareRidicare(rules)
 
   for (let p = 0; p < rules.piese.length; p++) {
     rezumatMat[p] = { exista: false, dMin: 0, slot: -1 }
     matOriunde[p] = false
+    matImprastiat[p] = false
+    sumaBruta[p] = 0
+    existaMorman[p] = false
+    sumaLibera[p] = 0
+    cheiaMin[p] = 0
   }
 
   for (let s = 0; s < it.count; s++) {
     if (it.alive[s] === 0) continue
+    raport.pasiRezumat++
     // Aceleasi doua porti ca la carat: un morman care tocmai a refuzat pe cineva
     // nu se re-propune imediat, si unul evitat de pionul ASTA nu i se propune lui.
     // Fara ele, un morman din alta componenta ar fi ales la fiecare scanare, la
@@ -725,30 +782,47 @@ export function rezumatMaterial(w: World, rules: Rules, slot: number): readonly 
     const fel = it.kind[s]!
     const cant = it.cantitate[s]!
     const dist = Math.abs(it.wx[s]! - ax) + Math.abs(it.wy[s]! - ay) + Math.abs(it.z[s]! - az)
+    // Aceeasi raza ca `refaSursa`: un morman pe care sonda l-ar propune, dar pe care
+    // a doua ridicare nu l-ar mai vedea, ar fi doua predicate pentru aceeasi intrebare.
+    const inRaza = dist <= rules.jobScanRadiusCells
+    let liber = -1
     for (let p = 1; p < rules.piese.length; p++) {
       const spec = rules.piese[p]!
       if (rules.digYield[spec.material]!.fel !== fel) continue
-      if (cant < spec.cantitate) continue
-      // Pana aici e predicatul LUMII: fel si cantitate, nimic despre cine intreaba.
-      matOriunde[p] = true
-      if (!alMeu) continue
+      // Pana aici e predicatul LUMII: suma bruta pe fel, si „exista un morman de la
+      // care merita un drum". Nimic despre cine intreaba.
+      sumaBruta[p]! += cant
+      if (cant >= pragRidicare(rules, spec)) existaMorman[p] = true
+      if (!alMeu || !inRaza) continue
+      // Partea PIONULUI: ce e LIBER, in raza lui. Un `Map.get` per morman, o data.
+      if (liber === -1) liber = liberPeItem(w, s)
+      if (liber < pragSursa(rules, spec, spec.cantitate)) continue
+      sumaLibera[p]! += liber
+      // Un morman partial costa o ridicare in plus: cheia il muta mai departe cu
+      // exact atatea celule cat dureaza ridicarea. Departajarea la cheie egala e pe
+      // `it.id`, EXPLICIT — o ordine totala pe date persistate, nu pe sloturi.
+      const cheie = dist + (liber < spec.cantitate ? penalizare : 0)
       const vechi = rezumatMat[p]!
-      // Departajarea la distanta egala e pe `it.id`, EXPLICIT. Ordinea sloturilor
-      // ar da azi acelasi raspuns, dar e o proprietate a formatului de save, nu a
-      // regulii — iar ce decide ce job ia pionul trebuie sa fie o ordine totala pe
-      // date persistate, scrisa ca atare.
       if (vechi.slot !== -1) {
-        if (dist > vechi.dMin) continue
-        if (dist === vechi.dMin && it.id[s]! > it.id[vechi.slot]!) continue
+        if (cheie > cheiaMin[p]!) continue
+        if (cheie === cheiaMin[p]! && it.id[s]! > it.id[vechi.slot]!) continue
       }
-      // Ce e LIBER si rezervarea se cer ABIA aici: sunt cele mai scumpe dintre
-      // conditii (un `Map.get` fiecare), si le plateste doar mormanul care chiar
-      // ar fi ales. `liber`, nu `cant`: cu mai multi claimanti pe strat, un morman
-      // de 75 tinut cu 60 mai are 15, si un perete de 20 nu incape in ele.
-      if (liberPeItem(w, s) < spec.cantitate) continue
-      if (!poateRezerva(w.rezervari, eu, cerereCarat(rules, it.id[s]!, spec.cantitate)).ok) continue
-      rezumatMat[p] = { exista: true, dMin: dist, slot: s }
+      // Rezervarea se cere ABIA aici: e cea mai scumpa dintre conditii, si o
+      // plateste doar mormanul care chiar ar fi ales.
+      if (!poateRezerva(w.rezervari, eu, cerereCarat(rules, it.id[s]!, Math.min(spec.cantitate, liber))).ok) continue
+      rezumatMat[p] = { exista: false, dMin: cheie, slot: s }
+      cheiaMin[p] = cheie
     }
+  }
+  for (let p = 1; p < rules.piese.length; p++) {
+    const spec = rules.piese[p]!
+    matOriunde[p] = existaMorman[p]! && sumaBruta[p]! >= spec.cantitate
+    matImprastiat[p] = !existaMorman[p]! && sumaBruta[p]! >= spec.cantitate
+    const m = rezumatMat[p]!
+    // `exista` cere suma LIBERA in raza pionului, nu suma lumii: altfel „pompa" —
+    // joburi pornite pe material din alta componenta sau din mana altuia, care
+    // ridica prima parte, nu gasesc a doua, si o lasa jos (panoul, 25.09).
+    rezumatMat[p] = { exista: m.slot !== -1 && sumaLibera[p]! >= spec.cantitate, dMin: m.dMin, slot: m.slot }
   }
   return rezumatMat
 }
@@ -1151,7 +1225,9 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       // poate aparea la orice tick, iar `reincercaLaTick` e hasuit si persistat.
       if (!matOriunde[d.piesa[s]!]!) {
         d.ultimulMotiv[s] = codMotiv(Reason.LIPSA_MATERIAL)
-        d.ultimulMotivDetaliu[s] = DetaliuMotiv.NICIUNUL
+        // „Nu e destul" si „e destul, dar praf" sunt doua raspunsuri actionabile
+        // diferite: sapa mai mult, sau picteaza un depozit ca sa se contopeasca.
+        d.ultimulMotivDetaliu[s] = matImprastiat[d.piesa[s]!]! ? DetaliuMotiv.MATERIAL_IMPRASTIAT : DetaliuMotiv.NICIUNUL
       } else if (d.ultimulMotiv[s]! === codMotiv(Reason.LIPSA_MATERIAL)) {
         // Se sterge DOAR cauza asta. Un INACCESIBIL scris de trecerea scumpa are
         // racirea lui si nu se afla aici: un santier racit nici nu ajunge pana aici.
@@ -1580,17 +1656,20 @@ export function pornesteConstruieste(
   if (w.iteme.kind[is] !== cerut) {
     return refuse(Reason.LIPSA_MATERIAL, { cerut, gasit: w.iteme.kind[is]! })
   }
-  // Ce e LIBER, nu ce e in morman: restul poate fi deja al altcuiva.
+  // Ce e LIBER, nu ce e in morman: restul poate fi deja al altcuiva. Si nu
+  // neaparat toata piesa: de la prag in sus, restul vine din a doua sursa.
   const liber = liberPeItem(w, is)
-  if (liber < spec.cantitate) {
-    return refuse(Reason.LIPSA_MATERIAL, { cerut: spec.cantitate, gasit: liber })
+  const necesar = pragSursa(rules, spec, spec.cantitate)
+  if (liber < necesar) {
+    return refuse(Reason.LIPSA_MATERIAL, { cerut: necesar, gasit: liber })
   }
+  const count = Math.min(spec.cantitate, liber)
   const jobId = w.nextId
   const out = rezervaToate(
     w.rezervari,
     a.id[slot]!,
     jobId,
-    cereriConstruieste(rules, w.iteme.id[is]!, d.id[ds]!, spec.cantitate, PasConstruieste.MERGE_SURSA),
+    cereriConstruieste(rules, w.iteme.id[is]!, d.id[ds]!, count, PasConstruieste.MERGE_SURSA),
   )
   if (!out.ok) return out
   w.nextId++
@@ -1599,7 +1678,9 @@ export function pornesteConstruieste(
   a.jobId[slot] = jobId
   a.jobTarget[slot] = w.iteme.id[is]!
   a.jobDest[slot] = d.id[ds]!
-  a.jobCantitate[slot] = spec.cantitate
+  // Count-ul pe SURSA CURENTA, ca la carat — nu totalul piesei, care e in content
+  // si pe care `zideste` il citeste de acolo. Un camp nou ar fi cerut schema 8.
+  a.jobCantitate[slot] = count
   a.jobEfect[slot] = 0
   a.jobStep[slot] = PasConstruieste.MERGE_SURSA
   a.jobProgres[slot] = 0
@@ -1926,6 +2007,107 @@ function refaDestinatia(w: World, rules: Rules, slot: number, evitaCs = -1): boo
   return true
 }
 
+/**
+ * A DOUA sursa a unui constructor care are deja o parte din piesa in mana.
+ *
+ * Aceleasi porti ca sonda din `rezumatMaterial` (viu, felul cerut, neracit, neevitat,
+ * in raza `jobScanRadiusCells`, `liber ≥ pragSursa`, rezervabil) plus COMPONENTA —
+ * verificarea pe care sonda o lasa trecerii scumpe: un morman din alta componenta
+ * (moloz in groapa dupa prabusire) ar fi „cel mai apropiat" pentru fiecare morman
+ * din jurul lui si ar face fiecare al doilea picior sa esueze, la fiecare
+ * constructor. Se sare cu racire pe PERECHE, ca acolo.
+ *
+ * Ordonat pe `d(curent, M) + d(M, santier)`, nu pe `d(curent, M)`: pionul cu 10 in
+ * mana nu are voie sa fie tras de un morman din spatele lui. Panoul a simulat
+ * regula „cel mai apropiat de celula curenta" pe 3000 de campuri: 19% peste
+ * marginea de 2·dMin din masuratorile feliei, pana la 12·dMin; cu santierul in
+ * cheie, 0 din 3000. Departajare pe `it.id`.
+ *
+ * `evita` e sursa care tocmai a murit sau al carei drum e refuzat. Rezerva sub
+ * ACELASI `jobId` si rescrie tuplul (`jobTarget`, `jobCantitate` = count-ul nou,
+ * `jobWork*`, `MERGE_SURSA`, progres 0). Intoarce `false` daca nu exista niciuna.
+ */
+function refaSursa(w: World, rules: Rules, slot: number, evita: number): boolean {
+  const a = w.agents
+  const it = w.iteme
+  const d = w.desemnari
+  const ds = slotDesemnare(d, a.jobDest[slot]!)
+  if (ds === -1) return false
+  const spec = rules.piese[d.piesa[ds]!]!
+  const lipsa = spec.cantitate - a.caraCantitate[slot]!
+  if (lipsa <= 0) return false
+  const fel = rules.digYield[spec.material]!.fel
+  const necesar = pragSursa(rules, spec, lipsa)
+  const ox = cellOf(a.x[slot]!)
+  const oy = cellOf(a.y[slot]!)
+  const oz = a.z[slot]!
+  const comp = find(w.regions, regionAt(w.regions, ox, oy, oz))
+  raport.cautariSursa++
+  let best = -1
+  let bestCheie = 0
+  let bestCount = 0
+  for (let s = 0; s < it.count; s++) {
+    raport.pasiCautareSursa++
+    if (it.alive[s] === 0 || it.kind[s] !== fel || it.id[s] === evita) continue
+    if (it.reincercaLaTick[s]! > w.tick || esteEvitata(w, slot, it.id[s]!)) continue
+    const d1 = Math.abs(it.wx[s]! - ox) + Math.abs(it.wy[s]! - oy) + Math.abs(it.z[s]! - oz)
+    if (d1 > rules.jobScanRadiusCells) continue
+    const cheie = d1 + Math.abs(it.wx[s]! - d.wx[ds]!) + Math.abs(it.wy[s]! - d.wy[ds]!) + Math.abs(it.z[s]! - d.z[ds]!)
+    if (best !== -1 && (cheie > bestCheie || (cheie === bestCheie && it.id[s]! > it.id[best]!))) continue
+    const r = regionAt(w.regions, it.wx[s]!, it.wy[s]!, it.z[s]!)
+    if (r === NO_REGION && w.regions.dirty.size > 0) continue
+    if (r === NO_REGION || find(w.regions, r) !== comp) {
+      evitaTinta(w, slot, it.id[s]!, w.tick + rules.jobRetryTicks)
+      continue
+    }
+    const liber = liberPeItem(w, s)
+    if (liber < necesar) continue
+    const count = Math.min(lipsa, liber)
+    if (!poateRezerva(w.rezervari, a.id[slot]!, cerereCarat(rules, it.id[s]!, count)).ok) continue
+    best = s
+    bestCheie = cheie
+    bestCount = count
+  }
+  if (best === -1) return false
+  const out = rezervaToate(w.rezervari, a.id[slot]!, a.jobId[slot]!, [cerereCarat(rules, it.id[best]!, bestCount)])
+  if (!out.ok) return false
+  a.jobTarget[slot] = it.id[best]!
+  a.jobCantitate[slot] = bestCount
+  a.jobWorkX[slot] = it.wx[best]!
+  a.jobWorkY[slot] = it.wy[best]!
+  a.jobWorkZ[slot] = it.z[best]!
+  a.jobStep[slot] = PasConstruieste.MERGE_SURSA
+  a.jobProgres[slot] = 0
+  tintesteLocDeLucru(w, slot)
+  raport.locuriDeLucruRefacute++
+  return true
+}
+
+/**
+ * N-a mai gasit a doua sursa: NU e vina santierului, deci santierul nu primeste nici
+ * racire, nici cauza. Marfa se lasa la picioare — material bun pentru toti — si se
+ * reincearca la un tact, nu la `jobRetryTicks`.
+ *
+ * Ce MARGINESTE bucla nu e aici, ci in `refaSursa` si in sonda: un morman de neatins
+ * (alta componenta) se evita pe pereche cand e sarit, iar sonda nu porneste un job
+ * decat cu suma LIBERA in raza — care nu numara ce e evitat. Prima versiune evita
+ * si mormanul lasat jos, dar o pereche (pion, morman) nu poate opri nimic cand
+ * mormanul lasat primeste id NOU la fiecare lasare si celalalt pion il vede oricum:
+ * centura era de neaprins, si s-a scos.
+ *
+ * Nici „esecul consolideaza: 10 + 10 devin 20" nu e adevarat: pionul sta pe celula
+ * sursei pe care tocmai a golit-o si lasa marfa exact acolo — acelasi morman, id
+ * nou (panoul, 25.09). Se asserteaza no-op-ul, nu consolidarea.
+ */
+function abandoneazaRidicarea(w: World, rules: Rules, slot: number): void {
+  const a = w.agents
+  terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
+  a.scanLaTick[slot] = w.tick + rules.jobRescanTicks
+  w.ratiune.stare[slot] = StareRatiune.RESPINS
+  w.ratiune.motivFinal[slot] = codMotiv(Reason.LIPSA_MATERIAL)
+  w.ratiune.ridicariAbandonate++
+}
+
 // ---------------------------------------------------------------------------
 // pasii de oprire: LUCREAZA, RIDICA, LASA
 // ---------------------------------------------------------------------------
@@ -2108,12 +2290,12 @@ function ridica(w: World, rules: Rules, slot: number): void {
   const cant = Math.min(a.jobCantitate[slot]!, it.cantitate[is]!)
   const idItem = it.id[is]!
   a.caraKind[slot] = it.kind[is]!
-  a.caraCantitate[slot] = cant
   a.jobEfect[slot] = 1
   // Sursa s-a consumat: DOAR ea se elibereaza, destinatia ramane tinuta.
   elibereazaUna(w.rezervari, a.id[slot]!, a.jobId[slot]!, idItem, Strat.CARAT)
   const luat = iaDinItem(w, rules, is, cant)
-  if (luat !== cant) a.caraCantitate[slot] = luat
+  // Se ADUNA, nu se scrie: la construit mana poate avea deja prima parte a piesei.
+  a.caraCantitate[slot] = a.caraCantitate[slot]! + luat
   // Mormanul s-a golit: cine il mai tinea isi incheie jobul ACUM. Varianta veche
   // chema `elibereazaTinta` si ii ARUNCA valoarea de retur — adica stergea rezervarile
   // celorlalti fara sa le incheie joburile, lasand un job viu FARA rezervare.
@@ -2134,6 +2316,16 @@ function ridica(w: World, rules: Rules, slot: number): void {
       terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
       return
     }
+    const spec = rules.piese[d.piesa[ds]!]!
+    // Mai lipseste: a doua sursa, aleasa dupa drumul curent → morman → santier.
+    // Daca nu exista, marfa se lasa jos si santierul NU e invinuit.
+    if (a.caraCantitate[slot]! < spec.cantitate) {
+      if (!refaSursa(w, rules, slot, idItem)) abandoneazaRidicarea(w, rules, slot)
+      return
+    }
+    // Mana e plina: count-ul pe sursa nu mai inseamna nimic. Zero, ca decode sa aiba
+    // o singura forma de acceptat dupa RIDICA.
+    a.jobCantitate[slot] = 0
     // IN COMPONENTA pionului, care acum sta pe morman. Fara ea, `celulaDeLucru`
     // intoarce prima celula calcabila in ordinea fixa, indiferent daca pionul
     // ajunge la ea — si atunci el pleaca spre o tinta imposibila, arde plafonul de
@@ -2302,7 +2494,14 @@ function reconciliazaTintaMoarta(w: World, rules: Rules, id: number): void {
   for (const claimant of elibereazaTinta(w.rezervari, id)) {
     for (let i = 0; i < a.count; i++) {
       if (a.alive[i] === 1 && a.id[i] === claimant && a.jobKind[i] !== 0 && a.jobTarget[i] === id) {
-        terminaJob(w, rules, i, Sfarsit.INTRERUPT)
+        // Un constructor cu prima parte in mana nu arunca ce are: isi cauta alta
+        // sursa. AICI, nu in `ridica` — orice moarte de morman trece pe aici in
+        // acelasi tick, deci o ramura in `ridica` ar fi cod mort (panoul, 25.09).
+        if (a.jobKind[i] === FelJob.CONSTRUIESTE && a.jobStep[i]! <= PasConstruieste.RIDICA && a.caraCantitate[i]! > 0) {
+          if (!refaSursa(w, rules, i, id)) abandoneazaRidicarea(w, rules, i)
+        } else {
+          terminaJob(w, rules, i, Sfarsit.INTRERUPT)
+        }
       }
     }
   }
@@ -3553,7 +3752,16 @@ const DRIVER_CONSTRUIESTE: DriverJob = {
     // Masurat de panoul din 25.09, cu un ostil pinuit pe morman: 73 din 74 de
     // joburi intr-o bucla de 3000 de tickuri, 2586 de tickuri de „zidire" din
     // nimic, `nextId` +74, niciun zavor tras.
-    if (a.jobStep[slot]! <= PasConstruieste.RIDICA) return false
+    if (a.jobStep[slot]! <= PasConstruieste.RIDICA) {
+      // Alta SURSA, nu alta celula: drumul spre mormanul asta e blocat pentru mine.
+      // Intai se gaseste si se rezerva cea noua, ABIA apoi se elibereaza cea veche:
+      // un job viu fara rezervarea sursei ar fi reconstruit altfel la incarcare.
+      const veche = a.jobTarget[slot]!
+      if (!refaSursa(w, rules, slot, veche)) return false
+      elibereazaUna(w.rezervari, a.id[slot]!, a.jobId[slot]!, veche, Strat.CARAT)
+      evitaTinta(w, slot, veche, w.tick + rules.jobRetryTicks)
+      return true
+    }
     // La construit santierul e in `jobDest`, nu in `jobTarget` — acolo e sursa.
     return refaLoculDeLucruEvitandCurentul(w, rules, slot, a.jobDest[slot]!, PasConstruieste.MERGE_SANTIER)
   },

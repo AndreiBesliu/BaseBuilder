@@ -162,6 +162,15 @@ export interface Rules {
    * 220–420 de tickuri; pe trei mormane, 112–120.
    */
   readonly itemClaimantsMax: number
+  /**
+   * Sub cat nu merita un drum pentru O PARTE dintr-o piesa. Un morman intra in
+   * calcul daca are cel putin atat, sau cel putin cat mai lipseste; taiat la
+   * cantitatea piesei (SCARA cere 5 — pragul ei e 5, nu 10). Rolul constantei e
+   * sa margineasca numarul de cautari O(mormane) per job: cel mult
+   * `cantitate / prag` ridicari. Fara ea, un perete s-ar aduna din 20 de mormane
+   * de cate 1, cu 20 de drumuri si 20 de cautari.
+   */
+  readonly constructPickupMinUnits: number
   /** Cate mormane incap in lume. Plafon dur: cand e atins, sapatul refuza pana se cara ceva. */
   readonly itemCapacity: number
   /** Cate zone incap. */
@@ -324,6 +333,7 @@ const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield' | 'piese' | 'nevoi' | '
   haulDestMaxCells: { min: 1, max: 1000000 },
   haulDestRadiusCells: { min: 1, max: 4096 },
   itemClaimantsMax: { min: 1, max: 64 },
+  constructPickupMinUnits: { min: 1, max: 1000000 },
   itemCapacity: { min: 1, max: 1000000 },
   zoneCapacity: { min: 1, max: 1000000 },
   zoneCellCapacity: { min: 1, max: 1000000 },
@@ -742,6 +752,10 @@ export function parseRules(raw: unknown): Outcome<Rules> {
   if (r.haulCarryMax > r.itemStackMax) {
     return refuse(Reason.VALOARE_INVALIDA, { camp: 'haulCarryMax', valoare: r.haulCarryMax, max: r.itemStackMax })
   }
+  // Un prag peste stiva n-ar lasa niciun morman sa fie sursa: acelasi argument.
+  if (r.constructPickupMinUnits > r.itemStackMax) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'constructPickupMinUnits', valoare: r.constructPickupMinUnits, max: r.itemStackMax })
+  }
   for (const y of r.digYield) {
     if (y.cantitate > r.itemStackMax) {
       return refuse(Reason.VALOARE_INVALIDA, { camp: 'digYield', motiv: 'un voxel nu poate da mai mult decat incape intr-un morman', valoare: y.cantitate, max: r.itemStackMax })
@@ -957,6 +971,7 @@ export const DEFAULT_RULES: Rules = {
   haulDestMaxCells: 512,
   haulDestRadiusCells: 96,
   itemClaimantsMax: 4,
+  constructPickupMinUnits: 10,
   itemCapacity: 4096,
   zoneCapacity: 256,
   zoneCellCapacity: 4096,

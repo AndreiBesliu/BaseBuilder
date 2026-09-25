@@ -28,6 +28,8 @@ import { Desemnare, makeDesignationStore, reindexeazaDesemnari } from './desemna
 import type { DesignationStore } from './desemnari.ts'
 import { createReservations } from './rezervari.ts'
 import { makeRatiuneStore, reconstruiesteRezervari } from './joburi.ts'
+import { FelJob, PasConstruieste } from './state.ts'
+import { slotDesemnare } from './desemnari.ts'
 import { makeItemStore, reindexeazaIteme } from './iteme.ts'
 import type { ItemStore } from './iteme.ts'
 import { makeZoneStore, reindexeazaZone } from './zone.ts'
@@ -596,10 +598,44 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
     ratiune: makeRatiuneStore(capacity),
     plecatiTotal: (data.plecatiTotal as number | undefined) ?? 0,
   }
+  const construit = valideazaJoburiDeConstruit(w, rules)
+  if (!construit.ok) return construit
   // Rezervarile sunt DERIVED din joburi. Ce nu se poate reconstrui e un save
   // inconsistent: jobul se anuleaza si se numara, nu se lasa tacut.
   reconstruiesteRezervari(w, rules)
   return accept(w)
+}
+
+/**
+ * Joburile de construit, contra CONTINUTULUI. `jobCantitate` e count-ul rezervat pe
+ * SURSA CURENTA (nu totalul piesei — ala e `piese[].cantitate`, citit de `zideste`),
+ * deci pana la RIDICA inclusiv e intre 1 si ce mai lipseste; dupa, codul scrie 0,
+ * dar un save de dinaintea taieturii 3 a logisticii are acolo totalul piesei si se
+ * ACCEPTA (fixtura golden de schema 7): nu se citeste dupa RIDICA. Un santier
+ * disparut nu se valideaza aici — reconstructia anuleaza jobul, cu raport.
+ * Contradictia se REFUZA, nu se repara tacit.
+ */
+function valideazaJoburiDeConstruit(w: World, rules: Rules): Outcome<void> {
+  const a = w.agents
+  for (let i = 0; i < a.count; i++) {
+    if (a.alive[i] !== 1 || a.jobKind[i] !== FelJob.CONSTRUIESTE) continue
+    const ds = slotDesemnare(w.desemnari, a.jobDest[i]!)
+    if (ds === -1) continue
+    const spec = rules.piese[w.desemnari.piesa[ds]!]!
+    const cara = a.caraCantitate[i]!
+    const cant = a.jobCantitate[i]!
+    if (cara > spec.cantitate) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `agents.caraCantitate[${i}]`, valoare: cara, max: spec.cantitate, motiv: 'mai mult in mana decat costa piesa' })
+    }
+    if (a.jobStep[i]! <= PasConstruieste.RIDICA) {
+      if (cant < 1 || cant > spec.cantitate - cara) {
+        return refuse(Reason.VALOARE_INVALIDA, { camp: `agents.jobCantitate[${i}]`, valoare: cant, min: 1, max: spec.cantitate - cara, motiv: 'count-ul pe sursa curenta nu e intre 1 si ce mai lipseste' })
+      }
+    } else if (cant < 0 || cant > spec.cantitate) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `agents.jobCantitate[${i}]`, valoare: cant, min: 0, max: spec.cantitate })
+    }
+  }
+  return accept()
 }
 
 /** Citeste un tablou de store SoA: obligatoriu, de lungime `count`. */
