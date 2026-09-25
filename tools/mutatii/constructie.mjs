@@ -608,7 +608,11 @@ export const MUTATII = [
     f: "src/sim/joburi.ts",
     a: "      if (!matOriunde[d.piesa[s]!]!) {",
     b: "      if (!m.exista) {",
-    t: 'tests/constructie.test.ts', e: 'materialul rezervat de ALT pion',
+    // Din 25.09 (logistica): testul cu materialul REZERVAT nu mai deosebeste — ridicarea
+    // dureaza 10 tickuri si scanarea vine la 30, deci al doilea pion vede mormanul deja
+    // consumat si LIPSA e legitima in ambele variante. Cine deosebeste per-pion de lume e
+    // testul cu mormanul EVITAT: evitarea e a perechii, lumea tot il are.
+    t: 'tests/constructie.test.ts', e: 'mormanul evitat de pioni',
   },
   {
     n: 'exista in lume se afla DUPA portile per-pion (evitarea sterge felul)',
