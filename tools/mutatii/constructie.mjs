@@ -298,6 +298,28 @@ export const MUTATII = [
     b: "  if (false) {",
     t: 'tests/constructie.test.ts', e: "un morman de alt fel, sau sub PRAGUL",
   },
+  // --- logistica constructiei, commit 3: costul nu creste cu mormanele din lume (25.09.2026) ---
+  {
+    n: "rezumatMaterial se cheama si fara niciun santier viu (O(mormane) pentru nimic)",
+    f: "src/sim/joburi.ts",
+    a: "  if (activ.construieste && d.viiConstruieste > 0) {",
+    b: "  if (activ.construieste) {",
+    t: 'tests/constructie.test.ts', e: "3000 de mormane: fara santiere",
+  },
+  {
+    n: "sonda parcurge TOATE itemele, nu doar felul cerut",
+    f: "src/sim/joburi.ts",
+    a: "    for (const s of ix.peFel[fel]!) {\n    if (it.alive[s] === 0) continue\n    raport.pasiRezumat++",
+    b: "    for (let s = 0; s < it.count; s++) {\n    if (it.alive[s] === 0 || it.kind[s] !== fel) continue\n    raport.pasiRezumat++",
+    t: 'tests/constructie.test.ts', e: "3000 de mormane: cu un santier",
+  },
+  {
+    n: "viiConstruieste nu creste la desemnare (constructia nu mai porneste niciodata)",
+    f: "src/sim/desemnari.ts",
+    a: "  if (d.kind[slot] === Desemnare.CONSTRUIESTE) d.viiConstruieste++",
+    b: "  void slot",
+    t: 'tests/constructie.test.ts', e: "ridicarea in mai multe randuri",
+  },
   // --- logistica constructiei, commit 2b: ridicarea in mai multe randuri (25.09.2026) ---
   {
     n: "ridica nu ADUNA: a doua ridicare rescrie mana (prima parte a piesei dispare)",

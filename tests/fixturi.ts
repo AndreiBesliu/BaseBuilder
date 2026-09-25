@@ -254,3 +254,33 @@ export function lumeFragmentata(seed: number): World {
   }
   return w
 }
+
+/**
+ * Tinta de scara din DESIGN §10: ~3000 de stive. `cate` mormane de PAMANT (pe care
+ * nicio piesa nu-l cere), `piatra` mormane de PIATRA, pe cate o celula calcabila
+ * din jurul sitului. Pentru cifre de cost, nu pentru joc: aici se vede daca o
+ * bucla scaleaza cu LUMEA sau cu MUNCA (K05).
+ */
+export function lume3000(seed: number, cate = 3000, piatra = 20): { w: World; sit: Sit; puse: number } {
+  const { w, sit } = laSit(seed, 4)
+  let puse = 0
+  let dePiatra = 0
+  for (let r = 1; r <= 80 && puse < cate + piatra; r++) {
+    for (let dx = -r; dx <= r && puse < cate + piatra; dx++) {
+      for (const dy of dx === -r || dx === r ? Array.from({ length: 2 * r + 1 }, (_, k) => k - r) : [-r, r]) {
+        if (puse >= cate + piatra) break
+        const wx = sit.wx + dx
+        const wy = sit.wy + dy
+        if (wx < 0 || wy < 0) continue
+        const g = solid(w, wx, wy)
+        if (g === null) continue
+        const fel = dePiatra < piatra ? Item.PIATRA : Item.PAMANT
+        const out = applyCommand(w, { kind: 'lasaItem', fel, cantitate: 10, wx, wy, z: g + 1 }, R)
+        if (!out.ok) continue
+        puse++
+        if (fel === Item.PIATRA) dePiatra++
+      }
+    }
+  }
+  return { w, sit, puse }
+}

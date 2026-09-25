@@ -81,6 +81,13 @@ export interface DesignationStore {
   readonly laId: Map<number, number>
   /** DERIVED — cate sunt vii. `shouldSkip` in O(1). */
   vii: number
+  /**
+   * DERIVED — cate desemnari de CONSTRUIT sunt vii. `rezumatMaterial` e O(mormane
+   * de felul cerut) per scanare si se chema si cand nu exista niciun santier:
+   * masurat de panou, 42 µs/apel la 3000 de mormane, adica tot bugetul de tick
+   * la 64 de pioni liberi — pentru nimic. Cu contorul, iesirea e O(1).
+   */
+  viiConstruieste: number
 }
 
 export function makeDesignationStore(capacity: number): DesignationStore {
@@ -101,6 +108,7 @@ export function makeDesignationStore(capacity: number): DesignationStore {
     laCelula: new Map(),
     laId: new Map(),
     vii: 0,
+    viiConstruieste: 0,
   }
 }
 
@@ -166,6 +174,7 @@ export function adaugaDesemnare(
   d.laCelula.set(key, slot)
   d.laId.set(id, slot)
   d.vii++
+  if (d.kind[slot] === Desemnare.CONSTRUIESTE) d.viiConstruieste++
   return accept(slot)
 }
 
@@ -194,6 +203,7 @@ export function stergeDesemnare(d: DesignationStore, slot: number): void {
   d.laCelula.delete(cellKey(d.wx[slot]!, d.wy[slot]!, d.z[slot]!))
   d.laId.delete(d.id[slot]!)
   d.vii--
+  if (d.kind[slot] === Desemnare.CONSTRUIESTE) d.viiConstruieste--
 }
 
 /**
@@ -206,8 +216,10 @@ export function reindexeazaDesemnari(d: DesignationStore): Outcome<void> {
   d.laCelula.clear()
   d.laId.clear()
   d.vii = 0
+  d.viiConstruieste = 0
   for (let i = 0; i < d.count; i++) {
     if (d.alive[i] === 0) continue
+    if (d.kind[i] === Desemnare.CONSTRUIESTE) d.viiConstruieste++
     const key = cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!)
     if (d.laCelula.has(key)) {
       return refuse(Reason.DEJA_DESEMNATA, { camp: 'desemnari', motiv: 'doua desemnari vii pe aceeasi celula', slot: i, wx: d.wx[i]!, wy: d.wy[i]!, z: d.z[i]! })

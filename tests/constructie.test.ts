@@ -37,6 +37,7 @@ import { anuleazaDesemnare, celulaDeLucru, comparaCandidati, constructiaPrevizua
 import { Nevoie, NEVOI } from '../src/sim/state.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { slotItem } from '../src/sim/iteme.ts'
+import { indexZone } from '../src/sim/zone.ts'
 import { rezervariPentru, Strat } from '../src/sim/rezervari.ts'
 import { DetaliuMotiv } from '../src/sim/desemnari.ts'
 import { Faction, Item } from '../src/sim/state.ts'
@@ -44,7 +45,7 @@ import { panaCand } from './fixturi.ts'
 import { PasCara, PasConstruieste } from '../src/sim/state.ts'
 import { asazaItem, itemLaCelula } from '../src/sim/iteme.ts'
 import { lasaItem } from './fixturi.ts'
-import { desemneaza, laSit, marfaTotala, patratPlat, R, ruleaza, solid, solidLaDistanta } from './fixturi.ts'
+import { desemneaza, laSit, lume3000, marfaTotala, patratPlat, R, ruleaza, solid, solidLaDistanta } from './fixturi.ts'
 import { createWorld } from '../src/sim/world.ts'
 import { WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 
@@ -1971,4 +1972,38 @@ test('un morman cu prea putin LIBER nu e sursa, chiar daca are destul in el: 5 l
   const m = rezumatMaterial(w, R, p)[Piesa.PERETE]!
   assert.ok(m.exista && m.slot !== -1, 'fixtura: sonda n-a gasit material')
   assert.equal(w.iteme.id[m.slot], idDeparte, `sonda a propus mormanul cu 5 libere (${idAproape}) in loc de cel intreg`)
+})
+
+// ---------------------------------------------------------------------------
+// costul nu creste cu numarul de mormane din lume (logistica, 3)
+// ---------------------------------------------------------------------------
+
+test('3000 de mormane: fara santiere, sonda de material nu face niciun pas', () => {
+  // Masurat de panou pe codul dinainte: 42 µs/apel la 3000 de mormane, chemat la
+  // fiecare scanare a fiecarui pion liber — cu 64 de pioni, tot bugetul de tick,
+  // pentru o intrebare la care raspunsul era „niciun santier".
+  const { w, puse } = lume3000(12345)
+  assert.ok(puse >= 2500, `fixtura: doar ${puse} mormane puse`)
+  const t = ruleaza(w, 200)
+  assert.ok(t.scanari > 0, 'fixtura: nicio scanare')
+  assert.equal(t.pasiRezumat, 0, `${t.pasiRezumat} pasi de sonda fara niciun santier`)
+})
+
+test('3000 de mormane: cu un santier de PIATRA, sonda parcurge doar mormanele de piatra', () => {
+  const { w, sit, puse } = lume3000(12345, 3000, 20)
+  assert.ok(puse >= 2500, `fixtura: doar ${puse} mormane puse`)
+  let idSantier = -1
+  // Dincolo de spirala de mormane (raza ~27 la 3020): pe o celula cu morman nu se deseneaza santier.
+  for (let d = 30; d <= 45 && idSantier === -1; d++) {
+    const g = solid(w, sit.wx + d, sit.wy)
+    if (g === null) continue
+    const r = applyCommand(w, { kind: 'desemneaza', wx: sit.wx + d, wy: sit.wy, z: g + 1, piesa: Piesa.PERETE }, R)
+    if (r.ok) idSantier = r.value
+  }
+  assert.notEqual(idSantier, -1, 'fixtura: niciun santier')
+  const piatra = indexZone(w, R).peFel[Item.PIATRA]!.length
+  assert.ok(piatra >= 10 && piatra < 100, `fixtura: ${piatra} mormane de piatra`)
+  const t = ruleaza(w, 120)
+  assert.ok(t.scanari > 0 && t.pasiRezumat > 0, 'fixtura: sonda nu a rulat')
+  assert.ok(t.pasiRezumat <= t.scanari * piatra, `${t.pasiRezumat} pasi in ${t.scanari} scanari, cu ${piatra} mormane de piatra: sonda a parcurs si pamantul`)
 })

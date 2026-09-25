@@ -771,7 +771,15 @@ export function rezumatMaterial(w: World, rules: Rules, slot: number): readonly 
     cheiaMin[p] = 0
   }
 
-  for (let s = 0; s < it.count; s++) {
+  // Doar felurile pe care le cere vreo piesa, si doar mormanele lor: indexul
+  // `peFel` e DERIVED sub steag murdar, in ordinea slotului — aceeasi ordine pe
+  // care o parcurgea bucla peste toate itemele, deci acelasi raspuns, mai ieftin.
+  const ix = indexZone(w, rules)
+  for (let fel = 0; fel < ITEME; fel++) {
+    let cerut = false
+    for (let p = 1; p < rules.piese.length; p++) if (rules.digYield[rules.piese[p]!.material]!.fel === fel) { cerut = true; break }
+    if (!cerut) continue
+    for (const s of ix.peFel[fel]!) {
     if (it.alive[s] === 0) continue
     raport.pasiRezumat++
     // Aceleasi doua porti ca la carat: un morman care tocmai a refuzat pe cineva
@@ -779,7 +787,6 @@ export function rezumatMaterial(w: World, rules: Rules, slot: number): readonly 
     // Fara ele, un morman din alta componenta ar fi ales la fiecare scanare, la
     // nesfarsit, fiindca rezumatul tine un singur morman per piesa.
     const alMeu = it.reincercaLaTick[s]! <= w.tick && !esteEvitata(w, slot, it.id[s]!)
-    const fel = it.kind[s]!
     const cant = it.cantitate[s]!
     const dist = Math.abs(it.wx[s]! - ax) + Math.abs(it.wy[s]! - ay) + Math.abs(it.z[s]! - az)
     // Aceeasi raza ca `refaSursa`: un morman pe care sonda l-ar propune, dar pe care
@@ -812,6 +819,7 @@ export function rezumatMaterial(w: World, rules: Rules, slot: number): readonly 
       if (!poateRezerva(w.rezervari, eu, cerereCarat(rules, it.id[s]!, Math.min(spec.cantitate, liber))).ok) continue
       rezumatMat[p] = { exista: false, dMin: cheie, slot: s }
       cheiaMin[p] = cheie
+    }
     }
   }
   for (let p = 1; p < rules.piese.length; p++) {
@@ -1198,7 +1206,8 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
     }
   }
 
-  if (activ.construieste) {
+  // Fara niciun santier viu nu se plateste nicio baleiere de mormane: iesire O(1).
+  if (activ.construieste && d.viiConstruieste > 0) {
     const gPers = 4 ** (persB - 1)
     const rez = rezumatMaterial(w, rules, slot)
     // „N-are din ce" se afla O DATA pe fel, nu o data pe santier: un blocaj de
@@ -2046,9 +2055,10 @@ function refaSursa(w: World, rules: Rules, slot: number, evita: number): boolean
   let best = -1
   let bestCheie = 0
   let bestCount = 0
-  for (let s = 0; s < it.count; s++) {
+  const ix = indexZone(w, rules)
+  for (const s of ix.peFel[fel]!) {
     raport.pasiCautareSursa++
-    if (it.alive[s] === 0 || it.kind[s] !== fel || it.id[s] === evita) continue
+    if (it.alive[s] === 0 || it.id[s] === evita) continue
     if (it.reincercaLaTick[s]! > w.tick || esteEvitata(w, slot, it.id[s]!)) continue
     const d1 = Math.abs(it.wx[s]! - ox) + Math.abs(it.wy[s]! - oy) + Math.abs(it.z[s]! - oz)
     if (d1 > rules.jobScanRadiusCells) continue

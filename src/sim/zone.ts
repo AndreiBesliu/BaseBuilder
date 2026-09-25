@@ -106,6 +106,14 @@ export interface IndexZone {
    * sa gaseasca singura masa din asezare.
    */
   readonly comestibile: number[]
+  /**
+   * Sloturile mormanelor VII, pe fel, in ordinea slotului — inclusiv cele din
+   * depozite. Sonda de material si a doua sursa parcurg doar felul cerut de piesa:
+   * in scenariul standard majoritatea mormanelor sunt PAMANT, iar un perete cere
+   * PIATRA. Aceeasi garantie ca `deMutat`: orice item care apare sau dispare
+   * murdareste indexul.
+   */
+  readonly peFel: number[][]
   /** Cate iteme zac pe jos (nu intr-o zona) fara nicio zona care sa le primeasca. Pentru cauza pe pion. */
   peJosFaraDepozit: number
   /** Cate reconstructii s-au facut de la pornire. Pentru masuratori. */
@@ -160,6 +168,7 @@ export function makeZoneStore(capacity: number, cellCapacity: number): ZoneStore
     },
     index: {
       murdar: true,
+      peFel: Array.from({ length: ITEME }, () => [] as number[]),
       libere: [],
       acceptante: new Int32Array(capacity * ITEME),
       maxLocLiber: new Int32Array(capacity * ITEME),
@@ -404,10 +413,12 @@ export function indexZone(w: World, rules: Rules): IndexZone {
 
   ix.deMutat.length = 0
   ix.comestibile.length = 0
+  for (const lista of ix.peFel) lista.length = 0
   ix.peJosFaraDepozit = 0
   for (let i = 0; i < it.count; i++) {
     ix.pasi++
     if (it.alive[i] === 0) continue
+    ix.peFel[it.kind[i]!]!.push(i)
     // Comestibilele, in aceeasi trecere: lista mosteneste exact garantia lui
     // `deMutat`, fara sa ceara un al doilea loc de tinut minte.
     if (rules.nutritie[it.kind[i]!]! > 0) ix.comestibile.push(i)
