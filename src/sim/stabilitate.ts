@@ -919,39 +919,154 @@ export function sustinutAcumMemorat(t: Terrain, rules: Rules, wx: number, wy: nu
   return r
 }
 
+/**
+ * Poarta de PLASARE cu „De ce nu?": `sustinutAcum`, iar la refuz diagnosticul.
+ *
+ * Doar comanda si zidirea o cheama; scanerul de joburi intreaba `sustinutAcumMemorat` si
+ * arunca motivul, deci diagnosticul nu scumpeste nicio trecere a lui (masurat de
+ * verificatorul V4: in poarta scanerului ar fi urcat trecerea de 4,5 ori pe o podea).
+ */
 export function poateSustine(t: Terrain, rules: Rules, wx: number, wy: number, z: number): Outcome<void> {
   if (sustinutAcum(t, rules, wx, wy, z, null)) return accept()
-  // „De ce nu?" are TREI raspunsuri de cand exista grinda, si jucatorul care tocmai a
-  // pus una intreaba exact asta: nimic in raza; o grinda in raza, dar INACTIVA (nu e
-  // prinsa de nimic asezat); o grinda activa, dar drumul prin solid pana la ea e prea
-  // lung. Cea mai apropiata grinda in picioare, pe Manhattan, cu departajare pe ordinea
-  // indexului (cota, rand, coloana) — determinista.
+  return deCeNuSprijin(t, rules, wx, wy, z)
+}
+
+/** Cazurile lui „De ce nu?" pentru FARA_SPRIJIN — `params.caz`. */
+export const CazSprijin = {
+  /** Celula nu atinge nimic solid la cota ei si nu sta pe nimic: n-are de ce sa se prinda. */
+  NU_ATINGE: 'NU_ATINGE',
+  /** O grinda LEGATA prin solid la cel mult R−1 pasi — deci ar tine —, dar INACTIVA. */
+  GRINDA_INACTIVA: 'GRINDA_INACTIVA',
+  /** Cea mai apropiata grinda ACTIVA, pe drumul prin solid, e la ≥ R pasi. */
+  GRINDA_PREA_DEPARTE: 'GRINDA_PREA_DEPARTE',
+  /** O grinda la ≤ R−1 pe Manhattan, dar fara drum prin solid (in plafonul cautarii). */
+  GRINDA_NELEGATA: 'GRINDA_NELEGATA',
+  /** Nicio grinda legata prin solid in plafonul cautarii, si niciuna in raza. */
+  NICIO_GRINDA: 'NICIO_GRINDA',
+} as const
+
+// Tampoane PROPRII ale diagnosticului: activitatea unei grinzi foloseste `caveazaSpreAsezat`,
+// deci coada lui nu se poate imprumuta.
+const coadaDX: number[] = []
+const coadaDY: number[] = []
+const coadaDD: number[] = []
+const vazuteD = new Map<number, number>()
+const grinziD = new Set<number>()
+const listaD: number[] = []
+
+/**
+ * „De ce nu?" pentru o celula pe care `sustinutAcum` a refuzat-o. Doar prezentare: nu
+ * schimba lumea si nu atinge contoarele.
+ *
+ * Recenzia (26.09, V4 si V5): forma de dinainte cauta grinzi doar la Manhattan <= R−1 si
+ * alegea cea mai apropiata pe Manhattan. Pe cazul-vitrina — a 13-a celula a fasiei, cu
+ * grinda activa la 10 pasi — raspundea „nicio grinda in raza", cu razaGrinda=10 in chiar
+ * parametrii lui; pe o podea plina, toata frontiera primea acelasi raspuns fals. Unei celule
+ * fara niciun vecin solid ii spunea „drumul e prea lung", iar intre doua fasii paralele
+ * numea grinda NELEGATA de alaturi si o ascundea pe cea care conta. Oracolul verificatorului:
+ * 0 diferente pe 7.270 de celule refuzate, toate cele cinci cazuri prezente.
+ *
+ * Distantele sunt cele ale REGULII — pasi prin SOLID la cota celulei —, nu Manhattan: un
+ * BFS din celula, cu plafonul `2 · suportRazaGrinda` (dincolo de el, „grinda e la 25 de
+ * pasi" nu mai spune jucatorului nimic in plus fata de „nicio grinda"). Pe drum se
+ * noteaza primul voxel asezat (`sprijinD`, ≥ suportMax prin refuz), prima grinda (orice
+ * grinda la ≤ R−1 e INACTIVA prin refuz, deci nu se mai verifica) si prima grinda activa
+ * (la ≥ R, tot prin refuz). Ordinea BFS e fixa: raspunsul e determinist.
+ */
+function deCeNuSprijin(t: Terrain, rules: Rules, wx: number, wy: number, z: number): Outcome<void> {
   const R = rules.suportRazaGrinda
-  const lista: number[] = []
-  grinziInRaza(t.grinzi, wx, wy, z, R - 1, lista)
-  let bx = 0
-  let by = 0
-  let dMin = -1
-  for (let i = 0; i < lista.length; i += 2) {
-    if (!grindaInPicioare(t, lista[i]!, lista[i + 1]!, z, FARA_IPOTEZA, false)) continue
-    const d = Math.abs(lista[i]! - wx) + Math.abs(lista[i + 1]! - wy)
-    if (dMin !== -1 && d >= dMin) continue
-    dMin = d
-    bx = lista[i]!
-    by = lista[i + 1]!
-  }
-  if (dMin === -1) {
+  const M = rules.suportMax
+  const C = 2 * R
+  const baza: Record<string, number | string> = { wx, wy, z, raza: M, razaGrinda: R, cautare: C }
+
+  let atinge = false
+  for (const [dx, dy] of DIRECTII) if (solLa(t, wx + dx, wy + dy, z) === Sol.SOLID) atinge = true
+  if (!atinge) {
     return refuse(Reason.FARA_SPRIJIN, {
-      wx, wy, z, raza: rules.suportMax, razaGrinda: R,
-      motiv: 'nimic asezat la mai putin de suportMax pasi, si nicio grinda in raza: piesa ar cadea in acelasi tick',
+      ...baza, caz: CazSprijin.NU_ATINGE,
+      motiv: 'piesa nu sta pe nimic si nu atinge nimic solid la cota ei: n-are de ce sa se prinda',
     })
   }
-  const eActiva = s0Pozitiv(t, rules, bx, by, z, FARA_IPOTEZA)
+
+  // Grinzile IN PICIOARE din plafon, din index — aceeasi sursa de candidati ca regula.
+  listaD.length = 0
+  grinziInRaza(t.grinzi, wx, wy, z, C, listaD)
+  grinziD.clear()
+  for (let i = 0; i < listaD.length; i += 2) {
+    if (grindaInPicioare(t, listaD[i]!, listaD[i + 1]!, z, FARA_IPOTEZA, false)) grinziD.add(cellKey(listaD[i]!, listaD[i + 1]!, z))
+  }
+
+  let sprijinD = -1
+  let inX = 0, inY = 0, inD = -1 // prima grinda (inactiva) la ≤ R−1
+  let acX = 0, acY = 0, acD = -1 // prima grinda activa
+  vazuteD.clear()
+  coadaDX.length = 0
+  coadaDY.length = 0
+  coadaDD.length = 0
+  coadaDX.push(wx)
+  coadaDY.push(wy)
+  coadaDD.push(0)
+  vazuteD.set(cellKey(wx, wy, z), 0)
+  for (let cap = 0; cap < coadaDX.length; cap++) {
+    const x = coadaDX[cap]!
+    const y = coadaDY[cap]!
+    const d = coadaDD[cap]!
+    // Totul s-a aflat: nimic mai departe nu schimba raspunsul.
+    if (sprijinD !== -1 && acD !== -1) break
+    if (d >= C) continue
+    for (const [dx, dy] of DIRECTII) {
+      const nx = x + dx
+      const ny = y + dy
+      if (solLa(t, nx, ny, z) !== Sol.SOLID) continue
+      const cheie = cellKey(nx, ny, z)
+      if (vazuteD.has(cheie)) continue
+      vazuteD.set(cheie, d + 1)
+      if (sprijinD === -1 && esteAsezat(t, nx, ny, z)) sprijinD = d + 1
+      if (grinziD.has(cheie)) {
+        if (d + 1 <= R - 1) {
+          if (inD === -1) { inX = nx; inY = ny; inD = d + 1 }
+        } else if (acD === -1 && (esteAsezat(t, nx, ny, z) || caveazaSpreAsezat(t, rules, nx, ny, z, null) > 0)) {
+          acX = nx; acY = ny; acD = d + 1
+        }
+      }
+      coadaDX.push(nx)
+      coadaDY.push(ny)
+      coadaDD.push(d + 1)
+    }
+  }
+  if (sprijinD !== -1) baza.sprijinD = sprijinD
+
+  if (inD !== -1) {
+    return refuse(Reason.FARA_SPRIJIN, {
+      ...baza, caz: CazSprijin.GRINDA_INACTIVA, grindaX: inX, grindaY: inY, grindaD: inD, grindaActiva: 0,
+      motiv: 'grinda de la grindaD pasi ar tine piesa, dar ea nu tine nimic: nu e prinsa de nimic asezat la cel mult suportMax - 1 pasi',
+    })
+  }
+  if (acD !== -1) {
+    return refuse(Reason.FARA_SPRIJIN, {
+      ...baza, caz: CazSprijin.GRINDA_PREA_DEPARTE, grindaX: acX, grindaY: acY, grindaD: acD, grindaActiva: 1,
+      motiv: 'cea mai apropiata grinda activa e la grindaD pasi prin solid; tine cel mult suportRazaGrinda - 1',
+    })
+  }
+  // O grinda in raza la care nu duce niciun drum prin solid: cea mai apropiata pe
+  // Manhattan, cu departajare pe ordinea indexului (cota, rand, coloana).
+  let nX = 0, nY = 0, nM = -1
+  for (let i = 0; i < listaD.length; i += 2) {
+    const x = listaD[i]!, y = listaD[i + 1]!
+    const m = Math.abs(x - wx) + Math.abs(y - wy)
+    if (m > R - 1 || !grinziD.has(cellKey(x, y, z)) || vazuteD.has(cellKey(x, y, z))) continue
+    if (nM !== -1 && m >= nM) continue
+    nX = x; nY = y; nM = m
+  }
+  if (nM !== -1) {
+    return refuse(Reason.FARA_SPRIJIN, {
+      ...baza, caz: CazSprijin.GRINDA_NELEGATA, grindaX: nX, grindaY: nY,
+      motiv: 'grinda din raza nu e legata de piesa prin solid la cota ei (niciun drum de cel mult cautare pasi)',
+    })
+  }
   return refuse(Reason.FARA_SPRIJIN, {
-    wx, wy, z, raza: rules.suportMax, razaGrinda: R, grindaX: bx, grindaY: by, grindaActiva: eActiva ? 1 : 0,
-    motiv: eActiva
-      ? 'grinda din raza e activa, dar drumul prin solid pana la ea e mai lung de suportRazaGrinda - 1 pasi'
-      : 'grinda din raza nu tine nimic: nu e prinsa de nimic asezat (e la mai mult de suportMax - 1 pasi de sol)',
+    ...baza, caz: CazSprijin.NICIO_GRINDA,
+    motiv: 'nimic asezat la mai putin de suportMax pasi, si nicio grinda legata prin solid pe cel mult cautare pasi',
   })
 }
 

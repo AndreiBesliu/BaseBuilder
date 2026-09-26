@@ -266,10 +266,24 @@ export const MUTATII = [
     t: 'tests/grinda.test.ts', e: 'prefiltrul overlay-ului: langa o grinda',
   },
   {
-    n: '„De ce nu?" spune mereu ca grinda din raza e activa',
+    n: '„De ce nu?" nu mai numeste grinda INACTIVA care ar tine piesa',
     f: 'src/sim/stabilitate.ts',
-    a: 'grindaActiva: eActiva ? 1 : 0,',
-    b: 'grindaActiva: 1,',
+    a: '  if (inD !== -1) {',
+    b: '  if (false) {',
+    t: 'tests/grinda.test.ts', e: '„De ce nu?" deosebeste',
+  },
+  {
+    n: '„De ce nu?" masoara grinda pe Manhattan, nu pe drumul prin solid',
+    f: 'src/sim/stabilitate.ts',
+    a: '      if (solLa(t, nx, ny, z) !== Sol.SOLID) continue\n      const cheie = cellKey(nx, ny, z)\n      if (vazuteD.has(cheie)) continue',
+    b: '      const cheie = cellKey(nx, ny, z)\n      if (vazuteD.has(cheie)) continue',
+    t: 'tests/grinda.test.ts', e: '„De ce nu?" deosebeste',
+  },
+  {
+    n: '„De ce nu?" spune „drum prea lung" si unei celule care nu atinge nimic solid',
+    f: 'src/sim/stabilitate.ts',
+    a: '  if (!atinge) {',
+    b: '  if (false) {',
     t: 'tests/grinda.test.ts', e: '„De ce nu?" deosebeste',
   },
   {

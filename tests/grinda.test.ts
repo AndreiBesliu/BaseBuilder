@@ -334,28 +334,82 @@ test('o grinda plutitoare nu tine nimic: 31 de grinzi puse direct in cer au supo
   assert.equal(langa.ok, false, 'o piesa langa grinzile plutitoare trebuie refuzata')
 })
 
-test('„De ce nu?" deosebeste: nicio grinda in raza, o grinda INACTIVA, o grinda activa la care nu duce niciun drum', () => {
-  const { w, x0, y0, g } = scena(16)
-  const zf = g + 2
-  zid(w, x0, y0, 1, g, zf)
-  for (let dx = 1; dx <= 3; dx++) assert.ok(applyCommand(w, { kind: 'fill', wx: x0 + dx, wy: y0, z: zf, material: dx === 3 ? Material.GRINDA : Material.PIATRA_CONSTRUITA }, R).ok)
-  // (1) Activa, dar fara drum prin solid: aceeasi cota, doua randuri mai incolo, cu aer intre.
-  const faraDrum = poateSustine(w.terrain, R, x0 + 5, y0 + 2, zf)
-  assert.equal(faraDrum.ok, false)
-  if (!faraDrum.ok) {
-    assert.equal(faraDrum.reason, Reason.FARA_SPRIJIN)
-    assert.equal(faraDrum.params.grindaActiva, 1)
-    assert.equal(faraDrum.params.grindaX, x0 + 3)
+test('„De ce nu?" deosebeste: nu atinge nimic; grinda INACTIVA care ar tine; grinda activa PREA DEPARTE pe drum; grinda nelegata; nicio grinda', () => {
+  const caz = (o: ReturnType<typeof poateSustine>): string => (o.ok ? 'ok' : String(o.params.caz))
+  // (a) Fasia din OWNER_VERIFY 12: grinda activa la x = 3, podea pana la 12. A 13-a e la
+  //     10 pasi de grinda — raspunsul trebuie sa o NUMEASCA, cu distanta, nu „nicio grinda".
+  {
+    const { w, x0, y0, g } = scena(16)
+    const zf = g + 2
+    zid(w, x0, y0, 1, g, zf)
+    const plan: [number, number, number, number][] = []
+    for (let dx = 1; dx <= 12; dx++) plan.push([x0 + dx, y0, zf, dx === 3 ? Material.GRINDA : Material.PIATRA_CONSTRUITA])
+    assert.equal(construiesteIncremental(w, plan).size, 12, 'fixtura: fasia de 12')
+    const a13 = applyCommand(w, { kind: 'fill', wx: x0 + 13, wy: y0, z: zf, material: Material.PIATRA_CONSTRUITA }, R)
+    assert.equal(a13.ok, false)
+    if (!a13.ok) {
+      assert.equal(a13.reason, Reason.FARA_SPRIJIN)
+      assert.equal(caz(a13), 'GRINDA_PREA_DEPARTE')
+      assert.equal(a13.params.grindaX, x0 + 3)
+      assert.equal(a13.params.grindaD, 10)
+      assert.equal(a13.params.grindaActiva, 1)
+      assert.equal(a13.params.sprijinD, 13)
+    }
+    // (b) Celula fara niciun vecin solid la cota ei: grinda activa la Manhattan 4 NU e raspunsul.
+    const faraDrum = poateSustine(w.terrain, R, x0 + 5, y0 + 2, zf)
+    assert.equal(caz(faraDrum), 'NU_ATINGE')
+    if (!faraDrum.ok) assert.equal(faraDrum.params.grindaX, undefined)
   }
-  // (2) O grinda INACTIVA, pusa direct in teren la 5 pasi de zid (nicio comanda n-o accepta).
-  assert.ok(fillTeren(w.terrain, x0 + 9, y0 + 6, zf, Material.GRINDA).ok)
-  const inactiva = poateSustine(w.terrain, R, x0 + 10, y0 + 6, zf)
-  assert.equal(inactiva.ok, false)
-  if (!inactiva.ok) assert.equal(inactiva.params.grindaActiva, 0, 'grinda de langa trebuia raportata inactiva')
-  // (3) Nicio grinda in raza: departe de toate.
-  const departe = poateSustine(w.terrain, R, x0 + 14, y0 + 14, zf)
-  assert.equal(departe.ok, false)
-  if (!departe.ok) assert.equal(departe.params.grindaX, undefined)
+  // (c) A doua grinda, tinuta doar de prima: e ea cea care ar tine a 13-a (la 1 pas), deci
+  //     raspunsul e „grinda asta e inactiva", nu „grinda de la x = 3 e prea departe".
+  {
+    const { w, x0, y0, g } = scena(18)
+    const zf = g + 2
+    zid(w, x0, y0, 1, g, zf)
+    const plan: [number, number, number, number][] = []
+    for (let dx = 1; dx <= 12; dx++) plan.push([x0 + dx, y0, zf, dx === 3 || dx === 12 ? Material.GRINDA : Material.PIATRA_CONSTRUITA])
+    assert.equal(construiesteIncremental(w, plan).size, 12, 'fixtura: fasia de 12 cu doua grinzi')
+    const o = poateSustine(w.terrain, R, x0 + 13, y0, zf)
+    assert.equal(caz(o), 'GRINDA_INACTIVA')
+    if (!o.ok) {
+      assert.equal(o.params.grindaX, x0 + 12)
+      assert.equal(o.params.grindaD, 1)
+      assert.equal(o.params.grindaActiva, 0)
+    }
+  }
+  // (d) Doua fasii paralele din acelasi zid, cu aer intre ele. Cea mai apropiata grinda pe
+  //     Manhattan e a fasiei B (3 pasi, nelegata, inactiva); cea care conteaza e a fasiei A.
+  {
+    const { w, x0, y0, g } = scena(18)
+    const zf = g + 2
+    zid(w, x0, y0, 5, g, zf)
+    const plan: [number, number, number, number][] = []
+    for (let dx = 1; dx <= 12; dx++) plan.push([x0 + dx, y0, zf, dx === 3 ? Material.GRINDA : Material.PIATRA_CONSTRUITA])
+    for (let dx = 1; dx <= 12; dx++) plan.push([x0 + dx, y0 + 2, zf, dx === 3 || dx === 12 ? Material.GRINDA : Material.PIATRA_CONSTRUITA])
+    assert.equal(construiesteIncremental(w, plan).size, 24, 'fixtura: doua fasii de 12')
+    const o = poateSustine(w.terrain, R, x0 + 13, y0, zf)
+    assert.equal(caz(o), 'GRINDA_PREA_DEPARTE')
+    if (!o.ok) { assert.equal(o.params.grindaX, x0 + 3); assert.equal(o.params.grindaY, y0); assert.equal(o.params.grindaD, 10) }
+  }
+  // (e) Grinda in raza, dar nelegata prin solid; (f) nicio grinda: cel mai apropiat sprijin.
+  {
+    const { w, x0, y0, g } = scena(16)
+    const zf = g + 2
+    zid(w, x0, y0, 1, g, zf)
+    zid(w, x0, y0 + 2, 1, g, zf)
+    const plan: [number, number, number, number][] = []
+    for (let dx = 1; dx <= 3; dx++) plan.push([x0 + dx, y0, zf, dx === 3 ? Material.GRINDA : Material.PIATRA_CONSTRUITA])
+    for (let dx = 1; dx <= 3; dx++) plan.push([x0 + dx, y0 + 2, zf, Material.PIATRA_CONSTRUITA])
+    for (let dx = 1; dx <= 3; dx++) plan.push([x0 + dx, y0 + 12, zf, Material.PIATRA_CONSTRUITA])
+    zid(w, x0, y0 + 12, 1, g, zf)
+    assert.equal(construiesteIncremental(w, plan).size, 9, 'fixtura: trei fasii de 3')
+    const nelegata = poateSustine(w.terrain, R, x0 + 4, y0 + 2, zf)
+    assert.equal(caz(nelegata), 'GRINDA_NELEGATA')
+    if (!nelegata.ok) { assert.equal(nelegata.params.grindaX, x0 + 3); assert.equal(nelegata.params.grindaD, undefined); assert.equal(nelegata.params.sprijinD, 4) }
+    const nicio = poateSustine(w.terrain, R, x0 + 4, y0 + 12, zf)
+    assert.equal(caz(nicio), 'NICIO_GRINDA')
+    if (!nicio.ok) { assert.equal(nicio.params.grindaX, undefined); assert.equal(nicio.params.sprijinD, 4) }
+  }
 })
 
 test('poarta scanerului, din memorie: dupa o editare raspunde ca poarta calculata — grinda care devine ACTIVA, alt teren, alte reguli', () => {
