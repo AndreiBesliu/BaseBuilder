@@ -114,8 +114,8 @@ export const MUTATII = [
   {
     n: 'poarta accepta si suportul ZERO',
     f: 'src/sim/stabilitate.ts',
-    a: '  if (suportNouPanaLa(t, rules, wx, wy, z, FARA_IPOTEZA, 1) > 0) return accept()',
-    b: '  if (suportNouPanaLa(t, rules, wx, wy, z, FARA_IPOTEZA, 1) >= 0) return accept()',
+    a: '  return suportNouPanaLa(t, rules, wx, wy, z, ip, 1) > 0',
+    b: '  return suportNouPanaLa(t, rules, wx, wy, z, ip, 1) >= 0',
     t: 'tests/constructie.test.ts', e: 'nu se mai poate zidi in aer',
   },
   {
@@ -135,8 +135,8 @@ export const MUTATII = [
   {
     n: 'poarta refuza si pe o celula deja plina (mesajul devine inutil)',
     f: 'src/sim/stabilitate.ts',
-    a: '  if (solLa(t, wx, wy, z) === Sol.SOLID) return accept()',
-    b: '  if (false) return accept()',
+    a: '  if (solLa(t, wx, wy, z) === Sol.SOLID) return true',
+    b: '  if (false) return true',
     t: 'tests/constructie.test.ts', e: 'o celula deja plina raspunde CELULA_PLINA',
   },
 
@@ -546,7 +546,7 @@ export const MUTATII = [
   {
     n: "poarta de sprijin scoasa: se cara material la santiere in AER",
     f: 'src/sim/joburi.ts',
-    a: "      if (!poateSustine(w.terrain, rules, d.wx[s]!, d.wy[s]!, d.z[s]!).ok) {",
+    a: "      if (!sustinutAcumMemorat(w.terrain, rules, d.wx[s]!, d.wy[s]!, d.z[s]!, w.sprijin)) {",
     b: "      if (false) {",
     t: 'tests/constructie.test.ts', e: "un blueprint in AER nu trimite pe nimeni dupa material",
   },

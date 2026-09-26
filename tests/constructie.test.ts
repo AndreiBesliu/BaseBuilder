@@ -1059,6 +1059,32 @@ test('un blueprint in AER nu trimite pe nimeni dupa material', () => {
   assert.equal(w.agents.caraCantitate[0], 0, 'pionul a plecat cu material dupa un santier imposibil')
 })
 
+test('pionii ridica o CONSOLA din zid: fiecare celula devine zidibila abia dupa cea dinainte, iar poarta scanerului nu ramane cu raspunsul vechi', () => {
+  // Poarta scanerului raspunde din memoria lumii (`w.sprijin`), golita la orice editare de
+  // teren. Consola e cazul in care raspunsul SE SCHIMBA intre doua scanari: a doua celula
+  // e imposibila pana se zideste prima. O memorie care nu vede editarea ramane cu „nu"
+  // pe veci, si consola se opreste la o celula — fara niciun refuz vizibil.
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  const z = g + 2
+  for (let zz = g + 1; zz <= z; zz++) assert.ok(applyCommand(w, { kind: 'fill', wx: wx + 3, wy: wy + 6, z: zz, material: Material.PIATRA_CONSTRUITA }, R).ok, 'fixtura: zidul')
+  for (let i = 1; i <= 3; i++) {
+    assert.ok(applyCommand(w, { kind: 'desemneaza', wx: wx + 3 + i, wy: wy + 6, z, piesa: Piesa.PODEA }, R).ok, `fixtura: santierul ${i}`)
+  }
+  // Fixtura VIE: acum se poate zidi doar prima; a doua si a treia, abia dupa.
+  assert.ok(poateSustine(w.terrain, R, wx + 4, wy + 6, z).ok, 'fixtura: prima celula a consolei trebuia sa fie zidibila')
+  assert.ok(!poateSustine(w.terrain, R, wx + 5, wy + 6, z).ok, 'fixtura: a doua celula NU trebuia sa fie zidibila inainte de prima')
+  for (let i = 0; i < 3; i++) lasaItem(w, Item.PIATRA, R.piese[Piesa.PODEA]!.cantitate, wx + 1, wy + 1 + i)
+  for (let i = 0; i < 2; i++) {
+    assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (wx + 2) * 1000 + 500, y: (wy + 10 + i) * 1000 + 500, z: g + 1, faction: Faction.ASEZARE }, R).ok, `fixtura: pionul ${i}`)
+  }
+  const zidita = (i: number): boolean => {
+    const m = materialAt(w.terrain, wx + 3 + i, wy + 6, z)
+    return m.ok && isSolid(m.value)
+  }
+  const n = panaCand(w, 8000, () => zidita(1) && zidita(2) && zidita(3))
+  assert.ok(n >= 0, `consola s-a oprit: zidite ${[1, 2, 3].filter(zidita).length} din 3 in 8000 de tickuri`)
+})
+
 test('un santier peste care a cazut MOLOZ nu mai e candidat', () => {
   // `poateSustine` SINGUR nu ajunge: pe o celula deja solida raspunde `ok` prin
   // scurtcircuit, iar `zidesteVoxel` refuza cu CELULA_PLINA. Poarta e conjunctia.

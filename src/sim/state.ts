@@ -25,6 +25,7 @@ import type { ReservationStore } from './rezervari.ts'
 import type { RatiuneStore } from './joburi.ts'
 import type { ItemStore } from './iteme.ts'
 import type { ZoneStore } from './zone.ts'
+import type { MemorieSprijin } from './stabilitate.ts'
 
 /**
  * Versiunea schemei de stare. Creste la ORICE camp nou. Vezi save.ts.
@@ -488,6 +489,12 @@ export interface World {
   rezervari: ReservationStore
   /** TRANSIENT — de ce sta fiecare pion. Pentru overlay si teste, nu pentru simulare. */
   ratiune: RatiuneStore
+  /**
+   * TRANSIENT — raspunsurile portii de sprijin a scanerului, pe epoca terenului. Nu
+   * decide nimic ce n-ar decide calculul; o lume incarcata porneste goala. Vezi
+   * `sustinutAcumMemorat`.
+   */
+  sprijin: MemorieSprijin
   /**
    * PERSISTED — cati pioni au PLECAT din asezare, de la inceputul lumii.
    *

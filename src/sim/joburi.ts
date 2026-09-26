@@ -97,7 +97,7 @@ import type { Terrain } from './terrain/terrain.ts'
 import { dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
 import { Material } from './terrain/chunk.ts'
 import type { MaterialId } from './terrain/chunk.ts'
-import { cadeDaca, constructiaPosibila, cotaDeAsezare, multimeaCareCade, poateSustine, Sol, solLa } from './stabilitate.ts'
+import { cadeDaca, constructiaPosibila, cotaDeAsezare, multimeaCareCade, poateSustine, Sol, solLa, sustinutAcumMemorat } from './stabilitate.ts'
 import { cellKey, decodeCell } from './path.ts'
 import { Desemnare, desemnareLaCelula, DetaliuMotiv, seSapaLa, slotDesemnare, stergeDesemnare } from './desemnari.ts'
 import type { DesignationStore } from './desemnari.ts'
@@ -1393,8 +1393,13 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       // raspunde `ok` prin scurtcircuit, iar `zidesteVoxel` refuza cu CELULA_PLINA.
       // Cazul e real — prabusirea depune MOLOZ, si molozul poate ateriza peste un
       // blueprint desenat.
+      //
+      // Raspunsul portii vine din memoria lumii (`w.sprijin`, TRANSIENT), golita la
+      // orice editare de teren: un santier imposibil ramane desemnat pe veci, iar fara
+      // memorie fiecare scanare a fiecarui pion il re-calcula — masurat de lentila de
+      // cost, 250–620 ms pe tick pe o sala de 41×41 cu podea de grinzi, fara nicio munca.
       if (solLa(w.terrain, d.wx[s]!, d.wy[s]!, d.z[s]!) === Sol.SOLID) continue
-      if (!poateSustine(w.terrain, rules, d.wx[s]!, d.wy[s]!, d.z[s]!).ok) {
+      if (!sustinutAcumMemorat(w.terrain, rules, d.wx[s]!, d.wy[s]!, d.z[s]!, w.sprijin)) {
         // NICIO racire si NICIO cauza. Un santier nezidibil acum nu e un refuz, e o
         // pozitie in coada: `racireDesemnare` da intre 100 si 510 tickuri, iar un job
         // de construit dureaza 76 cap-coada — constructia ar avansa la viteza racirii,

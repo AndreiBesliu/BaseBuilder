@@ -304,14 +304,29 @@ function activa(t: Terrain, rules: Rules, x: number, y: number, z: number, ip: I
   return a
 }
 
-// Tampoane reusite. `candidati` tine perechi (x, y); BFS-ul lui `s1` are coada lui,
-// separata de a lui `caveazaSpreAsezat`, pe care o foloseste activitatea.
+// Tampoane reusite. `candidati` tine perechi (x, y); `candSursa` spune de unde vine
+// fiecare candidat (`DIN_TEREN` | `DIN_PLAN` — o celula poate fi in ambele indexuri).
+// BFS-ul lui `s1` are coada lui, separata de a lui `caveazaSpreAsezat`, pe care o
+// foloseste activitatea — cele doua se intercaleaza acum, deci nu pot imparti tampoane.
 const candidati: number[] = []
-const activeGasite = new Set<number>()
+const candSursa = new Map<number, number>()
+const DIN_TEREN = 1
+const DIN_PLAN = 2
 const coada1X: number[] = []
 const coada1Y: number[] = []
 const coada1D: number[] = []
 const vazute1 = new Set<number>()
+
+/** Celula `k` = (x, y, z) e o grinda candidata IN PICIOARE si ACTIVA? Activitatea, doar la nevoie. */
+function candidatActiv(t: Terrain, rules: Rules, x: number, y: number, z: number, k: number, ip: Ipoteza): boolean {
+  const sursa = candSursa.get(k)
+  if (sursa === undefined) return false
+  // Activitatea depinde doar de celula si de ipoteza, nu de sursa: in picioare dupa
+  // oricare dintre surse, raspunsul e acelasi `activa`.
+  const inPicioare = ((sursa & DIN_TEREN) !== 0 && grindaInPicioare(t, x, y, z, ip, false))
+    || ((sursa & DIN_PLAN) !== 0 && grindaInPicioare(t, x, y, z, ip, true))
+  return inPicioare && activa(t, rules, x, y, z, ip)
+}
 
 /**
  * `s1(c)`: `suportRazaGrinda − d1`, cu `d1` pasii prin SOLID (la cota lui c) pana la
@@ -320,6 +335,19 @@ const vazute1 = new Set<number>()
  * Candidatii vin din index (si din grinzile planificate ale ipotezei), la distanta
  * Manhattan cel mult `suportRazaGrinda − 1` — o margine inferioara a drumului, deci
  * niciun candidat pierdut. Fara candidati, raspunsul e 0 fara niciun BFS.
+ *
+ * ## Activitatea, LENES
+ *
+ * Doar pentru grinzile pe care le ATINGE BFS-ul, in ordinea lui, pana la prima activa.
+ * Acelasi raspuns ca „activitatea tuturor candidatilor, apoi BFS": BFS-ul e acelasi (nu
+ * depinde de activitate decat prin oprire), viziteaza in ordinea distantei, si orice
+ * celula vizitata e la Manhattan ≤ `suportRazaGrinda − 1`, deci e candidata daca e
+ * grinda. Prima vizitata activa e deci cea de la `d1` minim, in ambele forme.
+ *
+ * Masurat de lentila de cost (recenzia taieturii 4): o grinda departe de zid e inactiva,
+ * iar varianta cu toti candidatii ii calcula activitatea pentru fiecare santier din raza
+ * ei — si pentru cele fara niciun vecin solid, la care BFS-ul nu pleaca nicaieri. Pe o
+ * podea din grinzi cu centrul imposibil, 70–180 de BFS-uri `s0` per santier refuzat.
  */
 function suportDinGrinzi(t: Terrain, rules: Rules, wx: number, wy: number, z: number, ip: Ipoteza): number {
   const R = rules.suportRazaGrinda
@@ -329,17 +357,13 @@ function suportDinGrinzi(t: Terrain, rules: Rules, wx: number, wy: number, z: nu
   if (ip.grinziPlan !== null) grinziInRaza(ip.grinziPlan, wx, wy, z, R - 1, candidati)
   if (candidati.length === 0) return 0
   contoareStabilitate.interogariS1++
-  activeGasite.clear()
+  candSursa.clear()
   for (let i = 0; i < candidati.length; i += 2) {
-    const x = candidati[i]!
-    const y = candidati[i + 1]!
-    if (!grindaInPicioare(t, x, y, z, ip, i >= dinTeren)) continue
-    if (!activa(t, rules, x, y, z, ip)) continue
-    activeGasite.add(cellKey(x, y, z))
+    const k = cellKey(candidati[i]!, candidati[i + 1]!, z)
+    candSursa.set(k, (candSursa.get(k) ?? 0) | (i >= dinTeren ? DIN_PLAN : DIN_TEREN))
   }
-  if (activeGasite.size === 0) return 0
   const k0 = cellKey(wx, wy, z)
-  if (activeGasite.has(k0)) return R
+  if (candidatActiv(t, rules, wx, wy, z, k0, ip)) return R
 
   vazute1.clear()
   coada1X.length = 0
@@ -361,7 +385,7 @@ function suportDinGrinzi(t: Terrain, rules: Rules, wx: number, wy: number, z: nu
       const cheie = cellKey(nx, ny, z)
       if (vazute1.has(cheie)) continue
       vazute1.add(cheie)
-      if (activeGasite.has(cheie)) return R - (d + 1)
+      if (candidatActiv(t, rules, nx, ny, z, cheie, ip)) return R - (d + 1)
       coada1X.push(nx)
       coada1Y.push(ny)
       coada1D.push(d + 1)
@@ -786,14 +810,72 @@ export function constructiaPosibila(
   }
 }
 
-export function poateSustine(t: Terrain, rules: Rules, wx: number, wy: number, z: number): Outcome<void> {
+/**
+ * Raspunsul portii de sprijin, FARA „De ce nu?": `poateSustine(...).ok`, calculat de
+ * aceeasi functie (poarta il foloseste pe el), deci nu se pot desincroniza.
+ *
+ * Exista pentru trecerea ieftina a scanerului, care arunca motivul („NICIO cauza", vezi
+ * `cautaJob`) si intreaba sute de santiere pe ACELASI teren; „De ce nu?" ramane al
+ * portii, pentru comanda si pentru UI. `activ` e memoria activitatii grinzilor pe care o
+ * da apelantul pentru o serie de intrebari intre care terenul NU se schimba — si numai
+ * atunci: tine si „activa" si „inactiva", iar orice editare o poate intoarce pe oricare
+ * (o zidire activeaza, o sapatura dezactiveaza). `null` = fara memorie.
+ */
+export function sustinutAcum(t: Terrain, rules: Rules, wx: number, wy: number, z: number, activ: Map<number, boolean> | null): boolean {
   // Pe o celula deja solida nu se PLASEAZA nimic, deci intrebarea despre sprijin
   // nu se pune: refuzul util vine de la teren, cu `CELULA_PLINA`. Fara
   // scurtcircuitul asta, un bloc deja plutitor — pe care comanda nu-l mai poate
   // crea, dar un save de dinaintea taieturii poate sa-l contina — ar raspunde
   // „n-are sprijin": adevarat, si inutil.
-  if (solLa(t, wx, wy, z) === Sol.SOLID) return accept()
-  if (suportNouPanaLa(t, rules, wx, wy, z, FARA_IPOTEZA, 1) > 0) return accept()
+  if (solLa(t, wx, wy, z) === Sol.SOLID) return true
+  const ip = activ === null ? FARA_IPOTEZA : { ...FARA_IPOTEZA, activ }
+  return suportNouPanaLa(t, rules, wx, wy, z, ip, 1) > 0
+}
+
+/**
+ * TRANSIENT: raspunsurile lui `sustinutAcum` pe celula, si memoria activitatii grinzilor,
+ * pe o EPOCA a terenului (`Terrain.editari`). Orice scriere de voxel, oriunde, le goleste
+ * pe amandoua — invalidare globala, deci exacta fara nicio raza de tinut minte. Cheia
+ * contine si terenul si regulile: aceeasi memorie intrebata despre alt teren sau cu alte
+ * reguli porneste de la zero. Nu decide nimic ce n-ar decide calculul, nu intra in hash
+ * si nu se salveaza.
+ */
+export interface MemorieSprijin {
+  teren: Terrain | null
+  rules: Rules | null
+  editari: number
+  readonly ok: Map<number, boolean>
+  readonly activ: Map<number, boolean>
+}
+
+export function memorieSprijin(): MemorieSprijin {
+  return { teren: null, rules: null, editari: -1, ok: new Map(), activ: new Map() }
+}
+
+/**
+ * `sustinutAcum`, prin memorie. Masurat de lentila de cost (recenzia taieturii 4): o sala
+ * cu centrul podelei de grinzi imposibil ramane cu santierele desemnate pe veci, iar
+ * scanerul le re-intreaba la fiecare scanare a fiecarui pion — fara memorie, costul in
+ * repaus creste cu santierele imposibile, nu cu munca (K05).
+ */
+export function sustinutAcumMemorat(t: Terrain, rules: Rules, wx: number, wy: number, z: number, m: MemorieSprijin): boolean {
+  if (m.teren !== t || m.rules !== rules || m.editari !== t.editari) {
+    m.ok.clear()
+    m.activ.clear()
+    m.teren = t
+    m.rules = rules
+    m.editari = t.editari
+  }
+  const k = cellKey(wx, wy, z)
+  const stiut = m.ok.get(k)
+  if (stiut !== undefined) return stiut
+  const r = sustinutAcum(t, rules, wx, wy, z, m.activ)
+  m.ok.set(k, r)
+  return r
+}
+
+export function poateSustine(t: Terrain, rules: Rules, wx: number, wy: number, z: number): Outcome<void> {
+  if (sustinutAcum(t, rules, wx, wy, z, null)) return accept()
   // „De ce nu?" are TREI raspunsuri de cand exista grinda, si jucatorul care tocmai a
   // pus una intreaba exact asta: nimic in raza; o grinda in raza, dar INACTIVA (nu e
   // prinsa de nimic asezat); o grinda activa, dar drumul prin solid pana la ea e prea

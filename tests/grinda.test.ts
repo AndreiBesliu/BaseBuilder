@@ -15,7 +15,7 @@ import { hashWorld } from '../src/sim/hash.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
 import { adaugaGrinda, chunkKey, fill as fillTeren, grinziInRaza, listaGrinzi, materialAt, reconstruiesteGrinzi, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 import type { IndexGrinzi } from '../src/sim/terrain/terrain.ts'
-import { cadeDaca, constructiaPosibila, contoareStabilitate, esteAsezat, poateSustine, Prefiltru, prefiltruStabilitate, reseteazaContoareStabilitate, Sol, solLa, StareSapat, stareSapat, suportLa } from '../src/sim/stabilitate.ts'
+import { cadeDaca, constructiaPosibila, contoareStabilitate, esteAsezat, memorieSprijin, poateSustine, Prefiltru, prefiltruStabilitate, reseteazaContoareStabilitate, Sol, solLa, StareSapat, stareSapat, suportLa, sustinutAcum, sustinutAcumMemorat } from '../src/sim/stabilitate.ts'
 import { cellKey, decodeCell } from '../src/sim/path.ts'
 import { Reason } from '../src/sim/result.ts'
 import { constructiaPrevizualizata } from '../src/sim/joburi.ts'
@@ -356,6 +356,110 @@ test('„De ce nu?" deosebeste: nicio grinda in raza, o grinda INACTIVA, o grind
   const departe = poateSustine(w.terrain, R, x0 + 14, y0 + 14, zf)
   assert.equal(departe.ok, false)
   if (!departe.ok) assert.equal(departe.params.grindaX, undefined)
+})
+
+test('poarta scanerului, din memorie: dupa o editare raspunde ca poarta calculata — grinda care devine ACTIVA, alt teren, alte reguli', () => {
+  // Memoria (`sustinutAcumMemorat`) e cheiata pe (teren, reguli, epoca). Fiecare pas de
+  // mai jos schimba EXACT o componenta a cheii si cere raspunsul calculat; o memorie
+  // care uita una dintre ele raspunde cu cel vechi. Lumile continua si incarcata ar
+  // diverge din asta: memoria nu se salveaza.
+  const lumi = [scena(16), scena(16)]
+  for (const { w, x0, y0, g } of lumi) {
+    const zf = g + 2
+    zid(w, x0, y0, 1, g, zf)
+    // Consola cu doua grinzi: cea de la 3 e activa, cea de la 8 e INACTIVA (la 8 de zid),
+    // tinuta de prima. Santierul de la 13 e la 10 de prima, deci imposibil.
+    const plan: [number, number, number, number][] = []
+    for (let dx = 1; dx <= 12; dx++) plan.push([x0 + dx, y0, zf, dx === 3 || dx === 8 ? Material.GRINDA : Material.PIATRA_CONSTRUITA])
+    assert.equal(construiesteIncremental(w, plan).size, 12, 'fixtura: consola trebuia zidita pana la 12')
+  }
+  const [A, B] = lumi
+  const zf = A.g + 2
+  const santier = (L: { x0: number; y0: number }): [number, number, number] => [L.x0 + 13, L.y0, zf]
+  const inainte = poateSustine(A.w.terrain, R, ...santier(A))
+  assert.equal(inainte.ok, false, 'fixtura: santierul trebuia sa fie imposibil inainte de stalp')
+  if (!inainte.ok) assert.equal(inainte.params.grindaActiva, 0, 'fixtura: grinda de la 8 trebuia sa fie inactiva')
+
+  const m = memorieSprijin()
+  assert.equal(sustinutAcumMemorat(A.w.terrain, R, ...santier(A), m), false)
+  // Un stalp langa grinda de la 8 o face ACTIVA; pe B, stalpul e departe de ea. Acelasi
+  // numar de editari pe ambele terenuri, deci aceeasi epoca.
+  zid(A.w, A.x0 + 8, A.y0 + 1, 1, A.g, zf)
+  zid(B.w, B.x0 + 8, B.y0 + 6, 1, B.g, zf)
+  assert.equal(A.w.terrain.editari, B.w.terrain.editari, 'fixtura: cele doua terenuri trebuiau sa aiba aceeasi epoca')
+  assert.equal(poateSustine(A.w.terrain, R, ...santier(A)).ok, true, 'fixtura: stalpul trebuia sa activeze grinda')
+  assert.equal(poateSustine(B.w.terrain, R, ...santier(B)).ok, false, 'fixtura: pe B santierul ramane imposibil')
+  const R5 = { ...R, suportRazaGrinda: 5 }
+  assert.equal(poateSustine(A.w.terrain, R5, ...santier(A)).ok, false, 'fixtura: cu raza 5 santierul e la 5 de grinda, deci imposibil')
+
+  assert.equal(sustinutAcumMemorat(A.w.terrain, R, ...santier(A), m), true, 'dupa stalp, memoria a raspuns cu refuzul (sau cu activitatea) de dinainte')
+  assert.equal(sustinutAcumMemorat(B.w.terrain, R, ...santier(B), m), false, 'memoria a raspuns pentru terenul B cu raspunsul terenului A')
+  assert.equal(sustinutAcumMemorat(A.w.terrain, R, ...santier(A), m), true)
+  assert.equal(sustinutAcumMemorat(A.w.terrain, R5, ...santier(A), m), false, 'memoria a raspuns cu alte reguli')
+})
+
+test('K05: poarta scanerului pe o podea de grinzi cu centrul imposibil — activitatea doar unde ajunge drumul, o data pe epoca, apoi nimic', () => {
+  // Masurat de lentila de cost (recenzia taieturii 4): pe o sala de 41×41 cu podea din
+  // grinzi, o trecere a portii peste cele 225 de santiere imposibile facea 16.005 BFS-uri
+  // de activitate — la fiecare scanare, fara nicio munca. Aici, o sala de 31: centrul de
+  // 5×5 e la peste 12 de zid, deci imposibil.
+  // Ca la tavanul de mai sus: podeaua deasupra celui mai inalt sol, zidul din sol pana la
+  // ea — nu cere teren plat, doar uscat.
+  const L = 31
+  const { w, sit } = laSit(12345, 0)
+  const x0 = sit.wx
+  const y0 = sit.wy
+  let gmax = -1 << 20
+  for (let dx = 0; dx < L; dx++) {
+    for (let dy = 0; dy < L; dy++) {
+      const gs = solid(w, x0 + dx, y0 + dy)
+      assert.notEqual(gs, null, 'fixtura: apa sub sala')
+      if (gs! > gmax) gmax = gs!
+    }
+  }
+  const zf = gmax + 2
+  for (let dx = 0; dx < L; dx++) {
+    for (let dy = 0; dy < L; dy++) {
+      if (dx !== 0 && dy !== 0 && dx !== L - 1 && dy !== L - 1) continue
+      for (let z = solid(w, x0 + dx, y0 + dy)! + 1; z <= zf; z++) assert.ok(fillTeren(w.terrain, x0 + dx, y0 + dy, z, Material.PIATRA_CONSTRUITA).ok)
+    }
+  }
+  const plan: [number, number, number, number][] = []
+  for (let dx = 1; dx < L - 1; dx++) for (let dy = 1; dy < L - 1; dy++) plan.push([x0 + dx, y0 + dy, zf, Material.GRINDA])
+  const facute = construiesteIncremental(w, plan)
+  const ramase = plan.filter(([x, y, z]) => !facute.has(cellKey(x, y, z)))
+  assert.equal(ramase.length, 25, `fixtura: ${ramase.length} santiere imposibile, nu centrul de 5×5`)
+
+  // (1) LENES: un santier fara niciun vecin solid nu calculeaza nicio activitate, desi
+  // are ~180 de grinzi candidate in raza.
+  const centru = ramase.find(([x, y]) => x === x0 + 15 && y === y0 + 15)!
+  const candidati: number[] = []
+  grinziInRaza(w.terrain.grinzi, centru[0], centru[1], zf, R.suportRazaGrinda - 1, candidati)
+  assert.ok(candidati.length / 2 > 100, 'fixtura: centrul trebuia sa aiba grinzi candidate in raza')
+  reseteazaContoareStabilitate()
+  assert.equal(sustinutAcum(w.terrain, R, centru[0], centru[1], zf, null), false)
+  assert.equal(contoareStabilitate.activitati, 0, `${contoareStabilitate.activitati} activitati pentru un santier la care nu duce niciun drum`)
+
+  // (2) O trecere prin memorie: fiecare grinda cel mult o data, si doar dintre cele la
+  // care ajunge BFS-ul (la ≤ 9 de un santier ramas).
+  const aproape = new Set<number>()
+  for (const [x, y] of ramase) {
+    const l: number[] = []
+    grinziInRaza(w.terrain.grinzi, x, y, zf, R.suportRazaGrinda - 1, l)
+    for (let i = 0; i < l.length; i += 2) aproape.add(cellKey(l[i]!, l[i + 1]!, zf))
+  }
+  const m = memorieSprijin()
+  reseteazaContoareStabilitate()
+  for (const [x, y, z] of ramase) assert.equal(sustinutAcumMemorat(w.terrain, R, x, y, z, m), false)
+  const oTrecere = contoareStabilitate.activitati
+  assert.ok(oTrecere > 0, 'fixtura: marginea centrului trebuia sa ajunga la grinzi inactive')
+  assert.ok(oTrecere <= aproape.size, `${oTrecere} activitati pe o trecere, peste cele ${aproape.size} grinzi din raza santierelor`)
+
+  // (3) A doua trecere, pe acelasi teren: nimic.
+  reseteazaContoareStabilitate()
+  for (const [x, y, z] of ramase) assert.equal(sustinutAcumMemorat(w.terrain, R, x, y, z, m), false)
+  assert.equal(contoareStabilitate.activitati, 0, 'a doua trecere pe acelasi teren a recalculat activitati')
+  assert.equal(contoareStabilitate.interogariS1, 0, 'a doua trecere pe acelasi teren a reintrebat santierele')
 })
 
 test('S6d: sapi grinda, iar inelul de langa ea e tinut de un STALP — ce cade = previzualizarea = oracolul, zero plutitori', () => {

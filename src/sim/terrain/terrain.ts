@@ -43,6 +43,13 @@ export interface Terrain {
    * insertie a unui Map difera intre lumea continua si cea incarcata.
    */
   readonly grinzi: IndexGrinzi
+  /**
+   * TRANSIENT: cate scrieri de voxel au trecut prin `editAt`. E EPOCA terenului pentru
+   * memoriile care depind de el: acelasi numar pe acelasi obiect ⇒ acelasi continut
+   * (promovarea si streamingul nu schimba niciun raspuns — ne-promovat = cache). Nu
+   * intra in hash si nu se salveaza; un teren incarcat porneste de la 0, dar e alt obiect.
+   */
+  editari: number
 }
 
 /**
@@ -194,7 +201,7 @@ export function chunkKey(cx: number, cy: number): number {
 }
 
 export function createTerrain(seed: number, radius: number): Terrain {
-  return { seed, chunks: new Map(), keys: [], focusCx: 0, focusCy: 0, radius, grinzi: new Map() }
+  return { seed, chunks: new Map(), keys: [], focusCx: 0, focusCy: 0, radius, grinzi: new Map(), editari: 0 }
 }
 
 function insertKey(t: Terrain, key: number): void {
@@ -379,6 +386,7 @@ function editAt(t: Terrain, wx: number, wy: number, z: number, material: Materia
   // la runtime (sapat de job si de comanda, zidire, prabusire, moloz).
   if (current.value === Material.GRINDA) scoateGrinda(t.grinzi, wx, wy, z)
   if (material === Material.GRINDA) adaugaGrinda(t.grinzi, wx, wy, z)
+  t.editari++
   return accept()
 }
 
