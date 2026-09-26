@@ -89,6 +89,8 @@ test('graful STABIL e exact „calcabil in W ∪ Z si in F", masurat pe doua lum
   }
   for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) C.push(cellKey(wx + 3 + dx, wy + 3 + dy, g + 3))
   C.push(cellKey(wx + 1, wy + 5, g + 1))
+  // Buiandrugul peste usa: celula usii e calcabila in W, dar in F are santierul in CAP.
+  C.push(cellKey(wx + 5, wy + 3, g + 2))
   // Z: o jumatate din plan, deterministic.
   const Z = C.filter((_, i) => i % 2 === 0)
   const dec = (k: number): [number, number, number] => {
@@ -117,6 +119,7 @@ test('graful STABIL e exact „calcabil in W ∪ Z si in F", masurat pe doua lum
   // Fixtura VIE: exista si celule stabile, si celule calcabile in W dar nu in F (santiere).
   assert.ok(stabile > 50, `fixtura: doar ${stabile} celule stabile`)
   assert.ok(isWalkable(s.w.terrain, wx + 3, wy + 4, g + 1, R) && !nod.calcabila(wx + 3, wy + 4, g + 1), 'fixtura: celula de santier trebuia sa fie calcabila in W si nestabila')
+  assert.ok(isWalkable(s.w.terrain, wx + 5, wy + 3, g + 1, R) && !nod.calcabila(wx + 5, wy + 3, g + 1), 'fixtura: usa de sub buiandrug trebuia sa fie calcabila in W si nestabila')
   // Graful W cu `extra` e isWalkable pe W ∪ extra.
   const nodB = nodW(s.w.terrain, new Set(C), R)
   for (let x = wx - 1; x <= wx + 10; x++) {

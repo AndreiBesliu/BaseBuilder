@@ -245,8 +245,9 @@ export function nodStabil(l: LumeAcces, rules: Rules, r: Cititor = cititor(l.t))
       }
       return true
     },
+    // O piesa din Z e AER in terenul real (santierele stau pe celule goale — `desemneaza`
+    // refuza o celula plina), deci podeaua ei iese nenaturala fara nicio verificare in plus.
     naturala(x, y, z) {
-      if (Z !== null && Z.has(cellKey(x, y, z - 1))) return false
       const m = materialCitit(r, x, y, z - 1)
       return isSolid(m) && !esteMaterialDeStructura(m)
     },
@@ -271,7 +272,6 @@ export function nodW(t: Terrain, extra: ReadonlySet<number> | null, rules: Rules
       return true
     },
     naturala(x, y, z) {
-      if (extra !== null && extra.has(cellKey(x, y, z - 1))) return false
       const m = materialCitit(r, x, y, z - 1)
       return isSolid(m) && !esteMaterialDeStructura(m)
     },

@@ -102,13 +102,6 @@ export const MUTATII = [
     t: 'tests/acces.test.ts', e: 'podeaua NATURALA',
   },
   {
-    n: 'piesa zidita IPOTETIC numara ca podea naturala',
-    f: 'src/sim/acces.ts',
-    a: '      if (Z !== null && Z.has(cellKey(x, y, z - 1))) return false\n      const m = materialCitit(r, x, y, z - 1)',
-    b: '      const m = materialCitit(r, x, y, z - 1)',
-    t: 'tests/acces.test.ts', e: 'podeaua NATURALA',
-  },
-  {
     n: 'coloana nepromovata: pamantul coboara un nivel mai putin',
     f: 'src/sim/acces.ts',
     a: '      mat[l] = z > g ? Material.AER : z === g ? sus : z > g - 3 ? Material.PAMANT : Material.ROCA',
