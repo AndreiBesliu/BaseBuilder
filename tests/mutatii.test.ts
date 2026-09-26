@@ -11,8 +11,9 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
-import { writeFileSync, rmSync } from 'node:fs'
+import { execSync, spawnSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -62,6 +63,42 @@ test('harnasamentul ruleaza DOAR testul numit, si refuza un filtru de nume care 
   const mort = h.ruleazaTeste('tests/constructie.test.ts', 'un nume pe care nu-l poarta niciun test')
   assert.equal(mort.rulate, 0)
   assert.notEqual(mort.eroare, null, 'un filtru care nu prinde niciun test trebuie sa fie o EROARE, nu un verdict')
+})
+
+test('restaurarea se verifica fata de HEAD, nu doar dupa tipar: un fisier cu tiparul inapoi, dar schimbat in alta parte, NU e restaurat', async () => {
+  // A treia oara (26.09.2026), suita a raportat „restaurat: da" si a lasat o mutatie in
+  // arbore, pe alta linie decat tiparul verificat. Un depozit git temporar, ca verificarea sa
+  // se poata proba fara sa atinga depozitul real.
+  const repo = mkdtempSync(join(tmpdir(), 'kin-restaurare-'))
+  try {
+    const git = (c: string): void => { execSync(`git ${c}`, { cwd: repo, stdio: 'pipe' }) }
+    git('init -q')
+    git('config user.email proba@kinstead.local')
+    git('config user.name proba')
+    git('config core.autocrlf false')
+    writeFileSync(join(repo, 'f.txt'), 'unu\ndoi\ntrei\n', 'utf8')
+    git('add f.txt')
+    git('commit -q -m baza')
+    const cale = pathToFileURL(join(RADACINA, 'tools', 'mutatii', 'harnasament.mjs')).href
+    type Editare = { f: string; a: string; b: string }
+    const h = (await import(cale)) as {
+      restaurat: (e: Editare, repo: string) => boolean
+      restaureaza: (e: Editare[], repo: string) => boolean
+      laFelCaHead: (f: string, repo: string) => boolean
+    }
+    const e: Editare = { f: 'f.txt', a: 'doi', b: 'DOI' }
+    assert.equal(h.restaurat(e, repo), true, 'fisierul identic cu HEAD trebuie sa fie restaurat')
+    writeFileSync(join(repo, 'f.txt'), 'unu\ndoi\nTREI\n', 'utf8')
+    assert.equal(h.restaurat(e, repo), false, 'tiparul e la loc, dar alta linie e mutata: NU e restaurat')
+    assert.equal(h.laFelCaHead('f.txt', repo), false)
+    writeFileSync(join(repo, 'f.txt'), 'unu\r\ndoi\r\ntrei\r\n', 'utf8')
+    assert.equal(h.restaurat(e, repo), true, 'doar terminatorii de linie difera: e acelasi continut')
+    writeFileSync(join(repo, 'f.txt'), 'unu\nDOI\ntrei\n', 'utf8')
+    assert.equal(h.restaureaza([e], repo), true, 'restaurarea prin git reface fisierul')
+    assert.equal(h.laFelCaHead('f.txt', repo), true)
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
 })
 
 test('suitele de mutatii sunt intregi', () => {

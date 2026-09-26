@@ -16,7 +16,7 @@
  * n-a fost invalid.
  */
 
-import { arboreCurat, ruleazaSuita, ruleazaTeste, testePicate } from './harnasament.mjs'
+import { arboreCurat, laFelCaHead, ruleazaSuita, ruleazaTeste, testePicate } from './harnasament.mjs'
 import { SUITE } from './suite.mjs'
 
 const argumente = process.argv.slice(2)
@@ -92,6 +92,21 @@ for (const r of rezultate) {
   console.log(`  ${r.nume.padEnd(9)} ${r.prinse}/${r.valide} prinse${r.invalide.length ? `, ${r.invalide.length} controale invalide` : ''}`)
 }
 console.log(`\n  TOTAL     ${prinse}/${valide} prinse, ${invalide} controale invalide`)
+
+// Si la FINAL arborele trebuie sa fie curat: fiecare fisier atins de o proba, identic cu
+// HEAD, si nimic altceva modificat. Restaurarea se verifica si per proba; asta e plasa a
+// doua, care nu depinde de cum ar fi scapat o mutatie (26.09.2026: o rulare a iesit cu
+// codul 0 si a lasat o mutatie in arbore). Iesirea 1: urmatorul `check` ar fi fost rosu
+// pe o cauza pe care n-o vede nimeni.
+const atinse = new Set()
+for (const s of alese) for (const m of s.M) for (const e of [m, ...(m.e2 ?? [])]) atinse.add(e.f)
+const neRestaurate = [...atinse].sort().filter((f) => !laFelCaHead(f))
+const ramas = arboreCurat()
+if (neRestaurate.length > 0 || ramas) {
+  console.log(`\n  !! ARBORE MURDAR LA FINAL — mutatie lasata in arbore: ${neRestaurate.join(', ') || '(git status)'}`)
+  if (ramas) console.log(ramas)
+  process.exit(1)
+}
 
 // Un `TIPAR LIPSA` e un ESEC, la fel ca o mutatie ratata: un tipar invechit nu
 // probeaza nimic, dar arata ca si cum ar fi probat.

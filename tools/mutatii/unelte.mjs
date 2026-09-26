@@ -26,5 +26,18 @@ export const MUTATII = [
     a: '  const rulate = new Set(rezultate.map((x) => x[2]).filter((n) => n.startsWith(prefix))).size',
     b: '  const rulate = rezultate.length',
     t: 'tests/mutatii.test.ts', e: 'harnasamentul ruleaza DOAR testul numit',
+  },  {
+    n: 'restaurarea se verifica doar dupa tipar (o mutatie de pe alta linie ramane in arbore, „restaurat: da")',
+    f: 'tools/mutatii/harnasament.mjs',
+    a: '  return continut.includes(potrivit(continut, e.a)) && laFelCaHead(e.f, repo)',
+    b: '  return continut.includes(potrivit(continut, e.a))',
+    t: 'tests/mutatii.test.ts', e: 'restaurarea se verifica fata de HEAD',
+  },
+  {
+    n: 'egalitatea cu HEAD nu normalizeaza terminatorii de linie (autocrlf: orice fisier atins pare murdar)',
+    f: 'tools/mutatii/harnasament.mjs',
+    a: "  return a.replace(/\\r\\n/g, '\\n') === b.replace(/\\r\\n/g, '\\n')",
+    b: '  return a === b',
+    t: 'tests/mutatii.test.ts', e: 'restaurarea se verifica fata de HEAD',
   },
 ]

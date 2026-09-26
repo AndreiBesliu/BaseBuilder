@@ -181,24 +181,19 @@ export function aplica(f, a, b) {
  * decat niciun instrument — vezi si nota despre oracolul propriu din antetul
  * fisierului. Asta e a doua fata a aceleiasi lectii.
  */
-function restaureaza(editari) {
+export function restaureaza(editari, repo = REPO) {
   const fisiere = [...new Set(editari.map((e) => e.f))]
   for (const incercare of [1, 2, 3]) {
     for (const f of fisiere) {
       try {
         // `HEAD --`, nu doar `--`: al doilea copiaza din INDEX, iar indexul e
         // exact ce poate fi stricat de cursa descrisa mai sus.
-        execSync(`git checkout HEAD -- ${f}`, { cwd: REPO, stdio: 'pipe' })
+        execSync(`git checkout HEAD -- ${f}`, { cwd: repo, stdio: 'pipe' })
       } catch {
         // Se reincearca; daca si a treia pica, se striga.
       }
     }
-    // VERIFICAREA E PE CONTINUT: fiecare tipar cautat trebuie sa fie iar acolo.
-    // Nu se intreaba git — el e chiar partea care poate minti.
-    const rele = editari.filter((e) => {
-      const continut = readFileSync(resolve(REPO, e.f), 'utf8')
-      return !continut.includes(potrivit(continut, e.a))
-    })
+    const rele = editari.filter((e) => !restaurat(e, repo))
     if (rele.length === 0) return true
     if (incercare === 3) {
       console.log(`  !! RESTAURARE ESUATA dupa trei incercari: ${[...new Set(rele.map((e) => e.f))].join(', ')}`)
@@ -206,6 +201,40 @@ function restaureaza(editari) {
     }
   }
   return false
+}
+
+/** Doua texte sunt acelasi continut, cu terminatorii de linie normalizati (`core.autocrlf`). */
+export function acelasiText(a, b) {
+  return a.replace(/\r\n/g, '\n') === b.replace(/\r\n/g, '\n')
+}
+
+/**
+ * Fisierul `f` are, in arborele de lucru, EXACT continutul din commit-ul HEAD? Se citeste
+ * obiectul din HEAD (`git show`), nu indexul — indexul e partea pe care o poate strica
+ * cursa cu `git gc --auto`.
+ */
+export function laFelCaHead(f, repo = REPO) {
+  let dinHead
+  try {
+    dinHead = execSync(`git show HEAD:${f.replace(/\\/g, '/')}`, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 << 20 })
+  } catch {
+    return false
+  }
+  return acelasiText(readFileSync(resolve(repo, f), 'utf8'), dinHead)
+}
+
+/**
+ * E restaurata editarea `e`? Tiparul `a` e iar acolo SI fisierul e identic cu HEAD.
+ *
+ * Doar tiparul nu ajunge, si s-a vazut a treia oara (26.09.2026, recenzia grinzii): o
+ * rulare a suitei `grinda` a raportat „restaurat: da" pe toate probele, a iesit cu codul 0,
+ * si a lasat in `viewer/scanare-stabilitate.ts` mutatia unei probe de pe ALTA linie decat
+ * cea verificata la momentul acela — mecanismul (o cursa cu `git gc`, dupa commit-ul facut
+ * chiar inaintea rularii) nu s-a mai reprodus. Egalitatea cu HEAD nu depinde de mecanism.
+ */
+export function restaurat(e, repo = REPO) {
+  const continut = readFileSync(resolve(repo, e.f), 'utf8')
+  return continut.includes(potrivit(continut, e.a)) && laFelCaHead(e.f, repo)
 }
 
 /**
