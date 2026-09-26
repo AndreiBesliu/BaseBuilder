@@ -40,6 +40,10 @@ const ALBASTRU = new THREE.Color(0x63aec0)
 const ROSU = new THREE.Color(0xb1553f)
 const VIOLET = new THREE.Color(0x9b6bb5)
 const PORTOCALIU = new THREE.Color(0xe08a3c)
+/** Are unde sta, dar niciun loc SIGUR: o scara, o usa — sau asteapta o piesa inca nezidita. */
+const TURCOAZ = new THREE.Color(0x3fb8b0)
+/** Zidirea ar inchide un pion, un morman sau o zona. */
+const ROZ = new THREE.Color(0xd9708f)
 const LINIE = new THREE.Color(0xf2efe6)
 const DEPOZIT = new THREE.Color(0x7fa66b)
 
@@ -50,6 +54,10 @@ export interface JobOverlay {
   desemnari: number
   rezervate: number
   faraLoc: number
+  /** Are vecini, dar niciun loc de lucru SIGUR (FARA_LOC_SIGUR). */
+  faraLocSigur: number
+  /** Zidirea ar inchide ceva (AR_INCHIDE). */
+  inchide: number
   componente: number
   altRefuz: number
   iteme: number
@@ -65,7 +73,7 @@ export function createJobOverlay(): JobOverlay {
   group.visible = false
   return {
     group, visible: false,
-    desemnari: 0, rezervate: 0, faraLoc: 0, componente: 0, altRefuz: 0,
+    desemnari: 0, rezervate: 0, faraLoc: 0, faraLocSigur: 0, inchide: 0, componente: 0, altRefuz: 0,
     iteme: 0, itemeRezervate: 0, itemeFaraDepozit: 0, itemeInaccesibile: 0,
     celuleDepozit: 0, celuleOcupate: 0,
   }
@@ -112,6 +120,8 @@ export function rebuildJobOverlay(o: JobOverlay, w: World): void {
   o.desemnari = 0
   o.rezervate = 0
   o.faraLoc = 0
+  o.faraLocSigur = 0
+  o.inchide = 0
   o.componente = 0
   o.altRefuz = 0
   o.iteme = 0
@@ -139,6 +149,8 @@ export function rebuildJobOverlay(o: JobOverlay, w: World): void {
     } else {
       const motiv = motivDinCod(d.ultimulMotiv[i]!)
       if (motiv === Reason.INACCESIBIL && d.ultimulMotivDetaliu[i] === DetaliuMotiv.FARA_LOC_DE_LUCRU) { culoare = ROSU; o.faraLoc++ }
+      else if (motiv === Reason.INACCESIBIL && d.ultimulMotivDetaliu[i] === DetaliuMotiv.FARA_LOC_SIGUR) { culoare = TURCOAZ; o.faraLocSigur++ }
+      else if (motiv === Reason.AR_INCHIDE) { culoare = ROZ; o.inchide++ }
       else if (motiv === Reason.INACCESIBIL && d.ultimulMotivDetaliu[i] === DetaliuMotiv.COMPONENTE_DIFERITE) { culoare = VIOLET; o.componente++ }
       else if (motiv !== null) { culoare = PORTOCALIU; o.altRefuz++ }
     }

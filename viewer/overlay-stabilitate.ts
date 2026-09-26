@@ -51,6 +51,7 @@ import type { Rules } from '../src/sim/content.ts'
 import { decodeCell } from '../src/sim/path.ts'
 import { StareSapat } from '../src/sim/stabilitate.ts'
 import { constructiaPrevizualizata, prabusireaPrevizualizata } from '../src/sim/joburi.ts'
+import { CauzaAcces } from '../src/sim/acces.ts'
 import { avanseazaScanare, ceFacCuTrecerea, pornesteScanare, Trecere } from './scanare-stabilitate.ts'
 import type { Scanare } from './scanare-stabilitate.ts'
 
@@ -68,6 +69,15 @@ export interface StabilityOverlay {
    * planului. Calculate pe MULTIMEA desemnarilor, ca punct fix.
    */
   imposibile: number
+  /**
+   * Cate piese ar sta in picioare, dar niciun pion n-ar ajunge sa le zideasca — din aceeasi
+   * inchidere simulata pe care o face scanerul. Si cate dintre ele cer o SCARA (INALTIME);
+   * restul cer o USA (INCINTA).
+   */
+  faraAcces: number
+  faraAccesInaltime: number
+  /** Ce ar inchide planul, gata de HUD („1 pion, 3 mormane"); gol daca nimic. */
+  inchise: string
   /** Cate celule au ajuns la scanarea SCUMPA. Pentru bugetul de cadru. */
   scanate: number
   /** Ce sa scrie in HUD cand overlay-ul nu poate desena nimic. Gol daca poate. */
@@ -82,7 +92,7 @@ export function createStabilityOverlay(): StabilityOverlay {
   const group = new THREE.Group()
   group.visible = false
   return {
-    group, visible: false, sigur: 0, ultima: 0, cade: 0, previzualizate: 0, imposibile: 0, scanate: 0, piedica: '',
+    group, visible: false, sigur: 0, ultima: 0, cade: 0, previzualizate: 0, imposibile: 0, faraAcces: 0, faraAccesInaltime: 0, inchise: '', scanate: 0, piedica: '',
     scanare: null, ultimaScanare: null,
   }
 }
@@ -105,6 +115,9 @@ function uita(o: StabilityOverlay): void {
   o.cade = 0
   o.previzualizate = 0
   o.imposibile = 0
+  o.faraAcces = 0
+  o.faraAccesInaltime = 0
+  o.inchise = ''
   o.scanate = 0
 }
 
@@ -120,6 +133,8 @@ const CULOARE_PREVIZ = 0xff8030
  * Actiunea ceruta jucatorului e alta — muta piesa, sau ridica intai ceva sub ea.
  */
 const CULOARE_IMPOSIBIL = 0xb060d0
+/** Turcoaz: ar sta, dar nu se ajunge — o scara sau o usa, nu alt plan. */
+const CULOARE_FARA_ACCES = 0x3fb8b0
 
 /** Conturul de stare umple celula; cel de previzualizare sta INAUNTRUL lui. */
 const INSET_STARE = 0.08
@@ -250,6 +265,23 @@ export function redeseneazaStabilitate(o: StabilityOverlay, w: World, rules: Rul
     // Ca la previzualizarea de prabusire: proiectat pe nivelul activ daca piesa e
     // deasupra planului de taiere, altfel n-ar fi vizibila deloc.
     patrat(pozitii, culori, c.wx, c.wy, Math.min(c.z, zActiv) + 0.94, INSET_IMPOSIBIL, CULOARE_IMPOSIBIL)
+  }
+
+  // --- ce ar sta, dar la care nu ajunge nimeni ---
+  //
+  // Acelasi predicat ca scanerul (inchiderea simulata): ce se deseneaza turcoaz e exact ce
+  // pionii NU vor zidi. INALTIME cere o scara; INCINTA, o usa.
+  o.faraAcces = constr.faraAcces.length
+  o.faraAccesInaltime = constr.cauze.filter((cz) => cz === CauzaAcces.INALTIME).length
+  const bucati: string[] = []
+  if (constr.inchise.pioni > 0) bucati.push(`${constr.inchise.pioni} pion${constr.inchise.pioni === 1 ? '' : 'i'}`)
+  if (constr.inchise.mormane > 0) bucati.push(`${constr.inchise.mormane} morman${constr.inchise.mormane === 1 ? '' : 'e'}`)
+  if (constr.inchise.zone > 0) bucati.push(`${constr.inchise.zone} celul${constr.inchise.zone === 1 ? 'a' : 'e'} de zona`)
+  o.inchise = bucati.join(', ')
+  for (const cheie of constr.faraAcces) {
+    const c = decodeCell(cheie)
+    if (Math.abs(c.wx - cx) > raza || Math.abs(c.wy - cy) > raza) continue
+    patrat(pozitii, culori, c.wx, c.wy, Math.min(c.z, zActiv) + 0.94, INSET_IMPOSIBIL, CULOARE_FARA_ACCES)
   }
 
   if (pozitii.length === 0) return

@@ -671,7 +671,12 @@ renderer.domElement.addEventListener('click', (ev) => {
   pointer.y = -(ev.clientY / window.innerHeight) * 2 + 1
   raycaster.setFromCamera(pointer, camera)
   const hits = raycaster.intersectObjects(group.children, false)
-  if (hits.length === 0) return
+  // Cu o piesa aleasa si slice-ul pornit, se deseneaza la NIVELUL ACTIV (DESIGN §5.2: „toate
+  // ordinele se aplica la nivelul activ"), nu in fata fetei de teren lovite. Altfel etajele nu
+  // se puteau desena inainte sa existe placa: panoul accesului vertical a numarat 9 „valuri"
+  // de desenat pentru o casa cu doua etaje, iar „fara acces" nu aparea niciodata la planificare.
+  const cuPiesaSus = piesaAleasa !== Piesa.NICIUNA && !ev.altKey && !tastaZ && !tastaX && sliceLevel < VOXEL_LEVELS
+  if (hits.length === 0 && !cuPiesaSus) return
 
   // Punctul de impact sta EXACT pe suprafata, deci nu apartine niciunei celule:
   // rotunjirea lui nimerea sistematic celula de deasupra solului, adica aer, iar
@@ -681,12 +686,22 @@ renderer.domElement.addEventListener('click', (ev) => {
   // Merge la fel pe suprafata de heightfield (unde cota e fractionara: teren la
   // -4,37 m inseamna sol solid de la -5 in jos) si pe o fata de voxel (unde cota
   // e intreaga si punctul cade fix pe granita dintre doua celule).
-  const hit = hits[0]!
-  const normal = hit.face ? hit.face.normal : new THREE.Vector3(0, 1, 0)
   // Cu o piesa aleasa, celula e cea de AER din fata fetei, ca la Shift+click — si tot
   // acolo tinteste Ctrl+click, ca sa poata retrage o piesa desenata.
   const cuPiesa = piesaAleasa !== Piesa.NICIUNA && !ev.altKey && !tastaZ && !tastaX
-  const target = hit.point.clone().addScaledVector(normal, ev.shiftKey || cuPiesa ? 0.5 : -0.5)
+  let target: THREE.Vector3
+  if (cuPiesaSus) {
+    // Planul de deasupra nivelului activ (y = zActiv + 1): exact ce vede jucatorul de sus,
+    // fiindca taierea pastreaza y <= sliceLevel. Coloana de sub cursor, la cota zActiv.
+    const zActiv = sliceLevel - 1
+    const p = raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -(zActiv + 1)), new THREE.Vector3())
+    if (!p) return
+    target = new THREE.Vector3(p.x, zActiv + 0.5, p.z)
+  } else {
+    const hit = hits[0]!
+    const normal = hit.face ? hit.face.normal : new THREE.Vector3(0, 1, 0)
+    target = hit.point.clone().addScaledVector(normal, ev.shiftKey || cuPiesa ? 0.5 : -0.5)
+  }
 
   const wx = Math.floor(target.x)
   const wy = Math.floor(target.z)
@@ -1216,7 +1231,7 @@ function stepFrame(ts: number): void {
     {
       const r = rezumatJoburi(world)
       const d = world.desemnari.vii
-      const o = jobOverlay.visible ? ` · liber ${jobOverlay.desemnari - jobOverlay.rezervate - jobOverlay.faraLoc - jobOverlay.componente - jobOverlay.altRefuz} rez ${jobOverlay.rezervate} fara-loc ${jobOverlay.faraLoc} rupt ${jobOverlay.componente}` : ''
+      const o = jobOverlay.visible ? ` · liber ${jobOverlay.desemnari - jobOverlay.rezervate - jobOverlay.faraLoc - jobOverlay.faraLocSigur - jobOverlay.inchide - jobOverlay.componente - jobOverlay.altRefuz} rez ${jobOverlay.rezervate} fara-loc ${jobOverlay.faraLoc} nesigur ${jobOverlay.faraLocSigur} ar-inchide ${jobOverlay.inchide} rupt ${jobOverlay.componente}` : ''
       const m = jobOverlay.visible ? ` · mormane ${jobOverlay.iteme} (rez ${jobOverlay.itemeRezervate} fara-depozit ${jobOverlay.itemeFaraDepozit} rupt ${jobOverlay.itemeInaccesibile}) · depozit ${jobOverlay.celuleOcupate}/${jobOverlay.celuleDepozit}` : ` · mormane ${world.iteme.vii} · depozit ${world.zone.celule.vii} cel.`
       // Nevoile si dispozitia. „Nefericit" si „refuza munca" sunt DOUA contoare,
       // fiindca nu sunt acelasi lucru; avertismentul de plecare se uita la TINTA.
@@ -1233,6 +1248,8 @@ function stepFrame(ts: number): void {
           : (stabOverlay.ultimaScanare === null ? ' · ultima-celula ? cade ?' : ` · ultima-celula ${stabOverlay.ultima} cade ${stabOverlay.cade}`) +
             (stabOverlay.previzualizate > 0 ? ` · desemnarile ar prabusi ${stabOverlay.previzualizate}` : '') +
             (stabOverlay.imposibile > 0 ? ` · ${stabOverlay.imposibile} piese NU se pot zidi` : '') +
+            (stabOverlay.faraAcces > 0 ? ` · ${stabOverlay.faraAcces} fara acces (${stabOverlay.faraAccesInaltime} scara, ${stabOverlay.faraAcces - stabOverlay.faraAccesInaltime} usa)` : '') +
+            (stabOverlay.inchise !== '' ? ` · PLANUL INCHIDE ${stabOverlay.inchise}` : '') +
             (progresStabilitate(stabOverlay) !== null ? ` · scanare ${Math.floor(100 * progresStabilitate(stabOverlay)!)}%` : '')
       el('jobs').textContent = `${d} desemnari · idle ${r.idle} merg ${r.merg} lucreaza ${r.lucreaza} cara ${r.cara}${o}${m}${n}${av}${fm}${st}`
       el('jobs').className = r.faraMuncitori || r.faraCarausi ? 'warn' : ''
