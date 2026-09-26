@@ -8,7 +8,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { applyCommand } from '../src/sim/commands.ts'
-import { Prefiltru, StareSapat, stareSapat } from '../src/sim/stabilitate.ts'
+import { Prefiltru, prefiltruStabilitate, Sol, solLa, StareSapat, stareSapat } from '../src/sim/stabilitate.ts'
 import { aceeasiScanare, avanseazaScanare, pornesteScanare } from '../viewer/scanare-stabilitate.ts'
 import type { Scanare } from '../viewer/scanare-stabilitate.ts'
 import type { World } from '../src/sim/state.ts'
@@ -42,15 +42,19 @@ test('felierea nu schimba trecerea: o felie sau cate o celula pe apel, acelasi d
   const feliata = pornesteScanare(w, R, zA, cx, cy, raza)
   const apeluri = panaLaCapat(feliata, w, () => t++, 1)
 
-  // Referinta independenta: `stareSapat` pe fiecare celula DE_SCANAT, in ordinea ferestrei.
+  // Referinta INDEPENDENTA de scanare: `stareSapat` pe FIECARE celula solida a ferestrei, in
+  // ordinea ei, iar numarul de celule scumpe dintr-un prefiltru calculat aici, pe fereastra
+  // corecta. Prima versiune citea filtrul chiar din trecerea testata: un filtru calculat pe o
+  // fereastra decalata cu o celula trecea testul si lasa nedesenata o celula periculoasa din 56.
   const lat = 2 * raza + 1
+  const filtru = prefiltruStabilitate(w.terrain, R, cx - raza, cy - raza, lat, zA)
   const marcate: number[] = []
   let scanate = 0
   for (let k = 0; k < lat * lat; k++) {
-    if (intreaga.filtru[k] !== Prefiltru.DE_SCANAT) continue
-    scanate++
+    if (filtru[k] === Prefiltru.DE_SCANAT) scanate++
     const wx = cx - raza + Math.floor(k / lat)
     const wy = cy - raza + (k % lat)
+    if (solLa(w.terrain, wx, wy, zA) !== Sol.SOLID) continue
     const st = stareSapat(w.terrain, R, wx, wy, zA)
     if (st === StareSapat.ULTIMA_CELULA || st === StareSapat.CADE) marcate.push(wx, wy, st)
   }
