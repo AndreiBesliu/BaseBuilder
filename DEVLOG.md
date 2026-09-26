@@ -4092,3 +4092,113 @@ schimbarea nivelului pornește una nouă. Zero erori.
   piese de tavan.
 
 La owner: OWNER_VERIFY 12 (cifrele, alternativa `s1 = R − d0(b) − d1`, grinda de lemn, tavanele de rocă).
+
+---
+
+## Task Started — recenzia adversarială a grinzii
+
+**Model:** Claude Opus 5.5
+**Prompt de start:** „continua" (26.09, la cererea mea de cifre de consum; ultracode pornit)
+
+Recenzia feliei grinzii (diff `6ba8fe8..1196156`), în două workflow-uri, cu bugetul anunțat
+înainte (~3,3 M lentile + ~4–6 M verificare). CI-ul pe `1196156` fusese verde: `mutatii` 3 min 47 s
+(314 probe), `check` 1 min 51 s.
+
+## Task Completed — recenzia adversarială a grinzii
+
+### Cum s-a făcut, și cât a costat
+
+- **5 lentile care reproduc** (regula, continuitate/save, cost, plasa, viewer + documentație),
+  fiecare în instantaneul ei (`git archive` + junction către `node_modules`): **34 de constatări**
+  (4 MARE, 17 MEDIU, 13 MIC), 29 unice după dedup. **1,88 M tokeni**, 91 de minute.
+- **12 verificatori** pe cele 10 care decideau o remediere în nucleu (2 pe fiecare MARE: reproducere
+  + cauză/remediere; 1 contestatar pe fiecare MEDIU), cu verdictul pe motiv (domeniu / mecanism /
+  adevăr): **10 din 10 reale**. **2,89 M tokeni**. Total **4,77 M**, sub cele 8–9 M anunțate.
+- Găurile din plasă și afirmațiile din documentație le-am verificat eu, prin reparare: mutantul
+  raportat trebuia să treacă suita veche și să pice testul nou.
+
+Verificatorii au corectat lentilele de cinci ori, și fiecare corectură a schimbat o remediere:
+- **CONT-1:** ipoteza lentilei despre cauza a doua (ordinea din `adj`) era falsă; cauza izolată e
+  `restoreRegions`, iar remedierea lentilei (reconstrucția la începutul tickului) repara doar prima.
+- **COST-2** urcat la **MARE**: 126–412 ms pe planuri firești, la fiecare click și la capătul
+  fiecărei treceri de overlay.
+- **COST-4:** cifrele lentilei, umflate de mașina încărcată (o celulă: 10–20 ms, nu 16–46), iar
+  plafonul pe celulă propus de ea nu era exact; au propus în schimb oprirea la prima cădere.
+- **R2:** până la **5** celule ascunse la margine, nu 3; și fără grinzi, un ULTIMA pre-existent.
+- **V4:** remedierea lentilei („cea mai apropiată grindă activă") pierdea cazul grinzii INACTIVE
+  (683 din 7.270 de refuzuri) și celula fără vecin solid (6.369 din 7.270).
+
+### Ce s-a reparat
+
+| commit | ce |
+|---|---|
+| `2da2612` | plasa: grinda pe stâlp, discul (b) pe fiecare ramură, cote negative, margini de chunk, `suportLa` exact, referința testului scanării — 22 de mutații plauzibile treceau toată suita |
+| `44effe5` | **COST-1 (MARE):** poarta scanerului — s1 leneș, predicat fără „De ce nu?", memorie TRANSIENT pe epoca terenului (`Terrain.editari`). Tick în repaus pe o sală 41×41 cu podea de grinzi, 64 de pioni: **763 → 0,26 ms**; construcția: 221 de tickuri ≥ 50 ms → 0 |
+| `853ea3c` | **R1 + COST-3:** previzualizarea pe mai multe săpături depindea de ordinea lor (34 din 21.278 greșite, până la 14 celule lipsă); memoria nu se mai golește la însămânțare (10.310 → 882 de BFS-uri) |
+| `da16d32` | **COST-2 (MARE):** închiderea memorează și grinzile inactive, cu invalidare locală demonstrată; s1 leneș păstrează ieșirea timpurie |
+| `1ce9ef7` | **CONT-1 (MARE, pre-existent, fără legătură cu grinda):** un save între o comandă de teren și tick rupea M5 (6/6 semințe). `applyCommand` reconstruiește regiunile pe loc; invariant: în afara unui tick, `regions.dirty` e gol. S-DIG neschimbat (0,04 ms: graful e gol cu pionii opriți) |
+| `354b8a1` | **R2 + P5:** prefiltrul pe fereastra lărgită cu raza, fără presupuneri la margine; testele gărzilor prefiltrului |
+| `bd2c0be` | harnașamentul de mutații (vezi mai jos) |
+| `b859059` | viewer: o trecere terminată nu se reia fără editări de teren (COST-4a); violetul și portocaliul nu mai așteaptă trecerea (V2); decizia trecerii are test (V3) |
+| `9a6e165` | `stareSapat` se oprește la prima cădere (baza stâlpului cu 5 etaje: 1.583 → 6 verificări); K05 cu plafoane din geometrie pentru cascadă, închidere și previzualizare (COST-7, P6) |
+| `c9c0647` | **„De ce nu?"** pe drumul prin solid, cinci cazuri (V4, V5) — mințea pe cazul-vitrină din OWNER_VERIFY 12 |
+| `f868e89` | grinda prin MATERIAL și în previzualizare; piesa GRINDA nu poate fi din alt material (CONT-2); `suportRazaGrinda` ≤ 16 (CONT-3) |
+
+### Harnașamentul a lăsat o mutație în arbore — a treia oară
+
+O rulare a suitei `grinda` a raportat „restaurat: da" pe toate probele, a ieșit cu codul 0 și a lăsat
+în `viewer/scanare-stabilitate.ts` mutația unei probe. Verificarea de restaurare cerea doar ca
+tiparul `a` să fie iar în fișier. Nu s-a mai reprodus; suspectul scris deja în harnașament e cursa
+cu `git gc --auto`, pornit de commit-ul făcut chiar înaintea rulării. Acum restaurarea se verifică
+față de obiectul din HEAD (`git show`, terminatorii normalizați), iar la finalul rulării fiecare
+fișier atins de o probă trebuie să fie identic cu HEAD și `git status` gol — altfel „ARBORE MURDAR LA
+FINAL" și codul 1. Proba pe un depozit git temporar.
+
+### Cifrele, după remedieri (local, fixturi legitime)
+
+| | înainte | după |
+|---|---|---|
+| sala 23×23 cu 4 grinzi: săpătură în centru / previzualizare 9×9 | 10,8 / 13,9 ms | 9,0 / 11,3 ms |
+| tavan 21×21 numai din grinzi: săpătură / previzualizare 9×9 | 18,7 / 25,2 ms | 16,5 / 17,1 ms |
+| stâlp pe 5 etaje: calculul / comanda `dig` reală | 25 / 42–50 ms | 23–26 / **41 ms** (23 µs pe voxel căzut) |
+| `stareSapat` la baza stâlpului (o celulă de overlay) | 23–27 ms | **0,02 ms** |
+| închiderea: 25×25 cu o cruce de grinzi / 41×41×3 numai din grinzi | 126 ms / 7,5–9,9 s | 21 ms / **0,58 s** |
+| previzualizarea: pivniță 21×21×2 sub un tavan de grinzi | 135 ms (lentila: 317–338, mașina încărcată) | 33 ms |
+| lărgirea pivniței sub tavan dens, pe săpătură: mediana / p90 / max | 2,3 / 9,5 / 13,8 ms | 1,7 / 7,7 / 11,2 ms |
+| overlay S, o trecere (lucrul total, feliat): sala cu 4 grinzi / tavanul | 3,2 / 5,6 s | 2,6 / 4,7 s |
+
+Cifrele 2D, remăsurate pe codul final: fâșia 3 → 12, placa 25 → 181 → 313, sala 6×6 → 23×23. Hash
+**52b16ed2** neschimbat pe toată recenzia. **521/521** de teste; **361/361** de probe în **306 s** local
+(12:11–12:16), cu arborele curat la final.
+
+### Corecturi la intrarea „Task Completed — grinda" (append-only, deci aici)
+
+- „stâlp pe 5 etaje … **25 ms**" era doar calculul; comanda reală costă **41 ms** (~0,8 tick), iar
+  „plicul acceptat de panou (5–10 ms)" nu-l cuprindea.
+- „**311/311** în 277 s" era rularea de dinaintea celor 3 probe de viewer; suita avea 314.
+- testul prefiltrului „probează și lărgirea căutării" — nu: aserta o celulă de pe margine, deci
+  DE_SCANAT din oficiu; o probează acum `tests/prefiltru.test.ts`.
+- „toate cele patru ratări aveau aceeași cauză" rămâne adevărat; dar S6e exersa ramura din cascadă
+  doar CU memorie — cea fără memorie rula de 0 ori (P2).
+- OWNER_VERIFY 12: „80 de piatră în plus" (grinda costă cât podeaua pe care o înlocuiește: 0 piatră
+  în plus), regula descrisă fără „pe același nivel", overlay-ul „cel mult 4 ms pe cadru", pași care nu
+  se puteau urma — rescris.
+
+### Registru, cu cifra
+
+- **Overlay-ul pe câmpuri:** ~30–47 ms pe trecere (16–20 CADE + 13–27 ULTIMA, prototipat de panou),
+  exact doar pe un nivel; cazul general nemăsurat. Azi o celulă lângă grinzi costă 4–20 ms.
+- **`d1` ca câmp per propagare** (NEMĂSURAT), pentru săpăturile sub un tavan care ține.
+- **Discul (c) în cascadă, restrâns** la voxelii al căror suport venea din s1 (NEMĂSURAT): turnul de
+  10 etaje costă ~1,5 tickuri la comanda reală.
+- **Memoria golită INTEGRAL la fiecare cădere** (în loc de țintit) n-are plasă de cost: pe turn,
+  280 → 700 de activități, sub marginea geometrică riguroasă (1.060).
+- **Poarta scanerului, invalidare locală** în loc de globală: în timpul construcției unei podele mari
+  de grinzi, prima scanare după fiecare zidire face o trecere rece de 11–19 ms (~2% din tickuri ≥ 8 ms,
+  0 ≥ 50 ms).
+- **Memoria rezultatului lui `constructiaPrevizualizata`** pe (epoca terenului, epoca desemnărilor):
+  0,2–0,6 s la fiecare click la 41×41×3.
+- Rămân: precizia ULTIMA_CELULA, grinzile în tavanele de rocă.
+
+La owner: OWNER_VERIFY 12, rescris — patru decizii (regula de la zid, grinda sub podea, grinda de
+lemn prin `digYield`, tavanele de rocă) și cifrele.

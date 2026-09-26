@@ -242,42 +242,65 @@ dacă e greu de judecat fără o comparație, spune și pun o tastă care comut�
 
 ## 12. Grinda — se citește regula, și sunt cifrele pe care le voiai?
 
-**Ce te uiți.** Viewerul: tasta **P** alege piesa (sapă → perete → podea → scară → **grindă**; rândul
-„piesa" din HUD spune care), iar cu o piesă aleasă, **click** o desenează în celula de aer din fața
-feței atinse (**Ctrl+click** o retrage). Ridică un zid, pune o grindă la **3 celule** de el, apoi
-desenează o podea care pleacă din zid; tasta **S** (cu slice view) arată ce nu se poate zidi, în violet.
-Apoi sapă grinda și uită-te ce cade.
+*(Rescris după recenzia adversarială din 26.09: versiunea dinainte descria greșit regula pe
+verticală, dădea o cifră de piatră falsă, promitea un overlay de „4 ms pe cadru" și avea pași care
+nu se puteau urma în viewer.)*
+
+**Ce te uiți — pașii, în viewer.** Pornește slice view-ul (**Q**/**E**) pe nivelul unde vrei podeaua.
+1. **Shift+click** ridică un zid de 2–3 niveluri și primele 2 celule ale unei fâșii care iese din el,
+   la nivelul podelei. *(Shift+click zidește pe loc, din nimic — e unealta de test.)*
+2. **P** de patru ori (rândul „piesa" din HUD spune **grinda**), apoi **click** pe fața celulei a
+   doua: grinda se desenează în celula de aer din fața ei, a treia de la zid.
+3. **Alt+click** pe o rocă oarecare: săpătura lasă un morman de 20 de piatră, cât costă grinda. Un
+   pion vine și o zidește (câteva zeci de secunde).
+4. **Shift+click** mai departe pe fâșie, celulă cu celulă. Se oprește la a **12-a**; a 13-a e
+   refuzată, iar rândul „loc" din HUD spune de ce: *cea mai apropiată grindă activă e la 10 pași prin
+   solid; ține cel mult 9*.
+5. **P** până când HUD-ul spune **podea**, apoi **click** pe fața ultimei celule: a 13-a se desenează, iar cu **S** pornit apare
+   în **violet** („nu se poate zidi") imediat, fără să aștepte scanarea.
+6. Sapă grinda (**Alt+click** pe ea) și uită-te ce cade.
 
 **Regula, pe scurt** (în `content/rules.json`: `suportMax` 4, `suportRazaGrinda` 10). O grindă e
-*activă* dacă e ea însăși ținută de ceva așezat, prin cel mult 3 celule; o grindă activă ține tot ce e
-legat de ea prin cel mult 9 celule de solid. Grinzile **nu se țin una pe alta**: una ținută doar de altă
-grindă stă, dar nu ține nimic. Costă 20 de piatră, ca podeaua.
+*activă* dacă e ea însăși ținută de ceva așezat, prin cel mult 3 celule. O grindă activă ține tot ce e
+legat de ea prin cel mult 9 celule de solid **pe același nivel** — o grindă pusă *sub* o podea n-o
+ține (drumul se numără la cota piesei). Grinzile **nu se țin una pe alta**: una ținută doar de altă
+grindă stă, dar nu ține nimic.
 
-**Cum arată bine.** Cifrele, măsurate pe regula din cod:
-- o fâșie care iese dintr-un zid: **3** celule fără grindă, **12** cu o grindă la x = 3, iar a 13-a e
-  refuzată cu „De ce nu?" care spune de ce;
-- o sală: **6×6** fără grinzi, **23×23** cu 4 grinzi (80 de piatră în plus); verificat că toate cele 529
-  de celule ale podelei stau;
-- o placă peste un singur stâlp: **25** de celule fără grindă, **181** cu una, **313** cu patru.
+**Cum arată bine.** Cifrele, măsurate pe codul livrat:
+- fâșia din zid: **3** celule fără grindă, **12** cu o grindă la x = 3;
+- o sală: **6×6** fără grinzi, **23×23** cu 4 grinzi (toate cele 529 de celule ale podelei stau);
+- o placă peste un singur stâlp: **25** de celule fără grindă, **181** cu una pusă pe stâlp, **313** cu
+  patru la 3 pași de el.
 
-**Cum arată rău:** grinda pare magică (o sală uriașă din nimic), sau, invers, inutilă; ori „De ce nu?"
-nu se înțelege — are trei răspunsuri: *nimic așezat și nicio grindă în rază*, *grinda din rază nu e
-prinsă de nimic*, *grinda e activă, dar drumul prin solid până la ea e prea lung*.
+Grinda costă **20 de piatră, cât podeaua pe care o înlocuiește** — deci o sală cu grinzi nu costă nicio
+piatră în plus, doar muncă (500 față de 300 pe piesă, +800 pentru 4 grinzi). Asta o face mai „magică"
+decât părea: dacă vrei ca grinda să coste, e o decizie de conținut.
 
-**Trei decizii care sunt ale tale, nu ale mele:**
+**„De ce nu?" are cinci răspunsuri**, și toate măsoară pe drumul prin solid, nu pe Manhattan: *nu
+atinge nimic solid* · *grinda de la N pași ar ține, dar nu e prinsă de nimic așezat* · *cea mai
+apropiată grindă activă e la N pași; ține cel mult 9* · *grinda din rază nu e legată de piesă prin
+solid* · *nimic așezat aproape și nicio grindă legată*. **Cum arată rău:** grinda pare magică sau
+inutilă, ori un răspuns „De ce nu?" nu se înțelege.
+
+**Patru decizii care sunt ale tale:**
 1. **Contra-intuiția regulii.** O grindă ține cel mai mult când e la **marginea** razei de sol (3
-   celule de zid), nu lipită de zid. Alternativa măsurabilă: `s1 = 10 − d0(grindă) − d1`, adică raza se
-   numără de la zid, iar grinda din zid e cea mai tare (cel mult 9 de la zid). E mai intuitivă și mai
-   zgârcită. Spune dacă o vrei; e o schimbare de o linie plus testele.
-2. **Grinda e de PIATRĂ.** De lemn ar fi firesc, dar azi lemnul iese din tăiat copaci, care cere unelte,
-   care cer... ciclu. Dacă vrei lemn, e o decizie de economie, nu de cod.
-3. **Grinzi în tavanele de rocă** nu se pot pune din interior: locul de lucru e la cel mult un pas pe
-   verticală, deci un tavan la +2 nu se atinge. Secvența care merge: galerie deasupra, grinzile puse de
-   acolo, apoi lărgești dedesubt. Limita e a oricărei piese de tavan, nu a grinzii.
+   celule de zid), nu lipită de zid. Alternativa: `s1 = 10 − d0(grindă) − d1` — raza se numără de la
+   zid, grinda din zid e cea mai tare (cel mult 9 de la zid). Mai intuitivă și mai zgârcită.
+2. **Grinda sub podea.** Azi nu ține podeaua de deasupra (regula e pe nivel). E poziția intuitivă
+   pentru o grindă; o regulă care o acceptă e o schimbare de design, nu de cod.
+3. **Grinda de lemn.** Se poate fără cod: materialul rămâne GRINDA, iar în `content/rules.json` se
+   schimbă ce dă la săpat și deci ce costă — `digYield.GRINDA = {fel: LEMN, cantitate: 5}` și
+   `piese.GRINDA.cantitate = 5`. O piesă GRINDA din alt material e refuzată la încărcare (ar fi arătat
+   ca o grindă și n-ar fi ținut nimic).
+4. **Grinzi în tavanele de rocă** nu se pot pune din interior: locul de lucru e la cel mult un pas pe
+   verticală. Secvența care merge: galerie deasupra, grinzile puse de acolo, apoi lărgești dedesubt.
 
-**De ce nu pot eu.** Regula e probată: oracol prin forță brută pe 6 scene aleatoare, 28 de mutații.
-Dar dacă cifrele fac jocul interesant, și dacă omul înțelege regula privind ecranul, nu se măsoară din
-cod. **Și un lucru pe care îl vei simți:** lângă grinzi, overlay-ul **S** e scump. O trecere costă
-3,2 s într-o sală cu 4 grinzi, față de ~26 ms fără ele. E feliat pe cadre (cel mult 4 ms pe cadru, HUD:
-„scanare N%"), deci nu îngheață, dar se actualizează în câteva secunde. Dacă te deranjează, calculul pe
-câmpuri (16–20 ms, prototipat de panou) e următorul pas; e în registru.
+**De ce nu pot eu.** Regula e probată: un oracol prin forță brută, independent de cod, pe 3.200 de
+configurații ale recenziei (1,39 milioane de celule, 28.917 săpături, 20.279 de previzualizări pe mai
+multe săpături) și pe testele din repo; zeci de probe de mutație. Dar dacă cifrele fac jocul
+interesant și dacă omul înțelege regula privind ecranul nu se măsoară din cod. **Și un lucru pe care
+îl vei simți:** lângă grinzi, scanarea overlay-ului **S** e scumpă — o celulă costă 4–20 ms, deci cât
+ține o trecere (3–6 s într-o sală cu grinzi) cadrele au 8–25 ms de lucru: o sacadare, nu un îngheț.
+O trecere terminată nu se mai reia cât timp terenul nu se schimbă. Leacul întreg — calculul pe
+câmpuri, ~30–47 ms pe o trecere, exact doar pe un nivel — e în registru; spune dacă sacadarea
+contează.
