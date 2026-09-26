@@ -442,3 +442,102 @@ test('memoria accesului == recalculul si cu pasul de 2 m (cutia de dependenta se
   const rez = fuzzMemorie(r2.value, 777, 120)
   assert.equal(rez.invalidateDeparte, 0)
 })
+
+/**
+ * Marginile cutiei de dependenta, una cate una. Fuzz-ul aleator de mai sus n-a prins nicio
+ * margine gresita (5 probe RATATE): interogarea citeste calcabilitatea proaspat, deci o eticheta
+ * veche conteaza doar cand o punga se DESCHIDE sau se INCHIDE, iar editarile la intamplare aproape
+ * niciodata nu fac asta. Aici fiecare scena are o punga a carei singura iesire e blocata exact pe
+ * o margine, si o singura editare care o deschide: memoria incalzita inainte trebuie sa vada.
+ */
+function scenaMargine(rules: Rules, construieste: (t: Parameters<typeof fill>[0], x0: number, y0: number, g: number) => [number, number, number][], cheie: [number, number, number]): void {
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  const x0 = wx + 3, y0 = wy + 3
+  const deschideri = construieste(w.terrain, x0, y0, g)
+  const m = memorieAcces()
+  const [cx, cy, cz] = cheie
+  // Fixtura VIE: punga e punga inainte.
+  assert.equal(siguraMemorat(w.terrain, w.desemnari, rules, m, x0 + cx, y0 + cy, g + cz), false, 'fixtura: celula-cheie trebuia sa fie intr-o punga')
+  for (const [dx, dy, dz] of deschideri) {
+    assert.ok(dig(w.terrain, x0 + dx, y0 + dy, g + dz).ok, `fixtura: deschiderea (${dx},${dy},${dz})`)
+  }
+  const nou = memorieAcces()
+  const b = siguraMemorat(w.terrain, w.desemnari, rules, nou, x0 + cx, y0 + cy, g + cz)
+  assert.equal(b, true, 'fixtura: deschiderea trebuia sa deschida punga')
+  assert.equal(siguraMemorat(w.terrain, w.desemnari, rules, m, x0 + cx, y0 + cy, g + cz), b, 'memoria n-a vazut editarea de pe margine')
+}
+
+/** Camera 5x5 cu pereti de 2 (interior 3x3), inchisa; `usa` = celula de zid care se sapa (ambele randuri). */
+function cameraInchisa(usa: [number, number]): (t: Parameters<typeof fill>[0], x0: number, y0: number, g: number) => [number, number, number][] {
+  return (t, x0, y0, g) => {
+    inel(t, x0, y0, g, 5, 2)
+    return [[usa[0], usa[1], 1], [usa[0], usa[1], 2]]
+  }
+}
+
+test('memoria vede editarile de pe marginea ORIZONTALA a cutiei: zidul de pe fiecare latura', () => {
+  // Interiorul 3x3 e vizitat pe x0+1..x0+3; zidul e fix la ±1 de el.
+  scenaMargine(R, cameraInchisa([0, 2]), [2, 2, 1])
+  scenaMargine(R, cameraInchisa([4, 2]), [2, 2, 1])
+  scenaMargine(R, cameraInchisa([2, 0]), [2, 2, 1])
+  scenaMargine(R, cameraInchisa([2, 4]), [2, 2, 1])
+})
+
+test('memoria vede editarea de SUB pasul vecinului: santul din fata usii umplut pe fund', () => {
+  // Camera cu usa; in fata usii un sant de 2 m (g si g−1 sapate) — din usa (g+1) pana pe fundul
+  // lui (g−1) sunt 2 m, deci punga. Umplerea fundului (la g−1 = z0 − pas − 1) face calcabila
+  // celula de la g, la un pas sub usa. Umplerea e o editare; aici o simulam cu `fill`.
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  const x0 = wx + 3, y0 = wy + 3
+  const t = w.terrain
+  inel(t, x0, y0, g, 5, 2)
+  // usa pe latura de jos (y0), la x0+2
+  assert.ok(dig(t, x0 + 2, y0, g + 1).ok && dig(t, x0 + 2, y0, g + 2).ok)
+  // santul: o linie de 12 celule in fata usii, adanc de 2, care duce departe
+  // Doua randuri, iar la capatul din dreapta (dx = 8) adanc doar de 1: o treapta prin care
+  // santul iese afara. Fara ea, santul ar fi el insusi o punga si umplerea n-ar deschide nimic.
+  for (const rand of [1, 2]) {
+    for (let dx = -4; dx <= 8; dx++) {
+      assert.ok(dig(t, x0 + dx, y0 - rand, g).ok)
+      if (dx < 8) assert.ok(dig(t, x0 + dx, y0 - rand, g - 1).ok)
+    }
+  }
+  const m = memorieAcces()
+  assert.equal(siguraMemorat(t, w.desemnari, R, m, x0 + 2, y0 + 2, g + 1), false, 'fixtura: camera trebuia sa fie punga (santul e prea adanc)')
+  // umplerea fundului santului chiar in fata usii
+  assert.ok(fill(t, x0 + 2, y0 - 1, g - 1, Material.PIATRA_CONSTRUITA).ok)
+  const nou = memorieAcces()
+  const b = siguraMemorat(t, w.desemnari, R, nou, x0 + 2, y0 + 2, g + 1)
+  assert.equal(b, true, 'fixtura: treapta din sant trebuia sa lege camera')
+  assert.equal(siguraMemorat(t, w.desemnari, R, m, x0 + 2, y0 + 2, g + 1), b, 'memoria n-a vazut umplerea de sub pasul vecinului')
+})
+
+test('memoria vede editarea de PESTE capul vecinului de pas, la pas 2', () => {
+  // Pas 2: din camera (g+1) se urca 2 m pe creasta zidului (g+3), de unde se coboara afara.
+  // Capul celulei de pe creasta e blocat de un bloc la g+4 = z1 + pas + H − 1. Sapat, deschide.
+  const r2 = parseRules({ ...DEFAULT_RULES, maxStepM: 2, atingereSusM: 2 })
+  assert.ok(r2.ok)
+  if (!r2.ok) return
+  const rules = r2.value
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  const x0 = wx + 3, y0 = wy + 3
+  const t = w.terrain
+  inel(t, x0, y0, g, 5, 2)
+  // Pereti de 3 peste tot (cu pas 2 s-ar urca pe unul de 2), mai putin pe latura de jos la x0+2:
+  // acolo zidul are 2, iar deasupra lui, la g+4, un bloc care taie capul celulei de pe creasta.
+  for (let dx = 0; dx < 5; dx++) {
+    for (let dy = 0; dy < 5; dy++) {
+      if (dx !== 0 && dx !== 4 && dy !== 0 && dy !== 4) continue
+      if (dx === 2 && dy === 0) continue
+      assert.ok(fill(t, x0 + dx, y0 + dy, g + 3, Material.PIATRA_CONSTRUITA).ok)
+    }
+  }
+  assert.ok(fill(t, x0 + 2, y0, g + 4, Material.PIATRA_CONSTRUITA).ok)
+  const m = memorieAcces()
+  assert.equal(siguraMemorat(t, w.desemnari, rules, m, x0 + 2, y0 + 2, g + 1), false, 'fixtura: camera trebuia sa fie punga')
+  assert.ok(dig(t, x0 + 2, y0, g + 4).ok)
+  const nou = memorieAcces()
+  const b = siguraMemorat(t, w.desemnari, rules, nou, x0 + 2, y0 + 2, g + 1)
+  assert.equal(b, true, 'fixtura: creasta eliberata trebuia sa lege camera')
+  assert.equal(siguraMemorat(t, w.desemnari, rules, m, x0 + 2, y0 + 2, g + 1), b, 'memoria n-a vazut editarea de peste capul vecinului')
+})
