@@ -463,7 +463,9 @@ function disc(wx: number, wy: number, z: number, raza: number, out: number[]): v
 /**
  * Multimea voxelilor care cad dupa o editare la (wx, wy, z), ca punct fix.
  *
- * Multimea NU depinde de ordinea in care se descopera: suportul unui voxel e
+ * Multimea NU depinde de ordinea in care se descopera (nici de ordinea SEMINTELOR, la
+ * `cadeDaca` cu mai multe — pentru asta, starea „de dinainte" a unei samante se ia mereu
+ * din terenul neatins, vezi `emiteGrinzi`): suportul unui voxel e
  * distanta pana la un voxel ASEZAT, iar „asezat" e o proprietate a terenului de
  * dedesubt. A scoate un voxel poate doar sa SCADA suportul altuia, niciodata
  * sa-l creasca — deci procesul e monoton si are un singur punct fix.
@@ -587,19 +589,29 @@ function propaga(t: Terrain, rules: Rules, sapate: readonly number[]): { cazute:
         const bz = z + dz
         if (!grindaInPicioare(t, bx, by, bz, ip, false)) continue
         const kb = cellKey(bx, by, bz)
-        let anterior = activ.get(kb)
+        // Starea de DINAINTE. Pentru o samanta, MEREU din `inainte`, nu din memorie: la
+        // insamantare toate semintele sunt deja in `cazute`, deci memoria — umpluta, de
+        // pilda, de discul (c) al unei seminte anterioare — are starea de DUPA; citita drept
+        // „inainte", ascundea dezactivarea. Masurat de recenzie (26.09): previzualizarea pe
+        // mai multe sapaturi depindea de ordinea desemnarilor, 34 din 21.278 de previzualizari
+        // cu cadere gresite, pana la 14 celule lipsa — doar lipsuri, niciodata in plus.
+        let anterior = samanta ? (inainte.get(kb) ?? false) : activ.get(kb)
         if (anterior === undefined) {
-          if (samanta) {
-            anterior = inainte.get(kb) ?? false
-          } else {
-            // Starea dinaintea caderii lui `k`: `k` scos din ipoteza, o clipa.
-            cazute.delete(k)
-            anterior = s0Pozitiv(t, rules, bx, by, bz, ip)
-            cazute.add(k)
-          }
+          // Starea dinaintea caderii lui `k`: `k` scos din ipoteza, o clipa.
+          cazute.delete(k)
+          anterior = s0Pozitiv(t, rules, bx, by, bz, ip)
+          cazute.add(k)
         }
-        activ.delete(kb)
+        // La insamantare `cazute` nu se schimba de la o samanta la alta, deci memoria ramane
+        // valabila; se goleste doar dupa o CADERE. Golita la fiecare samanta, sub un tavan
+        // dens de grinzi o pivnita desemnata de 21×21×2 facea 10.310 BFS-uri pentru 441 de
+        // grinzi (acum 882).
+        if (!samanta) activ.delete(kb)
         if (activa(t, rules, bx, by, bz, ip) !== anterior) discGrinda(bx, by, bz)
+        // Discul (b) o singura data pe grinda la insamantare: samanta urmatoare de langa ea
+        // vede starea de acum ca „inainte". Fara asta, fiecare samanta la <= 3 de o grinda
+        // dezactivata re-emitea discul de 181 de celule (225 -> 5.625 de discuri, +25–45 ms).
+        if (samanta) inainte.set(kb, activa(t, rules, bx, by, bz, ip))
       }
     }
     lista.length = 0

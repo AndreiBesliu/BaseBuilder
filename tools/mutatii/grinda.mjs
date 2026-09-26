@@ -184,15 +184,15 @@ export const MUTATII = [
   {
     n: 'memoria activitatii nu se goleste la cadere (activitatea veche ascunde dezactivarea)',
     f: 'src/sim/stabilitate.ts',
-    a: '        activ.delete(kb)',
-    b: '        void kb',
+    a: '        if (!samanta) activ.delete(kb)',
+    b: '        void samanta',
     t: 'tests/grinda.test.ts', e: 'S6e: o grinda care se DEZACTIVEAZA',
   },
   {
     n: 'activitatea dinaintea sapaturii nu se tine minte (samanta nu schimba nimic, in aparenta)',
     f: 'src/sim/stabilitate.ts',
-    a: '            anterior = inainte.get(kb) ?? false',
-    b: '            anterior = s0Pozitiv(t, rules, bx, by, bz, ip)',
+    a: '        let anterior = samanta ? (inainte.get(kb) ?? false) : activ.get(kb)',
+    b: '        let anterior = samanta ? s0Pozitiv(t, rules, bx, by, bz, ip) : activ.get(kb)',
     t: 'tests/grinda.test.ts', e: 'S6e: o grinda care se DEZACTIVEAZA',
   },
   {
@@ -310,8 +310,8 @@ export const MUTATII = [
   {
     n: 'in cascada, activitatea „de dinainte" se calculeaza cu k deja cazut (starea de dupa)',
     f: 'src/sim/stabilitate.ts',
-    a: '            cazute.delete(k)\n            anterior = s0Pozitiv(t, rules, bx, by, bz, ip)\n            cazute.add(k)',
-    b: '            anterior = s0Pozitiv(t, rules, bx, by, bz, ip)',
+    a: '          cazute.delete(k)\n          anterior = s0Pozitiv(t, rules, bx, by, bz, ip)\n          cazute.add(k)',
+    b: '          anterior = s0Pozitiv(t, rules, bx, by, bz, ip)',
     t: 'tests/grinda.test.ts', e: 'discul (b) pe fiecare ramura',
   },
   {
@@ -355,5 +355,11 @@ export const MUTATII = [
     a: '    filtru: prefiltruStabilitate(w.terrain, rules, cx - raza, cy - raza, lat, zActiv),',
     b: '    filtru: prefiltruStabilitate(w.terrain, rules, cx - raza + 1, cy - raza, lat, zActiv),',
     t: 'tests/scanare-stabilitate.test.ts', e: 'felierea nu schimba trecerea',
+  },  {
+    n: 'samanta ia starea „de dinainte" din memorie cand o are (previzualizarea depinde de ordinea sapaturilor)',
+    f: 'src/sim/stabilitate.ts',
+    a: '        let anterior = samanta ? (inainte.get(kb) ?? false) : activ.get(kb)',
+    b: '        let anterior = activ.get(kb) ?? (samanta ? (inainte.get(kb) ?? false) : undefined)',
+    t: 'tests/grinda.test.ts', e: 'previzualizarea pe MAI MULTE sapaturi nu depinde de ordinea lor',
   },
 ]

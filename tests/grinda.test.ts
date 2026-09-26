@@ -604,6 +604,25 @@ test('discul (b) pe fiecare ramura: grinda la z+1, la distanta 3, si caderea in 
   }
 })
 
+test('previzualizarea pe MAI MULTE sapaturi nu depinde de ordinea lor: grinda dezactivata de a doua samanta isi re-verifica discul', () => {
+  // Scena S6e plus un stalp izolat Q, la 6 pasi de B. Sapaturile desemnate: varful lui Q si k.
+  // Recenzia (26.09): cu Q intai, discul (c) al lui Q memora activitatea lui B in starea de DUPA
+  // ambele sapaturi, iar discul (b) al lui k o citea drept „inainte" — nicio schimbare, deci h,
+  // tinut doar de B, lipsea din previzualizare. Cu k intai, era acolo. Ordinea e a sloturilor
+  // de desemnare, adica a istoriei — aceeasi multime aratea sau ascundea prabusirea.
+  for (const qIntai of [true, false]) {
+    const f = construiesteS6e(2)
+    const q = cellKey(f.cx + 6, f.yr, f.zf)
+    for (let z = f.g + 1; z <= f.zf; z++) assert.ok(applyCommand(f.w, { kind: 'fill', wx: f.cx + 6, wy: f.yr, z, material: Material.PIATRA_CONSTRUITA }, R).ok, 'fixtura: stalpul Q')
+    assert.equal(plutitori(f.w, f.cutie, 12), 0, 'fixtura: Q nu adauga plutitori')
+    const k = cellKey(f.cx, f.yr + 1, f.zf)
+    const seminte = qIntai ? [q, k] : [k, q]
+    const previz = cadeDaca(f.w.terrain, R, seminte)
+    assert.deepEqual([...previz].sort((a, b) => a - b), cadeOracol(f.w, f.cutie, seminte), `${qIntai ? 'Q' : 'k'} intai: previzualizarea difera de oracol`)
+    assert.ok(previz.includes(f.h), `${qIntai ? 'Q' : 'k'} intai: h trebuia sa cada`)
+  }
+})
+
 /** Un generator determinist mic (LCG), ca scenele aleatoare sa fie aceleasi la fiecare rulare. */
 function lcg(samanta: number): () => number {
   let s = samanta >>> 0
