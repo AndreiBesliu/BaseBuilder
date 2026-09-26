@@ -890,15 +890,119 @@ test('K05: o grinda departe nu costa nimic; un tavan numai din grinzi are un pla
   reseteazaContoareStabilitate()
   const cad = cadeDaca(w.terrain, R, [cellKey(x0 + 11, y0 + 11, zf)])
   assert.equal(cad.length, 0, 'fixtura: tavanul de grinzi trebuia sa tina fara grinda din centru')
-  // Marginea din GEOMETRIE, nu din cifra masurata: cu memoria, fiecare grinda se
-  // calculeaza o data pe propagare, deci cel mult grinzile de la 2·(R−1) de sapatura
-  // (aici tot tavanul, 441) plus cele de langa samanta, inainte si dupa (≤ 2 × 25).
-  // Masurat: 453. Fara memorie, fiecare interogare `s1` le-ar recalcula pe toate ~160
-  // din raza ei — de ordinul miilor.
-  const grinzi = 21 * 21
-  assert.ok(contoareStabilitate.activitati <= grinzi + 2 * 25, `${contoareStabilitate.activitati} calcule de activitate pentru o singura sapatura`)
-  // Verificarile: discul grinzii sapate (181) si discurile de sol (50), deduplicate.
-  assert.ok(contoareStabilitate.verificari <= 181 + 50, `${contoareStabilitate.verificari} verificari pentru o singura sapatura`)
+  // Marginile din GEOMETRIE, nu din cifra masurata (recenzia, 26.09: marginile de dinainte
+  // erau „tot tavanul" si discuri numarate de doua ori, deci regresii reale treceau pe sub ele).
+  //
+  // Activitati: cu memoria, fiecare grinda se calculeaza cel mult o data pe propagare (nimic nu
+  // cade aici). Candidatele sunt grinzile la <= R−1 de o celula verificata, iar celulele
+  // verificate sunt la <= R−1 de sapatura — deci grinzile la <= 2(R−1) = 18 de centru: 429 din
+  // cele 441 (colturile, la 20, nu). Plus starea „inainte" si „dupa" a celor <= 3 de samanta
+  // (25 + 24). Masurat: 274. Fara memorie: 5.267.
+  const grinzi18 = 21 * 21 - 12
+  assert.ok(contoareStabilitate.activitati <= grinzi18 + 25 + 24, `${contoareStabilitate.activitati} calcule de activitate pentru o singura sapatura`)
+  // Verificari: discul (c) de raza R−1 in jurul sapaturii (181, fara ea insasi) si discul de
+  // sol de la cota de deasupra (25) — cel de la cota ei e inclus in (c). Masurat: 180. Cu
+  // discul grinzii de raza R in loc de R−1: 220.
+  assert.ok(contoareStabilitate.verificari <= 181 - 1 + 25, `${contoareStabilitate.verificari} verificari pentru o singura sapatura`)
+  // Controlul pozitiv al primei parti: aici o grinda e in raza, deci interogarile se numara.
+  // Fara el, un contor care nu mai numara nimic ar face „0 interogari s1" de mai sus adevarat gratis.
+  assert.ok(contoareStabilitate.interogariS1 > 0, 'nicio interogare s1 sub un tavan de grinzi: contorul nu mai numara')
+})
+
+test('K05: cascada, inchiderea si previzualizarea pe multe sapaturi au plafoane scrise din geometrie', () => {
+  // Plasa K05 de dinainte acoperea doar `cadeDaca` cu o singura samanta, fara nicio cadere
+  // (recenzia, COST-7): scanerul, inchiderea, previzualizarea pe multe sapaturi si cascada
+  // n-aveau buget, iar regresii de 3–20x treceau prin toate testele.
+  //
+  // (1) Stalpul cu 5 etaje, cate 4 grinzi la 3 pasi de el pe fiecare etaj; se sapa baza.
+  const { w, sit } = laSit(12345, 0)
+  const px = sit.wx + 12
+  const py = sit.wy + 12
+  let gmax = -1 << 20
+  for (let dx = -12; dx <= 12; dx++) for (let dy = -12; dy <= 12; dy++) gmax = Math.max(gmax, solid(w, px + dx, py + dy)!)
+  const z1 = gmax + 3
+  const etaje = [z1, z1 + 3, z1 + 6, z1 + 9, z1 + 12]
+  const baza = solid(w, px, py)! + 1
+  for (let z = baza; z <= etaje[4]!; z++) assert.ok(applyCommand(w, { kind: 'fill', wx: px, wy: py, z, material: Material.PIATRA_CONSTRUITA }, R).ok, 'fixtura: stalpul')
+  const plan: [number, number, number, number][] = []
+  for (const zf of etaje) {
+    for (let dx = -12; dx <= 12; dx++) {
+      for (let dy = -12; dy <= 12; dy++) {
+        if ((dx === 0 && dy === 0) || Math.abs(dx) + Math.abs(dy) > 12) continue
+        const g = (Math.abs(dx) === 3 && dy === 0) || (Math.abs(dy) === 3 && dx === 0)
+        plan.push([px + dx, py + dy, zf, g ? Material.GRINDA : Material.PIATRA_CONSTRUITA])
+      }
+    }
+  }
+  construiesteIncremental(w, plan)
+  assert.equal(listaGrinzi(w.terrain.grinzi).length, 20, 'fixtura: 4 grinzi pe fiecare dintre cele 5 etaje')
+  reseteazaContoareStabilitate()
+  const cad = cadeDaca(w.terrain, R, [cellKey(px, py, baza)])
+  assert.ok(cad.length > 1000, `fixtura: sapand baza trebuia sa cada turnul (${cad.length})`)
+  // O grinda se (re)calculeaza initial si apoi doar dupa o cadere la <= 3 de ea, la cota ei
+  // (25 de celule) sau dedesubt (aici doar stalpul, 1): <= 27 de ori prin memorie, plus cel
+  // mult o data pe cadere „starea de dinainte" din discul (b) (<= 26) — 53 pe grinda. Masurat:
+  // 280. Cu memoria doar-pozitiva (forma de dinainte de recenzie): 3.180.
+  assert.ok(contoareStabilitate.activitati <= 20 * 53, `${contoareStabilitate.activitati} calcule de activitate intr-o cascada cu 20 de grinzi`)
+  // `stareSapat` cere doar „cade ceva?": se opreste la prima cadere, deci verifica cel mult
+  // discurile semintei (50; nicio grinda la cota bazei). Masurat: 6. Fara oprire: 1.583.
+  reseteazaContoareStabilitate()
+  assert.equal(stareSapat(w.terrain, R, px, py, baza), StareSapat.CADE)
+  assert.ok(contoareStabilitate.verificari <= 50, `${contoareStabilitate.verificari} verificari ca sa afle ca baza stalpului doboara ceva`)
+
+  // (2) Inchiderea: o sala 25×25 cu zidurile zidite si podeaua PLANIFICATA, cu o cruce de grinzi
+  // prin centru — ce deseneaza cine nu stie ca grinzile nu se tin una pe alta. O grinda
+  // planificata se (re)calculeaza initial si apoi doar dupa o zidire la <= 3 de ea, la cota ei
+  // (nimic nu se zideste dedesubt): <= 26 de ori. Masurat: 437. Memoria doar-pozitiva: 5.497.
+  {
+    const r = laSit(12345, 0)
+    const x0 = r.sit.wx
+    const y0 = r.sit.wy
+    let gm = -1 << 20
+    for (let dx = 0; dx < 27; dx++) for (let dy = 0; dy < 27; dy++) gm = Math.max(gm, solid(r.w, x0 + dx, y0 + dy)!)
+    const zf = gm + 3
+    const celule: number[] = []
+    const grinzi: number[] = []
+    for (let dx = 0; dx < 27; dx++) {
+      for (let dy = 0; dy < 27; dy++) {
+        if (dx === 0 || dy === 0 || dx === 26 || dy === 26) {
+          for (let z = solid(r.w, x0 + dx, y0 + dy)! + 1; z <= zf; z++) assert.ok(fillTeren(r.w.terrain, x0 + dx, y0 + dy, z, Material.PIATRA_CONSTRUITA).ok)
+          continue
+        }
+        const k = cellKey(x0 + dx, y0 + dy, zf)
+        celule.push(k)
+        if (dx === 13 || dy === 13) grinzi.push(k)
+      }
+    }
+    reseteazaContoareStabilitate()
+    const { construibile } = constructiaPosibila(r.w.terrain, R, celule, grinzi)
+    assert.ok(construibile.length > 500, `fixtura: inchiderea promite ${construibile.length}`)
+    assert.ok(contoareStabilitate.activitati <= grinzi.length * 26, `${contoareStabilitate.activitati} calcule de activitate pentru ${grinzi.length} grinzi planificate`)
+  }
+
+  // (3) Previzualizarea pe multe sapaturi: o pivnita 21×21×2 desemnata sub un tavan de roca
+  // inlocuit cu grinzi (asezate). La insamantare nimic nu cade, deci fiecare grinda are cel
+  // mult o stare „inainte" si una „dupa": <= 2 pe grinda. Masurat: 882 = 2 × 441. Cu memoria
+  // golita la fiecare samanta (forma de dinainte de recenzie): 10.310.
+  {
+    const r = laSit(12345, 0)
+    const x0 = r.sit.wx
+    const y0 = r.sit.wy
+    let gmin = 1 << 20
+    for (let dx = -2; dx <= 22; dx++) for (let dy = -2; dy <= 22; dy++) gmin = Math.min(gmin, solid(r.w, x0 + dx, y0 + dy)!)
+    const zc = gmin - 3
+    for (let dx = 0; dx < 21; dx++) {
+      for (let dy = 0; dy < 21; dy++) {
+        assert.ok(applyCommand(r.w, { kind: 'dig', wx: x0 + dx, wy: y0 + dy, z: zc }, R).ok)
+        assert.ok(applyCommand(r.w, { kind: 'fill', wx: x0 + dx, wy: y0 + dy, z: zc, material: Material.GRINDA }, R).ok)
+      }
+    }
+    const seminte: number[] = []
+    for (let dx = 0; dx < 21; dx++) for (let dy = 0; dy < 21; dy++) for (const z of [zc - 1, zc - 2]) seminte.push(cellKey(x0 + dx, y0 + dy, z))
+    reseteazaContoareStabilitate()
+    cadeDaca(r.w.terrain, R, seminte)
+    assert.ok(contoareStabilitate.activitati <= 2 * 21 * 21, `${contoareStabilitate.activitati} calcule de activitate pentru o previzualizare sub 441 de grinzi`)
+  }
 })
 
 

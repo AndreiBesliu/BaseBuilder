@@ -274,8 +274,8 @@ export const MUTATII = [
   {
     n: 'stareSapat se uita doar la tavanul de deasupra (versiunea dinainte de recenzie)',
     f: 'src/sim/stabilitate.ts',
-    a: '  const { cazute, minim } = propaga(t, rules, [cellKey(wx, wy, z)])',
-    b: '  const { cazute, minim } = propaga(t, rules, [cellKey(wx, wy, z)])\n  void cazute\n  void minim\n  const dupa = suportDacaSap(t, rules, wx, wy, z)\n  if (solLa(t, wx, wy, z + 1) !== Sol.SOLID) return StareSapat.SIGUR\n  if (dupa === 0) return StareSapat.CADE\n  if (dupa === 1) return StareSapat.ULTIMA_CELULA\n  return StareSapat.SIGUR',
+    a: '  const { cazute, minim } = propaga(t, rules, [cellKey(wx, wy, z)], true)',
+    b: '  const { cazute, minim } = propaga(t, rules, [cellKey(wx, wy, z)], true)\n  void cazute\n  void minim\n  const dupa = suportDacaSap(t, rules, wx, wy, z)\n  if (solLa(t, wx, wy, z + 1) !== Sol.SOLID) return StareSapat.SIGUR\n  if (dupa === 0) return StareSapat.CADE\n  if (dupa === 1) return StareSapat.ULTIMA_CELULA\n  return StareSapat.SIGUR',
     t: 'tests/stabilitate.test.ts', e: 'stareSapat nu minte',
   },
 
