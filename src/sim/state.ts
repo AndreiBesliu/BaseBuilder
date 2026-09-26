@@ -26,6 +26,7 @@ import type { RatiuneStore } from './joburi.ts'
 import type { ItemStore } from './iteme.ts'
 import type { ZoneStore } from './zone.ts'
 import type { MemorieSprijin } from './stabilitate.ts'
+import type { MemorieAcces } from './acces.ts'
 
 /**
  * Versiunea schemei de stare. Creste la ORICE camp nou. Vezi save.ts.
@@ -495,6 +496,12 @@ export interface World {
    * `sustinutAcumMemorat`.
    */
   sprijin: MemorieSprijin
+  /**
+   * TRANSIENT — raspunsurile de siguranta ale accesului vertical, pe (teren, santiere,
+   * reguli). O functie pura tinuta ieftin: nu decide nimic ce n-ar decide calculul de la
+   * zero; o lume incarcata porneste goala. Vezi `siguraMemorat`.
+   */
+  acces: MemorieAcces
   /**
    * PERSISTED — cati pioni au PLECAT din asezare, de la inceputul lumii.
    *

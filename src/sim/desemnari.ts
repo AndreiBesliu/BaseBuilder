@@ -93,6 +93,26 @@ export interface DesignationStore {
    * la 64 de pioni liberi — pentru nimic. Cu contorul, iesirea e O(1).
    */
   viiConstruieste: number
+  /**
+   * TRANSIENT: cate adaugari si stergeri de desemnari CONSTRUIESTE au fost, si ultimele
+   * `JURNAL_DESEMNARI_CAP` celule atinse, in inel (ca jurnalul terenului). Planul C al
+   * accesului vertical se tine la zi din el. Doar CONSTRUIESTE: o sapatura desemnata
+   * sau terminata nu schimba F, iar un contor care le numara si pe ele golea memoria la
+   * fiecare sapatura (panoul, COST-6).
+   */
+  editariConstr: number
+  readonly jurnalConstr: Int32Array
+}
+
+/** Cate schimbari de santier tine jurnalul. Peste atatea nevazute, memoria accesului se goleste. */
+export const JURNAL_DESEMNARI_CAP = 4096
+
+function noteazaConstr(d: DesignationStore, slot: number): void {
+  const j = (d.editariConstr % JURNAL_DESEMNARI_CAP) * 3
+  d.jurnalConstr[j] = d.wx[slot]!
+  d.jurnalConstr[j + 1] = d.wy[slot]!
+  d.jurnalConstr[j + 2] = d.z[slot]!
+  d.editariConstr++
 }
 
 export function makeDesignationStore(capacity: number): DesignationStore {
@@ -114,6 +134,8 @@ export function makeDesignationStore(capacity: number): DesignationStore {
     laId: new Map(),
     vii: 0,
     viiConstruieste: 0,
+    editariConstr: 0,
+    jurnalConstr: new Int32Array(JURNAL_DESEMNARI_CAP * 3),
   }
 }
 
@@ -179,7 +201,10 @@ export function adaugaDesemnare(
   d.laCelula.set(key, slot)
   d.laId.set(id, slot)
   d.vii++
-  if (d.kind[slot] === Desemnare.CONSTRUIESTE) d.viiConstruieste++
+  if (d.kind[slot] === Desemnare.CONSTRUIESTE) {
+    d.viiConstruieste++
+    noteazaConstr(d, slot)
+  }
   return accept(slot)
 }
 
@@ -208,7 +233,10 @@ export function stergeDesemnare(d: DesignationStore, slot: number): void {
   d.laCelula.delete(cellKey(d.wx[slot]!, d.wy[slot]!, d.z[slot]!))
   d.laId.delete(d.id[slot]!)
   d.vii--
-  if (d.kind[slot] === Desemnare.CONSTRUIESTE) d.viiConstruieste--
+  if (d.kind[slot] === Desemnare.CONSTRUIESTE) {
+    d.viiConstruieste--
+    noteazaConstr(d, slot)
+  }
 }
 
 /**

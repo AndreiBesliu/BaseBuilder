@@ -50,7 +50,19 @@ export interface Terrain {
    * intra in hash si nu se salveaza; un teren incarcat porneste de la 0, dar e alt obiect.
    */
   editari: number
+  /**
+   * TRANSIENT: ultimele `JURNAL_CAP` editari, (wx, wy, z) in inel, indexate cu `editari`
+   * (editarea n e la `(n % JURNAL_CAP) * 3`). O memorie care stie de la ce epoca a
+   * pornit poate invalida DOAR ce atinge editarea; peste `JURNAL_CAP` editari nevazute,
+   * se goleste integral. Exista fiindca o epoca singura golea tot la fiecare sapatura
+   * din lume — masurat de panoul accesului vertical, sute de tickuri peste 8 ms cand
+   * pionii sapa la 300 m de o constructie.
+   */
+  readonly jurnal: Int32Array
 }
+
+/** Cate editari tine jurnalul terenului. Peste atatea nevazute, o memorie se goleste. */
+export const JURNAL_CAP = 4096
 
 /**
  * Un index de grinzi: chunkKey → chei LOCALE sortate (`cheieLocala`). Acelasi tip
@@ -201,7 +213,7 @@ export function chunkKey(cx: number, cy: number): number {
 }
 
 export function createTerrain(seed: number, radius: number): Terrain {
-  return { seed, chunks: new Map(), keys: [], focusCx: 0, focusCy: 0, radius, grinzi: new Map(), editari: 0 }
+  return { seed, chunks: new Map(), keys: [], focusCx: 0, focusCy: 0, radius, grinzi: new Map(), editari: 0, jurnal: new Int32Array(JURNAL_CAP * 3) }
 }
 
 function insertKey(t: Terrain, key: number): void {
@@ -386,6 +398,10 @@ function editAt(t: Terrain, wx: number, wy: number, z: number, material: Materia
   // la runtime (sapat de job si de comanda, zidire, prabusire, moloz).
   if (current.value === Material.GRINDA) scoateGrinda(t.grinzi, wx, wy, z)
   if (material === Material.GRINDA) adaugaGrinda(t.grinzi, wx, wy, z)
+  const j = (t.editari % JURNAL_CAP) * 3
+  t.jurnal[j] = wx
+  t.jurnal[j + 1] = wy
+  t.jurnal[j + 2] = z
   t.editari++
   return accept()
 }

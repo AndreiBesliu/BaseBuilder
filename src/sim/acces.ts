@@ -44,7 +44,7 @@
 
 import type { Rules } from './content.ts'
 import type { Terrain } from './terrain/terrain.ts'
-import { ensureChunk, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
+import { ensureChunk, JURNAL_CAP, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
 import {
   cellHeightCm,
   CHUNK_CELLS,
@@ -57,7 +57,7 @@ import {
   VOXEL_LEVELS,
 } from './terrain/chunk.ts'
 import { cellKey } from './path.ts'
-import { Desemnare } from './desemnari.ts'
+import { Desemnare, desemnareLaCelula, JURNAL_DESEMNARI_CAP } from './desemnari.ts'
 import type { DesignationStore } from './desemnari.ts'
 
 // ---------------------------------------------------------------------------
@@ -353,4 +353,185 @@ export function esteSiguraPur(l: LumeAcces, rules: Rules, x: number, y: number, 
   const nod = nodStabil(l, rules, r)
   if (!nod.calcabila(x, y, z)) return false
   return componenta(nod, rules, x, y, z).deschisa
+}
+
+// ---------------------------------------------------------------------------
+// memoria din lume
+// ---------------------------------------------------------------------------
+
+/** Un flood retinut: concluzia, celulele etichetate si cutia din care a CITIT. */
+interface FloodMemorat {
+  readonly deschisa: boolean
+  readonly celule: number[]
+  readonly x0: number
+  readonly x1: number
+  readonly y0: number
+  readonly y1: number
+  readonly z0: number
+  readonly z1: number
+}
+
+/**
+ * TRANSIENT — raspunsurile de siguranta ale scanerului, pe (teren, santiere, reguli).
+ *
+ * O FUNCTIE PURA de (W, C, reguli), tinuta ieftin: nu decide nimic ce n-ar decide calculul
+ * de la zero, iar o lume incarcata porneste goala. Prima forma din design retinea un
+ * raspuns peste o zidire („editarea neutra") pe care recalculul nu-l mai dadea, si M5 cu
+ * save la fiecare tick iesea rosu de 1.087 de ori din 1.200. Aici nu se retine nimic peste
+ * o schimbare care ar putea atinge raspunsul.
+ *
+ * Invalidarea e pe FLOOD, nu pe lume: o editare (din jurnalul terenului sau al
+ * santierelor) sterge doar flood-urile a caror cutie de dependenta o contine. Cutia e
+ * cutia celulelor vizitate, largita cu cat CITESTE graful: ±1 pe orizontala (vecinii),
+ * iar pe verticala de la `z0 − maxStepM − 1` (podeaua vecinului de sub pas) la
+ * `z1 + maxStepM + agentHeadroomM − 1` (capul vecinului de peste pas). Designul v2 avea
+ * [−1, +H]: panoul a gasit o umplere pe fundul unui sant de 2 m care nu golea memoria,
+ * cu 180 de celule declarate sigure pe care recalculul le refuza.
+ */
+export interface MemorieAcces {
+  teren: Terrain | null
+  desemnari: DesignationStore | null
+  rules: Rules | null
+  /** Pana unde s-a citit jurnalul terenului (`Terrain.editari`). */
+  vazuteTeren: number
+  /** Pana unde s-a citit jurnalul santierelor (`editariConstr`). */
+  vazuteDes: number
+  /** C: celulele santierelor vii, tinute la zi din jurnal. */
+  readonly plan: Set<number>
+  readonly floods: (FloodMemorat | null)[]
+  vii: number
+  /** celula → indexul flood-ului care a etichetat-o ultimul. */
+  readonly eticheta: Map<number, number>
+  cititor: Cititor | null
+  cititorLa: number
+  /** Pentru teste si pentru poarta de cost: nimic din simulare nu le citeste. */
+  readonly stat: { flooduri: number; celuleFlood: number; invalidate: number; goliri: number }
+}
+
+export function memorieAcces(): MemorieAcces {
+  return {
+    teren: null,
+    desemnari: null,
+    rules: null,
+    vazuteTeren: 0,
+    vazuteDes: 0,
+    plan: new Set(),
+    floods: [],
+    vii: 0,
+    eticheta: new Map(),
+    cititor: null,
+    cititorLa: -1,
+    stat: { flooduri: 0, celuleFlood: 0, invalidate: 0, goliri: 0 },
+  }
+}
+
+function golesteFlooduri(m: MemorieAcces): void {
+  m.floods.length = 0
+  m.vii = 0
+  m.eticheta.clear()
+}
+
+/** Golire integrala: C refacut din store, niciun flood. */
+function goleste(m: MemorieAcces, t: Terrain, d: DesignationStore, rules: Rules): void {
+  m.stat.goliri++
+  m.teren = t
+  m.desemnari = d
+  m.rules = rules
+  m.vazuteTeren = t.editari
+  m.vazuteDes = d.editariConstr
+  m.plan.clear()
+  for (let i = 0; i < d.count; i++) {
+    if (d.alive[i] === 1 && d.kind[i] === Desemnare.CONSTRUIESTE) m.plan.add(cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!))
+  }
+  golesteFlooduri(m)
+}
+
+/** O editare la (x, y, z): se sterg flood-urile a caror cutie de dependenta o contine. */
+function invalideaza(m: MemorieAcces, x: number, y: number, z: number): void {
+  for (let i = 0; i < m.floods.length; i++) {
+    const f = m.floods[i]
+    if (!f) continue
+    if (x < f.x0 || x > f.x1 || y < f.y0 || y > f.y1 || z < f.z0 || z > f.z1) continue
+    for (const c of f.celule) if (m.eticheta.get(c) === i) m.eticheta.delete(c)
+    m.floods[i] = null
+    m.vii--
+    m.stat.invalidate++
+  }
+  // Sloturile moarte se strang cand sunt majoritare; etichetele se refac din cele vii,
+  // in ordinea slotului — aceeasi ordine ca a suprascrierilor, deci aceleasi etichete.
+  if (m.floods.length > 64 && m.vii * 2 < m.floods.length) {
+    const vii = m.floods.filter((f): f is FloodMemorat => f !== null)
+    m.floods.length = 0
+    m.eticheta.clear()
+    for (const f of vii) {
+      const idx = m.floods.length
+      m.floods.push(f)
+      for (const c of f.celule) m.eticheta.set(c, idx)
+    }
+  }
+}
+
+/** Aduce memoria la zi cu terenul si cu santierele. */
+function sincronizeaza(m: MemorieAcces, t: Terrain, d: DesignationStore, rules: Rules): void {
+  if (m.teren !== t || m.desemnari !== d || m.rules !== rules) {
+    goleste(m, t, d, rules)
+    return
+  }
+  const nd = d.editariConstr - m.vazuteDes
+  const nt = t.editari - m.vazuteTeren
+  if (nd > JURNAL_DESEMNARI_CAP || nt > JURNAL_CAP) {
+    goleste(m, t, d, rules)
+    return
+  }
+  for (let n = m.vazuteDes; n < d.editariConstr; n++) {
+    const j = (n % JURNAL_DESEMNARI_CAP) * 3
+    const x = d.jurnalConstr[j]!, y = d.jurnalConstr[j + 1]!, z = d.jurnalConstr[j + 2]!
+    const s = desemnareLaCelula(d, x, y, z)
+    const k = cellKey(x, y, z)
+    if (s !== -1 && d.kind[s] === Desemnare.CONSTRUIESTE) m.plan.add(k)
+    else m.plan.delete(k)
+    invalideaza(m, x, y, z)
+  }
+  m.vazuteDes = d.editariConstr
+  for (let n = m.vazuteTeren; n < t.editari; n++) {
+    const j = (n % JURNAL_CAP) * 3
+    invalideaza(m, t.jurnal[j]!, t.jurnal[j + 1]!, t.jurnal[j + 2]!)
+  }
+  m.vazuteTeren = t.editari
+}
+
+/**
+ * E SIGURA celula (x, y, z) in lumea de acum — stabila in (W, C) si in componenta deschisa?
+ * Acelasi raspuns ca `esteSiguraPur` pe planul viu, oricand; testul-oracol il compara cu o
+ * memorie noua dupa fiecare pas al unui fuzz.
+ */
+export function siguraMemorat(t: Terrain, d: DesignationStore, rules: Rules, m: MemorieAcces, x: number, y: number, z: number): boolean {
+  sincronizeaza(m, t, d, rules)
+  if (m.cititor === null || m.cititorLa !== t.editari) {
+    m.cititor = cititor(t)
+    m.cititorLa = t.editari
+  }
+  const nod = nodStabil({ t, plan: m.plan, zidite: null }, rules, m.cititor)
+  if (!nod.calcabila(x, y, z)) return false
+  const k = cellKey(x, y, z)
+  const e = m.eticheta.get(k)
+  if (e !== undefined) return m.floods[e]!.deschisa
+  const c = componenta(nod, rules, x, y, z)
+  m.stat.flooduri++
+  m.stat.celuleFlood += c.total
+  const pas = Math.max(0, Math.min(4, rules.maxStepM))
+  const idx = m.floods.length
+  m.floods.push({
+    deschisa: c.deschisa,
+    celule: c.celule,
+    x0: c.x0 - 1,
+    x1: c.x1 + 1,
+    y0: c.y0 - 1,
+    y1: c.y1 + 1,
+    z0: c.z0 - pas - 1,
+    z1: c.z1 + pas + rules.agentHeadroomM - 1,
+  })
+  m.vii++
+  for (const v of c.celule) m.eticheta.set(v, idx)
+  return c.deschisa
 }

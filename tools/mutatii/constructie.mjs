@@ -316,8 +316,8 @@ export const MUTATII = [
   {
     n: "viiConstruieste nu creste la desemnare (constructia nu mai porneste niciodata)",
     f: "src/sim/desemnari.ts",
-    a: "  if (d.kind[slot] === Desemnare.CONSTRUIESTE) d.viiConstruieste++",
-    b: "  void slot",
+    a: "    d.viiConstruieste++\n    noteazaConstr(d, slot)",
+    b: "    noteazaConstr(d, slot)",
     t: 'tests/constructie.test.ts', e: "ridicarea in mai multe randuri",
   },
   // --- logistica constructiei, commit 2b: ridicarea in mai multe randuri (25.09.2026) ---
@@ -770,8 +770,8 @@ export const MUTATII = [
   {
     n: 'viiConstruieste nu scade la stergere (sonda plateste O(mormane) si dupa ultimul santier)',
     f: 'src/sim/desemnari.ts',
-    a: "  if (d.kind[slot] === Desemnare.CONSTRUIESTE) d.viiConstruieste--",
-    b: "  void slot",
+    a: "    d.viiConstruieste--\n    noteazaConstr(d, slot)",
+    b: "    noteazaConstr(d, slot)",
     t: 'tests/constructie.test.ts', e: 'dupa ultimul perete',
   },
   {

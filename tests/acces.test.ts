@@ -15,17 +15,22 @@ import {
   esteSiguraPur,
   FelLucru,
   materialCitit,
+  memorieAcces,
   niveluriDeLucru,
   nodStabil,
   nodW,
+  siguraMemorat,
   vecinatate,
 } from '../src/sim/acces.ts'
+import { adaugaDesemnare, Desemnare, stergeDesemnare } from '../src/sim/desemnari.ts'
+import { Piesa } from '../src/sim/state.ts'
+import { JURNAL_CAP } from '../src/sim/terrain/terrain.ts'
 import type { LumeAcces } from '../src/sim/acces.ts'
 import { DEFAULT_RULES, parseRules } from '../src/sim/content.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { isWalkable, materialFast } from '../src/sim/regions.ts'
 import { cellKey } from '../src/sim/path.ts'
-import { dig, fill, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
+import { dig, fill, groundLevelM, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 import { CHUNK_CELLS, Material } from '../src/sim/terrain/chunk.ts'
 import { createWorld } from '../src/sim/world.ts'
 import { R, sitPlat } from './fixturi.ts'
@@ -302,4 +307,138 @@ test('nivelurile si vecinatatea locului de lucru, dupa fel', () => {
     assert.deepEqual(niveluriDeLucru(FelLucru.CONSTRUIESTE, r2.value), [0, 1, -1, 2, -2, -3])
     assert.deepEqual(niveluriDeLucru(FelLucru.SAPA, r2.value), [0, 1, -1, 2, -2])
   }
+})
+
+// ---------------------------------------------------------------------------
+// memoria din lume: oracolul
+// ---------------------------------------------------------------------------
+
+/**
+ * Fuzz-ul „memoria == recalculul de la zero". Dupa fiecare pas, fiecare celula din cutia
+ * casei se intreaba si memoriei tinute de-a lungul pasilor, si uneia NOI (care nu stie
+ * nimic din istorie). Orice diferenta e o memorie care decide ceva ce calculul n-ar decide.
+ *
+ * Pasii: zidiri din plan (fill + stergerea santierului, ca `zideste`), sapaturi si umpleri
+ * in cutie, SANTURI de 2 m langa casa (editarile de sub pasul vecinului — exact marginea pe
+ * care designul v2 o scria gresit), desemnari noi si anulari, editari la 300 de celule
+ * (nu au voie sa goleasca nimic) si, o data, o depasire a jurnalului.
+ */
+function fuzzMemorie(rules: Rules, seed: number, pasi: number): { comparatii: number; invalidateDeparte: number; goliri: number; flooduri: number; editariDeparte: number } {
+  const { w, wx, wy, g } = sitPlat(seed, 13)
+  const t = w.terrain
+  const d = w.desemnari
+  const x0 = wx + 3, y0 = wy + 3
+  const planifica = (x: number, y: number, z: number): void => {
+    const out = adaugaDesemnare(d, w.nextId++, Desemnare.CONSTRUIESTE, x, y, z, 3, Piesa.PERETE)
+    assert.ok(out.ok || out.reason === 'DEJA_DESEMNATA', JSON.stringify(out))
+  }
+  // Casa din F3, pe scurt: pereti de 2, usa, placa cu doua goluri, trepte inauntru, etaj.
+  for (let z = g + 1; z <= g + 2; z++) {
+    for (let dx = 0; dx < 7; dx++) {
+      for (let dy = 0; dy < 7; dy++) {
+        if (dx !== 0 && dx !== 6 && dy !== 0 && dy !== 6) continue
+        if (dx === 3 && dy === 0) continue
+        planifica(x0 + dx, y0 + dy, z)
+      }
+    }
+  }
+  planifica(x0 + 3, y0 + 1, g + 1); planifica(x0 + 3, y0 + 2, g + 1); planifica(x0 + 3, y0 + 2, g + 2)
+  for (let dx = 0; dx < 7; dx++) for (let dy = 0; dy < 7; dy++) if (!(dx === 3 && (dy === 1 || dy === 2))) planifica(x0 + dx, y0 + dy, g + 3)
+  for (let dx = 0; dx < 7; dx++) for (let dy = 0; dy < 7; dy++) if (dx === 0 || dx === 6 || dy === 0 || dy === 6) planifica(x0 + dx, y0 + dy, g + 4)
+
+  const m = memorieAcces()
+  let s = seed >>> 0
+  const rnd = (n: number): number => { s = (s * 1103515245 + 12345) >>> 0; return (s >>> 8) % n }
+  let comparatii = 0
+  let invalidateDeparte = 0
+  let editariDeparte = 0
+  /** Editarea n departe: aceeasi coloana umpluta si apoi sapata, la cota solului EI. */
+  const departe = (n: number): void => {
+    const k = n >> 1
+    // Spre interiorul lumii: situl poate fi langa margine.
+    const x = wx + (wx < WORLD_CELLS / 2 ? 300 : -300) + (k % 17)
+    const y = wy + (wy < WORLD_CELLS / 2 ? 300 : -300) + ((k / 17) | 0) % 17
+    const gl = groundLevelM(t, x, y)
+    assert.ok(gl.ok)
+    if (!gl.ok) return
+    const out = n % 2 === 0 ? fill(t, x, y, gl.value + 1, Material.PIATRA_CONSTRUITA) : dig(t, x, y, gl.value + 1)
+    assert.ok(out.ok, `fixtura: editarea departe ${n} refuzata: ${JSON.stringify(out)}`)
+    editariDeparte++
+  }
+  const compara = (eticheta: string): void => {
+    const nou = memorieAcces()
+    for (let x = x0 - 3; x <= x0 + 9; x++) {
+      for (let y = y0 - 3; y <= y0 + 9; y++) {
+        for (let z = g - 2; z <= g + 7; z++) {
+          const a = siguraMemorat(t, d, rules, m, x, y, z)
+          const b = siguraMemorat(t, d, rules, nou, x, y, z)
+          if (a !== b) assert.fail(`${eticheta}: memoria spune ${a}, recalculul ${b} la (${x - x0},${y - y0},${z - g})`)
+          comparatii++
+        }
+      }
+    }
+  }
+  compara('start')
+  for (let p = 0; p < pasi; p++) {
+    const r = rnd(100)
+    if (r < 25) {
+      // zidire din plan, ca `zideste`
+      const vii: number[] = []
+      for (let i = 0; i < d.count; i++) if (d.alive[i] === 1 && d.kind[i] === Desemnare.CONSTRUIESTE) vii.push(i)
+      if (vii.length > 0) {
+        const i = vii[rnd(vii.length)]!
+        fill(t, d.wx[i]!, d.wy[i]!, d.z[i]!, Material.PIATRA_CONSTRUITA)
+        stergeDesemnare(d, i)
+      }
+    } else if (r < 40) {
+      // sapatura sau umplere oriunde in cutie
+      const x = x0 - 3 + rnd(13), y = y0 - 3 + rnd(13), z = g - 3 + rnd(12)
+      if (rnd(2) === 0) dig(t, x, y, z)
+      else fill(t, x, y, z, rnd(2) === 0 ? Material.PIATRA_CONSTRUITA : Material.MOLOZ)
+    } else if (r < 50) {
+      // sant de 2 m langa casa (sub podeaua vecinului de pas)
+      const x = x0 - 3 + rnd(13), y = rnd(2) === 0 ? y0 - 2 : y0 + 8
+      dig(t, x, y, g); dig(t, x, y, g - 1)
+    } else if (r < 65) {
+      // santier nou pe o celula de aer
+      planifica(x0 - 3 + rnd(13), y0 - 3 + rnd(13), g + 1 + rnd(6))
+    } else if (r < 75) {
+      // anulare
+      const vii: number[] = []
+      for (let i = 0; i < d.count; i++) if (d.alive[i] === 1 && d.kind[i] === Desemnare.CONSTRUIESTE) vii.push(i)
+      if (vii.length > 0) stergeDesemnare(d, vii[rnd(vii.length)]!)
+    } else if (r < 90) {
+      // departe: nu are voie sa invalideze nimic
+      const inainte = m.stat.invalidate + m.stat.goliri
+      const k = rnd(200)
+      departe(2 * k); departe(2 * k + 1)
+      siguraMemorat(t, d, rules, m, x0 - 3, y0 - 3, g + 1)
+      invalidateDeparte += m.stat.invalidate + m.stat.goliri - inainte
+    }
+    compara(`pasul ${p}`)
+  }
+  // Depasirea jurnalului: o umplere langa casa, apoi mai multe editari departe decat tine
+  // jurnalul. Fara golire, memoria n-ar mai vedea umplerea.
+  assert.ok(fill(t, x0 - 1, y0 + 3, g + 1, Material.PIATRA_CONSTRUITA).ok, 'fixtura: umplerea de langa casa')
+  const inainteDeDepasire = t.editari
+  for (let n = 0; n <= JURNAL_CAP + 1; n++) departe(n)
+  assert.ok(t.editari - inainteDeDepasire > JURNAL_CAP, `fixtura: doar ${t.editari - inainteDeDepasire} editari, jurnalul nu s-a depasit`)
+  compara('dupa depasirea jurnalului')
+  return { comparatii, invalidateDeparte, goliri: m.stat.goliri, flooduri: m.stat.flooduri, editariDeparte }
+}
+
+test('memoria accesului == recalculul de la zero, pe un fuzz cu zidiri, santuri, desemnari, anulari si editari departe', () => {
+  const rez = fuzzMemorie(R, 12345, 160)
+  assert.equal(rez.invalidateDeparte, 0, 'o editare la 300 de celule a golit memoria (R3)')
+  // Fixtura VIE: memoria chiar a retinut si a refolosit flood-uri, si a trecut prin golirea de la depasire.
+  assert.ok(rez.comparatii > 100000, `fixtura: doar ${rez.comparatii} comparatii`)
+  assert.ok(rez.goliri >= 2, `fixtura: depasirea jurnalului n-a golit memoria (goliri ${rez.goliri})`)
+})
+
+test('memoria accesului == recalculul si cu pasul de 2 m (cutia de dependenta se largeste cu pasul)', () => {
+  const r2 = parseRules({ ...DEFAULT_RULES, maxStepM: 2, atingereSusM: 2 })
+  assert.ok(r2.ok, JSON.stringify(r2))
+  if (!r2.ok) return
+  const rez = fuzzMemorie(r2.value, 777, 120)
+  assert.equal(rez.invalidateDeparte, 0)
 })

@@ -24,6 +24,7 @@ import { makeRatiuneStore } from './joburi.ts'
 import { makeItemStore } from './iteme.ts'
 import { makeZoneStore } from './zone.ts'
 import { memorieSprijin } from './stabilitate.ts'
+import { memorieAcces } from './acces.ts'
 
 /**
  * Creeaza o lume. NU incarca teren: `createTerrain` aloca doar structura goala,
@@ -61,6 +62,7 @@ export function createWorld(seed: number, rules: Rules = DEFAULT_RULES): World {
     rezervari: createReservations(),
     ratiune: makeRatiuneStore(rules.agentCapacity),
     sprijin: memorieSprijin(),
+    acces: memorieAcces(),
     plecatiTotal: 0,
   }
 }

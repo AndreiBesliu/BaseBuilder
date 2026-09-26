@@ -35,6 +35,7 @@ import type { ItemStore } from './iteme.ts'
 import { makeZoneStore, reindexeazaZone } from './zone.ts'
 import type { ZoneStore } from './zone.ts'
 import { memorieSprijin } from './stabilitate.ts'
+import { memorieAcces } from './acces.ts'
 
 /** Creste cand se schimba FORMATUL de fisier, independent de schema de stare. */
 export const SAVE_BUILD = 1
@@ -609,6 +610,7 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
     rezervari: createReservations(),
     ratiune: makeRatiuneStore(capacity),
     sprijin: memorieSprijin(),
+    acces: memorieAcces(),
     plecatiTotal: (data.plecatiTotal as number | undefined) ?? 0,
   }
   const construit = valideazaJoburiDeConstruit(w, rules)
