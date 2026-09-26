@@ -496,6 +496,9 @@ test('la DESENARE nu se verifica sprijinul, si asta e deliberat', () => {
     1,
     'previzualizarea numara DOAR desemnarile de construit; cea de sapat n-are ce cauta in ea',
   )
+  // Nici printre piesele fara acces (taietura 5): acolo ar ajunge o desemnare de sapat inclusa din
+  // greseala, fiindca n-are niciun loc de lucru — si proba filtrului iesea RATATA.
+  assert.equal(previz.faraAcces.length, 0, 'desemnarea de sapat a ajuns printre piesele fara acces')
 
   // Iar `fill` tot o refuza: poarta de la ZIDESTE ramane ultima.
   const zidit = applyCommand(w, { kind: 'fill', wx, wy, z: g + 5, material: Material.PIATRA_CONSTRUITA }, R)
