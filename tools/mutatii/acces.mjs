@@ -38,6 +38,13 @@ export const MUTATII = [
     t: 'tests/content.test.ts', e: 'o piesa dintr-un material NATURAL e refuzata',
   },
   {
+    n: 'o piesa se poate face din AER (garda de structura scoasa cu totul)',
+    f: 'src/sim/content.ts',
+    a: '    if (!esteMaterialDeStructura(mat[1])) {',
+    b: '    if (false) {',
+    t: 'tests/content.test.ts', e: 'o piesa din AER sau APA',
+  },
+  {
     n: 'orice solid e „de structura" (roca, pamant, moloz numara ca zid)',
     f: 'src/sim/terrain/chunk.ts',
     a: '  return m === Material.PIATRA_CONSTRUITA || m === Material.GRINDA || m === Material.LEMN_CONSTRUIT',

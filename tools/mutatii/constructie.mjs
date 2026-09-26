@@ -95,13 +95,6 @@ export const MUTATII = [
     b: '  if (false) {',
     t: 'tests/content.test.ts', e: 'o grinda nu poate sprijini mai putin',
   },
-  {
-    n: 'o piesa se poate face din AER',
-    f: 'src/sim/content.ts',
-    a: '    if (!isSolid(mat[1])) {',
-    b: '    if (false) {',
-    t: 'tests/content.test.ts', e: 'o piesa din AER sau APA',
-  },
 
   // --- pasul 4: stabilitatea la zidire ---
   {

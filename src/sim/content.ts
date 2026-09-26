@@ -470,12 +470,11 @@ function parsePiese(raw: unknown): Outcome<SpecPiesa[]> {
     if (!mat) {
       return refuse(Reason.VALOARE_INVALIDA, { camp: `piese.${nume}.material`, valoare: String(e.material), cunoscute: NUME_MATERIALE.map(([n]) => n).join(', ') })
     }
-    if (!isSolid(mat[1])) {
-      return refuse(Reason.VALOARE_INVALIDA, { camp: `piese.${nume}.material`, valoare: mat[0], motiv: 'o piesa nu poate fi facuta din aer sau apa' })
-    }
-    // O piesa dintr-un material NATURAL ar face un zid sa arate ca teren: accesul vertical
-    // numara podeaua naturala ca sa deosebeasca „afara" de un acoperis fara scara, iar
-    // sapatul lui ar fi sapat in roca, nu deconstructie (alta atingere).
+    // Numai din material de STRUCTURA. Garda asta a inlocuit-o pe cea veche „nu din aer sau
+    // apa" (aerul si apa nu sunt de structura), a carei proba a iesit RATATA cand s-a adaugat
+    // asta. O piesa dintr-un material NATURAL ar face un zid sa arate ca teren: accesul
+    // vertical numara podeaua naturala ca sa deosebeasca „afara" de un acoperis fara scara,
+    // iar sapatul lui ar fi sapat in roca, nu deconstructie (alta atingere).
     if (!esteMaterialDeStructura(mat[1])) {
       return refuse(Reason.VALOARE_INVALIDA, { camp: `piese.${nume}.material`, valoare: mat[0], motiv: 'o piesa trebuie sa fie dintr-un material de structura (PIATRA_CONSTRUITA, GRINDA, LEMN_CONSTRUIT)' })
     }
