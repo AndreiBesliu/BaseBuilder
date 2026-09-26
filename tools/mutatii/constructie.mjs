@@ -516,8 +516,8 @@ export const MUTATII = [
   {
     n: "locul de lucru de la santier se cauta in ORICE componenta",
     f: "src/sim/joburi.ts",
-    a: "    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, comp)",
-    b: "    void comp\n    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules)",
+    a: "    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, FelLucru.CONSTRUIESTE, comp)",
+    b: "    void comp\n    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, FelLucru.CONSTRUIESTE)",
     t: 'tests/constructie.test.ts', e: 'santierul de necontactat se refuza PE LOC',
   },
 

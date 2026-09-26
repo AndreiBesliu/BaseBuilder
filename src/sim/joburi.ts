@@ -504,6 +504,41 @@ const DIRECTII = [
 ] as const
 
 /**
+ * FELUL muncii facute dintr-o celula de lucru. Decide nivelurile si vecinatatea in
+ * `celulaDeLucru`, deci fiecare apelant il spune EXPLICIT — prima versiune a
+ * accesului vertical avea felul doar la scaner, iar ridicarea, refacerea locului si
+ * testele-oracol chemau forma de sapat pentru un santier de construit.
+ *
+ *   SAPA           — un voxel natural (roca, pamant, iarba, moloz);
+ *   DECONSTRUIESTE — sapatul unui voxel din material de STRUCTURA (ce s-a zidit);
+ *   CONSTRUIESTE   — un santier de zidit;
+ *   DOARME         — locul de langa un santier pe care un pion ar fi adormit.
+ */
+export const FelLucru = {
+  SAPA: 0,
+  DECONSTRUIESTE: 1,
+  CONSTRUIESTE: 2,
+  DOARME: 3,
+} as const
+export type FelLucruId = (typeof FelLucru)[keyof typeof FelLucru]
+
+/** Materialele pe care le produce DOAR zidirea — ce se deconstruieste, nu se sapa. */
+export function esteMaterialDeStructura(m: number): boolean {
+  return m === Material.PIATRA_CONSTRUITA || m === Material.GRINDA || m === Material.LEMN_CONSTRUIT
+}
+
+/** Felul sapatului la (wx, wy, z): dupa materialul de ACOLO, nu dupa cine l-a cerut. */
+export function felSapa(t: Terrain, wx: number, wy: number, z: number): FelLucruId {
+  const m = materialAt(t, wx, wy, z)
+  return m.ok && esteMaterialDeStructura(m.value) ? FelLucru.DECONSTRUIESTE : FelLucru.SAPA
+}
+
+/** Felul muncii pe o desemnare vie: santier de zidit, sau sapat dupa material. */
+export function felDesemnare(t: Terrain, d: DesignationStore, ds: number): FelLucruId {
+  return d.kind[ds] === Desemnare.CONSTRUIESTE ? FelLucru.CONSTRUIESTE : felSapa(t, d.wx[ds]!, d.wy[ds]!, d.z[ds]!)
+}
+
+/**
  * De unde se sapa voxelul (wx, wy, z).
  *
  * PLAN K01 numeste momentul asta — „prima data cand scriu cod care cauta o
@@ -540,6 +575,8 @@ const DIRECTII = [
  * `null` inseamna „nu exista loc de lucru" cu conditiile date. Cauza o scrie
  * apelantul, dupa cum a intrebat: fara componenta = n-are niciun loc; cu
  * componenta = are, dar nu pentru cine intreaba.
+ *
+ * `fel` e felul muncii (`FelLucru`), spus de apelant — nu ghicit de aici.
  */
 export function celulaDeLucru(
   t: Terrain,
@@ -549,9 +586,11 @@ export function celulaDeLucru(
   wy: number,
   z: number,
   rules: Rules,
+  fel: FelLucruId,
   comp: number = NO_REGION,
   evita = -1,
 ): { wx: number; wy: number; z: number } | null {
+  void fel
   const pas = Math.max(0, Math.min(4, rules.maxStepM))
   for (let dz = 0; dz <= pas; dz++) {
     for (const zs of dz === 0 ? [z] : [z + dz, z - dz]) {
@@ -1489,9 +1528,10 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       scumpe++
       raport.candidatiExaminati++
       const prio = d.prioritate[s]!
-      let work = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, compAgent)
+      const felS = felSapa(w.terrain, d.wx[s]!, d.wy[s]!, d.z[s]!)
+      let work = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, felS, compAgent)
       if (!work) {
-        const oricare = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules)
+        const oricare = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, felS)
         if (!oricare) {
           // Proprietate a TINTEI: niciun vecin pe care sa se poata sta.
           raport.inaccesibil++
@@ -1505,7 +1545,7 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
         // ne asiguram ca golul nu e doar acoperire necalculata: un coridor, o data.
         if (acoperaCoridor(w, rules, ax, ay, az, d.wx[s]!, d.wy[s]!, d.z[s]!)) {
           compAgent = find(w.regions, regionAt(w.regions, ax, ay, az))
-          work = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, compAgent)
+          work = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, felS, compAgent)
         }
         if (!work) {
           // Acum e onest: componente diferite. Se memoreaza pe tinta cu racire
@@ -1552,9 +1592,9 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       // (b) santierul: un loc de lucru langa el, in componenta pionului. Identic cu
       // sapatul, coridor inclusiv — si la fel ca acolo, aici se intinde, fiindca
       // jucatorul poate cere un perete pe teren pe care n-a umblat nimeni.
-      let work = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, compAgent)
+      let work = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, FelLucru.CONSTRUIESTE, compAgent)
       if (!work) {
-        const oricare = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules)
+        const oricare = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, FelLucru.CONSTRUIESTE)
         if (!oricare) {
           raport.inaccesibil++
           d.ultimulMotiv[s] = codMotiv(Reason.INACCESIBIL)
@@ -1565,7 +1605,7 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
         }
         if (acoperaCoridor(w, rules, ax, ay, az, d.wx[s]!, d.wy[s]!, d.z[s]!)) {
           compAgent = find(w.regions, regionAt(w.regions, ax, ay, az))
-          work = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, compAgent)
+          work = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, FelLucru.CONSTRUIESTE, compAgent)
         }
         if (!work) {
           raport.inaccesibil++
@@ -2087,7 +2127,7 @@ function refaLoculDeLucru(
   const ds = slotDesemnare(d, idDesemnare)
   if (ds === -1) return false
   const comp = find(w.regions, regionAt(w.regions, cellOf(a.x[slot]!), cellOf(a.y[slot]!), a.z[slot]!))
-  const work = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, comp, evita)
+  const work = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, felDesemnare(w.terrain, d, ds), comp, evita)
   if (!work) return false
   a.jobWorkX[slot] = work.wx
   a.jobWorkY[slot] = work.wy
@@ -2506,7 +2546,7 @@ function ridica(w: World, rules: Rules, slot: number): void {
     // doar cazul in care nu ajunge la NICIUNA — dintr-o plimbare inutila intr-un
     // refuz imediat, cu cauza corecta pe tinta. Fail-fast, nu alegere reparata.
     const comp = find(w.regions, regionAt(w.regions, cellOf(a.x[slot]!), cellOf(a.y[slot]!), a.z[slot]!))
-    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, comp)
+    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, FelLucru.CONSTRUIESTE, comp)
     if (loc === null) {
       terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.INACCESIBIL, Racire.TINTA)
       return
@@ -3354,7 +3394,7 @@ function pornesteDoarme(w: World, rules: Rules, slot: number, cs: number): Outco
     const sant = desemnareLaCelula(w.desemnari, lx, ly, lz)
     if (sant !== -1 && w.desemnari.kind[sant] === Desemnare.CONSTRUIESTE) {
       const comp = find(w.regions, regionAt(w.regions, lx, ly, lz))
-      const vecin = celulaDeLucru(w.terrain, w.regions, w.desemnari, lx, ly, lz, rules, comp)
+      const vecin = celulaDeLucru(w.terrain, w.regions, w.desemnari, lx, ly, lz, rules, FelLucru.DOARME, comp)
       if (vecin) { lx = vecin.wx; ly = vecin.wy; lz = vecin.z }
     }
   }

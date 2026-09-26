@@ -15,7 +15,7 @@ import { groundLevelM, materialAt, WORLD_CELLS } from '../src/sim/terrain/terrai
 import { areConnected, blockKey, blockOfCell, isWalkable, NO_REGION, regionAt } from '../src/sim/regions.ts'
 import { cellKey } from '../src/sim/path.ts'
 import { DetaliuMotiv, slotDesemnare } from '../src/sim/desemnari.ts'
-import { celulaDeLucru, drumRefuzat, esteEvitata, lastJobReport, maiBun, StareRatiune } from '../src/sim/joburi.ts'
+import { celulaDeLucru, drumRefuzat, esteEvitata, FelLucru, lastJobReport, maiBun, StareRatiune } from '../src/sim/joburi.ts'
 import type { JobTickReport } from '../src/sim/joburi.ts'
 import { lastAgentReport } from '../src/sim/agents.ts'
 import { dumpRezervari, verificaRezervari } from '../src/sim/rezervari.ts'
@@ -387,7 +387,7 @@ test('locul de lucru se alege IN COMPONENTA pionului: o groapa izolata inaintea 
   assert.ok(out.ok, JSON.stringify(out))
   const comp = regionAt(w.regions, cx, cy, w.agents.z[0]!)
   assert.notEqual(comp, NO_REGION)
-  const oricare = celulaDeLucru(w.terrain, w.regions, w.desemnari, x, cy, g - 1, R)
+  const oricare = celulaDeLucru(w.terrain, w.regions, w.desemnari, x, cy, g - 1, R, FelLucru.SAPA)
   assert.ok(oricare && oricare.wx === x + 1, 'fixtura: primul loc in ordinea fixa nu e groapa')
   const n = panaCand(w, 200, (w) => w.agents.jobKind[0] !== 0)
   assert.ok(n >= 0, `desemnarea cu loc legat n-a fost luata (motiv ${w.desemnari.ultimulMotiv[0]}/${w.desemnari.ultimulMotivDetaliu[0]})`)
@@ -621,7 +621,7 @@ test('un ostil care STA pe prima celula de lucru nu blocheaza desemnarea: se ale
   const cy = cellOf(w.agents.y[0]!)
   const { z } = desemneaza(w, cx + 3, cy + 2)
   tick(w, R)
-  const primul = celulaDeLucru(w.terrain, w.regions, w.desemnari, cx + 3, cy + 2, z, R)
+  const primul = celulaDeLucru(w.terrain, w.regions, w.desemnari, cx + 3, cy + 2, z, R, FelLucru.SAPA)
   assert.ok(primul, 'fixtura: fara loc de lucru')
   // Ostilul e tinut pe prima celula de lucru, la fiecare tick.
   const ostil = 1
@@ -920,14 +920,14 @@ test('o desemnare la 6 blocuri e in COMPONENTA pionului: discurile de acoperire 
     const g = solid(w, wx, wy)
     if (g === null) continue
     if (!applyCommand(w, { kind: 'desemneaza', wx, wy, z: g }, R).ok) continue
-    const work = celulaDeLucru(w.terrain, w.regions, w.desemnari, wx, wy, g, R)
+    const work = celulaDeLucru(w.terrain, w.regions, w.desemnari, wx, wy, g, R, FelLucru.SAPA)
     if (!work) continue
     if (!areConnected(w.regions, cx, cy, cz, work.wx, work.wy, work.z)) continue
 
     const { w: w2 } = laSit(seed, 1)
     tick(w2, R)
     assert.ok(applyCommand(w2, { kind: 'desemneaza', wx, wy, z: g }, slab).ok)
-    const work2 = celulaDeLucru(w2.terrain, w2.regions, w2.desemnari, wx, wy, g, slab)
+    const work2 = celulaDeLucru(w2.terrain, w2.regions, w2.desemnari, wx, wy, g, slab, FelLucru.SAPA)
     assert.ok(work2)
     assert.equal(areConnected(w2.regions, cx, cy, cz, work2.wx, work2.wy, work2.z), false, 'cu raza 1 discurile tot se ating: invariantul nu leaga')
     gasit = true

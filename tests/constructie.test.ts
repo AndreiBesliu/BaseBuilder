@@ -33,7 +33,7 @@ import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { CATEGORII, Categorie, FelJob, Piesa } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { applyCommand } from '../src/sim/commands.ts'
-import { anuleazaDesemnare, celulaDeLucru, cerereCarat, comparaCandidati, constructiaPrevizualizata, esteEvitata, evitaTinta, lantAcopera, lastJobReport, pornesteConstruieste, pragRidicare, rezumatMaterial, unitatiDeMunca } from '../src/sim/joburi.ts'
+import { anuleazaDesemnare, celulaDeLucru, FelLucru, cerereCarat, comparaCandidati, constructiaPrevizualizata, esteEvitata, evitaTinta, lantAcopera, lastJobReport, pornesteConstruieste, pragRidicare, rezumatMaterial, unitatiDeMunca } from '../src/sim/joburi.ts'
 import { Nevoie, NEVOI } from '../src/sim/state.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { slotItem } from '../src/sim/iteme.ts'
@@ -1047,7 +1047,7 @@ test('un blueprint in AER nu trimite pe nimeni dupa material', () => {
   // Fixtura VIE: nezidibil, DAR accesibil. Amandoua, altfel nu proba poarta.
   assert.equal(suportDacaZidesc(w.terrain, R, wx + 5, wy + 6, g + 2), 0, 'fixtura: santierul are sprijin, deci nu proba nimic')
   assert.notEqual(
-    celulaDeLucru(w.terrain, w.regions, w.desemnari, wx + 5, wy + 6, g + 2, R), null,
+    celulaDeLucru(w.terrain, w.regions, w.desemnari, wx + 5, wy + 6, g + 2, R, FelLucru.CONSTRUIESTE), null,
     'fixtura moarta: santierul n-are loc de lucru, deci accesibilitatea refuza inaintea sprijinului',
   )
   lasaItem(w, Item.PIATRA, R.piese[Piesa.PERETE]!.cantitate, wx + 1, wy + 1)
@@ -1691,7 +1691,7 @@ test('marfa lasata la santierul REFUZAT nu raceste mormanul in care s-a contopit
   const idA = lasaItem(w, Item.PIATRA, 20, T.x0 + 2, T.y0 + 4)
   // Pe locul de lucru al santierului (primul vecin in ordinea directiilor): mormanul
   // in care marfa lasata se va contopi.
-  const loc = celulaDeLucru(w.terrain, w.regions, w.desemnari, T.x0 + 5, T.y0 + 4, T.g + 1, R)
+  const loc = celulaDeLucru(w.terrain, w.regions, w.desemnari, T.x0 + 5, T.y0 + 4, T.g + 1, R, FelLucru.CONSTRUIESTE)
   assert.ok(loc, 'fixtura: santierul n-are loc de lucru')
   const idB = lasaItem(w, Item.PIATRA, 30, loc!.wx, loc!.wy)
   const p = pionLa(w, T.x0 + 1, T.y0 + 4)
@@ -1725,7 +1725,7 @@ test('locul de lucru al unui santier nu e NICIODATA un alt santier viu: intr-un 
   const { w, T } = scenaPlata([7, 12345, 12, 17, 18, 19, 23], 9)
   const idS1 = pereteLa(w, T.x0 + 5, T.y0 + 4)
   pereteLa(w, T.x0 + 6, T.y0 + 4)
-  const loc = celulaDeLucru(w.terrain, w.regions, w.desemnari, T.x0 + 5, T.y0 + 4, T.g + 1, R)
+  const loc = celulaDeLucru(w.terrain, w.regions, w.desemnari, T.x0 + 5, T.y0 + 4, T.g + 1, R, FelLucru.CONSTRUIESTE)
   assert.ok(loc, 'santierul cu vecin trebuie sa aiba alt loc de lucru')
   assert.ok(!(loc!.wx === T.x0 + 6 && loc!.wy === T.y0 + 4), 'locul de lucru e chiar peretele vecin')
   const idA = lasaItem(w, Item.PIATRA, 20, T.x0 + 2, T.y0 + 4)
