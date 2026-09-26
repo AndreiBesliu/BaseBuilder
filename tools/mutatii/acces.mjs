@@ -315,13 +315,6 @@ export const MUTATII = [
     t: 'tests/acces-joc.test.ts', e: 'PREVIZUALIZAREA promite si salvarea',
   },
   {
-    n: 'memoria de runda tine „inchis" si dupa ce Z a crescut',
-    f: 'src/sim/acces.ts',
-    a: '        if (inchise.get(k) !== zidite.size) {',
-    b: '        if (!inchise.has(k)) {',
-    t: 'tests/acces-joc.test.ts', e: 'PREVIZUALIZAREA: cu scara',
-  },
-  {
     n: 'cauza nu se uita la podeaua pungii (placa fara scara iese INCINTA)',
     f: 'src/sim/acces.ts',
     a: '      if (!comp.deschisa && comp.naturale > 0) return CauzaAcces.INCINTA',

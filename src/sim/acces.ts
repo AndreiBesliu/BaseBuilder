@@ -620,7 +620,10 @@ export type CauzaAccesId = (typeof CauzaAcces)[keyof typeof CauzaAcces]
  *
  * Memoria de runda se sprijina pe teorema: cand Z creste, o celula stabila ramane stabila si
  * una deschisa ramane deschisa — deci „deschis" se tine pentru tot restul inchiderii, iar
- * „inchis" doar pentru acelasi Z (se reintreaba daca Z a crescut).
+ * „inchis" doar pentru acelasi Z (se reintreaba daca Z a crescut). Memoria lui „inchis" e doar
+ * a COSTULUI: o celula deschisa intre timp e prinsa oricum de privirea inainte (Z ∪ {p} ⊇ Z),
+ * dar cu un flood de marimea lumii in loc de unul de marimea pungii. Proba ei sta pe testul de
+ * cost, nu pe unul de corectitudine (unde a iesit RATATA — pe drept).
  */
 export function predicatAcces(t: Terrain, rules: Rules, plan: ReadonlySet<number>): (cheie: number, zidite: ReadonlySet<number>) => boolean {
   const r = cititor(t)
