@@ -54,6 +54,12 @@ export const Reason = {
    * daca poarta acelasi cod.
    */
   CELULA_PLINA: 'CELULA_PLINA',
+  /**
+   * Zidirea ar INCHIDE un pion, un morman sau o celula de zona intr-o incinta fara iesire
+   * (o componenta deschisa acum, inchisa cu piesa pusa). Nu e un refuz pe veci: pionul iese,
+   * marfa se cara. Actionabil: lasa o usa, sau scoate ce e inauntru.
+   */
+  AR_INCHIDE: 'AR_INCHIDE',
 } as const
 
 export type ReasonCode = (typeof Reason)[keyof typeof Reason]
@@ -87,6 +93,7 @@ export const MOTIVE: readonly ReasonCode[] = [
   Reason.FARA_DEPOZIT,
   Reason.FARA_SPRIJIN,
   Reason.CELULA_PLINA,
+  Reason.AR_INCHIDE,
 ]
 
 /** Codul (1-based) al unei cauze. 0 = niciuna. */

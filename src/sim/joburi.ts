@@ -97,10 +97,10 @@ import type { Terrain } from './terrain/terrain.ts'
 import { dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
 import { Material } from './terrain/chunk.ts'
 import type { MaterialId } from './terrain/chunk.ts'
-import { FelLucru, felDesemnare, felSapa } from './acces.ts'
+import { componenteInchiseDe, FelLucru, felDesemnare, felSapa, niveluriDeLucru, siguraDupaZidire, siguraMemorat, vecinatate } from './acces.ts'
 import type { FelLucruId } from './acces.ts'
 import { cadeDaca, constructiaPosibila, cotaDeAsezare, multimeaCareCade, poateSustine, Sol, solLa, sustinutAcumMemorat } from './stabilitate.ts'
-import { cellKey, decodeCell } from './path.ts'
+import { cellKey, decodeCell, decodeCellIn } from './path.ts'
 import { Desemnare, desemnareLaCelula, DetaliuMotiv, seSapaLa, slotDesemnare, stergeDesemnare } from './desemnari.ts'
 import type { DesignationStore } from './desemnari.ts'
 import type { Cerere } from './rezervari.ts'
@@ -498,13 +498,6 @@ export function uitaTintele(w: World, slot: number): void {
 // locul de lucru — K01 se declanseaza aici
 // ---------------------------------------------------------------------------
 
-const DIRECTII = [
-  [1, 0],
-  [-1, 0],
-  [0, 1],
-  [0, -1],
-] as const
-
 
 /**
  * De unde se sapa voxelul (wx, wy, z).
@@ -519,7 +512,9 @@ const DIRECTII = [
  *   - nici o celula a carei PODEA e o desemnare vie: altfel pionul A sta pe
  *     voxelul lui B, B il sapa, A cade — si abandoneaza cu un motiv care minte.
  *     Intr-o zona pictata asta ar fi regula, nu exceptia.
- *   - nivelurile `z ± maxStepM`, in ordine FIXA: intai z, apoi +1, −1, +2, −2…
+ *   - nivelurile din `niveluriDeLucru(fel)`, in ordine FIXA: intai z, apoi +1, −1, +2, −2…
+ *     (la zidire si deconstructie in jos pana la `atingereSusM`: pionul intinde mana pana
+ *     deasupra capului; la sapat si la somn, cat un pas);
  *   - prima celula intr-o regiune calculata, calcabila SI — daca se cere — in
  *     componenta `comp` castiga. Recenzia a aratat de ce componenta intra aici,
  *     nu dupa: primul vecin in ordinea fixa putea fi fundul unei gropi izolate,
@@ -544,7 +539,13 @@ const DIRECTII = [
  * apelantul, dupa cum a intrebat: fara componenta = n-are niciun loc; cu
  * componenta = are, dar nu pentru cine intreaba.
  *
- * `fel` e felul muncii (`FelLucru`), spus de apelant — nu ghicit de aici.
+ * `fel` e felul muncii (`FelLucru`), spus de apelant — nu ghicit de aici. El decide
+ * nivelurile si vecinatatea (`niveluriDeLucru`, `vecinatate`): zidirea si deconstructia
+ * ajung pana deasupra capului si pe diagonala, sapatul si somnul ca pana acum.
+ *
+ * `sigura`, daca e dat, e ultima poarta: celula trebuie sa fie SIGURA (vezi `acces.ts`) — un
+ * pion nu zideste de pe creasta unui zid fara scara, din interiorul unei camere fara usa sau
+ * de pe o piesa a planului.
  */
 export function celulaDeLucru(
   t: Terrain,
@@ -557,26 +558,26 @@ export function celulaDeLucru(
   fel: FelLucruId,
   comp: number = NO_REGION,
   evita = -1,
+  sigura: ((x: number, y: number, z: number) => boolean) | null = null,
 ): { wx: number; wy: number; z: number } | null {
-  void fel
-  const pas = Math.max(0, Math.min(4, rules.maxStepM))
-  for (let dz = 0; dz <= pas; dz++) {
-    for (const zs of dz === 0 ? [z] : [z + dz, z - dz]) {
-      for (const [dx, dy] of DIRECTII) {
-        const nx = wx + dx
-        const ny = wy + dy
-        if (nx < 0 || ny < 0) continue
-        const r = regionAt(s, nx, ny, zs)
-        if (r === NO_REGION) continue
-        if (comp !== NO_REGION && find(s, r) !== comp) continue
-        const cheie = cellKey(nx, ny, zs)
-        if (cheie === evita) continue
-        if (seSapaLa(d, nx, ny, zs - 1)) continue
-        const sant = desemnareLaCelula(d, nx, ny, zs)
-        if (sant !== -1 && d.kind[sant] === Desemnare.CONSTRUIESTE) continue
-        if (!isWalkable(t, nx, ny, zs, rules)) continue
-        return { wx: nx, wy: ny, z: zs }
-      }
+  const directii = vecinatate(fel)
+  for (const dzs of niveluriDeLucru(fel, rules)) {
+    const zs = z + dzs
+    for (const [dx, dy] of directii) {
+      const nx = wx + dx
+      const ny = wy + dy
+      if (nx < 0 || ny < 0) continue
+      const r = regionAt(s, nx, ny, zs)
+      if (r === NO_REGION) continue
+      if (comp !== NO_REGION && find(s, r) !== comp) continue
+      const cheie = cellKey(nx, ny, zs)
+      if (cheie === evita) continue
+      if (seSapaLa(d, nx, ny, zs - 1)) continue
+      const sant = desemnareLaCelula(d, nx, ny, zs)
+      if (sant !== -1 && d.kind[sant] === Desemnare.CONSTRUIESTE) continue
+      if (!isWalkable(t, nx, ny, zs, rules)) continue
+      if (sigura !== null && !sigura(nx, ny, zs)) continue
+      return { wx: nx, wy: ny, z: zs }
     }
   }
   return null
@@ -1562,20 +1563,24 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       // (b) santierul: un loc de lucru langa el, in componenta pionului. Identic cu
       // sapatul, coridor inclusiv — si la fel ca acolo, aici se intinde, fiindca
       // jucatorul poate cere un perete pe teren pe care n-a umblat nimeni.
-      let work = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, FelLucru.CONSTRUIESTE, compAgent)
+      const sigur = locSigurPentru(w, rules, d.wx[s]!, d.wy[s]!, d.z[s]!)
+      let work = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, FelLucru.CONSTRUIESTE, compAgent, -1, sigur)
       if (!work) {
-        const oricare = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, FelLucru.CONSTRUIESTE)
+        const oricare = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, FelLucru.CONSTRUIESTE, NO_REGION, -1, sigur)
         if (!oricare) {
+          // Are vecini pe care se poate sta, dar niciunul sigur? Atunci cauza e PLANUL (o scara,
+          // o usa, o piesa inca nezidita), nu terenul — si „sapa o rampa" ar minti.
+          const nesigur = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, FelLucru.CONSTRUIESTE)
           raport.inaccesibil++
           d.ultimulMotiv[s] = codMotiv(Reason.INACCESIBIL)
-          d.ultimulMotivDetaliu[s] = DetaliuMotiv.FARA_LOC_DE_LUCRU
+          d.ultimulMotivDetaliu[s] = nesigur ? DetaliuMotiv.FARA_LOC_SIGUR : DetaliuMotiv.FARA_LOC_DE_LUCRU
           d.reincercaLaTick[s] = w.tick + racireDesemnare(w, rules)
           noteaza(Reason.INACCESIBIL)
           continue
         }
         if (acoperaCoridor(w, rules, ax, ay, az, d.wx[s]!, d.wy[s]!, d.z[s]!)) {
           compAgent = find(w.regions, regionAt(w.regions, ax, ay, az))
-          work = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, FelLucru.CONSTRUIESTE, compAgent)
+          work = celulaDeLucru(w.terrain, w.regions, d, d.wx[s]!, d.wy[s]!, d.z[s]!, rules, FelLucru.CONSTRUIESTE, compAgent, -1, sigur)
         }
         if (!work) {
           raport.inaccesibil++
@@ -2097,7 +2102,9 @@ function refaLoculDeLucru(
   const ds = slotDesemnare(d, idDesemnare)
   if (ds === -1) return false
   const comp = find(w.regions, regionAt(w.regions, cellOf(a.x[slot]!), cellOf(a.y[slot]!), a.z[slot]!))
-  const work = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, felDesemnare(w.terrain, d, ds), comp, evita)
+  const fel = felDesemnare(w.terrain, d, ds)
+  const sigur = fel === FelLucru.CONSTRUIESTE ? locSigurPentru(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!) : null
+  const work = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, fel, comp, evita, sigur)
   if (!work) return false
   a.jobWorkX[slot] = work.wx
   a.jobWorkY[slot] = work.wy
@@ -2377,11 +2384,15 @@ function zideste(w: World, rules: Rules, slot: number): void {
   const cy = cellOf(a.y[slot]!)
   const cz = a.z[slot]!
   const peLoc = cx === a.jobWorkX[slot] && cy === a.jobWorkY[slot] && cz === a.jobWorkZ[slot]
-  if (!peLoc || seSapaLa(d, cx, cy, cz - 1)) {
+  // Locul de lucru trebuie sa fie SIGUR la fiecare tick de munca, nu doar cand a fost ales: o
+  // desemnare noua (o usa zidita, un perete peste scara) il poate face capcana intre timp.
+  if (!peLoc || seSapaLa(d, cx, cy, cz - 1) || !locSigurPentru(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!)(cx, cy, cz)) {
     if (w.regions.dirty.size > 0) return
     // Santierul sta in `jobDest`, si se revine la pasul de mers al CONSTRUITULUI.
     if (!refaLoculDeLucru(w, rules, slot, a.jobDest[slot]!, PasConstruieste.MERGE_SANTIER)) {
+      const detaliu = detaliuFaraLoc(w, rules, ds)
       terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.INACCESIBIL, Racire.TINTA)
+      d.ultimulMotivDetaliu[ds] = detaliu
     }
     return
   }
@@ -2409,11 +2420,28 @@ function zideste(w: World, rules: Rules, slot: number): void {
     raport.santierOcupat++
     return
   }
+  // Regula de sigilare, la primul tick de munca: o piesa care ar inchide un pion, un morman
+  // sau o zona nu se incepe. Refuz cu racire pe santier si marfa JOS — niciodata asteptare cu
+  // marfa in mana: panoul a masurat constructorul mort de foame langa o punga care nu se
+  // golea (marfa in mana il face neintreruptibil).
+  if (a.jobProgres[slot] === 0) {
+    const inchide = arInchideCeva(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!)
+    if (!inchide.ok) {
+      terminaJob(w, rules, slot, Sfarsit.INCOMPLET, inchide.reason, Racire.TINTA)
+      return
+    }
+  }
   a.jobProgres[slot] = a.jobProgres[slot]! + unitatiDeMunca(w, rules, slot)
   raport.tickuriDeLucru++
   w.ratiune.tickuriDeLucru++
   if (a.jobProgres[slot]! < spec.lucru) return
 
+  // Si inainte de zidire: in cele `lucru` tickuri cineva poate intra in incinta.
+  const inchide = arInchideCeva(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!)
+  if (!inchide.ok) {
+    terminaJob(w, rules, slot, Sfarsit.INCOMPLET, inchide.reason, Racire.TINTA)
+    return
+  }
   const out = zidesteVoxel(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, spec.material)
   if (!out.ok) {
     // Nu se poate zidi ACUM — sprijin pierdut, celula ocupata, celula plina.
@@ -2516,9 +2544,11 @@ function ridica(w: World, rules: Rules, slot: number): void {
     // doar cazul in care nu ajunge la NICIUNA — dintr-o plimbare inutila intr-un
     // refuz imediat, cu cauza corecta pe tinta. Fail-fast, nu alegere reparata.
     const comp = find(w.regions, regionAt(w.regions, cellOf(a.x[slot]!), cellOf(a.y[slot]!), a.z[slot]!))
-    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, FelLucru.CONSTRUIESTE, comp)
+    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, FelLucru.CONSTRUIESTE, comp, -1, locSigurPentru(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!))
     if (loc === null) {
+      const detaliu = detaliuFaraLoc(w, rules, ds)
       terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.INACCESIBIL, Racire.TINTA)
+      d.ultimulMotivDetaliu[ds] = detaliu
       return
     }
     a.jobWorkX[slot] = loc.wx
@@ -2738,6 +2768,61 @@ function refaLoculDeLucruEvitandCurentul(
 ): boolean {
   const a = w.agents
   return refaLoculDeLucru(w, rules, slot, idDesemnare, pasMerge, cellKey(a.jobWorkX[slot]!, a.jobWorkY[slot]!, a.jobWorkZ[slot]!))
+}
+
+/**
+ * Predicatul „celula de lucru e SIGURA" pentru santierul de la (px, py, pz): sigura in lumea
+ * de acum (`siguraMemorat`), sau sigura dupa ce piesa asta e pusa (privirea inainte, salvarea
+ * din groapa). Un singur loc, chemat de scaner, de ridicare, de refacerea locului si de
+ * `zideste` — acelasi adevar peste tot.
+ */
+function locSigurPentru(w: World, rules: Rules, px: number, py: number, pz: number): (x: number, y: number, z: number) => boolean {
+  return (x, y, z) =>
+    siguraMemorat(w.terrain, w.desemnari, rules, w.acces, x, y, z) ||
+    siguraDupaZidire(w.terrain, rules, w.acces, x, y, z, px, py, pz)
+}
+
+/**
+ * De ce n-are un santier de zidit loc de lucru: niciun vecin pe care sa se poata sta
+ * (FARA_LOC_DE_LUCRU, „sapa o rampa"), sau are, dar niciunul SIGUR (FARA_LOC_SIGUR, „o
+ * scara, o usa"). Aceeasi deosebire ca in scaner; fara ea, un constructor oprit fiindca
+ * locul lui a devenit o capcana primea cauza care minte.
+ */
+function detaliuFaraLoc(w: World, rules: Rules, ds: number): number {
+  const d = w.desemnari
+  const oricare = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, FelLucru.CONSTRUIESTE)
+  return oricare ? DetaliuMotiv.FARA_LOC_SIGUR : DetaliuMotiv.FARA_LOC_DE_LUCRU
+}
+
+/**
+ * Regula de sigilare: zidirea piesei de la (px, py, pz) ar inchide un pion viu, un morman sau o
+ * celula de zona intr-o incinta fara iesire? Vezi `componenteInchiseDe`. `AR_INCHIDE` cu ce si
+ * unde; altfel `accept`.
+ */
+export function arInchideCeva(w: World, rules: Rules, px: number, py: number, pz: number): Outcome<void> {
+  const inchise = componenteInchiseDe(w.terrain, rules, px, py, pz)
+  if (inchise.length === 0) return accept()
+  const a = w.agents
+  const pioni = new Map<number, number>()
+  for (let i = 0; i < a.count; i++) {
+    if (a.alive[i] === 0) continue
+    pioni.set(cellKey(cellOf(a.x[i]!), cellOf(a.y[i]!), a.z[i]!), a.id[i]!)
+  }
+  const c = { wx: 0, wy: 0, z: 0 }
+  for (const celule of inchise) {
+    for (const k of celule) {
+      const pion = pioni.get(k)
+      if (pion !== undefined) {
+        decodeCellIn(k, c)
+        return refuse(Reason.AR_INCHIDE, { ce: 'pion', id: pion, wx: c.wx, wy: c.wy, z: c.z, piesaX: px, piesaY: py, piesaZ: pz })
+      }
+      decodeCellIn(k, c)
+      const it = itemLaCelula(w.iteme, c.wx, c.wy, c.z)
+      if (it !== -1) return refuse(Reason.AR_INCHIDE, { ce: 'morman', id: w.iteme.id[it]!, wx: c.wx, wy: c.wy, z: c.z, piesaX: px, piesaY: py, piesaZ: pz })
+      if (celulaDeZonaLa(w.zone, c.wx, c.wy, c.z) !== -1) return refuse(Reason.AR_INCHIDE, { ce: 'zona', wx: c.wx, wy: c.wy, z: c.z, piesaX: px, piesaY: py, piesaZ: pz })
+    }
+  }
+  return accept()
 }
 
 /**

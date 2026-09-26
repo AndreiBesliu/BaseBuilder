@@ -535,3 +535,66 @@ export function siguraMemorat(t: Terrain, d: DesignationStore, rules: Rules, m: 
   for (const v of c.celule) m.eticheta.set(v, idx)
   return c.deschisa
 }
+
+/**
+ * PRIVIREA INAINTE cu o piesa: celula (x, y, z) nu e sigura acum, dar cu piesa p zidita ar fi?
+ * Salvarea din groapa: un pion prins zideste treapta care il scoate. Fara ea, planul care
+ * deschide o punga n-ar avea niciodata constructor (masurat de panou: pionul prins in groapa
+ * salvat ca pe HEAD doar cu privirea inainte). Sigur prin teorema: dupa zidirea lui p lumea e
+ * W ∪ {p} cu acelasi F, iar pionul sta intr-o componenta deschisa.
+ *
+ * Cere memoria deja sincronizata (`siguraMemorat` intrebat inainte) — `plan` e al ei, si p
+ * e in el: e un santier viu. (Z ⊆ C e ipoteza grafului stabil.)
+ */
+export function siguraDupaZidire(
+  t: Terrain,
+  rules: Rules,
+  m: MemorieAcces,
+  x: number,
+  y: number,
+  z: number,
+  px: number,
+  py: number,
+  pz: number,
+): boolean {
+  const kp = cellKey(px, py, pz)
+  const r = m.cititor !== null && m.cititorLa === t.editari ? m.cititor : cititor(t)
+  return esteSiguraPur({ t, plan: m.plan, zidite: new Set([kp]) }, rules, x, y, z, r)
+}
+
+/**
+ * REGULA DE SIGILARE: componentele W pe care zidirea lui p le-ar INCHIDE — deschise acum,
+ * inchise cu p pusa. Fiecare intoarsa e cunoscuta integral (e inchisa), deci apelantul
+ * poate verifica ce e in ea.
+ *
+ * Pe W, nu pe graful stabil: un pion care sta sub un buiandrug planificat nu e pe nicio
+ * celula stabila, iar prima forma a regulii (pe etichetele W ∩ F) nu-l vedea si zidea peste
+ * el (panoul v2, 3 din 3 seminte). Si doar ce INCHIDE p: un gard in jurul unei gropi in
+ * care un pion era deja prins nu inchide nimic, iar prima forma tinea constructorii pe loc
+ * pana murea cel prins.
+ *
+ * Semintele: celulele calcabile in W ∪ {p} din cele 4 coloane vecine, pe nivelurile pe care
+ * o muchie putea trece prin coloana lui p. O componenta care nu atinge coloana lui p nu se
+ * poate schimba.
+ */
+export function componenteInchiseDe(t: Terrain, rules: Rules, px: number, py: number, pz: number): number[][] {
+  const r = cititor(t)
+  const H = rules.agentHeadroomM
+  const pas = Math.max(0, Math.min(4, rules.maxStepM))
+  const cuP = nodW(t, new Set([cellKey(px, py, pz)]), rules, r)
+  const faraP = nodW(t, null, rules, r)
+  const vazute = new Set<number>()
+  const out: number[][] = []
+  for (const [dx, dy] of DIR4) {
+    const x = px + dx, y = py + dy
+    for (let z = pz - H - pas; z <= pz + 1 + pas; z++) {
+      if (vazute.has(cellKey(x, y, z)) || !cuP.calcabila(x, y, z)) continue
+      const dupa = componenta(cuP, rules, x, y, z)
+      for (const c of dupa.celule) vazute.add(c)
+      if (dupa.deschisa) continue
+      if (!faraP.calcabila(x, y, z)) continue
+      if (componenta(faraP, rules, x, y, z).deschisa) out.push(dupa.celule)
+    }
+  }
+  return out
+}

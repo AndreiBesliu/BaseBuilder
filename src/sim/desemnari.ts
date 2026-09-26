@@ -47,6 +47,13 @@ export const DetaliuMotiv = {
    * se decide pe sume brute, nu pe raze si nu pe rezervari.
    */
   MATERIAL_IMPRASTIAT: 3,
+  /**
+   * Santierul ARE vecini pe care se poate sta, dar niciunul SIGUR: din oricare, pionul ar
+   * ramane sus sau inchis cand se termina planul (creasta unui zid fara scara, interiorul unei
+   * camere fara usa, o piesa a planului pe care ar sta). Actionabil: o scara, o usa — sau
+   * asteapta: piesa de care depinde accesul poate fi inca nezidita.
+   */
+  FARA_LOC_SIGUR: 4,
 } as const
 
 export interface DesignationStore {

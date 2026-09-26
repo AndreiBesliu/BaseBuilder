@@ -273,7 +273,7 @@ export const MUTATII = [
   {
     n: "se zideste de la DISTANTA (pozitia de lucru nu conteaza)",
     f: "src/sim/joburi.ts",
-    a: "  if (!peLoc || seSapaLa(d, cx, cy, cz - 1)) {",
+    a: "  if (!peLoc || seSapaLa(d, cx, cy, cz - 1) || !locSigurPentru(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!)(cx, cy, cz)) {",
     b: "  if (false) {",
     t: 'tests/constructie.test.ts', e: "pionul mutat de pe locul de lucru nu zideste de la distanta",
   },
@@ -509,8 +509,8 @@ export const MUTATII = [
   {
     n: "locul de lucru de la santier se cauta in ORICE componenta",
     f: "src/sim/joburi.ts",
-    a: "    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, FelLucru.CONSTRUIESTE, comp)",
-    b: "    void comp\n    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, FelLucru.CONSTRUIESTE)",
+    a: "    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, FelLucru.CONSTRUIESTE, comp, -1, locSigurPentru(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!))",
+    b: "    void comp\n    const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, FelLucru.CONSTRUIESTE, NO_REGION, -1, locSigurPentru(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!))",
     t: 'tests/constructie.test.ts', e: 'santierul de necontactat se refuza PE LOC',
   },
 
@@ -817,8 +817,8 @@ export const MUTATII = [
     a: "  if (a.caraCantitate[slot]! < spec.cantitate) {\n    w.ratiune.zidiriCuManaGoala++\n    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)\n    return\n  }\n  // Celula santierului",
     b: "  // Celula santierului",
     e2: [{ f: 'src/sim/joburi.ts',
-      a: "  if (a.jobProgres[slot]! < spec.lucru) return\n\n  const out = zidesteVoxel",
-      b: "  if (a.jobProgres[slot]! < spec.lucru) return\n  if (a.caraCantitate[slot]! < spec.cantitate) {\n    w.ratiune.zidiriCuManaGoala++\n    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)\n    return\n  }\n\n  const out = zidesteVoxel" }],
+      a: "  if (a.jobProgres[slot]! < spec.lucru) return\n\n  // Si inainte de zidire",
+      b: "  if (a.jobProgres[slot]! < spec.lucru) return\n  if (a.caraCantitate[slot]! < spec.cantitate) {\n    w.ratiune.zidiriCuManaGoala++\n    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)\n    return\n  }\n\n  // Si inainte de zidire" }],
     t: 'tests/constructie.test.ts', e: 'zidirea cu mana goala se incheie pe loc',
   },
   {
@@ -831,8 +831,8 @@ export const MUTATII = [
   {
     n: 'locul de lucru poate fi un alt santier viu (constructorul sta pe peretele vecin)',
     f: 'src/sim/joburi.ts',
-    a: "        const sant = desemnareLaCelula(d, nx, ny, zs)\n        if (sant !== -1 && d.kind[sant] === Desemnare.CONSTRUIESTE) continue",
-    b: "        void desemnareLaCelula",
+    a: "      const sant = desemnareLaCelula(d, nx, ny, zs)\n      if (sant !== -1 && d.kind[sant] === Desemnare.CONSTRUIESTE) continue",
+    b: "      void desemnareLaCelula",
     t: 'tests/constructie.test.ts', e: 'locul de lucru al unui santier nu e NICIODATA',
   },
   {
