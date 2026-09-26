@@ -23,8 +23,10 @@ import { Faction, FelJob, Item, Nevoie, NEVOI, PasConstruieste, Piesa } from '..
 import type { PiesaId, World } from '../src/sim/state.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
 import { stergeItem } from '../src/sim/iteme.ts'
+import { Zona } from '../src/sim/zone.ts'
 import { advance } from '../src/sim/world.ts'
 import { lasaItem, panaCand, R, ruleaza, sitPlat } from './fixturi.ts'
+import { unitatiDeMunca } from '../src/sim/joburi.ts'
 
 type Piesa_ = readonly [number, number, number, PiesaId]
 
@@ -363,26 +365,31 @@ test('SIGILAREA la zidire: un pion intrat in camera CAT TIMP se lucra la ultima 
   const { w, wx, wy, g } = sitPlat(12345, 18)
   const x0 = wx + 6, y0 = wy + 6
   cameraZidita(w, x0, y0, g, [[2, 0]])
-  const usa: number[] = []
-  for (const z of [g + 1, g + 2]) {
-    const o = applyCommand(w, { kind: 'desemneaza', wx: x0 + 2, wy: y0, z, piesa: Piesa.PERETE }, R)
-    assert.ok(o.ok)
-    if (o.ok) usa.push(o.value)
-  }
+  // Doar BUIANDRUGUL: el singur inchide camera (usa de sub el ramane fara loc de cap). Cu tot
+  // golul desemnat, constructorul lucra intai la pragul de jos, care nu inchide nimic, iar scena
+  // nu mai proba verificarea de dinaintea zidirii.
+  const o = applyCommand(w, { kind: 'desemneaza', wx: x0 + 2, wy: y0, z: g + 2, piesa: Piesa.PERETE }, R)
+  assert.ok(o.ok)
+  const buiandrug = o.ok ? o.value : -1
   lasaItem(w, Item.PIATRA, 40, x0 + 2, y0 - 3)
   const constructor = pion(w, x0 + 4, y0 - 3, g + 1)
+  // Pionul intra la ULTIMUL tick de munca: la tickul urmator se pune piesa, deci singura poarta
+  // care il poate vedea e cea de dinaintea zidirii.
+  const spec = R.piese[Piesa.PERETE]!
   let intrat = false
   for (let t = 0; t < 6000 && !intrat; t++) {
     advance(w, 1, R)
     const a = w.agents
-    if (a.jobKind[constructor] === FelJob.CONSTRUIESTE && a.jobStep[constructor] === PasConstruieste.ZIDESTE && a.jobProgres[constructor]! > 0) {
+    if (a.jobKind[constructor] === FelJob.CONSTRUIESTE && a.jobStep[constructor] === PasConstruieste.ZIDESTE && a.jobProgres[constructor]! + unitatiDeMunca(w, R, constructor) >= spec.lucru) {
       pion(w, x0 + 2, y0 + 2, g + 1)
       intrat = true
     }
   }
-  assert.ok(intrat, 'fixtura: constructorul n-a inceput niciodata usa')
+  assert.ok(intrat, 'fixtura: constructorul n-a ajuns la ultimul tick al buiandrugului')
+  advance(w, 1, R)
+  assert.notEqual(slotDesemnare(w.desemnari, buiandrug), -1, 'buiandrugul s-a pus cu pionul inauntru')
   ruleaza(w, 300)
-  assert.deepEqual(blocati(w), [], 'usa s-a inchis peste pionul intrat')
+  assert.deepEqual(blocati(w), [], 'buiandrugul s-a pus peste pionul intrat')
 })
 
 test('SIGILAREA la primul tick: o piesa care ar inchide ceva nu consuma munca', () => {
@@ -483,7 +490,9 @@ test('SIGILAREA: un morman sau o celula de depozit inauntru opresc ultima piesa,
   for (const ce of ['morman', 'zona'] as const) {
     const { w, ids, x0, y0, g } = santier(12345, (gg) => { const o: Piesa_[] = []; pereti(o, 0, 0, 5, gg + 1, gg + 2); return o })
     if (ce === 'morman') lasaItem(w, Item.HRANA, 30, x0 + 2, y0 + 2)
-    else assert.ok(applyCommand(w, { kind: 'picteazaZona', x0: x0 + 2, y0: y0 + 2, x1: x0 + 2, y1: y0 + 2, z: g + 1 }, R).ok)
+    // O zona de DORMIT: in ea nu se cara nimic — cu un depozit, refuzul venea de la mormanul
+    // carat inauntru, nu de la zona, si proba zonei iesea RATATA.
+    else assert.ok(applyCommand(w, { kind: 'picteazaZona', x0: x0 + 2, y0: y0 + 2, x1: x0 + 2, y1: y0 + 2, z: g + 1, fel: Zona.DORMIT }, R).ok)
     let refuzat = false
     panaCand(w, 25000, (ww) => {
       for (const id of ramase(ww, ids)) {
