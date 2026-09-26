@@ -283,8 +283,8 @@ export const MUTATII = [
   {
     n: 'prefiltrul overlay-ului cauta doar AER (tavanul unei pivnite iese SIGUR fara scanare)',
     f: 'src/sim/stabilitate.ts',
-    a: '      if (!solidJos || !solidSus || !esteAsezat(t, x, y, zA)) dist[k] = 0',
-    b: '      if (!solidJos || !solidSus) dist[k] = 0',
+    a: '      if (solLa(t, x, y, zA) !== Sol.SOLID || solLa(t, x, y, zA + 1) !== Sol.SOLID || !esteAsezat(t, x, y, zA)) dist[i * L + j] = 0',
+    b: '      if (solLa(t, x, y, zA) !== Sol.SOLID || solLa(t, x, y, zA + 1) !== Sol.SOLID) dist[i * L + j] = 0',
     t: 'tests/stabilitate.test.ts', e: 'prefiltrul overlay-ului nu ascunde',
   },
   {
@@ -300,5 +300,18 @@ export const MUTATII = [
     a: '      if (!esteMaterialCunoscut(m)) {',
     b: '      if (false) {',
     t: 'tests/terrain.test.ts', e: 'un material NECUNOSCUT se refuza la usa',
+  },  {
+    n: 'prefiltrul nu mai largeste fereastra (o sursa de dincolo de margine nu se vede)',
+    f: 'src/sim/stabilitate.ts',
+    a: '  const m = raza\n  const L = lat + 2 * m',
+    b: '  const m = 0\n  const L = lat + 2 * m',
+    t: 'tests/prefiltru.test.ts', e: 'marginea, fara grinzi',
+  },
+  {
+    n: 'prefiltrul: aerul de la zA+1 nu mai e sursa (baza unui stalp cu placa iese SIGUR)',
+    f: 'src/sim/stabilitate.ts',
+    a: '      if (solLa(t, x, y, zA) !== Sol.SOLID || solLa(t, x, y, zA + 1) !== Sol.SOLID || !esteAsezat(t, x, y, zA)) dist[i * L + j] = 0',
+    b: '      if (solLa(t, x, y, zA) !== Sol.SOLID || !esteAsezat(t, x, y, zA)) dist[i * L + j] = 0',
+    t: 'tests/prefiltru.test.ts', e: 'aerul de la zA+1',
   },
 ]

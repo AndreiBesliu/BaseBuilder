@@ -1034,8 +1034,8 @@ export const Prefiltru = {
  * peste un tavan care cade. Tavanul atarna, iar celulele atarnate sunt chiar
  * cele pe care o sapatura alaturi le poate dobori.
  *
- * Marginea ferestrei nu stie ce e dincolo de ea: se trateaza ca „poate fi sursa",
- * ca sa nu se rateze o celula periculoasa fiindca s-a privit prea ingust.
+ * Marginea ferestrei nu se presupune: sursele se cauta pe fereastra largita cu raza, vezi
+ * mai jos de ce.
  */
 export function prefiltruStabilitate(t: Terrain, rules: Rules, x0: number, y0: number, lat: number, zA: number): Uint8Array {
   const MARE = 1 << 20
@@ -1057,36 +1057,45 @@ export function prefiltruStabilitate(t: Terrain, rules: Rules, x0: number, y0: n
   const aproape: number[] = []
   grinziInRaza(t.grinzi, x0 + jum, y0 + jum, zA, 2 * jum + rules.suportRazaGrinda, aproape)
   const raza = aproape.length > 0 ? Math.max(rules.suportMax, rules.suportRazaGrinda) : rules.suportMax
-  const dist = new Int32Array(n).fill(MARE)
-  const out = new Uint8Array(n)
-  for (let i = 0; i < lat; i++) {
-    for (let j = 0; j < lat; j++) {
-      const k = i * lat + j
-      const x = x0 + i
-      const y = y0 + j
-      const solidJos = solLa(t, x, y, zA) === Sol.SOLID
-      const solidSus = solLa(t, x, y, zA + 1) === Sol.SOLID
-      out[k] = solidJos ? Prefiltru.SIGUR : Prefiltru.NIMIC
-      if (!solidJos || !solidSus || !esteAsezat(t, x, y, zA)) dist[k] = 0
-      else if (i === 0 || j === 0 || i === lat - 1 || j === lat - 1) dist[k] = raza
+  // Harta surselor se face pe fereastra LARGITA cu `raza` pe fiecare latura, si abia apoi se
+  // decupeaza: o celula din fereastra vede orice sursa aflata la cel mult `raza` de ea, oriunde
+  // ar fi. Forma de dinainte presupunea ceva despre ce e dincolo de margine — „poate fi sursa",
+  // la distanta `raza` — ceea ce e sigur cand drumurile se opresc la primul voxel asezat (s0),
+  // dar nu cand trec prin solid asezat (s1, spre o grinda): masurat de recenzie (26.09), o
+  // grinda la 1–5 pasi de margine care tine tavanul unei pivnite de DINCOLO iesea SIGUR fara
+  // scanare, cu tot drumul ei; si, fara grinzi, o celula ULTIMA dupa un sant de langa margine.
+  // Largita, prefiltrul e si mai ieftin la scanare: rama nu mai e DE_SCANAT din oficiu
+  // (-10,6% scanari scumpe cu grinzi, -44% fara), iar harta de 53² costa sub o milisecunda.
+  const m = raza
+  const L = lat + 2 * m
+  const dist = new Int32Array(L * L).fill(MARE)
+  for (let i = 0; i < L; i++) {
+    for (let j = 0; j < L; j++) {
+      const x = x0 - m + i
+      const y = y0 - m + j
+      if (solLa(t, x, y, zA) !== Sol.SOLID || solLa(t, x, y, zA + 1) !== Sol.SOLID || !esteAsezat(t, x, y, zA)) dist[i * L + j] = 0
     }
   }
-  for (let i = 0; i < lat; i++) {
-    for (let j = 0; j < lat; j++) {
-      const k = i * lat + j
-      if (i > 0 && dist[k - lat]! + 1 < dist[k]!) dist[k] = dist[k - lat]! + 1
+  for (let i = 0; i < L; i++) {
+    for (let j = 0; j < L; j++) {
+      const k = i * L + j
+      if (i > 0 && dist[k - L]! + 1 < dist[k]!) dist[k] = dist[k - L]! + 1
       if (j > 0 && dist[k - 1]! + 1 < dist[k]!) dist[k] = dist[k - 1]! + 1
     }
   }
-  for (let i = lat - 1; i >= 0; i--) {
-    for (let j = lat - 1; j >= 0; j--) {
-      const k = i * lat + j
-      if (i < lat - 1 && dist[k + lat]! + 1 < dist[k]!) dist[k] = dist[k + lat]! + 1
-      if (j < lat - 1 && dist[k + 1]! + 1 < dist[k]!) dist[k] = dist[k + 1]! + 1
+  for (let i = L - 1; i >= 0; i--) {
+    for (let j = L - 1; j >= 0; j--) {
+      const k = i * L + j
+      if (i < L - 1 && dist[k + L]! + 1 < dist[k]!) dist[k] = dist[k + L]! + 1
+      if (j < L - 1 && dist[k + 1]! + 1 < dist[k]!) dist[k] = dist[k + 1]! + 1
     }
   }
-  for (let k = 0; k < n; k++) {
-    if (out[k] === Prefiltru.SIGUR && dist[k]! <= raza) out[k] = Prefiltru.DE_SCANAT
+  const out = new Uint8Array(n)
+  for (let i = 0; i < lat; i++) {
+    for (let j = 0; j < lat; j++) {
+      if (solLa(t, x0 + i, y0 + j, zA) !== Sol.SOLID) continue
+      out[i * lat + j] = dist[(i + m) * L + (j + m)]! <= raza ? Prefiltru.DE_SCANAT : Prefiltru.SIGUR
+    }
   }
   return out
 }

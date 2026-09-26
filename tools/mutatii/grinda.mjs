@@ -388,5 +388,18 @@ export const MUTATII = [
     a: '    if (ip.activ?.get(k) !== false) deIncercat = true',
     b: '    if (ip.activ?.get(k) === true) deIncercat = true',
     t: 'tests/grinda.test.ts', e: 'fasia din zid',
+  },  {
+    n: 'prefiltrul nu mai largeste fereastra: grinda de langa margine tine un tavan de dincolo, nevazut',
+    f: 'src/sim/stabilitate.ts',
+    a: '  const m = raza\n  const L = lat + 2 * m',
+    b: '  const m = 0\n  const L = lat + 2 * m',
+    t: 'tests/prefiltru.test.ts', e: 'marginea: o grinda la 1..4 pasi de margine',
+  },
+  {
+    n: 'prefiltrul cauta grinzile doar in rombul ferestrei (2·jum, fara raza grinzii)',
+    f: 'src/sim/stabilitate.ts',
+    a: '  grinziInRaza(t.grinzi, x0 + jum, y0 + jum, zA, 2 * jum + rules.suportRazaGrinda, aproape)',
+    b: '  grinziInRaza(t.grinzi, x0 + jum, y0 + jum, zA, 2 * jum, aproape)',
+    t: 'tests/prefiltru.test.ts', e: 'cautarea grinzilor',
   },
 ]
