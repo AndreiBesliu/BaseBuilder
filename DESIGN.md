@@ -153,6 +153,10 @@ agricultură + pathfinding + randare deodată).
   terraformat și ziduri.
 - **Vizualizatorul numeric se livrează în aceeași sarcină cu regula.** La Foxy Voxel absența lui a fost
   reclamată ani întregi — sistemul arăta doar un mesaj de eroare la eșec.
+- **Accesul e o regulă, nu un noroc** (S20-23, tăietura 5): un pion zidește până la celula de deasupra
+  capului și pe diagonală, dar numai de pe o celulă din care nu poate rămâne blocat când se termină
+  planul; o piesă care ar închide un pion, un morman sau o zonă nu se pune. Previzualizarea rulează
+  același predicat și arată ce n-ar zidi nimeni: „pune o scară" sau „lasă o ușă".
 - **Clădirile sunt un kit modular** pe aceeași grilă cu terenul, cu un contract unic de conexiune
   (perete / colț / ușă / fereastră / podea / scară / acoperiș). Nu modelez case; modelez 15-25 de
   piese și las jucătorul să compună. 20 de module bune bat 60 de clădiri mediocre.

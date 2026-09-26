@@ -4202,3 +4202,120 @@ Cifrele 2D, remăsurate pe codul final: fâșia 3 → 12, placa 25 → 181 → 3
 
 La owner: OWNER_VERIFY 12, rescris — patru decizii (regula de la zid, grinda sub podea, grinda de
 lemn prin `digYield`, tavanele de rocă) și cifrele.
+
+---
+
+## Task Started — accesul vertical (S20-23, tăietura 5): scara, etajul, pionii care nu mai rămân sus
+
+**Model:** Claude Opus 5.5
+**Prompt de start:** „Continua" (26.09, după recenzia grinzii; ultracode pornit)
+
+PLAN S20-23 mai avea „multi-etaj, scări, acoperișuri". Înainte de design am măsurat pe HEAD
+`48d7115` (scripturile în `scratchpad/scari/`), cu pioni reali, material și hrană:
+
+- **F1 — nimic peste g+2.** Un pion zidea la `z ∈ [zs−1, zs+1]`; pe sol plat, nimic peste g+2. Zidul
+  de 4: 6/12. Camera 5×5 cu pereți de 2 și placă: 30/55 — placa deloc. Iar previzualizarea le
+  declara construibile: testul „casa 9×9: 176 din 177" număra sprijinul, nu accesul.
+- **F2 — pionul rămas pe zid.** Cameră fără ușă: un pion urca pe rândul 1 al unei coloane ca să
+  zidească rândul 2 al vecinului, apoi pe creastă, iar ultimul rând 2 i-l lua de sub picioare. 3 din
+  3 semințe; nicio cauză afișată.
+- **F3 — blocaj.** Casa cu două etaje și scară interioară: 53/194 — singurele celule de pe care placa
+  ar fi continuat erau ele însele șantiere.
+- **F4 — scara din blocuri MERGE** (pasul de 1 m face din orice solid o treaptă): cameră + 2 trepte
+  lipite de zid, 58/58, 0 blocați. Deci mecanica de mers exista; lipseau regulile.
+- **F5 — SCARA nu se putea construi:** cerea LEMN, pe care worldgen-ul nu-l scrie.
+- **F6 — fixturile lungi fără hrană** omorau pionii pe la 25.000 de tickuri.
+
+## Task Completed — accesul vertical
+
+### Trei designuri, două panouri
+
+**v1** (atingere +2 la zidire; „lumea de la final" F = W ∪ C și o celulă de lucru sigură legată de
+„exteriorul" clusterului de desemnări; previzualizare `faraAcces`; SCARA ca treaptă de 10 piatră) a
+mers la un panou de **5 lentile care reproduc + 38 de verificatori: 13,78 M tokeni, 57 de agenți**
+— anunțasem 5–6,5 M, deci de două ori peste; i-am spus owner-ului. **22 de CRITIC/MARE, toate
+confirmate de ambii verificatori.** Rădăcina, pe cinci lentile: „exteriorul" se calcula pe
+desemnările RĂMASE, deci o zidire (care nu schimbă F) strângea cutia și memoria reținea un răspuns pe
+care recalculul nu-l mai dădea. M5 cu save la fiecare tick: **1.087 din 1.200 roșii** pe casa cu
+etaje; orice săpătură fără legătură aducea pionul înapoi pe creastă (letal pe camera 10×10). Plus:
+colțurile etajelor n-aveau loc de lucru cu 4 vecini (288/288); treapta de 10 domina peretele (și
+PODEA domina deja PERETE pe HEAD: același voxel, 300 vs 400 de muncă); viewer-ul nu putea desena peste
+stratul zidit; două capcane existente (planul care sigilează o cameră cu un pion și hrana; săparea
+scării).
+
+**v2** a înlocuit exteriorul cu un predicat pur: graful **stabil** (calcabil în W și în F) și
+componenta **deschisă** (≥ 2.048 de celule cu podea naturală, sau peste 8.192). **Teoremă:** cât
+timp se zidesc doar piese din plan, mulțimea stabilă doar crește și componentele doar se unesc —
+deci un pion pe o celulă sigură rămâne pe o celulă sigură. Panoul v2 (**3 lentile + 10 verificatori,
+3,9 M**, în buget) a confirmat miezul — teorema, **0 încălcări în 7.075.388 de verificări**; 0 pioni
+blocați pe corpusul de 155 de planuri × 3 semințe (HEAD: 124) — și a răsturnat trei părți:
+previzualizarea pe F' într-o trecere promitea 18/51 de piese nezidite; regula de sigilare pe
+etichetele W ∩ F înfometa constructorul și nu vedea pionul de sub buiandrug; cutia de dependență a
+memoriei era cu o celulă prea scurtă pe verticală (M5 roșu 100/103). **v3** (`scratchpad/scari/design-acces-v3.md`)
+e ce s-a construit.
+
+### Ce s-a livrat
+
+| commit | ce |
+|---|---|
+| `2673915` | `celulaDeLucru(fel)` la toți cei 9 apelanți, fără schimbare de comportament |
+| `d72e973` | conținutul: `atingereSusM` 2, pragurile de acces, invariantele; piesele numai din material de STRUCTURĂ; SCARA = PODEA (piatră) |
+| `042e5c8`, `dc26632` | `acces.ts`, modulul pur: citirea pe coloană, graful stabil, componenta deschisă, TEOREMA ca test de proprietate |
+| `68325f5`, `927248b`, `dd8539c` | memoria `w.acces`: flood-uri leneșe, invalidate DOAR de editările din cutia lor (jurnalele terenului și ale șantierelor); marginile cutiei probate una câte una |
+| `2f5ebe1`, `dd42220` | **D1 + D2 în joc**: atingerea +2 și diagonala la zidire și deconstrucție; locul de lucru SIGUR (scaner, ridicare, refacere, revalidare la fiecare tick); privirea înainte; regula de sigilare pe W, la plasare |
+| `aa617cf`, `7a0baa3` | previzualizarea: închiderea SIMULATĂ pe predicatul scanerului; `faraAcces` cu cauza (ÎNĂLȚIME / INCINTĂ); pungile planului |
+| `c20b18b` | viewer: desenarea la NIVELUL ACTIV; turcoaz = fără acces; HUD „PLANUL ÎNCHIDE"; culorile noi în overlay-ul de joburi |
+| `05340c5`, `6bc9495` | costul: etichetare pe trecere (3,4 s → 0,14 s la 6.003 piese); porți K05 pe contoare; hash de referință al accesului `3550c897` |
+
+### Cifrele (local, pioni reali, cu hrană)
+
+| | HEAD `48d7115` | acum |
+|---|---|---|
+| casa cu două etaje și scară interioară | 53 / 194 | **193 / 193**, pe 3 semințe, 0 blocați |
+| aceeași fără scară | — | rămân **exact** etajul și acoperișul (97), cu FARA_LOC_SIGUR; previzualizarea le arată pe ele, cauza ÎNĂLȚIME |
+| camera fără ușă | 1 pion pe creastă pe fiecare sămânță | 0, și după editări fără legătură în coadă |
+| zidul de 4 | 6 / 12 | rândurile 1–3; rândul 4 fără acces |
+| etaj peste o casă existentă cu scara afară | — | integral (v1: 0/97) |
+| camera în fundul unei gropi de 4 m cu rampă | — | integral (v1: tot planul fără acces) |
+| pion care doarme în camera care se închide | închis înăuntru | ultima piesă așteaptă (AR_INCHIDE), 0 închiși |
+| previzualizare 21×21×2 / 41×41×3 | — | 40 / 142 ms (prima formă: 603 / 3.353) |
+| oraș: 4 case cu etaj, 24 de constructori, carieră cu 12 săpători | — | tick p99 6,75 ms, max 22,5 ms, 0 peste 50 ms |
+
+Hash-ul scenariului standard: **52b16ed2**, neschimbat — zidește doar la sol, unde alegerea celulei
+nu se schimbă (deci e orb la acces; poarta accesului e hash-ul casei cu etaj, `3550c897`). **563/563**
+de teste. **407/407** probe în 6 min 56 s local; izolare 268/268.
+
+### Ce a găsit implementarea, după panouri
+
+- **Nouă probe RATATE, fiecare cu dreptate.** Fuzz-ul aleator „memoria == recalculul" nu prindea nicio
+  margine greșită a cutiei — o etichetă veche contează doar când o pungă se deschide sau se închide,
+  iar editările la întâmplare aproape niciodată nu fac asta; au trebuit trei scene țintite, una pe
+  margine. Scenele de sigilare exersau altă gardă decât numeau (constructorul lucra la pragul de jos
+  al ușii, care nu închide nimic; zona de depozit atrăgea cărăuși cu marfă). Două gărzi erau cod mort
+  (podeaua naturală a unei piese ipotetice; „piesa nu din aer" subsumată de garda de structură), iar
+  una era doar de cost (memoria „închis" a previzualizării), deci n-avea ce căuta pe un test de
+  corectitudine.
+- **Pragul de jos al unei uși NU închide camera** — peste 1 m se trece. Munca pe el e legitimă; doar
+  buiandrugul închide.
+- **Cauza la oprire mințea:** un constructor oprit fiindcă locul lui devenise capcană primea „fără loc
+  de lucru — sapă o rampă". Acum FARA_LOC_SIGUR („o scară, o ușă").
+- Fixturile mele editau terenul direct (regiunile rămâneau vechi), săpau cu comanda lăsând mormane pe
+  locul șantierelor, și dădeau piatră doar pentru piesele camerei — de fiecare dată o scenă care nu
+  proba ce spunea numele.
+
+### Registru
+
+- **Săpătura care taie accesul** (săparea singurei scări lasă hrana și depozitul sus; existent pe HEAD,
+  ține de săpat): previzualizarea de săpat pe W − săpături, sora lui `prabusireaPrevizualizata`.
+- **Planurile care își mută accesul** (închid vechea rampă și fac o scară nouă): pe corpusul panoului,
+  441 de piese pe care HEAD le zidea fără capcană devin fără acces. Previzualizarea le arată cinstit;
+  o ordine a jucătorului (întâi scara nouă) le rezolvă. Decizie la owner.
+- **Șablonul de scară** (un click pune coloanele 1+2 și lasă golurile) și **linia/dreptunghiul** pentru
+  pereți și plăci — panoul: gâtul sunt plăcile voxel cu voxel, nu scara.
+- **Coborârea de urgență** a unui pion izolat de altceva decât de construcție.
+- **Poarta de siguranță la deconstrucție** (azi doar atingerea +2 și diagonala): fără săpăturile în F ar
+  fi vidă.
+- **Memoria rezultatului previzualizării** în viewer (0,14 s la 6.003 piese, la fiecare click).
+- Cifrele de acces pe un oraș mare (15+ case) rămân de măsurat pe codul livrat.
+
+La owner: OWNER_VERIFY 13 — pașii în viewer și șase decizii.

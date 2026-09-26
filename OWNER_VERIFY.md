@@ -304,3 +304,54 @@ interesant și dacă omul înțelege regula privind ecranul nu se măsoară din 
 O trecere terminată nu se mai reia cât timp terenul nu se schimbă. Leacul întreg — calculul pe
 câmpuri, ~30–47 ms pe o trecere, exact doar pe un nivel — e în registru; spune dacă sacadarea
 contează.
+
+## 13. Accesul vertical — se construiește un etaj, și se citește de ce nu, când nu?
+
+**Ce s-a schimbat pentru tine.** Pionii zidesc acum până la celula de deasupra capului (tavanul unei
+camere de 2 m se pune de pe podeaua ei) și pe diagonală (colțurile etajelor). Un pion nu mai lucrează
+de pe o celulă din care ar rămâne blocat când se termină planul: creasta unui zid fără scară,
+interiorul unei camere fără ușă, o piesă a planului. Nicio piesă nu se pune dacă ar închide un pion,
+un morman sau o zonă. **SCARA** se poate, în sfârșit, construi: e de piatră, cât o podea.
+
+**Ce te uiți — pașii, în viewer.**
+1. **Q** până la solul unui loc plat (rândul „nivel slice" din HUD). **P** până la **perete**.
+   **Click** desenează acum **la nivelul activ** — coloana de sub cursor, nu fața atinsă. Desenează
+   o cameră 7×7 cu pereți pe două niveluri (**E** urcă nivelul) și un gol de ușă.
+2. **E** încă o dată, **P** până la **podea**, și acoperă camera, lăsând două celule libere pe mijloc.
+3. **P** până la **scara**: în cele două celule libere, pe nivelurile de jos, o coloană de 1 și una de
+   2 (a doua lângă peretele din spate).
+4. **E**, **P** → **perete**: un etaj peste placă; apoi o placă peste el.
+5. **S**: ce e **turcoaz** ar sta în picioare, dar n-ar ajunge nimeni la el. Șterge o treaptă
+   (**Ctrl+click** pe ea): etajul și acoperișul devin turcoaz, iar HUD-ul spune „N fără acces (N scară,
+   0 ușă)". Pune-o la loc.
+6. Piatra: **P** până la **sapa** și **click** pe câteva zeci de celule de rocă — pionii sapă și fac
+   mormane (20 pe celulă, cât o piesă) —, apoi lasă-i să construiască. **J**:
+   șantierele **turcoaz** așteaptă un loc sigur (scara încă nezidită), cele **roz** ar închide pe cineva.
+7. Desenează o cameră închisă cu un pion înăuntru: HUD-ul spune „PLANUL ÎNCHIDE 1 pion", iar ultima
+   piesă nu se pune cât timp e acolo.
+
+**Cum arată bine:** casa cu două etaje se ridică toată (în teste: 193/193 pe trei semințe, fără niciun
+pion blocat); fără scară, rămân exact etajul și acoperișul, turcoaz. **Cum arată rău:** un pion rămâne
+sus fără drum; turcoazul promite ce pionii fac sau invers; nu poți desena un etaj.
+
+**Șase decizii care sunt ale tale:**
+1. **Atingerea +2** și la **deconstrucție** (ce s-a zidit de pe sol se desface de pe sol). Altfel, rândul 3
+   și placa cer o scară doar ca să fie demolate. Implicit: da.
+2. **Pragurile de „afară"** (`accesPlafonNatural` 2048, `accesPlafonTotal` 8192): o curte închisă cu
+   podea naturală de peste ~45×45 contează ca „afară" — pionii pot rămâne în ea; un acoperiș fără scară
+   de peste 8.192 de celule la fel. Sub ele, orice incintă e pungă.
+3. **SCARA de piatră acum**, de lemn când va exista lemn. Azi e identică cu PODEA (20 de piatră, 300 de
+   muncă) — o treaptă mai ieftină ar fi fost un zid mai ieftin.
+4. **PERETE (400 de muncă) vs PODEA/SCARA (300)** — același voxel, deci podeaua e un perete mai ieftin.
+   Existent, nu adus aici; spune dacă piesele trebuie să difere prin altceva decât preț.
+5. **Planurile care își mută accesul** (închid rampa veche și fac o scară nouă) sunt fără acces până
+   se zidește întâi scara nouă. Previzualizarea o spune; o ordine automată ar fi o altă felie.
+6. **Săparea singurei scări** lasă hrana și depozitul de sus fără drum — azi fără avertisment (era și
+   înainte). E următorul lucru din registru; spune dacă e prioritar.
+
+**De ce nu pot eu.** Regula e probată: teorema de monotonie pe 7 milioane de verificări (panoul) și ca
+test de proprietate; memoria comparată cu recalculul după fiecare pas al unui fuzz, pe margini țintite;
+M5 în coada casei cu etaj; 47 de probe de mutație pe suita accesului. Dar dacă un etaj se desenează
+ușor, dacă turcoazul și roz-ul se înțeleg și dacă cele șase decizii fac jocul bun se vede doar pe ecran.
+
+**Pașii tăi:** `npm run viewer`, apoi http://localhost:5175/ ; commit-urile: https://github.com/AndreiBesliu/BaseBuilder/compare/48d7115...main
