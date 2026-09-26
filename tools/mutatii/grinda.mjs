@@ -58,8 +58,8 @@ export const MUTATII = [
   {
     n: 'orice grinda in picioare e activa (una plutitoare tine podeaua)',
     f: 'src/sim/stabilitate.ts',
-    a: '  return inPicioare && activa(t, rules, x, y, z, ip)',
-    b: '  return inPicioare',
+    a: '  return inPicioare.has(k) && activa(t, rules, x, y, z, ip)',
+    b: '  return inPicioare.has(k)',
     t: 'tests/grinda.test.ts', e: 'o grinda plutitoare nu tine nimic',
   },
   {
@@ -72,22 +72,43 @@ export const MUTATII = [
   {
     n: 'activitatea nu se memoreaza (un BFS per candidat per interogare)',
     f: 'src/sim/stabilitate.ts',
-    a: '  if (ip.activ !== null && (a || !ip.doarPozitive)) ip.activ.set(k, a)',
+    a: '  if (ip.activ !== null) ip.activ.set(k, a)',
     b: '  void k',
     t: 'tests/grinda.test.ts', e: 'K05: o grinda departe',
   },
   {
-    n: 'inchiderea memoreaza si „inactiva" (o grinda activata mai tarziu de plan ramane inactiva)',
+    n: 'inchiderea nu mai invalideaza memoria la zidire (o grinda activata mai tarziu de plan ramane inactiva)',
     f: 'src/sim/stabilitate.ts',
-    a: '  if (ip.activ !== null && (a || !ip.doarPozitive)) ip.activ.set(k, a)',
-    b: '  if (ip.activ !== null) ip.activ.set(k, a)',
+    a: '      zidite.add(cheie)\n      invalideaza(cheie)',
+    b: '      zidite.add(cheie)',
     t: 'tests/grinda.test.ts', e: 'S6e: o grinda care se DEZACTIVEAZA',
+  },
+  {
+    n: 'invalidarea inchiderii pe raza suportMax - 2',
+    f: 'src/sim/stabilitate.ts',
+    a: '        grinziInRaza(index, cz.wx, cz.wy, cz.z + dz, rules.suportMax - 1, lista)',
+    b: '        grinziInRaza(index, cz.wx, cz.wy, cz.z + dz, rules.suportMax - 2, lista)',
+    t: 'tests/grinda.test.ts', e: 'inchiderea: o grinda zidita INACTIVA',
+  },
+  {
+    n: 'invalidarea inchiderii doar la cota de deasupra (nu si la cota zidirii)',
+    f: 'src/sim/stabilitate.ts',
+    a: '    decodeCellIn(k, cz)\n    for (const dz of [0, 1]) {',
+    b: '    decodeCellIn(k, cz)\n    for (const dz of [1]) {',
+    t: 'tests/grinda.test.ts', e: 'inchiderea: o grinda zidita INACTIVA',
+  },
+  {
+    n: 'invalidarea inchiderii doar la cota zidirii (celula de deasupra devine asezata, grinda de acolo nu afla)',
+    f: 'src/sim/stabilitate.ts',
+    a: '    decodeCellIn(k, cz)\n    for (const dz of [0, 1]) {',
+    b: '    decodeCellIn(k, cz)\n    for (const dz of [0]) {',
+    t: 'tests/grinda.test.ts', e: 'inchiderea: o grinda zidita INACTIVA',
   },
   {
     n: 'un candidat din PLAN nu mai e grinda (sursa lui se pierde in forma lenesa)',
     f: 'src/sim/stabilitate.ts',
-    a: '    || ((sursa & DIN_PLAN) !== 0 && grindaInPicioare(t, x, y, z, ip, true))',
-    b: '    || false',
+    a: '    if (!grindaInPicioare(t, x, y, z, ip, i >= dinTeren)) continue',
+    b: '    if (!grindaInPicioare(t, x, y, z, ip, false)) continue',
     t: 'tests/grinda.test.ts', e: 'inchiderea de constructie cu grinzi PLANIFICATE',
   },
   {
@@ -361,5 +382,11 @@ export const MUTATII = [
     a: '        let anterior = samanta ? (inainte.get(kb) ?? false) : activ.get(kb)',
     b: '        let anterior = activ.get(kb) ?? (samanta ? (inainte.get(kb) ?? false) : undefined)',
     t: 'tests/grinda.test.ts', e: 'previzualizarea pe MAI MULTE sapaturi nu depinde de ordinea lor',
+  },  {
+    n: 's1 sare peste grinzile a caror activitate nu e inca stiuta (iesirea timpurie cere „stiuta activa")',
+    f: 'src/sim/stabilitate.ts',
+    a: '    if (ip.activ?.get(k) !== false) deIncercat = true',
+    b: '    if (ip.activ?.get(k) === true) deIncercat = true',
+    t: 'tests/grinda.test.ts', e: 'fasia din zid',
   },
 ]

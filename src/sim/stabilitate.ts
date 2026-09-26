@@ -239,21 +239,20 @@ interface Ipoteza {
   readonly zidite: ReadonlySet<number> | null
   readonly grinziPlan: IndexGrinzi | null
   /**
-   * TRANSIENT, cat tine o intrebare: cellKey(grinda) → activa. O tine si o invalideaza
-   * cine o creeaza: `propaga`, la fiecare cadere, pentru grinzile la cel mult
-   * `suportMax − 1` de celula cazuta, la z si z+1 (singurele a caror activitate se
-   * poate schimba); `constructiaPosibila` retine doar „activa" (`doarPozitive`),
-   * fiindca o adaugare nu dezactiveaza nicio grinda.
+   * TRANSIENT, cat tine o intrebare: cellKey(grinda) → activa, si „activa" si „inactiva".
+   * O tine si o invalideaza cine o creeaza, la fiecare schimbare a ipotezei, pentru
+   * grinzile la cel mult `suportMax − 1` de celula schimbata, la z si z+1 — singurele a
+   * caror activitate se poate schimba: `propaga` la fiecare cadere, `constructiaPosibila`
+   * la fiecare zidire.
    *
    * Masurat de panou de ce trebuie: fara ea, activitatea se calcula cu cate un BFS
    * pentru fiecare grinda candidata, la fiecare interogare — sub un tavan 21×21 numai
    * din grinzi, 160 de candidati pe interogare si 215–246 ms pe o singura sapatura.
    */
   readonly activ: Map<number, boolean> | null
-  readonly doarPozitive: boolean
 }
 
-const FARA_IPOTEZA: Ipoteza = { cazute: null, zidite: null, grinziPlan: null, activ: null, doarPozitive: false }
+const FARA_IPOTEZA: Ipoteza = { cazute: null, zidite: null, grinziPlan: null, activ: null }
 
 /**
  * TRANSIENT: ce a costat stabilitatea, pentru bugetele din teste si din DEVLOG. Nu
@@ -300,18 +299,16 @@ function activa(t: Terrain, rules: Rules, x: number, y: number, z: number, ip: I
   const m = ip.activ?.get(k)
   if (m !== undefined) return m
   const a = s0Pozitiv(t, rules, x, y, z, ip)
-  if (ip.activ !== null && (a || !ip.doarPozitive)) ip.activ.set(k, a)
+  if (ip.activ !== null) ip.activ.set(k, a)
   return a
 }
 
-// Tampoane reusite. `candidati` tine perechi (x, y); `candSursa` spune de unde vine
-// fiecare candidat (`DIN_TEREN` | `DIN_PLAN` — o celula poate fi in ambele indexuri).
+// Tampoane reusite. `candidati` tine perechi (x, y); `inPicioare` sunt candidatii care
+// chiar stau acum, in ipoteza (din teren sau din plan — o celula poate fi in ambele).
 // BFS-ul lui `s1` are coada lui, separata de a lui `caveazaSpreAsezat`, pe care o
-// foloseste activitatea — cele doua se intercaleaza acum, deci nu pot imparti tampoane.
+// foloseste activitatea — cele doua se intercaleaza, deci nu pot imparti tampoane.
 const candidati: number[] = []
-const candSursa = new Map<number, number>()
-const DIN_TEREN = 1
-const DIN_PLAN = 2
+const inPicioare = new Set<number>()
 const coada1X: number[] = []
 const coada1Y: number[] = []
 const coada1D: number[] = []
@@ -319,13 +316,7 @@ const vazute1 = new Set<number>()
 
 /** Celula `k` = (x, y, z) e o grinda candidata IN PICIOARE si ACTIVA? Activitatea, doar la nevoie. */
 function candidatActiv(t: Terrain, rules: Rules, x: number, y: number, z: number, k: number, ip: Ipoteza): boolean {
-  const sursa = candSursa.get(k)
-  if (sursa === undefined) return false
-  // Activitatea depinde doar de celula si de ipoteza, nu de sursa: in picioare dupa
-  // oricare dintre surse, raspunsul e acelasi `activa`.
-  const inPicioare = ((sursa & DIN_TEREN) !== 0 && grindaInPicioare(t, x, y, z, ip, false))
-    || ((sursa & DIN_PLAN) !== 0 && grindaInPicioare(t, x, y, z, ip, true))
-  return inPicioare && activa(t, rules, x, y, z, ip)
+  return inPicioare.has(k) && activa(t, rules, x, y, z, ip)
 }
 
 /**
@@ -357,11 +348,21 @@ function suportDinGrinzi(t: Terrain, rules: Rules, wx: number, wy: number, z: nu
   if (ip.grinziPlan !== null) grinziInRaza(ip.grinziPlan, wx, wy, z, R - 1, candidati)
   if (candidati.length === 0) return 0
   contoareStabilitate.interogariS1++
-  candSursa.clear()
+  // Iesirea timpurie a formei de dinainte, pastrata: daca nicio candidata nu STA, sau
+  // toate cele care stau sunt deja stiute inactive, raspunsul e 0 fara BFS. Fara ea, forma
+  // lenesa facea BFS-ul de raza 9 si cand nu avea ce gasi (masurat de verificatorul COST-2:
+  // pe o grila de grinzi planificate la 5, 0 -> 1.226 de BFS-uri pe apel).
+  inPicioare.clear()
+  let deIncercat = false
   for (let i = 0; i < candidati.length; i += 2) {
-    const k = cellKey(candidati[i]!, candidati[i + 1]!, z)
-    candSursa.set(k, (candSursa.get(k) ?? 0) | (i >= dinTeren ? DIN_PLAN : DIN_TEREN))
+    const x = candidati[i]!
+    const y = candidati[i + 1]!
+    if (!grindaInPicioare(t, x, y, z, ip, i >= dinTeren)) continue
+    const k = cellKey(x, y, z)
+    inPicioare.add(k)
+    if (ip.activ?.get(k) !== false) deIncercat = true
   }
+  if (!deIncercat) return 0
   const k0 = cellKey(wx, wy, z)
   if (candidatActiv(t, rules, wx, wy, z, k0, ip)) return R
 
@@ -522,7 +523,7 @@ function propaga(t: Terrain, rules: Rules, sapate: readonly number[]): { cazute:
   // si ~650 ms fara ea, 1961 si ~60 ms cu ea.
   const inAsteptare = new Set<number>()
   const activ = new Map<number, boolean>()
-  const ip: Ipoteza = { cazute, zidite: null, grinziPlan: null, activ, doarPozitive: false }
+  const ip: Ipoteza = { cazute, zidite: null, grinziPlan: null, activ }
   // UN obiect de decodare per apel, nu unul per iteratie.
   const c: Celula = { wx: 0, wy: 0, z: 0 }
   const cg: Celula = { wx: 0, wy: 0, z: 0 }
@@ -784,9 +785,35 @@ export function constructiaPosibila(
     decodeCellIn(k, cg)
     adaugaGrinda(plan, cg.wx, cg.wy, cg.z)
   }
-  // O adaugare nu dezactiveaza nicio grinda, deci „activa" ramane adevarat pana la
-  // capat; „inactiva" poate deveni activa, deci nu se memoreaza.
-  const ip: Ipoteza = { cazute: null, zidite, grinziPlan: grinzi.length > 0 ? plan : null, activ: new Map(), doarPozitive: true }
+  // Memoria activitatii tine si „activa" si „inactiva". O zidire nu dezactiveaza nicio
+  // grinda, dar poate ACTIVA una: numai pe cele de la cel mult `suportMax − 1` de celula
+  // zidita, la cota ei (drumul spre asezat trece prin ea) si la cota de deasupra (celula
+  // de deasupra ei devine asezata). Acolo se sterg intrarile „inactiva", din ambele
+  // indexuri. Demonstrat de verificatorul COST-2 si masurat: 900 de planuri contra
+  // constructiei reale, 0 diferente, 0 raspunsuri invechite din 80.803 re-verificate.
+  //
+  // Fara memoria negativa, o grinda zidita dar inactiva (una din crucea sau randurile de
+  // grinzi pe care le deseneaza un jucator care nu stie ca grinzile nu se tin una pe alta)
+  // isi recalcula activitatea la fiecare interogare `s1`, la fiecare trecere: o podea de
+  // 25×25 cu o cruce de grinzi, 126 ms la fiecare click; 41×41 pe trei etaje, secunde.
+  const activ = new Map<number, boolean>()
+  const ip: Ipoteza = { cazute: null, zidite, grinziPlan: grinzi.length > 0 ? plan : null, activ }
+  const lista: number[] = []
+  const cz: Celula = { wx: 0, wy: 0, z: 0 }
+  const invalideaza = (k: number): void => {
+    decodeCellIn(k, cz)
+    for (const dz of [0, 1]) {
+      for (const index of [t.grinzi, ip.grinziPlan]) {
+        if (index === null) continue
+        lista.length = 0
+        grinziInRaza(index, cz.wx, cz.wy, cz.z + dz, rules.suportMax - 1, lista)
+        for (let i = 0; i < lista.length; i += 2) {
+          const kb = cellKey(lista[i]!, lista[i + 1]!, cz.z + dz)
+          if (activ.get(kb) === false) activ.delete(kb)
+        }
+      }
+    }
+  }
   const ramase = new Set<number>(celule)
   // Celulele deja solide nu sunt „de construit": ies din multime de la inceput,
   // ca sa nu fie numarate nici construibile, nici imposibile.
@@ -810,6 +837,7 @@ export function constructiaPosibila(
       const c = decodeCell(cheie)
       if (suportNouPanaLa(t, rules, c.wx, c.wy, c.z, ip, 1) === 0) continue
       zidite.add(cheie)
+      invalideaza(cheie)
       ramase.delete(cheie)
       adaugat = true
     }

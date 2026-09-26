@@ -623,6 +623,43 @@ test('previzualizarea pe MAI MULTE sapaturi nu depinde de ordinea lor: grinda de
   }
 })
 
+test('inchiderea: o grinda zidita INACTIVA devine activa cand se zideste celula asezata la 3 de ea — la cota ei si dedesubt (z+1)', () => {
+  // Memoria inchiderii tine si „inactiva", iar o zidire o sterge doar pe raza `suportMax − 1`,
+  // la cota zidirii si la cea de deasupra. Scenele verificatorului COST-2 (26.09): B e zidita
+  // prin s1 din B', inactiva; o SONDA legata de ea prin solid re-memoreaza „inactiva" chiar
+  // inaintea lui k; apoi k face B activa, iar ultimele celule stau doar prin B. Cu raza -1, fara
+  // cota z, sau fara z+1, inchiderea le pierdea; testele de pana atunci treceau pe toate.
+  const scena = (sus: number, B: number, kX: number): { w: World; plan: [number, number, number, number][]; cutie: Cutie } => {
+    const { w, sit } = laSit(12345, 0)
+    const x0 = sit.wx + 40
+    const y0 = sit.wy + 40
+    let gmax = -1 << 20
+    for (let dx = -2; dx < 26; dx++) for (let dy = -3; dy < 4; dy++) gmax = Math.max(gmax, solid(w, x0 + dx, y0 + dy)!)
+    const zf = gmax + 3
+    const zB = zf + sus
+    for (let z = solid(w, x0, y0)! + 1; z <= zB; z++) assert.ok(applyCommand(w, { kind: 'fill', wx: x0, wy: y0, z, material: Material.PIATRA_CONSTRUITA }, R).ok, 'fixtura: stalpul de langa B\'')
+    const P = Material.PIATRA_CONSTRUITA
+    const plan: [number, number, number, number][] = [[x0 + 1, y0, zB, Material.GRINDA]]
+    for (let dx = 2; dx <= 10; dx++) plan.push([x0 + dx, y0, zB, dx === B ? Material.GRINDA : P])
+    // Stalpul lui k, planificat din sol; k = varful lui (la cota lui B, sau sub ea).
+    for (let z = solid(w, x0 + kX, y0)! + 1; z < zf; z++) plan.push([x0 + kX, y0, z, P])
+    plan.push([x0 + 10, y0 + 1, zB, P]) // sonda, legata de B, fara sprijin pana la k
+    plan.push([x0 + kX, y0, zf, P]) // k
+    for (let dx = kX + 1; dx <= kX + 6; dx++) plan.push([x0 + dx, y0, zB, P])
+    return { w, plan, cutie: { x0: x0 - 14, y0: y0 - 14, x1: x0 + 32, y1: y0 + 14, z0: zf - 3, z1: zB } }
+  }
+  for (const [nume, sus, B, kX] of [['A3: k la cota lui B, la 3 de ea', 0, 8, 11], ['B3: k sub celula de la 3 de B (invalidare la z+1)', 1, 7, 10]] as const) {
+    const { w, plan, cutie } = scena(sus, B, kX)
+    const celule = plan.map(([x, y, z]) => cellKey(x, y, z))
+    const grinzi = plan.filter(([, , , m]) => m === Material.GRINDA).map(([x, y, z]) => cellKey(x, y, z))
+    const { construibile } = constructiaPosibila(w.terrain, R, celule, grinzi)
+    const facute = construiesteIncremental(w, plan)
+    assert.equal(facute.size, plan.length, `fixtura ${nume}: planul se construieste intreg in realitate`)
+    assert.deepEqual(construibile, [...facute].sort((a, b) => a - b), `${nume}: inchiderea difera de constructia reala`)
+    assert.equal(plutitori(w, cutie, 12), 0, `fixtura ${nume}: plutitori`)
+  }
+})
+
 /** Un generator determinist mic (LCG), ca scenele aleatoare sa fie aceleasi la fiecare rulare. */
 function lcg(samanta: number): () => number {
   let s = samanta >>> 0
