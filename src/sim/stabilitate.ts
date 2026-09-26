@@ -699,6 +699,11 @@ export function cadeDaca(t: Terrain, rules: Rules, sapate: readonly number[], in
  * chiar atarna in aer. Scurtcircuitul „nu se plaseaza nimic, deci nu intreba" sta
  * in POARTA, nu aici: o masuratoare care minte ca sa fie comoda nu mai e o
  * masuratoare.
+ *
+ * Cifra e a unei piese OBISNUITE: functia nu stie materialul. O GRINDA zidita acolo, daca
+ * ar iesi activa (s0 > 0), ar avea `suportRazaGrinda` — oglinda nu mai e exacta pentru ea
+ * (recenzia, R4). Poarta si inchiderea cer doar „> 0", care ramane adevarat pentru orice
+ * material; doar testele citesc cifra.
  */
 export function suportDacaZidesc(
   t: Terrain,

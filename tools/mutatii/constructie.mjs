@@ -855,5 +855,18 @@ export const MUTATII = [
     a: "  if (!celulaLibera(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!).ok) {\n    raport.santierOcupat++\n    return\n  }",
     b: "  if (false) {\n    raport.santierOcupat++\n    return\n  }",
     t: 'tests/constructie.test.ts', e: 'un santier ocupat TRECATOR',
+  },  {
+    n: 'piesa GRINDA poate fi din orice material (o grinda de lemn prin piese nu tine nimic)',
+    f: 'src/sim/content.ts',
+    a: '    if (id === Piesa.GRINDA && mat[1] !== Material.GRINDA) {',
+    b: '    if (false) {',
+    t: 'tests/content.test.ts', e: 'piesa GRINDA dintr-un alt material e refuzata',
+  },
+  {
+    n: 'raza grinzii fara plafon de cost (64: o sapatura de grinda costa secunde)',
+    f: 'src/sim/content.ts',
+    a: '  suportRazaGrinda: { min: 1, max: 16 },',
+    b: '  suportRazaGrinda: { min: 1, max: 64 },',
+    t: 'tests/content.test.ts', e: 'raza grinzii are un plafon de COST',
   },
 ]

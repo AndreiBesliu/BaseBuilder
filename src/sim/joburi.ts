@@ -89,7 +89,7 @@ import type { Rules } from './content.ts'
 import type { Outcome, ReasonCode } from './result.ts'
 import { accept, codMotiv, refuse, Reason } from './result.ts'
 import type { FelJobId, World } from './state.ts'
-import { Categorie, CATEGORII, FelJob, Gand, GAND_PENTRU_NEVOIE, ITEME, Nevoie, NEVOI, PasCara, PasConstruieste, PasJob, pasDeMers, PasNevoie, Piesa, puneGand } from './state.ts'
+import { Categorie, CATEGORII, FelJob, Gand, GAND_PENTRU_NEVOIE, ITEME, Nevoie, NEVOI, PasCara, PasConstruieste, PasJob, pasDeMers, PasNevoie, puneGand } from './state.ts'
 import { cellOf, clearPath } from './drumuri.ts'
 import { blockOfCell, ensureArea, find, isWalkable, markDirty, NO_REGION, regionAt, REGION_SIZE } from './regions.ts'
 import type { RegionStore } from './regions.ts'
@@ -2849,7 +2849,10 @@ export function constructiaPrevizualizata(w: World, rules: Rules): { construibil
     if (d.alive[i] !== 1 || d.kind[i] !== Desemnare.CONSTRUIESTE) continue
     const k = cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!)
     celule.push(k)
-    if (d.piesa[i] === Piesa.GRINDA) grinzi.push(k)
+    // Grinda prin MATERIAL, ca fizica (`grindaInPicioare`), nu prin numele piesei: o piesa
+    // „grinda" din alt material n-ar tine nimic, iar o alta piesa din materialul GRINDA ar
+    // tine (recenzia, CONT-2: previzualizarea promitea 12 celule, pionii zideau 3).
+    if (rules.piese[d.piesa[i]!]!.material === Material.GRINDA) grinzi.push(k)
   }
   if (celule.length === 0) return { construibile: [], imposibile: [] }
   return constructiaPosibila(w.terrain, rules, celule, grinzi)

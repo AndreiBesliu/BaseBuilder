@@ -351,7 +351,10 @@ const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield' | 'piese' | 'nevoi' | '
   mancatoriPeMorman: { min: 1, max: 64 },
   odihnaPeTicDeNevoie: { min: 1, max: 1000000 },
   suportMax: { min: 1, max: 64 },
-  suportRazaGrinda: { min: 1, max: 64 },
+  // Plafonul e al COSTULUI: discurile grinzii au raza R−1, deci o sapatura langa grinzi costa
+  // ~R³. Masurat dupa recenzie (26.09), o placa peste un stalp cu 4 grinzi, sapata o grinda:
+  // R=10 9 ms, 12 10 ms, 14 18 ms, 16 30 ms, 20 65 ms, 31 420 ms (tickul are 50 ms).
+  suportRazaGrinda: { min: 1, max: 16 },
   dispozitieMax: { min: 1, max: 1000000 },
   dispozitieBaza: { min: 0, max: 1000000 },
   dispozitieTicks: { min: 1, max: 1000000 },
@@ -447,6 +450,13 @@ function parsePiese(raw: unknown): Outcome<SpecPiesa[]> {
     const l = e.lucru
     if (typeof l !== 'number' || !Number.isInteger(l) || l < 1 || l > MAX_LUCRU) {
       return refuse(Reason.VALOARE_INVALIDA, { camp: `piese.${nume}.lucru`, valoare: String(l), min: 1, max: MAX_LUCRU })
+    }
+    // Grinda e grinda prin MATERIAL: fizica si previzualizarea se uita la el. O piesa GRINDA
+    // din alt material ar trece validarea si n-ar tine nimic — iar mesajul invariantului de
+    // cost („asteptat 5" pentru lemn) chiar impingea autorul spre editarea asta (recenzia,
+    // CONT-2). O grinda de LEMN se face din `digYield.GRINDA` (felul si cantitatea), nu de aici.
+    if (id === Piesa.GRINDA && mat[1] !== Material.GRINDA) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `piese.${nume}.material`, valoare: mat[0], motiv: 'grinda trebuie sa fie din materialul GRINDA; felul platit se schimba din digYield.GRINDA' })
     }
     // `mat[1]` vine din `NUME_MATERIALE`, care e construit din `Material.*`: cheia
     // a fost deja cautata in tabelul ala, deci ingustarea e sigura.

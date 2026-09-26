@@ -18,6 +18,8 @@ import type { IndexGrinzi } from '../src/sim/terrain/terrain.ts'
 import { cadeDaca, constructiaPosibila, contoareStabilitate, esteAsezat, memorieSprijin, poateSustine, Prefiltru, prefiltruStabilitate, reseteazaContoareStabilitate, Sol, solLa, StareSapat, stareSapat, suportLa, sustinutAcum, sustinutAcumMemorat } from '../src/sim/stabilitate.ts'
 import { cellKey, decodeCell } from '../src/sim/path.ts'
 import { Reason } from '../src/sim/result.ts'
+import { readFileSync } from 'node:fs'
+import { parseRules } from '../src/sim/content.ts'
 import { constructiaPrevizualizata } from '../src/sim/joburi.ts'
 import type { World } from '../src/sim/state.ts'
 import { Piesa } from '../src/sim/state.ts'
@@ -793,6 +795,24 @@ test('inchiderea de constructie cu grinzi PLANIFICATE promite exact ce se constr
     const facute = construiesteIncremental(w2, plan)
     assert.deepEqual([...facute].sort((a, b) => a - b), construibile)
   }
+})
+
+test('previzualizarea recunoaste grinda planificata dupa MATERIALUL piesei, ca fizica', () => {
+  // Reguli in care PERETELE e facut din materialul GRINDA: zidit, tine ca o grinda. Cu grinda
+  // recunoscuta dupa NUMELE piesei, previzualizarea promitea 3 si se zideau 12 (recenzia, CONT-2).
+  const brut = JSON.parse(readFileSync(new URL('../content/rules.json', import.meta.url), 'utf8'))
+  brut.piese.PERETE = { ...brut.piese.PERETE, material: 'GRINDA' }
+  const R2 = parseRules(brut)
+  assert.ok(R2.ok, 'fixtura: regulile cu peretele de grinda')
+  if (!R2.ok) return
+  const { w, x0, y0, g } = scena(16)
+  const zf = g + 2
+  zid(w, x0, y0, 1, g, zf)
+  for (let dx = 1; dx <= 14; dx++) {
+    assert.ok(applyCommand(w, { kind: 'desemneaza', wx: x0 + dx, wy: y0, z: zf, piesa: dx === 3 ? Piesa.PERETE : Piesa.PODEA }, R2.value).ok)
+  }
+  const { construibile } = constructiaPrevizualizata(w, R2.value)
+  assert.equal(construibile.length, 12, `previzualizarea promite ${construibile.length}`)
 })
 
 test('constructiaPosibila fara lista de grinzi planificate ar promite MAI PUTIN — lista e necesara', () => {

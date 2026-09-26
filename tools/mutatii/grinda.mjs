@@ -469,5 +469,11 @@ export const MUTATII = [
     a: '  contoareStabilitate.interogariS1++',
     b: '  void contoareStabilitate',
     t: 'tests/grinda.test.ts', e: 'K05: o grinda departe',
+  },  {
+    n: 'previzualizarea recunoaste grinda dupa numele piesei, nu dupa material',
+    f: 'src/sim/joburi.ts',
+    a: '    if (rules.piese[d.piesa[i]!]!.material === Material.GRINDA) grinzi.push(k)',
+    b: '    if (d.piesa[i] === 4) grinzi.push(k)',
+    t: 'tests/grinda.test.ts', e: 'previzualizarea recunoaste grinda planificata dupa MATERIALUL',
   },
 ]

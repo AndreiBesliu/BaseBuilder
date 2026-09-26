@@ -177,6 +177,36 @@ test('o grinda nu poate sprijini mai putin decat solul', () => {
   assert.equal(egal.ok, true)
 })
 
+test('piesa GRINDA dintr-un alt material e refuzata; grinda de LEMN se face din digYield', () => {
+  // Recenzia (CONT-2): `piese.GRINDA.material = LEMN_CONSTRUIT` trecea validarea, iar grinda nu
+  // mai tinea nimic — previzualizarea promitea 12, se zideau 3.
+  const brut = (): Record<string, any> => JSON.parse(readFileSync(new URL('../content/rules.json', import.meta.url), 'utf8'))
+  const lemn = brut()
+  lemn.piese.GRINDA = { ...lemn.piese.GRINDA, material: 'LEMN_CONSTRUIT', cantitate: 5 }
+  const out = parseRules(lemn)
+  assert.equal(out.ok, false)
+  if (!out.ok) {
+    assert.equal(out.reason, Reason.VALOARE_INVALIDA)
+    assert.equal(out.params.camp, 'piese.GRINDA.material')
+  }
+  // Calea care merge: materialul ramane GRINDA, se schimba ce da (si deci ce costa).
+  const buna = brut()
+  buna.digYield.GRINDA = { fel: 'LEMN', cantitate: 5 }
+  buna.piese.GRINDA = { ...buna.piese.GRINDA, cantitate: 5 }
+  assert.equal(parseRules(buna).ok, true, 'grinda de lemn prin digYield trebuia acceptata')
+})
+
+test('raza grinzii are un plafon de COST: 16 trece, 17 nu', () => {
+  // Recenzia (CONT-3): RULES_SPEC accepta 64, unde o sapatura de grinda costa 5 s.
+  assert.equal(parseRules({ ...DEFAULT_RULES, suportRazaGrinda: 16 }).ok, true)
+  const out = parseRules({ ...DEFAULT_RULES, suportRazaGrinda: 17 })
+  assert.equal(out.ok, false)
+  if (!out.ok) {
+    assert.equal(out.params.camp, 'suportRazaGrinda')
+    assert.equal(out.params.max, 16)
+  }
+})
+
 test('pragul de ridicare nu poate depasi stiva, si nu poate fi zero', () => {
   // Peste stiva, niciun morman n-ar mai fi sursa; la zero, praful ar fi sursa.
   const peste = parseRules({ ...DEFAULT_RULES, constructPickupMinUnits: DEFAULT_RULES.itemStackMax + 1 })
