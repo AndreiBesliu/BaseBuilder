@@ -46,6 +46,9 @@
   "zonePriorityDefault": 3,
   "suportMax": 4,
   "suportRazaGrinda": 10,
+  "atingereSusM": 2,
+  "accesPlafonNatural": 2048,
+  "accesPlafonTotal": 8192,
   "nevoieMax": 1000,
   "nevoiTicks": 250,
   "nevoieFazaPas": 137,
@@ -84,7 +87,7 @@
   "piese": {
     "PERETE": { "material": "PIATRA_CONSTRUITA", "cantitate": 20, "lucru": 400 },
     "PODEA": { "material": "PIATRA_CONSTRUITA", "cantitate": 20, "lucru": 300 },
-    "SCARA": { "material": "LEMN_CONSTRUIT", "cantitate": 5, "lucru": 250 },
+    "SCARA": { "material": "PIATRA_CONSTRUITA", "cantitate": 20, "lucru": 300 },
     "GRINDA": { "material": "GRINDA", "cantitate": 20, "lucru": 500 }
   },
   "digYield": {

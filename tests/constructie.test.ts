@@ -49,6 +49,8 @@ import { asazaItem, itemLaCelula } from '../src/sim/iteme.ts'
 import { lasaItem } from './fixturi.ts'
 import { desemneaza, laSit, lume3000, marfaTotala, patratPlat, R, ruleaza, solid, solidLaDistanta } from './fixturi.ts'
 import { createWorld } from '../src/sim/world.ts'
+import { readFileSync } from 'node:fs'
+import { parseRules } from '../src/sim/content.ts'
 import { WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 
 /**
@@ -2447,17 +2449,27 @@ test('De ce nu? deosebeste „nu e destul" de „e destul, dar praf": LIPSA_MATE
   assert.equal(w.ratiune.unitatiZidite, 0)
 })
 
-test('SCARA cere 5, deci pragul ei e 5: porneste dintr-un morman de 5 lemn', () => {
+test('o piesa de 5 are pragul 5: porneste dintr-un morman de 5 (reguli sintetice)', () => {
+  // Pana la taietura 5, SCARA de lemn (5) era singura legatura prin continut a taieturii
+  // `min(prag, cantitate)`. Acum toate piesele livrate au 20, deci ramura se leaga aici,
+  // pe o scara de lemn scrisa in reguli — exact varianta de continut care va veni cu lemnul.
+  const brut = JSON.parse(readFileSync(new URL('../content/rules.json', import.meta.url), 'utf8'))
+  brut.piese.SCARA = { material: 'LEMN_CONSTRUIT', cantitate: 5, lucru: 250 }
+  const parsat = parseRules(brut)
+  assert.ok(parsat.ok, JSON.stringify(parsat))
+  if (!parsat.ok) return
+  const R5 = parsat.value
+  assert.ok(R5.piese[Piesa.SCARA]!.cantitate < R5.constructPickupMinUnits, 'fixtura: piesa trebuie sa fie sub prag')
   const { w, wx, wy, g } = sitPlat(12345, 11)
-  const sant = applyCommand(w, { kind: 'desemneaza', wx: wx + 5, wy: wy + 5, z: g + 1, piesa: Piesa.SCARA }, R)
+  const sant = applyCommand(w, { kind: 'desemneaza', wx: wx + 5, wy: wy + 5, z: g + 1, piesa: Piesa.SCARA }, R5)
   assert.ok(sant.ok, JSON.stringify(sant))
-  const idItem = lasaItem(w, Item.LEMN, R.piese[Piesa.SCARA]!.cantitate, wx + 1, wy + 5)
+  const idItem = lasaItem(w, Item.LEMN, R5.piese[Piesa.SCARA]!.cantitate, wx + 1, wy + 5, R5)
   const p = pionLa(w, wx + 2, wy + 5)
   const ds = slotDesemnare(w.desemnari, sant.ok ? sant.value : -1)
   const is = slotItem(w.iteme, idItem)
-  assert.equal(pragRidicare(R, R.piese[Piesa.SCARA]!), R.piese[Piesa.SCARA]!.cantitate)
-  assert.ok(pornesteConstruieste(w, R, p, ds, is).ok, 'scara nu porneste din singurul morman care o acopera intreg')
-  assert.equal(w.agents.jobCantitate[p], R.piese[Piesa.SCARA]!.cantitate)
+  assert.equal(pragRidicare(R5, R5.piese[Piesa.SCARA]!), R5.piese[Piesa.SCARA]!.cantitate)
+  assert.ok(pornesteConstruieste(w, R5, p, ds, is).ok, 'piesa nu porneste din singurul morman care o acopera intreg')
+  assert.equal(w.agents.jobCantitate[p], R5.piese[Piesa.SCARA]!.cantitate)
 })
 
 test('un morman cu prea putin LIBER nu e sursa, chiar daca are destul in el: 5 libere din 25 nu merita drumul', () => {

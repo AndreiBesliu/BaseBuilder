@@ -95,7 +95,7 @@ import { blockOfCell, ensureArea, find, isWalkable, markDirty, NO_REGION, region
 import type { RegionStore } from './regions.ts'
 import type { Terrain } from './terrain/terrain.ts'
 import { dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
-import { Material } from './terrain/chunk.ts'
+import { esteMaterialDeStructura, Material } from './terrain/chunk.ts'
 import type { MaterialId } from './terrain/chunk.ts'
 import { cadeDaca, constructiaPosibila, cotaDeAsezare, multimeaCareCade, poateSustine, Sol, solLa, sustinutAcumMemorat } from './stabilitate.ts'
 import { cellKey, decodeCell } from './path.ts'
@@ -522,11 +522,6 @@ export const FelLucru = {
 } as const
 export type FelLucruId = (typeof FelLucru)[keyof typeof FelLucru]
 
-/** Materialele pe care le produce DOAR zidirea — ce se deconstruieste, nu se sapa. */
-export function esteMaterialDeStructura(m: number): boolean {
-  return m === Material.PIATRA_CONSTRUITA || m === Material.GRINDA || m === Material.LEMN_CONSTRUIT
-}
-
 /** Felul sapatului la (wx, wy, z): dupa materialul de ACOLO, nu dupa cine l-a cerut. */
 export function felSapa(t: Terrain, wx: number, wy: number, z: number): FelLucruId {
   const m = materialAt(t, wx, wy, z)
@@ -818,7 +813,9 @@ type SpecPiesa = Rules['piese'][number]
 
 /**
  * Pragul de ridicare al unei piese: sub cat nu merita un drum pentru o parte din
- * ea. Taiat la cantitatea piesei — SCARA cere 5, deci pragul ei e 5, nu 10.
+ * ea. Taiat la cantitatea piesei — o piesa de 5 are pragul 5, nu 10. (Continutul
+ * livrat nu mai are o astfel de piesa din taietura 5, cand SCARA a devenit de
+ * piatra; ramura e legata de un test cu reguli sintetice.)
  */
 export function pragRidicare(rules: Rules, spec: SpecPiesa): number {
   return Math.min(rules.constructPickupMinUnits, spec.cantitate)

@@ -207,6 +207,69 @@ test('raza grinzii are un plafon de COST: 16 trece, 17 nu', () => {
   }
 })
 
+test('atingerea la zidire: cel putin un pas, cel mult pana deasupra capului', () => {
+  // RULES_SPEC le valideaza independent; fara invariant, o atingere sub pas ar face
+  // zidurile pe care pionul urca dar nu le poate continua, iar una peste cap ar zidi prin
+  // tavanul de sub el.
+  // Pas 2, atingere 1: fiecare valoare trece de RULES_SPEC, deci refuzul e al invariantului.
+  const sub = parseRules({ ...DEFAULT_RULES, maxStepM: 2, atingereSusM: 1 })
+  assert.equal(sub.ok, false)
+  if (!sub.ok) {
+    assert.equal(sub.params.camp, 'atingereSusM')
+    assert.equal(sub.params.min, 2)
+  }
+  const peste = parseRules({ ...DEFAULT_RULES, atingereSusM: DEFAULT_RULES.agentHeadroomM + 1 })
+  assert.equal(peste.ok, false)
+  if (!peste.ok) {
+    assert.equal(peste.reason, Reason.VALOARE_INVALIDA)
+    assert.equal(peste.params.camp, 'atingereSusM')
+    assert.equal(peste.params.max, DEFAULT_RULES.agentHeadroomM)
+  }
+  // Capetele sunt permise: pas = atingere si atingere = cap.
+  assert.equal(parseRules({ ...DEFAULT_RULES, atingereSusM: DEFAULT_RULES.agentHeadroomM }).ok, true)
+  assert.equal(parseRules({ ...DEFAULT_RULES, atingereSusM: DEFAULT_RULES.maxStepM }).ok, true)
+})
+
+test('pragul natural al accesului nu poate trece de plafonul total', () => {
+  const out = parseRules({ ...DEFAULT_RULES, accesPlafonNatural: DEFAULT_RULES.accesPlafonTotal + 1 })
+  assert.equal(out.ok, false)
+  if (!out.ok) {
+    assert.equal(out.params.camp, 'accesPlafonNatural')
+    assert.equal(out.params.max, DEFAULT_RULES.accesPlafonTotal)
+  }
+  assert.equal(parseRules({ ...DEFAULT_RULES, accesPlafonNatural: DEFAULT_RULES.accesPlafonTotal }).ok, true)
+})
+
+test('plafoanele accesului au un plafon de COST: 16384 trece, 16385 nu', () => {
+  // O intrebare de acces e un flood de cel mult `accesPlafonTotal` celule; panoul a masurat
+  // 5–14 ms la 8192. Fara plafon in RULES_SPEC, un 10^6 ar face o singura intrebare de
+  // secunde, cu toate regulile „valide".
+  assert.equal(parseRules({ ...DEFAULT_RULES, accesPlafonTotal: 16384 }).ok, true)
+  const out = parseRules({ ...DEFAULT_RULES, accesPlafonTotal: 16385 })
+  assert.equal(out.ok, false)
+  if (!out.ok) {
+    assert.equal(out.params.camp, 'accesPlafonTotal')
+    assert.equal(out.params.max, 16384)
+  }
+})
+
+test('o piesa dintr-un material NATURAL e refuzata: un zid n-are voie sa arate ca teren', () => {
+  const brut = (): Record<string, any> => JSON.parse(readFileSync(new URL('../content/rules.json', import.meta.url), 'utf8'))
+  for (const natural of ['ROCA', 'PAMANT', 'IARBA', 'MOLOZ']) {
+    const r = brut()
+    r.piese.PERETE = { ...r.piese.PERETE, material: natural }
+    // Invariantul „costa cat da inapoi" s-ar putea inrosi primul; il satisfacem, ca sa
+    // se vada exact garda materialului.
+    r.piese.PERETE.cantitate = r.digYield[natural].cantitate
+    const out = parseRules(r)
+    assert.equal(out.ok, false, `PERETE din ${natural} a trecut`)
+    if (!out.ok) {
+      assert.equal(out.params.camp, 'piese.PERETE.material')
+      assert.equal(out.params.valoare, natural)
+    }
+  }
+})
+
 test('pragul de ridicare nu poate depasi stiva, si nu poate fi zero', () => {
   // Peste stiva, niciun morman n-ar mai fi sursa; la zero, praful ar fi sursa.
   const peste = parseRules({ ...DEFAULT_RULES, constructPickupMinUnits: DEFAULT_RULES.itemStackMax + 1 })

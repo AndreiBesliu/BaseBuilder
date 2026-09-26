@@ -49,7 +49,7 @@ export const Material = {
    * DACA e ea insasi sprijinita de sol (`s0 > 0`) — vezi `src/sim/stabilitate.ts`.
    * De PIATRA, nu de lemn: LEMN vine doar din sapatul lui LEMN_CONSTRUIT, care vine
    * doar din SCARA, care cere LEMN — o grinda de lemn n-ar putea fi construita
-   * niciodata. Valoare noua intr-un `Uint8Array` deja persistat, ca MOLOZ: fara
+   * niciodata. (Din taietura 5 nici SCARA nu mai e de lemn: e de piatra, ca PODEA.) Valoare noua intr-un `Uint8Array` deja persistat, ca MOLOZ: fara
    * schema noua, fiindca `fill` si decode refuza de acum un material necunoscut.
    */
   GRINDA: 8,
@@ -58,6 +58,20 @@ export type MaterialId = (typeof Material)[keyof typeof Material]
 
 export function isSolid(m: number): boolean {
   return m !== Material.AER && m !== Material.APA
+}
+
+/**
+ * Materialele pe care le produce DOAR zidirea. Restul solidelor (roca, pamant, iarba,
+ * moloz) sunt NATURALE: worldgen-ul sau o prabusire le lasa, niciun pion nu le zideste.
+ *
+ * Doua intrebari stau pe diferenta asta, si de-aia e o multime scrisa explicit, nu
+ * „orice nu e de piesa": sapatul unui voxel zidit e DECONSTRUCTIE (se face cu atingerea
+ * zidirii), iar accesul vertical numara celulele cu podea naturala ca sa deosebeasca
+ * „afara" de un acoperis mare fara scara. O piesa dintr-un material natural ar face un
+ * zid sa arate ca teren — `parseRules` o refuza.
+ */
+export function esteMaterialDeStructura(m: number): boolean {
+  return m === Material.PIATRA_CONSTRUITA || m === Material.GRINDA || m === Material.LEMN_CONSTRUIT
 }
 
 /**

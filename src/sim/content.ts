@@ -13,7 +13,7 @@
 import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import { REGION_SIZE } from './regions.ts'
-import { isSolid, Material } from './terrain/chunk.ts'
+import { esteMaterialDeStructura, isSolid, Material } from './terrain/chunk.ts'
 import type { MaterialId } from './terrain/chunk.ts'
 import { Gand, GAND_PENTRU_NEVOIE, GANDURI, Item, ITEME, Nevoie, NEVOI, Piesa } from './state.ts'
 
@@ -165,7 +165,7 @@ export interface Rules {
   /**
    * Sub cat nu merita un drum pentru O PARTE dintr-o piesa. Un morman intra in
    * calcul daca are cel putin atat, sau cel putin cat mai lipseste; taiat la
-   * cantitatea piesei (SCARA cere 5 — pragul ei e 5, nu 10). Rolul constantei e
+   * cantitatea piesei (o piesa de 5 are pragul 5, nu 10). Rolul constantei e
    * sa margineasca numarul de cautari O(mormane) per job: cel mult
    * `cantitate / prag` ridicari. Fara ea, un perete s-ar aduna din 20 de mormane
    * de cate 1, cu 20 de drumuri si 20 de cautari.
@@ -250,6 +250,31 @@ export interface Rules {
    * cu blueprints. Sta aici ca sa nu se schimbe conventia cand se adauga.
    */
   readonly suportRazaGrinda: number
+
+  // --- accesul vertical (S20-23, taietura 5) ---
+  /**
+   * Cat de SUS zideste un pion fata de celula pe care sta: la `atingereSusM = 2` si un
+   * cap de 2 m, pana la celula de deasupra capului. Doar la zidire si la deconstructia a
+   * ce s-a zidit; sapatul in roca ramane la `± maxStepM`. Masurat pe HEAD inainte: cu
+   * atingerea de pas (±1), pe sol plat nu se zidea nimic peste g+2 — nici randul 3 al
+   * unui zid, nici tavanul unei camere (30 din 55 de piese). Cu 2: tavanul se pune de pe
+   * podeaua de dedesubt, iar etajul urmator cere o scara.
+   */
+  readonly atingereSusM: number
+  /**
+   * O componenta de celule pe care se poate sta e „DESCHISA" (duce undeva) daca are cel
+   * putin atatea celule cu podea NATURALA — altfel e o punga: o camera fara usa, o creasta
+   * de zid, un acoperis fara scara. 2048 ≈ o curte de 45×45: sub ea, orice incinta e
+   * punga. Costul unei intrebari e un flood de cel mult atatea celule (~1,5 ms, masurat
+   * de panou cu citire pe coloana), deci plafonul e al costului, nu doar al jocului.
+   */
+  readonly accesPlafonNatural: number
+  /**
+   * ... sau daca are PESTE atatea celule in total, indiferent de podea. Opreste flood-ul
+   * pe un acoperis urias fara nicio celula naturala. Peste el, un acoperis fara scara
+   * conteaza ca „afara" — limita e scrisa si testata la granita.
+   */
+  readonly accesPlafonTotal: number
 
   // --- dispozitia (S16-19, taietura 3) ---
   //
@@ -355,6 +380,11 @@ const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield' | 'piese' | 'nevoi' | '
   // ~R³. Masurat dupa recenzie (26.09), o placa peste un stalp cu 4 grinzi, sapata o grinda:
   // R=10 9 ms, 12 10 ms, 14 18 ms, 16 30 ms, 20 65 ms, 31 420 ms (tickul are 50 ms).
   suportRazaGrinda: { min: 1, max: 16 },
+  atingereSusM: { min: 1, max: 8 },
+  // Plafoanele sunt ale COSTULUI: o intrebare de acces e un flood de cel mult atatea celule.
+  // Masurat de panoul v2 cu citire pe coloana: 2048 naturale ~1,5 ms, 8192 total 5–14 ms.
+  accesPlafonNatural: { min: 1, max: 16384 },
+  accesPlafonTotal: { min: 1, max: 16384 },
   dispozitieMax: { min: 1, max: 1000000 },
   dispozitieBaza: { min: 0, max: 1000000 },
   dispozitieTicks: { min: 1, max: 1000000 },
@@ -442,6 +472,12 @@ function parsePiese(raw: unknown): Outcome<SpecPiesa[]> {
     }
     if (!isSolid(mat[1])) {
       return refuse(Reason.VALOARE_INVALIDA, { camp: `piese.${nume}.material`, valoare: mat[0], motiv: 'o piesa nu poate fi facuta din aer sau apa' })
+    }
+    // O piesa dintr-un material NATURAL ar face un zid sa arate ca teren: accesul vertical
+    // numara podeaua naturala ca sa deosebeasca „afara" de un acoperis fara scara, iar
+    // sapatul lui ar fi sapat in roca, nu deconstructie (alta atingere).
+    if (!esteMaterialDeStructura(mat[1])) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `piese.${nume}.material`, valoare: mat[0], motiv: 'o piesa trebuie sa fie dintr-un material de structura (PIATRA_CONSTRUITA, GRINDA, LEMN_CONSTRUIT)' })
     }
     const c = e.cantitate
     if (typeof c !== 'number' || !Number.isInteger(c) || c < 1 || c > MAX_YIELD) {
@@ -813,6 +849,17 @@ export function parseRules(raw: unknown): Outcome<Rules> {
   if (r.suportRazaGrinda < r.suportMax) {
     return refuse(Reason.VALOARE_INVALIDA, { camp: 'suportRazaGrinda', valoare: r.suportRazaGrinda, min: r.suportMax, motiv: 'o grinda nu poate sprijini mai putin decat sprijina solul' })
   }
+  // Atingerea la zidire: cel putin cat urca un pas (altfel zidirea ar ajunge mai jos decat
+  // mersul, adica un zid pe care pionul poate urca, dar nu-l poate continua), si cel mult
+  // pana deasupra capului — mai sus ar zidi prin tavanul pe care sta sub el.
+  if (r.atingereSusM < r.maxStepM || r.atingereSusM > r.agentHeadroomM) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'atingereSusM', valoare: r.atingereSusM, min: r.maxStepM, max: r.agentHeadroomM, motiv: 'un pion zideste cel putin cat urca un pas si cel mult pana deasupra capului' })
+  }
+  // Pragul natural e o dovada ca flood-ul a ajuns „afara"; cel total, plafonul lui. Invers,
+  // o componenta ar fi declarata deschisa prin marime inainte sa se poata numara podeaua.
+  if (r.accesPlafonNatural > r.accesPlafonTotal) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'accesPlafonNatural', valoare: r.accesPlafonNatural, max: r.accesPlafonTotal, motiv: 'pragul natural nu poate trece de plafonul total' })
+  }
   // O portie trebuie sa incapa intr-un morman, altfel n-ar lega niciodata —
   // acelasi argument ca la `haulCarryMax`.
   if (r.portieMancare > r.itemStackMax) {
@@ -1010,7 +1057,10 @@ export const DEFAULT_RULES: Rules = {
     { material: Material.AER, cantitate: 0, lucru: 0 },
     { material: Material.PIATRA_CONSTRUITA, cantitate: 20, lucru: 400 },
     { material: Material.PIATRA_CONSTRUITA, cantitate: 20, lucru: 300 },
-    { material: Material.LEMN_CONSTRUIT, cantitate: 5, lucru: 250 },
+    // SCARA e o treapta de piatra, identica cu PODEA (panoul accesului vertical: o
+    // treapta mai ieftina ar fi fost un zid mai ieftin — o casa numai din „scari" costa
+    // jumatate). Scara de LEMN vine cu lemnul.
+    { material: Material.PIATRA_CONSTRUITA, cantitate: 20, lucru: 300 },
     { material: Material.GRINDA, cantitate: 20, lucru: 500 },
   ],
   // Nevoile. La 20 Hz: FOAME scade 6 la 250 de tickuri, deci 1000/6 × 250 =
@@ -1035,6 +1085,9 @@ export const DEFAULT_RULES: Rules = {
   // care sta singura e 6×6.
   suportMax: 4,
   suportRazaGrinda: 10,
+  atingereSusM: 2,
+  accesPlafonNatural: 2048,
+  accesPlafonTotal: 8192,
   // Indexat cu `Nevoie`: FOAME, ODIHNA.
   nevoi: [
     { scurgere: 6, prag: 400, pragCritic: 150 },
