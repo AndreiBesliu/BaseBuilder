@@ -12,7 +12,9 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { componenta, memorieAcces, nodW } from '../src/sim/acces.ts'
+import { CauzaAcces, componenta, memorieAcces, nodW, predicatAcces } from '../src/sim/acces.ts'
+import { constructiaPosibila } from '../src/sim/stabilitate.ts'
+import { cellKey } from '../src/sim/path.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { DetaliuMotiv, slotDesemnare } from '../src/sim/desemnari.ts'
 import { cellOf } from '../src/sim/drumuri.ts'
@@ -26,7 +28,7 @@ import { stergeItem } from '../src/sim/iteme.ts'
 import { Zona } from '../src/sim/zone.ts'
 import { advance } from '../src/sim/world.ts'
 import { lasaItem, panaCand, R, ruleaza, sitPlat } from './fixturi.ts'
-import { unitatiDeMunca } from '../src/sim/joburi.ts'
+import { constructiaPrevizualizata, unitatiDeMunca } from '../src/sim/joburi.ts'
 
 type Piesa_ = readonly [number, number, number, PiesaId]
 
@@ -505,4 +507,99 @@ test('SIGILAREA: un morman sau o celula de depozit inauntru opresc ultima piesa,
     assert.ok(refuzat, `${ce}: piesa ramasa n-a spus AR_INCHIDE`)
     assert.deepEqual(blocati(w), [])
   }
+})
+
+// ---------------------------------------------------------------------------
+// previzualizarea: acelasi predicat ca scanerul, simulat pana la punct fix
+// ---------------------------------------------------------------------------
+
+/** Cheile celulelor planului, in ordinea `plan`. */
+function chei(x0: number, y0: number, plan: readonly Piesa_[]): number[] {
+  return plan.map(([dx, dy, z]) => cellKey(x0 + dx, y0 + dy, z))
+}
+
+test('PREVIZUALIZAREA: fara scara, fara acces e EXACT etajul si acoperisul, din cauza INALTIMII — si exact asta nu zidesc pionii', () => {
+  const { w, x0, y0, g, ids, plan } = santier(12345, casaCuEtaj(false))
+  const p = constructiaPrevizualizata(w, R)
+  const toate = chei(x0, y0, plan)
+  const deSus = new Set(toate.filter((_, i) => plan[i]![2] >= g + 4))
+  assert.equal(p.imposibile.length, 0)
+  assert.deepEqual([...p.faraAcces].sort((a, b) => a - b), [...deSus].sort((a, b) => a - b))
+  assert.ok(p.cauze.every((c) => c === CauzaAcces.INALTIME), 'cauza trebuia sa fie INALTIMEA: placa fara scara, fara podea naturala')
+  assert.equal(p.construibile.length, toate.length - deSus.size)
+  // Promisiunea == ce fac pionii: tot ce e construibil se zideste, nimic din faraAcces.
+  const promis = new Set(p.construibile)
+  panaCand(w, 60000, () => ramase(w, ids).every((id, i) => !promis.has(toate[ids.indexOf(id)]!) || i < 0))
+  ruleaza(w, 2000)
+  const ram = new Set(ramase(w, ids))
+  for (let i = 0; i < ids.length; i++) {
+    assert.equal(ram.has(ids[i]!), !promis.has(toate[i]!), `piesa la dz=${plan[i]![2] - g}: promisa ${promis.has(toate[i]!)}, ramasa ${ram.has(ids[i]!)}`)
+  }
+})
+
+test('PREVIZUALIZAREA: cu scara, casa cu doua etaje e construibila in intregime', () => {
+  const { w } = santier(12345, casaCuEtaj(true))
+  const p = constructiaPrevizualizata(w, R)
+  assert.equal(p.faraAcces.length, 0, `fara acces: ${p.faraAcces.length}`)
+  assert.equal(p.imposibile.length, 0)
+  assert.equal(p.construibile.length, 193)
+})
+
+test('PREVIZUALIZAREA: o piesa din interiorul unei camere fara usa e fara acces din cauza INCINTEI', () => {
+  const { w, x0, y0, g } = santier(12345, (gg) => {
+    const o: Piesa_[] = []
+    pereti(o, 0, 0, 5, gg + 1, gg + 2)
+    o.push([2, 2, gg + 1, Piesa.PODEA])
+    return o
+  })
+  const p = constructiaPrevizualizata(w, R)
+  const k = cellKey(x0 + 2, y0 + 2, g + 1)
+  const i = p.faraAcces.indexOf(k)
+  assert.notEqual(i, -1, 'piesa din camera inchisa trebuia sa fie fara acces')
+  assert.equal(p.cauze[i], CauzaAcces.INCINTA)
+  assert.equal(p.faraAcces.length, 1, 'peretii se zidesc de afara')
+})
+
+test('PREVIZUALIZAREA promite si salvarea din groapa (privirea inainte, acelasi predicat ca scanerul)', () => {
+  const { w, wx, wy, g } = sitPlat(12345, 18)
+  const x0 = wx + 6, y0 = wy + 6
+  for (const z of [g, g - 1]) for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) sapaCmd(w, x0 + dx, y0 + dy, z)
+  curataMormane(w, x0 - 1, y0 - 1, x0 + 3, y0 + 3)
+  pion(w, x0 + 1, y0 + 1, g - 1)
+  assert.ok(applyCommand(w, { kind: 'desemneaza', wx: x0 + 1, wy: y0 + 2, z: g - 1, piesa: Piesa.SCARA }, R).ok)
+  const p = constructiaPrevizualizata(w, R)
+  assert.deepEqual(p.faraAcces, [], 'treapta de iesire din groapa trebuia promisa')
+  assert.equal(p.construibile.length, 1)
+})
+
+test('PREVIZUALIZAREA numara ce ar INCHIDE planul — pioni, mormane, zone — dar nu si ce era deja inchis', () => {
+  // Camera fara usa peste un pion, un morman si o zona de dormit.
+  const { w, x0, y0, g } = santier(12345, (gg) => { const o: Piesa_[] = []; pereti(o, 0, 0, 5, gg + 1, gg + 2); return o }, 0)
+  pion(w, x0 + 1, y0 + 1, g + 1)
+  lasaItem(w, Item.HRANA, 20, x0 + 2, y0 + 2)
+  assert.ok(applyCommand(w, { kind: 'picteazaZona', x0: x0 + 3, y0: y0 + 3, x1: x0 + 3, y1: y0 + 3, z: g + 1, fel: Zona.DORMIT }, R).ok)
+  // Si o groapa departe, cu un pion deja prins: nu e vina planului.
+  for (const z of [g, g - 1]) for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) sapaCmd(w, x0 + 10 + dx, y0 + dy, z)
+  curataMormane(w, x0 + 9, y0 - 1, x0 + 13, y0 + 3)
+  pion(w, x0 + 11, y0 + 1, g - 1)
+  const p = constructiaPrevizualizata(w, R)
+  assert.deepEqual(p.inchise, { pioni: 1, mormane: 1, zone: 1 })
+})
+
+test('INCHIDEREA SIMULATA nu depinde de ordinea planului', () => {
+  const { w, x0, y0, plan } = santier(777, casaCuEtaj(true))
+  const toate = chei(x0, y0, plan)
+  const planSet = new Set(toate)
+  const refer = constructiaPosibila(w.terrain, R, toate, [], predicatAcces(w.terrain, R, planSet)).construibile
+  let s = 777
+  for (let k = 0; k < 4; k++) {
+    const amestec = toate.slice()
+    for (let i = amestec.length - 1; i > 0; i--) {
+      s = (s * 1103515245 + 12345) >>> 0
+      const j = s % (i + 1)
+      const tmp = amestec[i]!; amestec[i] = amestec[j]!; amestec[j] = tmp
+    }
+    assert.deepEqual(constructiaPosibila(w.terrain, R, amestec, [], predicatAcces(w.terrain, R, planSet)).construibile, refer)
+  }
+  assert.equal(refer.length, 193)
 })

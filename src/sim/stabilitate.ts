@@ -776,12 +776,18 @@ function suportNouPanaLa(t: Terrain, rules: Rules, wx: number, wy: number, z: nu
  *
  * Costul, masurat: 0,22 ms la 177 de piese, 3,97 ms la 2043. Se cheama la
  * mouse-up, nu la mouse-move.
+ *
+ * `acces`, daca e dat, e a doua conditie a unei runde: piesa se zideste virtual doar daca
+ * are si un loc de lucru SIGUR in lumea de pana atunci (previzualizarea accesului vertical,
+ * `accesulPlanului`). Ramane monoton — siguranta doar creste cu ce se zideste din plan —,
+ * deci punctul fix ramane unic.
  */
 export function constructiaPosibila(
   t: Terrain,
   rules: Rules,
   celule: readonly number[],
   grinzi: readonly number[] = [],
+  acces: ((cheie: number, zidite: ReadonlySet<number>) => boolean) | null = null,
 ): { construibile: number[]; imposibile: number[] } {
   const zidite = new Set<number>()
   // Grinzile PLANIFICATE ale multimii, ca index spatial — acelasi tip si aceeasi
@@ -846,6 +852,7 @@ export function constructiaPosibila(
     for (const cheie of [...ramase]) {
       const c = decodeCell(cheie)
       if (suportNouPanaLa(t, rules, c.wx, c.wy, c.z, ip, 1) === 0) continue
+      if (acces !== null && !acces(cheie, zidite)) continue
       zidite.add(cheie)
       invalideaza(cheie)
       ramase.delete(cheie)

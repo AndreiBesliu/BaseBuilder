@@ -457,10 +457,16 @@ test('ACCEPTANTA: casa de 177 de piese se DESENEAZA intreaga, si previzualizarea
   assert.equal(acceptate, 177, `desenarea trebuia sa accepte TOT planul; refuzuri: ${[...new Set(refuzuri)].join(',')}`)
 
   const previz = constructiaPrevizualizata(w, R)
-  assert.equal(previz.construibile.length, 176)
+  // Taietura 5: „176 construibile" era adevarat doar pentru SPRIJIN. Pionii zideau randurile 1–2
+  // si nimic peste g+2 (masurat pe HEAD: zidul de 4, 6 din 12; tavanul, 0). Acum raspunsul e al
+  // accesului: randurile 1–3 de pe sol (atingerea +2), iar acoperisul de la g+4 — la 3 m, fara
+  // scara — fara acces, din cauza INALTIMII. Imposibila ramane una: centrul, la 4 pasi de zid.
   assert.equal(previz.imposibile.length, 1)
   const c = decodeCell(previz.imposibile[0]!)
   assert.deepEqual({ dx: c.wx - wx, dy: c.wy - wy, dz: c.z - g }, { dx: 4, dy: 4, dz: 4 })
+  assert.equal(previz.construibile.length, 96, 'trei randuri de 32')
+  assert.equal(previz.faraAcces.length, 80, 'acoperisul, fara centru')
+  assert.ok(previz.faraAcces.every((k) => decodeCell(k).z === g + 4))
 })
 
 test('la DESENARE nu se verifica sprijinul, si asta e deliberat', () => {

@@ -598,3 +598,126 @@ export function componenteInchiseDe(t: Terrain, rules: Rules, px: number, py: nu
   }
   return out
 }
+
+// ---------------------------------------------------------------------------
+// previzualizarea
+// ---------------------------------------------------------------------------
+
+/** De ce n-are acces o piesa, in lumea de la capatul planului. */
+export const CauzaAcces = {
+  /** Nimic pe care sa stai la indemana — sau doar pungi fara podea naturala (un acoperis, o placa fara scara). Pune o scara. */
+  INALTIME: 1,
+  /** Locurile de lucru sunt intr-o incinta cu podea naturala, fara iesire. Lasa o usa. */
+  INCINTA: 2,
+} as const
+export type CauzaAccesId = (typeof CauzaAcces)[keyof typeof CauzaAcces]
+
+/**
+ * Predicatul de acces al inchiderii simulate: are piesa `cheie` un loc de lucru SIGUR in
+ * lumea W ∪ Z (Z = ce s-a zidit virtual pana acum), cu planul C? Acelasi predicat ca al
+ * scanerului (`locSigurPentru`): stabil si in componenta deschisa, sau deschisa dupa ce piesa
+ * insasi e pusa (privirea inainte).
+ *
+ * Memoria de runda se sprijina pe teorema: cand Z creste, o celula stabila ramane stabila si
+ * una deschisa ramane deschisa — deci „deschis" se tine pentru tot restul inchiderii, iar
+ * „inchis" doar pentru acelasi Z (se reintreaba daca Z a crescut).
+ */
+export function predicatAcces(t: Terrain, rules: Rules, plan: ReadonlySet<number>): (cheie: number, zidite: ReadonlySet<number>) => boolean {
+  const r = cititor(t)
+  const deschise = new Set<number>()
+  const inchise = new Map<number, number>()
+  const c = { x: 0, y: 0, z: 0 }
+  const dec = (k: number): void => {
+    const x = k % WORLD_CELLS
+    const rest = (k - x) / WORLD_CELLS
+    const y = rest % WORLD_CELLS
+    c.x = x; c.y = y; c.z = (rest - y) / WORLD_CELLS - 512
+  }
+  const niveluri = niveluriDeLucru(FelLucru.CONSTRUIESTE, rules)
+  const directii = vecinatate(FelLucru.CONSTRUIESTE)
+  return (cheie, zidite) => {
+    const nod = nodStabil({ t, plan, zidite }, rules, r)
+    dec(cheie)
+    const px = c.x, py = c.y, pz = c.z
+    let dupa: Nod | null = null
+    for (const dzs of niveluri) {
+      const zs = pz + dzs
+      for (const [dx, dy] of directii) {
+        const x = px + dx, y = py + dy
+        if (!nod.calcabila(x, y, zs)) continue
+        const k = cellKey(x, y, zs)
+        if (deschise.has(k)) return true
+        if (inchise.get(k) !== zidite.size) {
+          const comp = componenta(nod, rules, x, y, zs)
+          if (comp.deschisa) {
+            for (const v of comp.celule) deschise.add(v)
+            return true
+          }
+          for (const v of comp.celule) inchise.set(v, zidite.size)
+        }
+        // Privirea inainte: celula e intr-o punga; cu piesa pusa, s-ar deschide?
+        if (dupa === null) {
+          const Zp = new Set(zidite)
+          Zp.add(cheie)
+          dupa = nodStabil({ t, plan, zidite: Zp }, rules, r)
+        }
+        if (dupa.calcabila(x, y, zs) && componenta(dupa, rules, x, y, zs).deschisa) return true
+      }
+    }
+    return false
+  }
+}
+
+/**
+ * Cauza pentru o piesa fara acces, in lumea finala W ∪ Z: INCINTA daca vreun loc de lucru
+ * calcabil sta intr-o punga cu podea naturala (o camera fara usa); altfel INALTIME (nimic la
+ * indemana, sau doar o placa ori un acoperis fara scara). Panoul v2: fara tipul podelei,
+ * cauza iesea gresita pe etajul fara scara (0 din 97 INALTIME).
+ */
+export function cauzaFaraAcces(t: Terrain, rules: Rules, plan: ReadonlySet<number>, zidite: ReadonlySet<number>, cheie: number): CauzaAccesId {
+  const r = cititor(t)
+  const nod = nodStabil({ t, plan, zidite }, rules, r)
+  const x0 = cheie % WORLD_CELLS
+  const rest = (cheie - x0) / WORLD_CELLS
+  const y0 = rest % WORLD_CELLS
+  const z0 = (rest - y0) / WORLD_CELLS - 512
+  for (const dzs of niveluriDeLucru(FelLucru.CONSTRUIESTE, rules)) {
+    for (const [dx, dy] of vecinatate(FelLucru.CONSTRUIESTE)) {
+      const x = x0 + dx, y = y0 + dy, z = z0 + dzs
+      if (!nod.calcabila(x, y, z)) continue
+      const comp = componenta(nod, rules, x, y, z)
+      if (!comp.deschisa && comp.naturale > 0) return CauzaAcces.INCINTA
+    }
+  }
+  return CauzaAcces.INALTIME
+}
+
+/**
+ * Ce ar INCHIDE planul, dus pana unde se poate (W ∪ Z): celulele date (pioni, mormane,
+ * zone de acum) care sunt intr-o componenta deschisa azi si inchisa la capat. Avertisment,
+ * nu refuz — regula de sigilare va opri ultima piesa cat timp ceva e inauntru.
+ */
+export function inchiseDePlan(t: Terrain, rules: Rules, zidite: ReadonlySet<number>, celule: readonly number[]): number[] {
+  const r = cititor(t)
+  const acum = nodW(t, null, rules, r)
+  const dupa = nodW(t, zidite, rules, r)
+  const deschiseDupa = new Set<number>()
+  const inchiseDupa = new Set<number>()
+  const out: number[] = []
+  const c = { x: 0, y: 0, z: 0 }
+  for (const k of celule) {
+    const x = k % WORLD_CELLS
+    const rest = (k - x) / WORLD_CELLS
+    const y = rest % WORLD_CELLS
+    c.x = x; c.y = y; c.z = (rest - y) / WORLD_CELLS - 512
+    if (!dupa.calcabila(c.x, c.y, c.z) || deschiseDupa.has(k)) continue
+    if (!inchiseDupa.has(k)) {
+      const comp = componenta(dupa, rules, c.x, c.y, c.z)
+      for (const v of comp.celule) (comp.deschisa ? deschiseDupa : inchiseDupa).add(v)
+      if (comp.deschisa) continue
+    }
+    // Inchisa la capat. Era deschisa acum? Altfel nu e vina planului.
+    if (acum.calcabila(c.x, c.y, c.z) && componenta(acum, rules, c.x, c.y, c.z).deschisa) out.push(k)
+  }
+  return out
+}

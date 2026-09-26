@@ -299,4 +299,40 @@ export const MUTATII = [
     b: '  return DIR4',
     t: 'tests/acces-joc.test.ts', e: 'ACCEPTANTA: casa cu doua etaje si scara interioara se ridica INTEGRAL',
   },
+  // --- pasul 6: previzualizarea ---
+  {
+    n: 'inchiderea previzualizarii ignora accesul (promite ce pionii nu zidesc)',
+    f: 'src/sim/stabilitate.ts',
+    a: '      if (acces !== null && !acces(cheie, zidite)) continue',
+    b: '      void acces',
+    t: 'tests/acces-joc.test.ts', e: 'PREVIZUALIZAREA: fara scara',
+  },
+  {
+    n: 'previzualizarea fara privirea inainte (salvarea din groapa nu e promisa)',
+    f: 'src/sim/acces.ts',
+    a: '        if (dupa.calcabila(x, y, zs) && componenta(dupa, rules, x, y, zs).deschisa) return true',
+    b: '        if (dupa.calcabila(x, y, zs) && false) return true',
+    t: 'tests/acces-joc.test.ts', e: 'PREVIZUALIZAREA promite si salvarea',
+  },
+  {
+    n: 'memoria de runda tine „inchis" si dupa ce Z a crescut',
+    f: 'src/sim/acces.ts',
+    a: '        if (inchise.get(k) !== zidite.size) {',
+    b: '        if (!inchise.has(k)) {',
+    t: 'tests/acces-joc.test.ts', e: 'PREVIZUALIZAREA: cu scara',
+  },
+  {
+    n: 'cauza nu se uita la podeaua pungii (placa fara scara iese INCINTA)',
+    f: 'src/sim/acces.ts',
+    a: '      if (!comp.deschisa && comp.naturale > 0) return CauzaAcces.INCINTA',
+    b: '      if (!comp.deschisa && comp.naturale >= 0) return CauzaAcces.INCINTA',
+    t: 'tests/acces-joc.test.ts', e: 'PREVIZUALIZAREA: fara scara',
+  },
+  {
+    n: 'pungile planului numara si ce era DEJA inchis',
+    f: 'src/sim/acces.ts',
+    a: '    if (acum.calcabila(c.x, c.y, c.z) && componenta(acum, rules, c.x, c.y, c.z).deschisa) out.push(k)',
+    b: '    out.push(k)',
+    t: 'tests/acces-joc.test.ts', e: 'PREVIZUALIZAREA numara ce ar INCHIDE',
+  },
 ]

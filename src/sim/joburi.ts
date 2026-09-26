@@ -97,8 +97,9 @@ import type { Terrain } from './terrain/terrain.ts'
 import { dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
 import { Material } from './terrain/chunk.ts'
 import type { MaterialId } from './terrain/chunk.ts'
-import { componenteInchiseDe, FelLucru, felDesemnare, felSapa, niveluriDeLucru, siguraDupaZidire, siguraMemorat, vecinatate } from './acces.ts'
-import type { FelLucruId } from './acces.ts'
+import { cauzaFaraAcces, componenteInchiseDe, FelLucru, felDesemnare, felSapa, inchiseDePlan, predicatAcces, siguraDupaZidire, siguraMemorat } from './acces.ts'
+import type { CauzaAccesId, FelLucruId } from './acces.ts'
+import { niveluriDeLucru, vecinatate } from './acces.ts'
 import { cadeDaca, constructiaPosibila, cotaDeAsezare, multimeaCareCade, poateSustine, Sol, solLa, sustinutAcumMemorat } from './stabilitate.ts'
 import { cellKey, decodeCell, decodeCellIn } from './path.ts'
 import { Desemnare, desemnareLaCelula, DetaliuMotiv, seSapaLa, slotDesemnare, stergeDesemnare } from './desemnari.ts'
@@ -2934,7 +2935,27 @@ export function sapaVoxel(w: World, wx: number, wy: number, z: number, rules: Ru
  * 0 — blueprintul e aer pana se construieste — deci un refuz per celula ar
  * respinge 82% dintr-o casa pe care se poate ridica.
  */
-export function constructiaPrevizualizata(w: World, rules: Rules): { construibile: number[]; imposibile: number[] } {
+/**
+ * Ce se poate construi din tot ce e desenat, si ce nu — pe ACELASI predicat ca scanerul.
+ *
+ *   - `imposibile`: n-ar sta in picioare nici daca s-ar zidi tot restul (inchiderea de sprijin);
+ *   - `faraAcces`: ar sta, dar niciun pion n-ar ajunge sa le zideasca — inchiderea SIMULATA,
+ *     runde in care se zideste virtual tot ce e sustinut ACUM si are un loc de lucru sigur,
+ *     pana la punct fix. Panoul v2: o singura trecere pe planul final promitea 18 piese pe
+ *     corpus (51 pe cazurile-limita) pe care pionii nu le zideau niciodata; simularea, 0;
+ *   - `construibile`: restul, adica exact ce vor zidi pionii;
+ *   - `cauze` (paralel cu `faraAcces`): INALTIME sau INCINTA;
+ *   - `inchise`: pioni, mormane si celule de zona pe care planul le-ar inchide.
+ *
+ * Costul: doua inchideri si flood-urile lor. Bugetul de click e in DEVLOG.
+ */
+export function constructiaPrevizualizata(w: World, rules: Rules): {
+  construibile: number[]
+  imposibile: number[]
+  faraAcces: number[]
+  cauze: CauzaAccesId[]
+  inchise: { pioni: number; mormane: number; zone: number }
+} {
   const d = w.desemnari
   const celule: number[] = []
   // Grinzile PLANIFICATE: fara ele inchiderea promite mai putin decat se poate construi
@@ -2949,8 +2970,34 @@ export function constructiaPrevizualizata(w: World, rules: Rules): { construibil
     // tine (recenzia, CONT-2: previzualizarea promitea 12 celule, pionii zideau 3).
     if (rules.piese[d.piesa[i]!]!.material === Material.GRINDA) grinzi.push(k)
   }
-  if (celule.length === 0) return { construibile: [], imposibile: [] }
-  return constructiaPosibila(w.terrain, rules, celule, grinzi)
+  const gol = { pioni: 0, mormane: 0, zone: 0 }
+  if (celule.length === 0) return { construibile: [], imposibile: [], faraAcces: [], cauze: [], inchise: gol }
+  const sprijin = constructiaPosibila(w.terrain, rules, celule, grinzi)
+  const plan = new Set(celule)
+  const cuAcces = constructiaPosibila(w.terrain, rules, celule, grinzi, predicatAcces(w.terrain, rules, plan))
+  const zidite = new Set(cuAcces.construibile)
+  const faraAcces = sprijin.construibile.filter((k) => !zidite.has(k))
+  const cauze = faraAcces.map((k) => cauzaFaraAcces(w.terrain, rules, plan, zidite, k))
+  // Ce ar inchide planul dus pana la capat: pionii, mormanele si celulele de zona de ACUM.
+  const a = w.agents
+  const pioni: number[] = []
+  for (let i = 0; i < a.count; i++) if (a.alive[i] === 1) pioni.push(cellKey(cellOf(a.x[i]!), cellOf(a.y[i]!), a.z[i]!))
+  const mormane: number[] = []
+  for (let i = 0; i < w.iteme.count; i++) if (w.iteme.alive[i] === 1) mormane.push(cellKey(w.iteme.wx[i]!, w.iteme.wy[i]!, w.iteme.z[i]!))
+  const zone: number[] = []
+  const zc = w.zone.celule
+  for (let i = 0; i < zc.count; i++) if (zc.alive[i] === 1) zone.push(cellKey(zc.wx[i]!, zc.wy[i]!, zc.z[i]!))
+  return {
+    construibile: cuAcces.construibile,
+    imposibile: sprijin.imposibile,
+    faraAcces,
+    cauze,
+    inchise: {
+      pioni: inchiseDePlan(w.terrain, rules, zidite, pioni).length,
+      mormane: inchiseDePlan(w.terrain, rules, zidite, mormane).length,
+      zone: inchiseDePlan(w.terrain, rules, zidite, zone).length,
+    },
+  }
 }
 
 export function prabusireaPrevizualizata(w: World, rules: Rules): number[] {
