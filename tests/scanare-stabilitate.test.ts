@@ -9,7 +9,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { applyCommand } from '../src/sim/commands.ts'
 import { Prefiltru, prefiltruStabilitate, Sol, solLa, StareSapat, stareSapat } from '../src/sim/stabilitate.ts'
-import { aceeasiScanare, avanseazaScanare, pornesteScanare } from '../viewer/scanare-stabilitate.ts'
+import { aceeasiScanare, avanseazaScanare, ceFacCuTrecerea, pornesteScanare, Trecere } from '../viewer/scanare-stabilitate.ts'
 import type { Scanare } from '../viewer/scanare-stabilitate.ts'
 import type { World } from '../src/sim/state.ts'
 import { laSit, R, solid } from './fixturi.ts'
@@ -85,6 +85,36 @@ test('bugetul se respecta: un apel judeca cel mult cat incape, si macar o celula
     if (!gata) assert.ok(acum >= 1, 'un apel neterminat n-a judecat nimic')
   }
   assert.ok(s.felii > 1, 'fixtura: trecerea a incaput intr-un singur apel, bugetul n-a fost pus la proba')
+})
+
+test('cererea periodica nu reporneste trecerea din curs, iar una TERMINATA nu se reporneste fara editari de teren', () => {
+  // Bucla viewer-ului, fara THREE: la fiecare 30 de cadre, cererea; la fiecare cadru, o felie de
+  // o celula. Recenzia (26.09): garda „din curs" statea in overlay fara niciun test — scoasa,
+  // langa grinzi trecerea nu se mai termina; iar una terminata se relua la 30 de cadre si
+  // platea iar celula cea mai scumpa, cu terenul neatins.
+  const { w, cx, cy, zA } = pivnita()
+  let inCurs: Scanare | null = null
+  let ultima: Scanare | null = null
+  let t = 0
+  let porniri = 0
+  for (let cadru = 0; cadru < 20000 && ultima === null; cadru++) {
+    if (cadru % 30 === 0) {
+      const d = ceFacCuTrecerea(inCurs, ultima, w.terrain, zA, cx, cy, 12)
+      if (d === Trecere.PORNESTE || d === Trecere.UITA_SI_PORNESTE) { inCurs = pornesteScanare(w, R, zA, cx, cy, 12); porniri++ }
+    }
+    if (inCurs !== null && avanseazaScanare(inCurs, w, R, () => t++, 1)) { ultima = inCurs; inCurs = null }
+  }
+  assert.ok(ultima !== null, 'trecerea n-a ajuns la capat: cererea periodica o reporneste')
+  assert.equal(porniri, 1, 'fixtura: o singura trecere pentru o singura intrebare')
+  assert.ok(ultima!.felii > 30, 'fixtura: trecerea trebuia sa treaca prin mai multe cereri periodice')
+  assert.equal(ceFacCuTrecerea(null, ultima, w.terrain, zA, cx, cy, 12), Trecere.GATA, 'terminata, pe acelasi teren: nimic de refacut')
+  assert.equal(ceFacCuTrecerea(null, ultima, w.terrain, zA + 1, cx, cy, 12), Trecere.UITA_SI_PORNESTE, 'alt nivel: alta intrebare')
+  const alta = pivnita()
+  assert.equal(ceFacCuTrecerea(null, ultima, alta.w.terrain, zA, cx, cy, 12), Trecere.PORNESTE, 'alt teren (alta lume, aceeasi epoca): trecerea veche nu raspunde')
+  // O editare de teren, oriunde: trecerea se reface.
+  const g = solid(w, cx + 20, cy + 20)
+  assert.ok(g !== null && applyCommand(w, { kind: 'dig', wx: cx + 20, wy: cy + 20, z: g }, R).ok, 'fixtura: o sapatura departe')
+  assert.equal(ceFacCuTrecerea(null, ultima, w.terrain, zA, cx, cy, 12), Trecere.PORNESTE, 'dupa o editare de teren trecerea terminata e veche')
 })
 
 test('trecerea din curs nu se reporneste pentru aceleasi intrebari, si se reporneste pentru altele', () => {

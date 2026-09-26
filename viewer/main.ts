@@ -1157,8 +1157,9 @@ function stepFrame(ts: number): void {
       }
     }
     if (jobOverlay.visible && frameIndex % 6 === 0) rebuildJobOverlay(jobOverlay, world)
-    // Mult mai rar decat overlay-ul de joburi: o celula care ajunge la scanarea
-    // scumpa costa ~19 µs, iar prefiltrul o plateste doar langa goluri.
+    // Mult mai rar decat overlay-ul de joburi. Cererea nu reporneste trecerea din curs,
+    // nici una terminata pe acelasi teren (vezi `ceFacCuTrecerea`): o celula ajunsa la
+    // scanarea scumpa costa zeci de µs departe de grinzi, dar 4–20 ms langa ele.
     if (stabOverlay.visible && frameIndex % 30 === 0) refaStabilitate()
     // Overlay-ul de regiuni (G) se reimprospateaza cand graful s-a schimbat —
     // sapaturile pionilor si acoperirea desemnarilor il schimba fara niciun click.
@@ -1229,7 +1230,7 @@ function stepFrame(ts: number): void {
         ? ''
         : stabOverlay.piedica !== ''
           ? ` · ${stabOverlay.piedica}`
-          : ` · ultima-celula ${stabOverlay.ultima} cade ${stabOverlay.cade}` +
+          : (stabOverlay.ultimaScanare === null ? ' · ultima-celula ? cade ?' : ` · ultima-celula ${stabOverlay.ultima} cade ${stabOverlay.cade}`) +
             (stabOverlay.previzualizate > 0 ? ` · desemnarile ar prabusi ${stabOverlay.previzualizate}` : '') +
             (stabOverlay.imposibile > 0 ? ` · ${stabOverlay.imposibile} piese NU se pot zidi` : '') +
             (progresStabilitate(stabOverlay) !== null ? ` · scanare ${Math.floor(100 * progresStabilitate(stabOverlay)!)}%` : '')

@@ -51,7 +51,7 @@ import type { Rules } from '../src/sim/content.ts'
 import { decodeCell } from '../src/sim/path.ts'
 import { StareSapat } from '../src/sim/stabilitate.ts'
 import { constructiaPrevizualizata, prabusireaPrevizualizata } from '../src/sim/joburi.ts'
-import { aceeasiScanare, avanseazaScanare, pornesteScanare } from './scanare-stabilitate.ts'
+import { avanseazaScanare, ceFacCuTrecerea, pornesteScanare, Trecere } from './scanare-stabilitate.ts'
 import type { Scanare } from './scanare-stabilitate.ts'
 
 export interface StabilityOverlay {
@@ -160,9 +160,14 @@ export function pornesteStabilitate(
     return
   }
   o.piedica = ''
-  if (o.scanare !== null && aceeasiScanare(o.scanare, zActiv, cx, cy, raza)) return
-  if (o.ultimaScanare !== null && !aceeasiScanare(o.ultimaScanare, zActiv, cx, cy, raza)) uita(o)
+  const d = ceFacCuTrecerea(o.scanare, o.ultimaScanare, w.terrain, zActiv, cx, cy, raza)
+  if (d === Trecere.CONTINUA || d === Trecere.GATA) return
+  if (d === Trecere.UITA_SI_PORNESTE) uita(o)
   o.scanare = pornesteScanare(w, rules, zActiv, cx, cy, raza)
+  // Fara desen vechi pentru intrebarea asta, previzualizarile ieftine (violet si portocaliu)
+  // se deseneaza ACUM, nu la capatul trecerii scumpe (recenzia, V2: ~450 de cadre fara ele
+  // langa grinzi, cu HUD-ul aratand „ultima-celula 0 cade 0").
+  if (o.ultimaScanare === null) redeseneazaStabilitate(o, w, rules)
 }
 
 /** Avanseaza trecerea din curs cu cel mult `bugetMs` de lucru (plus celula din curs); la capat, o deseneaza. */
@@ -182,22 +187,28 @@ export function progresStabilitate(o: StabilityOverlay): number | null {
 /**
  * Deseneaza ultima trecere TERMINATA, plus cele doua previzualizari pe desemnarile de
  * ACUM. Fara `stareSapat`, deci ieftin: se cheama si cand s-au schimbat doar
- * desemnarile — o piesa desenata isi vede pe loc eticheta de „imposibil".
+ * desemnarile — o piesa desenata isi vede pe loc eticheta de „imposibil". Fara o trecere
+ * terminata se deseneaza doar previzualizarile, pentru intrebarea trecerii din curs;
+ * patratele de stare vin la capatul ei.
  */
 export function redeseneazaStabilitate(o: StabilityOverlay, w: World, rules: Rules): void {
   const s = o.ultimaScanare
-  if (!o.visible || s === null) return
+  // Cand exista amandoua, sunt aceeasi intrebare: `pornesteStabilitate` o uita pe cea veche altfel.
+  const q = s ?? o.scanare
+  if (!o.visible || q === null) return
   goleste(o.group)
-  o.sigur = s.sigur
-  o.ultima = s.ultima
-  o.cade = s.cade
-  o.scanate = s.scanate
-  const { zActiv, cx, cy, raza } = s
+  const { zActiv, cx, cy, raza } = q
   const pozitii: number[] = []
   const culori: number[] = []
 
-  for (let i = 0; i < s.marcate.length; i += 3) {
-    patrat(pozitii, culori, s.marcate[i]!, s.marcate[i + 1]!, zActiv + 0.96, INSET_STARE, CULOARE[s.marcate[i + 2]!]!)
+  if (s !== null) {
+    o.sigur = s.sigur
+    o.ultima = s.ultima
+    o.cade = s.cade
+    o.scanate = s.scanate
+    for (let i = 0; i < s.marcate.length; i += 3) {
+      patrat(pozitii, culori, s.marcate[i]!, s.marcate[i + 1]!, zActiv + 0.96, INSET_STARE, CULOARE[s.marcate[i + 2]!]!)
+    }
   }
 
   // --- ce s-ar prabusi daca s-ar sapa tot ce a cerut jucatorul ---

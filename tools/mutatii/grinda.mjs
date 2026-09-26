@@ -401,5 +401,25 @@ export const MUTATII = [
     a: '  grinziInRaza(t.grinzi, x0 + jum, y0 + jum, zA, 2 * jum + rules.suportRazaGrinda, aproape)',
     b: '  grinziInRaza(t.grinzi, x0 + jum, y0 + jum, zA, 2 * jum, aproape)',
     t: 'tests/prefiltru.test.ts', e: 'cautarea grinzilor',
+  },  {
+    n: 'cererea periodica reporneste si trecerea din curs (langa grinzi nu se mai termina niciodata)',
+    f: 'viewer/scanare-stabilitate.ts',
+    a: '  if (inCurs !== null && aceeasiScanare(inCurs, zActiv, cx, cy, raza)) return Trecere.CONTINUA',
+    b: '  void inCurs',
+    t: 'tests/scanare-stabilitate.test.ts', e: 'cererea periodica nu reporneste trecerea din curs',
+  },
+  {
+    n: 'o trecere terminata ramane „gata" si dupa o editare de teren (desen vechi pe teren nou)',
+    f: 'viewer/scanare-stabilitate.ts',
+    a: '&& ultima.teren === teren && ultima.editari === teren.editari) return Trecere.GATA',
+    b: '&& ultima.teren === teren) return Trecere.GATA',
+    t: 'tests/scanare-stabilitate.test.ts', e: 'cererea periodica nu reporneste trecerea din curs',
+  },
+  {
+    n: 'o trecere terminata ramane „gata" pe ALT teren (alta lume, aceeasi epoca)',
+    f: 'viewer/scanare-stabilitate.ts',
+    a: '&& ultima.teren === teren && ultima.editari === teren.editari) return Trecere.GATA',
+    b: '&& ultima.editari === teren.editari) return Trecere.GATA',
+    t: 'tests/scanare-stabilitate.test.ts', e: 'cererea periodica nu reporneste trecerea din curs',
   },
 ]
