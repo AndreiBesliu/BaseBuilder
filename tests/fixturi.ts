@@ -20,6 +20,41 @@ import { cellKey } from '../src/sim/path.ts'
 
 export const R = DEFAULT_RULES
 
+/**
+ * Un petec de sol PLAT de `latura` celule, cautat pe mai multe mii de coloane.
+ *
+ * `patratPlat` din fixturi cauta doar pe cele patru directii dintr-un sit dat, si
+ * la 9x9 nu gaseste nimic pe seedurile astea. Terenul plat nu e un moft de
+ * fixtura aici: pe teren inclinat coloanele vecine au propriul lor sol, deci o
+ * consola s-ar sprijini pe pamant in loc sa atarne — prima versiune a testului
+ * n-a cerut-o si a patra celula a trecut, desi regula spune ca nu are voie.
+ */
+export function sitPlat(seed: number, latura: number): { w: World; wx: number; wy: number; g: number } {
+  const w = createWorld(seed)
+  for (let k = 1; k <= 8000; k++) {
+    const wx = (k * 1237 + seed) % WORLD_CELLS
+    const wy = (k * 7919 + seed * 31) % WORLD_CELLS
+    const g = groundLevelM(w.terrain, wx, wy)
+    if (!g.ok) continue
+    // Si USCAT. `groundLevelM` intoarce cota solului si sub apa, iar acolo celula
+    // de la `g` e APA — care nu e solida, deci nu sustine nimic. Fara verificarea
+    // asta, fixtura alegea un sit la -47 m si primul nivel al stalpului iesea
+    // FARA_SPRIJIN. E aceeasi capcana pe care `pickSites` din scenariu o are deja
+    // scrisa: „sub apa nu se sapa; situl se alege pe uscat".
+    const sus = materialAt(w.terrain, wx, wy, g.value)
+    if (!sus.ok || !isSolid(sus.value)) continue
+    let plat = true
+    for (let dx = -2; dx <= latura + 2 && plat; dx++) {
+      for (let dy = -2; dy <= latura + 2; dy++) {
+        const gg = groundLevelM(w.terrain, wx + dx, wy + dy)
+        if (!gg.ok || gg.value !== g.value) { plat = false; break }
+      }
+    }
+    if (plat) return { w, wx, wy, g: g.value }
+  }
+  assert.fail(`niciun sit plat de ${latura} la seed ${seed}`)
+}
+
 /** Cota solului SOLID la (wx, wy), sau null (apa, in afara lumii). */
 export function solid(w: World, wx: number, wy: number): number | null {
   const g = groundLevelM(w.terrain, wx, wy)

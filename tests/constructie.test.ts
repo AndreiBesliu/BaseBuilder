@@ -33,7 +33,8 @@ import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { CATEGORII, Categorie, FelJob, Piesa } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { applyCommand } from '../src/sim/commands.ts'
-import { anuleazaDesemnare, celulaDeLucru, FelLucru, cerereCarat, comparaCandidati, constructiaPrevizualizata, esteEvitata, evitaTinta, lantAcopera, lastJobReport, pornesteConstruieste, pragRidicare, rezumatMaterial, unitatiDeMunca } from '../src/sim/joburi.ts'
+import { FelLucru } from '../src/sim/acces.ts'
+import { anuleazaDesemnare, celulaDeLucru, cerereCarat, comparaCandidati, constructiaPrevizualizata, esteEvitata, evitaTinta, lantAcopera, lastJobReport, pornesteConstruieste, pragRidicare, rezumatMaterial, unitatiDeMunca } from '../src/sim/joburi.ts'
 import { Nevoie, NEVOI } from '../src/sim/state.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { slotItem } from '../src/sim/iteme.ts'
@@ -47,46 +48,10 @@ import { panaCand } from './fixturi.ts'
 import { PasCara, PasConstruieste } from '../src/sim/state.ts'
 import { asazaItem, itemLaCelula } from '../src/sim/iteme.ts'
 import { lasaItem } from './fixturi.ts'
-import { desemneaza, laSit, lume3000, marfaTotala, patratPlat, R, ruleaza, solid, solidLaDistanta } from './fixturi.ts'
-import { createWorld } from '../src/sim/world.ts'
+import { desemneaza, laSit, lume3000, marfaTotala, patratPlat, R, ruleaza, sitPlat, solid, solidLaDistanta } from './fixturi.ts'
 import { readFileSync } from 'node:fs'
 import { parseRules } from '../src/sim/content.ts'
-import { WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 
-/**
- * Un petec de sol PLAT de `latura` celule, cautat pe mai multe mii de coloane.
- *
- * `patratPlat` din fixturi cauta doar pe cele patru directii dintr-un sit dat, si
- * la 9x9 nu gaseste nimic pe seedurile astea. Terenul plat nu e un moft de
- * fixtura aici: pe teren inclinat coloanele vecine au propriul lor sol, deci o
- * consola s-ar sprijini pe pamant in loc sa atarne — prima versiune a testului
- * n-a cerut-o si a patra celula a trecut, desi regula spune ca nu are voie.
- */
-function sitPlat(seed: number, latura: number): { w: World; wx: number; wy: number; g: number } {
-  const w = createWorld(seed)
-  for (let k = 1; k <= 8000; k++) {
-    const wx = (k * 1237 + seed) % WORLD_CELLS
-    const wy = (k * 7919 + seed * 31) % WORLD_CELLS
-    const g = groundLevelM(w.terrain, wx, wy)
-    if (!g.ok) continue
-    // Si USCAT. `groundLevelM` intoarce cota solului si sub apa, iar acolo celula
-    // de la `g` e APA — care nu e solida, deci nu sustine nimic. Fara verificarea
-    // asta, fixtura alegea un sit la -47 m si primul nivel al stalpului iesea
-    // FARA_SPRIJIN. E aceeasi capcana pe care `pickSites` din scenariu o are deja
-    // scrisa: „sub apa nu se sapa; situl se alege pe uscat".
-    const sus = materialAt(w.terrain, wx, wy, g.value)
-    if (!sus.ok || !isSolid(sus.value)) continue
-    let plat = true
-    for (let dx = -2; dx <= latura + 2 && plat; dx++) {
-      for (let dy = -2; dy <= latura + 2; dy++) {
-        const gg = groundLevelM(w.terrain, wx + dx, wy + dy)
-        if (!gg.ok || gg.value !== g.value) { plat = false; break }
-      }
-    }
-    if (plat) return { w, wx, wy, g: g.value }
-  }
-  assert.fail(`niciun sit plat de ${latura} la seed ${seed}`)
-}
 
 test('o desemnare care NU e de sapat nu e luata niciodata ca job de sapat', () => {
   const { w, sit } = laSit(12345, 4, [0, 0, 0, 0])

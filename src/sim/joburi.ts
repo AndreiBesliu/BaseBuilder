@@ -95,8 +95,10 @@ import { blockOfCell, ensureArea, find, isWalkable, markDirty, NO_REGION, region
 import type { RegionStore } from './regions.ts'
 import type { Terrain } from './terrain/terrain.ts'
 import { dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
-import { esteMaterialDeStructura, Material } from './terrain/chunk.ts'
+import { Material } from './terrain/chunk.ts'
 import type { MaterialId } from './terrain/chunk.ts'
+import { FelLucru, felDesemnare, felSapa } from './acces.ts'
+import type { FelLucruId } from './acces.ts'
 import { cadeDaca, constructiaPosibila, cotaDeAsezare, multimeaCareCade, poateSustine, Sol, solLa, sustinutAcumMemorat } from './stabilitate.ts'
 import { cellKey, decodeCell } from './path.ts'
 import { Desemnare, desemnareLaCelula, DetaliuMotiv, seSapaLa, slotDesemnare, stergeDesemnare } from './desemnari.ts'
@@ -503,35 +505,6 @@ const DIRECTII = [
   [0, -1],
 ] as const
 
-/**
- * FELUL muncii facute dintr-o celula de lucru. Decide nivelurile si vecinatatea in
- * `celulaDeLucru`, deci fiecare apelant il spune EXPLICIT — prima versiune a
- * accesului vertical avea felul doar la scaner, iar ridicarea, refacerea locului si
- * testele-oracol chemau forma de sapat pentru un santier de construit.
- *
- *   SAPA           — un voxel natural (roca, pamant, iarba, moloz);
- *   DECONSTRUIESTE — sapatul unui voxel din material de STRUCTURA (ce s-a zidit);
- *   CONSTRUIESTE   — un santier de zidit;
- *   DOARME         — locul de langa un santier pe care un pion ar fi adormit.
- */
-export const FelLucru = {
-  SAPA: 0,
-  DECONSTRUIESTE: 1,
-  CONSTRUIESTE: 2,
-  DOARME: 3,
-} as const
-export type FelLucruId = (typeof FelLucru)[keyof typeof FelLucru]
-
-/** Felul sapatului la (wx, wy, z): dupa materialul de ACOLO, nu dupa cine l-a cerut. */
-export function felSapa(t: Terrain, wx: number, wy: number, z: number): FelLucruId {
-  const m = materialAt(t, wx, wy, z)
-  return m.ok && esteMaterialDeStructura(m.value) ? FelLucru.DECONSTRUIESTE : FelLucru.SAPA
-}
-
-/** Felul muncii pe o desemnare vie: santier de zidit, sau sapat dupa material. */
-export function felDesemnare(t: Terrain, d: DesignationStore, ds: number): FelLucruId {
-  return d.kind[ds] === Desemnare.CONSTRUIESTE ? FelLucru.CONSTRUIESTE : felSapa(t, d.wx[ds]!, d.wy[ds]!, d.z[ds]!)
-}
 
 /**
  * De unde se sapa voxelul (wx, wy, z).
