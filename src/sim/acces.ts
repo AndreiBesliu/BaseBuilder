@@ -214,6 +214,12 @@ export interface LumeAcces {
   readonly t: Terrain
   readonly plan: ReadonlySet<number>
   readonly zidite: ReadonlySet<number> | null
+  /** O piesa zidita in plus peste Z (privirea inainte), fara copia lui Z. */
+  readonly inPlus?: number
+}
+
+function ziditaIpotetic(Z: ReadonlySet<number> | null, inPlus: number, k: number): boolean {
+  return k === inPlus || (Z !== null && Z.has(k))
 }
 
 /** Un graf de celule pe care se poate sta, cu intrebarea „podeaua e naturala?". */
@@ -233,13 +239,14 @@ export function nodStabil(l: LumeAcces, rules: Rules, r: Cititor = cititor(l.t))
   const H = rules.agentHeadroomM
   const C = l.plan
   const Z = l.zidite
+  const inPlus = l.inPlus ?? -1
   return {
     calcabila(x, y, z) {
       const m = materialCitit(r, x, y, z)
       if (isSolid(m) || m === Material.APA) return false
       // Afara din lume materialul e ROCA, deci n-am ajuns aici: cheia e injectiva.
       if (C.has(cellKey(x, y, z))) return false
-      if (!isSolid(materialCitit(r, x, y, z - 1)) && !(Z !== null && Z.has(cellKey(x, y, z - 1)))) return false
+      if (!isSolid(materialCitit(r, x, y, z - 1)) && !ziditaIpotetic(Z, inPlus, cellKey(x, y, z - 1))) return false
       for (let h = 1; h < H; h++) {
         if (isSolid(materialCitit(r, x, y, z + h)) || C.has(cellKey(x, y, z + h))) return false
       }
@@ -613,73 +620,140 @@ export const CauzaAcces = {
 export type CauzaAccesId = (typeof CauzaAcces)[keyof typeof CauzaAcces]
 
 /**
+ * Etichetarea unui graf: celula → componenta, cu concluzia si marimile ei. Lenesa: o celula
+ * neetichetata se inunda la prima intrebare. O componenta INCHISA e cunoscuta integral (o
+ * singura eticheta pentru toata); una deschisa e dovedita doar pe ce a vizitat, deci alte celule
+ * ale ei pot primi alte etichete — toate „deschise", ceea ce e tot ce conteaza.
+ */
+export interface Etichetare {
+  readonly nod: Nod
+  readonly comp: Map<number, number>
+  readonly deschisa: boolean[]
+  readonly total: number[]
+  readonly naturale: number[]
+  /** Cate celule s-au inundat, pentru poarta de cost. Nimic nu decide pe el. */
+  inundate: number
+}
+
+export function etichetare(nod: Nod): Etichetare {
+  return { nod, comp: new Map(), deschisa: [], total: [], naturale: [], inundate: 0 }
+}
+
+/** Componenta celulei (x, y, z), care TREBUIE sa fie calcabila in graf. */
+export function idComponenta(e: Etichetare, rules: Rules, x: number, y: number, z: number): number {
+  const k = cellKey(x, y, z)
+  const gasit = e.comp.get(k)
+  if (gasit !== undefined) return gasit
+  const c = componenta(e.nod, rules, x, y, z)
+  e.inundate += c.total
+  const id = e.deschisa.length
+  e.deschisa.push(c.deschisa)
+  e.total.push(c.total)
+  e.naturale.push(c.naturale)
+  for (const v of c.celule) e.comp.set(v, id)
+  return id
+}
+
+/** Predicatul de acces al inchiderii simulate, cu apelul de inceput de trecere. */
+export interface PredicatAcces {
+  /** Celulele inundate de toate etichetarile lui, pentru poarta de cost. */
+  inundate(): number
+  /** O trecere noua a inchiderii: etichetele vechi se arunca. */
+  trecere(): void
+  /** Are piesa `cheie` un loc de lucru SIGUR in lumea W ∪ Z? */
+  poate(cheie: number, zidite: ReadonlySet<number>): boolean
+}
+
+/**
  * Predicatul de acces al inchiderii simulate: are piesa `cheie` un loc de lucru SIGUR in
  * lumea W ∪ Z (Z = ce s-a zidit virtual pana acum), cu planul C? Acelasi predicat ca al
  * scanerului (`locSigurPentru`): stabil si in componenta deschisa, sau deschisa dupa ce piesa
  * insasi e pusa (privirea inainte).
  *
- * Memoria de runda se sprijina pe teorema: cand Z creste, o celula stabila ramane stabila si
- * una deschisa ramane deschisa — deci „deschis" se tine pentru tot restul inchiderii, iar
- * „inchis" doar pentru acelasi Z (se reintreaba daca Z a crescut). Memoria lui „inchis" e doar
- * a COSTULUI: o celula deschisa intre timp e prinsa oricum de privirea inainte (Z ∪ {p} ⊇ Z),
- * dar cu un flood de marimea lumii in loc de unul de marimea pungii. Proba ei sta pe testul de
- * cost, nu pe unul de corectitudine (unde a iesit RATATA — pe drept).
+ * Etichetele se fac o data pe TRECERE, nu pe piesa: prima forma inunda pungile din nou la
+ * fiecare piesa si copia Z pentru privirea inainte — 3,4 s la o previzualizare de 6.003 piese.
+ * In timpul trecerii Z mai creste; etichetele facute pe un Z mai mic sunt o subestimare (ce
+ * era deschis ramane deschis — teorema), deci trecerea e doar prudenta, iar trecerea care nu
+ * mai adauga nimic are etichetele exacte: punctul fix e acelasi.
+ *
+ * Privirea inainte e O(1) tot prin teorema: zidirea lui p adauga o SINGURA celula stabila,
+ * cea de deasupra lui p. Componenta ei noua e reuniunea componentelor vecinilor ei; o celula
+ * dintr-o punga se deschide daca punga ei e printre ele si reuniunea e deschisa.
  */
-export function predicatAcces(t: Terrain, rules: Rules, plan: ReadonlySet<number>): (cheie: number, zidite: ReadonlySet<number>) => boolean {
+export function predicatAcces(t: Terrain, rules: Rules, plan: ReadonlySet<number>): PredicatAcces {
   const r = cititor(t)
-  const deschise = new Set<number>()
-  const inchise = new Map<number, number>()
-  const c = { x: 0, y: 0, z: 0 }
-  const dec = (k: number): void => {
-    const x = k % WORLD_CELLS
-    const rest = (k - x) / WORLD_CELLS
-    const y = rest % WORLD_CELLS
-    c.x = x; c.y = y; c.z = (rest - y) / WORLD_CELLS - 512
-  }
+  const pas = Math.max(0, Math.min(4, rules.maxStepM))
   const niveluri = niveluriDeLucru(FelLucru.CONSTRUIESTE, rules)
   const directii = vecinatate(FelLucru.CONSTRUIESTE)
-  return (cheie, zidite) => {
-    const nod = nodStabil({ t, plan, zidite }, rules, r)
-    dec(cheie)
-    const px = c.x, py = c.y, pz = c.z
-    let dupa: Nod | null = null
-    for (const dzs of niveluri) {
-      const zs = pz + dzs
-      for (const [dx, dy] of directii) {
-        const x = px + dx, y = py + dy
-        if (!nod.calcabila(x, y, zs)) continue
-        const k = cellKey(x, y, zs)
-        if (deschise.has(k)) return true
-        if (inchise.get(k) !== zidite.size) {
-          const comp = componenta(nod, rules, x, y, zs)
-          if (comp.deschisa) {
-            for (const v of comp.celule) deschise.add(v)
-            return true
-          }
-          for (const v of comp.celule) inchise.set(v, zidite.size)
-        }
-        // Privirea inainte: celula e intr-o punga; cu piesa pusa, s-ar deschide?
-        if (dupa === null) {
-          const Zp = new Set(zidite)
-          Zp.add(cheie)
-          dupa = nodStabil({ t, plan, zidite: Zp }, rules, r)
-        }
-        if (dupa.calcabila(x, y, zs) && componenta(dupa, rules, x, y, zs).deschisa) return true
+  let et: Etichetare | null = null
+  let lumeaEt: ReadonlySet<number> | null = null
+  let inundateInainte = 0
+  const inchise = new Set<number>()
+  const vecine = new Set<number>()
+  return {
+    inundate() {
+      return inundateInainte + (et === null ? 0 : et.inundate)
+    },
+    trecere() {
+      if (et !== null) inundateInainte += et.inundate
+      et = null
+    },
+    poate(cheie, zidite) {
+      if (et === null || lumeaEt !== zidite) {
+        if (et !== null) inundateInainte += et.inundate
+        et = etichetare(nodStabil({ t, plan, zidite }, rules, r))
+        lumeaEt = zidite
       }
-    }
-    return false
+      const e = et
+      const px = cheie % WORLD_CELLS
+      const rest = (cheie - px) / WORLD_CELLS
+      const py = rest % WORLD_CELLS
+      const pz = (rest - py) / WORLD_CELLS - 512
+      inchise.clear()
+      for (const dzs of niveluri) {
+        const zs = pz + dzs
+        for (const [dx, dy] of directii) {
+          const x = px + dx, y = py + dy
+          if (!e.nod.calcabila(x, y, zs)) continue
+          const id = idComponenta(e, rules, x, y, zs)
+          if (e.deschisa[id]) return true
+          inchise.add(id)
+        }
+      }
+      if (inchise.size === 0) return false
+      // Privirea inainte: celula de deasupra lui p, stabila cu p zidita?
+      const sus = nodStabil({ t, plan, zidite, inPlus: cheie }, rules, r)
+      if (!sus.calcabila(px, py, pz + 1)) return false
+      vecine.clear()
+      let deschisa = false
+      let total = 1
+      let naturale = 0
+      for (const [dx, dy] of DIR4) {
+        for (let dz = -pas; dz <= pas; dz++) {
+          const x = px + dx, y = py + dy, z = pz + 1 + dz
+          if (!e.nod.calcabila(x, y, z)) continue
+          const id = idComponenta(e, rules, x, y, z)
+          if (vecine.has(id)) continue
+          vecine.add(id)
+          if (e.deschisa[id]) deschisa = true
+          total += e.total[id]!
+          naturale += e.naturale[id]!
+        }
+      }
+      if (!deschisa && naturale < rules.accesPlafonNatural && total <= rules.accesPlafonTotal) return false
+      for (const id of inchise) if (vecine.has(id)) return true
+      return false
+    },
   }
 }
 
 /**
- * Cauza pentru o piesa fara acces, in lumea finala W ∪ Z: INCINTA daca vreun loc de lucru
- * calcabil sta intr-o punga cu podea naturala (o camera fara usa); altfel INALTIME (nimic la
- * indemana, sau doar o placa ori un acoperis fara scara). Panoul v2: fara tipul podelei,
- * cauza iesea gresita pe etajul fara scara (0 din 97 INALTIME).
+ * Cauza pentru o piesa fara acces, in lumea finala W ∪ Z (etichetarea ei): INCINTA daca vreun
+ * loc de lucru calcabil sta intr-o punga cu podea naturala (o camera fara usa); altfel INALTIME
+ * (nimic la indemana, sau doar o placa ori un acoperis fara scara). Panoul v2: fara tipul
+ * podelei, cauza iesea gresita pe etajul fara scara (0 din 97 INALTIME).
  */
-export function cauzaFaraAcces(t: Terrain, rules: Rules, plan: ReadonlySet<number>, zidite: ReadonlySet<number>, cheie: number): CauzaAccesId {
-  const r = cititor(t)
-  const nod = nodStabil({ t, plan, zidite }, rules, r)
+export function cauzaFaraAcces(e: Etichetare, rules: Rules, cheie: number): CauzaAccesId {
   const x0 = cheie % WORLD_CELLS
   const rest = (cheie - x0) / WORLD_CELLS
   const y0 = rest % WORLD_CELLS
@@ -687,9 +761,9 @@ export function cauzaFaraAcces(t: Terrain, rules: Rules, plan: ReadonlySet<numbe
   for (const dzs of niveluriDeLucru(FelLucru.CONSTRUIESTE, rules)) {
     for (const [dx, dy] of vecinatate(FelLucru.CONSTRUIESTE)) {
       const x = x0 + dx, y = y0 + dy, z = z0 + dzs
-      if (!nod.calcabila(x, y, z)) continue
-      const comp = componenta(nod, rules, x, y, z)
-      if (!comp.deschisa && comp.naturale > 0) return CauzaAcces.INCINTA
+      if (!e.nod.calcabila(x, y, z)) continue
+      const id = idComponenta(e, rules, x, y, z)
+      if (!e.deschisa[id] && e.naturale[id]! > 0) return CauzaAcces.INCINTA
     }
   }
   return CauzaAcces.INALTIME

@@ -97,7 +97,7 @@ import type { Terrain } from './terrain/terrain.ts'
 import { dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
 import { Material } from './terrain/chunk.ts'
 import type { MaterialId } from './terrain/chunk.ts'
-import { cauzaFaraAcces, componenteInchiseDe, FelLucru, felDesemnare, felSapa, inchiseDePlan, predicatAcces, siguraDupaZidire, siguraMemorat } from './acces.ts'
+import { cauzaFaraAcces, componenteInchiseDe, etichetare, FelLucru, felDesemnare, felSapa, inchiseDePlan, nodStabil, predicatAcces, siguraDupaZidire, siguraMemorat } from './acces.ts'
 import type { CauzaAccesId, FelLucruId } from './acces.ts'
 import { niveluriDeLucru, vecinatate } from './acces.ts'
 import { cadeDaca, constructiaPosibila, cotaDeAsezare, multimeaCareCade, poateSustine, Sol, solLa, sustinutAcumMemorat } from './stabilitate.ts'
@@ -2955,6 +2955,8 @@ export function constructiaPrevizualizata(w: World, rules: Rules): {
   faraAcces: number[]
   cauze: CauzaAccesId[]
   inchise: { pioni: number; mormane: number; zone: number }
+  /** Celulele inundate de inchiderea simulata si de cauze — poarta de cost K05. */
+  celuleInundate: number
 } {
   const d = w.desemnari
   const celule: number[] = []
@@ -2971,13 +2973,15 @@ export function constructiaPrevizualizata(w: World, rules: Rules): {
     if (rules.piese[d.piesa[i]!]!.material === Material.GRINDA) grinzi.push(k)
   }
   const gol = { pioni: 0, mormane: 0, zone: 0 }
-  if (celule.length === 0) return { construibile: [], imposibile: [], faraAcces: [], cauze: [], inchise: gol }
+  if (celule.length === 0) return { construibile: [], imposibile: [], faraAcces: [], cauze: [], inchise: gol, celuleInundate: 0 }
   const sprijin = constructiaPosibila(w.terrain, rules, celule, grinzi)
   const plan = new Set(celule)
-  const cuAcces = constructiaPosibila(w.terrain, rules, celule, grinzi, predicatAcces(w.terrain, rules, plan))
+  const predicat = predicatAcces(w.terrain, rules, plan)
+  const cuAcces = constructiaPosibila(w.terrain, rules, celule, grinzi, predicat)
   const zidite = new Set(cuAcces.construibile)
   const faraAcces = sprijin.construibile.filter((k) => !zidite.has(k))
-  const cauze = faraAcces.map((k) => cauzaFaraAcces(w.terrain, rules, plan, zidite, k))
+  const final = etichetare(nodStabil({ t: w.terrain, plan, zidite }, rules))
+  const cauze = faraAcces.map((k) => cauzaFaraAcces(final, rules, k))
   // Ce ar inchide planul dus pana la capat: pionii, mormanele si celulele de zona de ACUM.
   const a = w.agents
   const pioni: number[] = []
@@ -2997,6 +3001,7 @@ export function constructiaPrevizualizata(w: World, rules: Rules): {
       mormane: inchiseDePlan(w.terrain, rules, zidite, mormane).length,
       zone: inchiseDePlan(w.terrain, rules, zidite, zone).length,
     },
+    celuleInundate: predicat.inundate() + final.inundate,
   }
 }
 

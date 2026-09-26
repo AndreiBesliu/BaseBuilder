@@ -97,7 +97,7 @@ export const MUTATII = [
   {
     n: 'graful stabil nu vede podeaua zidita IPOTETIC',
     f: 'src/sim/acces.ts',
-    a: '      if (!isSolid(materialCitit(r, x, y, z - 1)) && !(Z !== null && Z.has(cellKey(x, y, z - 1)))) return false',
+    a: '      if (!isSolid(materialCitit(r, x, y, z - 1)) && !ziditaIpotetic(Z, inPlus, cellKey(x, y, z - 1))) return false',
     b: '      if (!isSolid(materialCitit(r, x, y, z - 1))) return false',
     t: 'tests/acces.test.ts', e: 'graful STABIL e exact',
   },
@@ -303,22 +303,22 @@ export const MUTATII = [
   {
     n: 'inchiderea previzualizarii ignora accesul (promite ce pionii nu zidesc)',
     f: 'src/sim/stabilitate.ts',
-    a: '      if (acces !== null && !acces(cheie, zidite)) continue',
+    a: '      if (acces !== null && !acces.poate(cheie, zidite)) continue',
     b: '      void acces',
     t: 'tests/acces-joc.test.ts', e: 'PREVIZUALIZAREA: fara scara',
   },
   {
     n: 'previzualizarea fara privirea inainte (salvarea din groapa nu e promisa)',
     f: 'src/sim/acces.ts',
-    a: '        if (dupa.calcabila(x, y, zs) && componenta(dupa, rules, x, y, zs).deschisa) return true',
-    b: '        if (dupa.calcabila(x, y, zs) && false) return true',
+    a: '      for (const id of inchise) if (vecine.has(id)) return true',
+    b: '      void vecine',
     t: 'tests/acces-joc.test.ts', e: 'PREVIZUALIZAREA promite si salvarea',
   },
   {
     n: 'cauza nu se uita la podeaua pungii (placa fara scara iese INCINTA)',
     f: 'src/sim/acces.ts',
-    a: '      if (!comp.deschisa && comp.naturale > 0) return CauzaAcces.INCINTA',
-    b: '      if (!comp.deschisa && comp.naturale >= 0) return CauzaAcces.INCINTA',
+    a: '      if (!e.deschisa[id] && e.naturale[id]! > 0) return CauzaAcces.INCINTA',
+    b: '      if (!e.deschisa[id] && e.naturale[id]! >= 0) return CauzaAcces.INCINTA',
     t: 'tests/acces-joc.test.ts', e: 'PREVIZUALIZAREA: fara scara',
   },
   {
@@ -327,5 +327,20 @@ export const MUTATII = [
     a: '    if (acum.calcabila(c.x, c.y, c.z) && componenta(acum, rules, c.x, c.y, c.z).deschisa) out.push(k)',
     b: '    out.push(k)',
     t: 'tests/acces-joc.test.ts', e: 'PREVIZUALIZAREA numara ce ar INCHIDE',
+  },
+  // --- pasul 8: costul ---
+  {
+    n: 'previzualizarea reface etichetarea la FIECARE piesa (costul prim, 3,4 s)',
+    f: 'src/sim/acces.ts',
+    a: '      if (et === null || lumeaEt !== zidite) {',
+    b: '      if (true) {',
+    t: 'tests/acces-joc.test.ts', e: 'K05: previzualizarea inunda',
+  },
+  {
+    n: 'memoria scanerului nu retine etichetele (fiecare intrebare inunda)',
+    f: 'src/sim/acces.ts',
+    a: '  for (const v of c.celule) m.eticheta.set(v, idx)',
+    b: '  for (const v of c.celule) void v',
+    t: 'tests/acces-joc.test.ts', e: 'K05: memoria scanerului',
   },
 ]

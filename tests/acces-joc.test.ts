@@ -603,3 +603,52 @@ test('INCHIDEREA SIMULATA nu depinde de ordinea planului', () => {
   }
   assert.equal(refer.length, 193)
 })
+
+// ---------------------------------------------------------------------------
+// K05: costul creste cu PLANUL, nu cu lumea — pe contoare, nu pe timp
+// ---------------------------------------------------------------------------
+
+test('K05: previzualizarea inunda cel mult 4 × (pragul natural + piesele), pe planuri de la 291 la 4.096 de piese', () => {
+  // Prima forma a inchiderii simulate reinunda pungile la fiecare piesa si copia Z pentru
+  // privirea inainte: 3,4 s la 6.003 piese. Cu etichetarea pe trecere si privirea inainte in
+  // O(1): 2.123 / 5.179 / 12.755 de celule la 291 / 1.803 / 4.096 de piese (masurat).
+  for (const L of [7, 21, 41]) {
+    let sit: ReturnType<typeof sitPlat> | null = null
+    for (const seed of [12345, 777, 4242, 7, 12, 17]) { try { sit = sitPlat(seed, L + 2); break } catch { /* alta */ } }
+    assert.ok(sit, `fixtura: niciun sit plat de ${L + 2}`)
+    const { w, wx, wy, g } = sit!
+    let piese = 0
+    for (let e = 0; e < 3; e++) {
+      const z0 = g + 1 + e * 3
+      for (let z = z0; z <= z0 + 1; z++) for (let dx = 0; dx < L; dx++) for (let dy = 0; dy < L; dy++) {
+        if (dx !== 0 && dx !== L - 1 && dy !== 0 && dy !== L - 1) continue
+        if (applyCommand(w, { kind: 'desemneaza', wx: wx + dx, wy: wy + dy, z, piesa: Piesa.PERETE }, R).ok) piese++
+      }
+      for (let dx = 0; dx < L; dx++) for (let dy = 0; dy < L; dy++) if (applyCommand(w, { kind: 'desemneaza', wx: wx + dx, wy: wy + dy, z: z0 + 2, piesa: Piesa.PODEA }, R).ok) piese++
+    }
+    const p = constructiaPrevizualizata(w, R)
+    const plafon = 4 * (R.accesPlafonNatural + piese)
+    assert.ok(p.celuleInundate <= plafon, `${L}x${L}x3: ${p.celuleInundate} celule inundate, plafonul ${plafon}`)
+    assert.ok(p.faraAcces.length > 0, 'fixtura: planul trebuia sa aiba si piese fara acces (etajele fara scara)')
+  }
+})
+
+test('K05: memoria scanerului inunda cel mult 2 × piese × pragul natural pe casa cu doua etaje', () => {
+  // Masurat: 260 de flood-uri, ~2.070 de celule pe piesa zidita (o inundare „afara" dupa fiecare
+  // zidire din cutia ei). Fara etichetele retinute, fiecare intrebare a scanerului ar inunda.
+  const { w, ids } = santier(12345, casaCuEtaj(true))
+  const n = panaCand(w, 90000, () => ramase(w, ids).length === 0)
+  assert.ok(n >= 0, 'fixtura: casa nu s-a terminat')
+  const plafon = 2 * ids.length * R.accesPlafonNatural
+  assert.ok(w.acces.stat.celuleFlood <= plafon, `${w.acces.stat.celuleFlood} celule inundate, plafonul ${plafon}`)
+  assert.ok(w.acces.stat.flooduri > 0, 'fixtura: memoria n-a lucrat deloc')
+})
+
+test('hash de referinta al accesului vertical: casa cu doua etaje dupa 12.000 de tickuri', () => {
+  // Scenariul standard e orb la accesul vertical (52b16ed2 in toate formele: zideste doar la
+  // sol, unde alegerea celulei nu se schimba). Asta e poarta lui: o schimbare a regulii de acces
+  // muta hash-ul O DATA, cu motiv scris; altfel e o regresie.
+  const { w } = santier(12345, casaCuEtaj(true))
+  advance(w, 12000, R)
+  assert.equal(hashWorld(w), '3550c897')
+})
