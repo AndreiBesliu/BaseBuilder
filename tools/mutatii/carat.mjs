@@ -297,4 +297,18 @@ export const MUTATII = [
       b: "  if (it.alive[is] === 0) reconciliazaTintaMoarta(w, rules, idItem)\n  elibereazaUna(w.rezervari, a.id[slot]!, a.jobId[slot]!, idItem, Strat.CARAT)" }],
     t: 'tests/joburi.test.ts', e: 'un slot FARA job are campurile',
   },
+  {
+    n: 'comanda dig nu mai reconstruieste graful pe loc (save-ul dintre comanda si tick diverge)',
+    f: 'src/sim/commands.ts',
+    a: '      // Invariantul: in afara unui tick, `regions.dirty` e gol.\n      rebuildDirty(w.terrain, w.regions, rules)',
+    b: '      // Invariantul: in afara unui tick, `regions.dirty` e gol.',
+    t: 'tests/joburi.test.ts', e: 'M5 cu save IMEDIAT dupa o sapatura care prabuseste',
+  },
+  {
+    n: 'comanda fill nu mai reconstruieste graful pe loc',
+    f: 'src/sim/commands.ts',
+    a: '      // Ca la `dig`: fara fereastra comanda -> tick cu blocuri murdare.\n      rebuildDirty(w.terrain, w.regions, rules)',
+    b: '      // Ca la `dig`: fara fereastra comanda -> tick cu blocuri murdare.',
+    t: 'tests/joburi.test.ts', e: 'M5 cu un save luat INTRE o comanda de teren',
+  },
 ]

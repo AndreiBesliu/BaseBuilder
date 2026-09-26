@@ -4,9 +4,9 @@ import { DEFAULT_RULES, parseRules } from '../src/sim/content.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { racireTinta } from '../src/sim/joburi.ts'
-import { lumeBogata } from './fixturi.ts'
+import { laSit as laSitComun, lumeBogata, patratPlat } from './fixturi.ts'
 import { advance, createWorld, tick } from '../src/sim/world.ts'
-import { Faction, PasJob } from '../src/sim/state.ts'
+import { Faction, Item, PasJob } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { cellOf } from '../src/sim/drumuri.ts'
 import { codMotiv, Reason } from '../src/sim/result.ts'
@@ -980,10 +980,11 @@ test('M5 cu joburi in curs: save la un tick cu SAPATURA de job, apoi hash identi
   assert.equal(hashWorld(loaded.value), hashWorld(continuu))
 })
 
-test('M5 cu un save luat INTRE o comanda de teren si tickul urmator: blocurile murdare supravietuiesc', () => {
+test('M5 cu un save luat INTRE o comanda de teren si tickul urmator: comanda nu lasa blocuri murdare', () => {
   // Exact ce face viewerul: click = applyCommand, tickul vine in cadrul urmator.
   // Recenzia a masurat: fara `murdare` in save, graful diverge dupa un tick in
-  // 40 din 143 de cazuri si hash-ul in 5, cu hash EGAL la save.
+  // 40 din 143 de cazuri si hash-ul in 5, cu hash EGAL la save. Acum comanda de
+  // teren reconstruieste pe loc, deci fereastra nu mai exista (CONT-1).
   const continuu = fixturaM5(302).w
   const intrerupt = fixturaM5(302).w
   for (let t = 0; t < 120; t++) { tick(continuu, R); tick(intrerupt, R) }
@@ -995,7 +996,12 @@ test('M5 cu un save luat INTRE o comanda de teren si tickul urmator: blocurile m
     assert.ok(applyCommand(continuu, { kind: 'dig', wx: cx + dx, wy: cy + 4, z: g }, R).ok)
     assert.ok(applyCommand(intrerupt, { kind: 'dig', wx: cx + dx, wy: cy + 4, z: g }, R).ok)
   }
-  assert.ok(intrerupt.regions.dirty.size > 0, 'fixtura: comanda n-a murdarit nimic')
+  assert.equal(intrerupt.regions.dirty.size, 0, 'comanda de teren a lasat blocuri murdare: fereastra comanda -> tick e deschisa')
+  // Si zidirea, cealalta comanda de teren: un bloc de piatra pe sol, langa pion.
+  const gz = solid(intrerupt, cx + 1, cy + 6)
+  assert.notEqual(gz, null, 'fixtura: sol langa pion')
+  for (const lume of [continuu, intrerupt]) assert.ok(applyCommand(lume, { kind: 'fill', wx: cx + 1, wy: cy + 6, z: gz! + 1, material: Material.PIATRA_CONSTRUITA }, R).ok, 'fixtura: zidirea')
+  assert.equal(intrerupt.regions.dirty.size, 0, 'zidirea a lasat blocuri murdare: fereastra comanda -> tick e deschisa')
   const loaded = decode(encode(intrerupt))
   assert.ok(loaded.ok)
   assert.equal(loaded.value.regions.dirty.size, intrerupt.regions.dirty.size, 'blocurile murdare nu s-au incarcat')
@@ -1006,6 +1012,78 @@ test('M5 cu un save luat INTRE o comanda de teren si tickul urmator: blocurile m
     assert.equal(hashWorld(loaded.value), hashWorld(continuu), `divergenta la +${t + 1}`)
   }
 })
+
+/** Graful de regiuni cu id-urile inlocuite de ancora: ce trebuie sa fie identic intre doua lumi M5. */
+function grafCanonic(w: World): string {
+  const s = w.regions
+  const anc = (r: number): number => s.ancora.get(r)!
+  const muchii: string[] = []
+  for (const [r, vecini] of s.adj) for (const v of vecini) muchii.push(`${anc(r)}>${anc(v)}`)
+  return JSON.stringify({ blocuri: [...s.keys], legate: [...s.legate].sort((a, b) => a - b), muchii: muchii.sort() })
+}
+
+test('M5 cu save IMEDIAT dupa o sapatura care prabuseste o placa cu pioni pe ea: hash SI graful de regiuni', () => {
+  // Recenzia (CONT-1), doua cauze: `stepAgents` citea regiunile INAINTE de reconstructie
+  // (lumea continua decidea pe celulele de dinaintea comenzii, cea incarcata pe cele noi),
+  // iar `restoreRegions` lega blocurile murdare pe terenul nou si crea blocuri pe care
+  // lumea continua le crea abia in reconstructie, NElegate. Seed 8 prinde a doua cauza
+  // doar prin graf: hash-ul ramane egal 1000 de tickuri.
+  for (const seed of [8, 19]) {
+    const { w, sit } = laSitComun(seed, 0)
+    const P = patratPlat(w, sit, 20, 2, 60)
+    assert.ok(P, 'fixtura: niciun patrat plat')
+    const x0 = P.x0 + 4
+    const y0 = P.y0 + 4
+    const g = P.g
+    const LAT = 10
+    const H = 8
+    const stalp = (dx: number, dy: number): boolean => dx === 4 && dy === 4
+    for (let z = g; z > g - 3; z--) for (let dx = 0; dx < LAT; dx++) for (let dy = 0; dy < H; dy++) if (!stalp(dx, dy)) applyCommand(w, { kind: 'dig', wx: x0 + dx, wy: y0 + dy, z }, R)
+    const puse = new Set<number>()
+    for (let ad = true; ad;) {
+      ad = false
+      for (let dx = 0; dx < LAT; dx++) for (let dy = 0; dy < H; dy++) {
+        if (stalp(dx, dy) || puse.has(dx * H + dy)) continue
+        if (applyCommand(w, { kind: 'fill', wx: x0 + dx, wy: y0 + dy, z: g, material: Material.PIATRA_CONSTRUITA }, R).ok) { puse.add(dx * H + dy); ad = true }
+      }
+    }
+    assert.equal(puse.size, LAT * H - 1, 'fixtura: placa incompleta')
+    for (let dx = 1; dx < LAT; dx += 3) for (const dy of [2, 5]) applyCommand(w, { kind: 'lasaItem', fel: Item.PIATRA, cantitate: 20, wx: x0 + dx, wy: y0 + dy, z: g + 1 }, R)
+    assert.ok(applyCommand(w, { kind: 'picteazaZona', x0: x0 + 3, y0: y0 + 3, x1: x0 + 6, y1: y0 + 5, z: g + 1 }, R).ok)
+    for (let i = 0; i < 6; i++) assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (x0 + 1 + i) * 1000 + 500, y: (y0 + 3 + (i % 3)) * 1000 + 500, z: g + 1, faction: 0 }, R).ok)
+    const pePlaca = (): number => {
+      let n = 0
+      for (let i = 0; i < w.agents.count; i++) {
+        const cx = cellOf(w.agents.x[i]!)
+        const cy = cellOf(w.agents.y[i]!)
+        if (w.agents.alive[i] === 1 && w.agents.z[i] === g + 1 && cx >= x0 && cx < x0 + LAT && cy >= y0 && cy < y0 + H) n++
+      }
+      return n
+    }
+    while (w.tick <= 50 || pePlaca() < 2) { assert.ok(w.tick < 2000, 'fixtura: nimeni pe placa'); tick(w, R) }
+    const solideInainte = pePlacaSolide(w, x0, y0, g, LAT, H)
+    assert.ok(applyCommand(w, { kind: 'dig', wx: x0 + 4, wy: y0 + 4, z: g - 1 }, R).ok)
+    assert.ok(pePlacaSolide(w, x0, y0, g, LAT, H) < solideInainte, 'fixtura: placa n-a cazut')
+    const loaded = decode(encode(w))
+    assert.ok(loaded.ok)
+    assert.equal(hashWorld(loaded.value), hashWorld(w))
+    for (let t = 0; t < 300; t++) {
+      tick(w, R)
+      tick(loaded.value, R)
+      assert.equal(hashWorld(loaded.value), hashWorld(w), `seed ${seed}: hash divergent la +${t + 1}`)
+    }
+    assert.equal(grafCanonic(loaded.value), grafCanonic(w), `seed ${seed}: graful de regiuni difera`)
+  }
+})
+
+function pePlacaSolide(w: World, x0: number, y0: number, g: number, lat: number, h: number): number {
+  let n = 0
+  for (let dx = 0; dx < lat; dx++) for (let dy = 0; dy < h; dy++) {
+    const m = materialAt(w.terrain, x0 + dx, y0 + dy, g)
+    if (m.ok && isSolid(m.value)) n++
+  }
+  return n
+}
 
 test('M5 cu TOATE campurile noi nenule la save: incercari, raciri pe pereche, racire pe tinta, prioritate nedefault, scanare programata', () => {
   // Recenzia: sase mutatii in save.ts (cate un camp necitit sau nescris) treceau

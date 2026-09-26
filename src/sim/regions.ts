@@ -678,7 +678,15 @@ export function decodeBlockKey(key: number): { bx: number; by: number; z: number
  * „incremental" — costa cat s-a schimbat, nu cat exista.
  *
  * Nu e insa „gata": 2,8 ms e tot peste bugetul de sub 1 ms al unei sapaturi, deci
- * ramane in afara caii interactive pana cand exista un motiv masurat sa fie in ea.
+ * ramanea in afara caii interactive pana cand exista un motiv masurat sa fie in ea.
+ * Motivul a venit (CONT-1): cu reconstructia amanata pana la tick, un save luat
+ * dupa o comanda de teren diverge, iar pionii cazuti stateau 42 de tickuri pe loc.
+ * `applyCommand` o cheama acum dupa fiecare dig/fill. Lucrul se MUTA din tick in
+ * comanda, nu se adauga: tickul gaseste apoi `dirty` gol. Plateste in plus doar un LOT
+ * de comenzi de teren in acelasi cadru. Masurat de verificator: +1,2–2,1 ms pe click;
+ * 28–39 ms pentru 16 sapaturi intr-un cadru (4,5–6,7 ms inainte). Cu graful calculat
+ * peste toata asezarea M10 (51.092 de blocuri): mediana 6,1 ms, max 17 ms pe sapatura.
+ * S-DIG, cu pionii opriti si graful gol: 0,04 ms, neschimbat.
  * Si mai e o limita, scrisa aici ca sa nu fie descoperita la luna 12: `relabel`
  * parcurge TOATE celulele rezidente ca sa afle ce regiuni traiesc, deci partea
  * aia inca scaleaza cu rezidenta. La 600 de blocuri nu se vede; la discul complet

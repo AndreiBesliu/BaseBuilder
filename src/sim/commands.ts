@@ -20,7 +20,7 @@ import type { PiesaId } from './state.ts'
 import { cellOf, clearPath } from './drumuri.ts'
 import type { Rules } from './content.ts'
 import { DEFAULT_RULES } from './content.ts'
-import { isWalkable } from './regions.ts'
+import { isWalkable, rebuildDirty } from './regions.ts'
 import { esteMaterialCunoscut, isSolid, MATERIAL_MAX, type MaterialId } from './terrain/chunk.ts'
 import { CHUNK_GRID, inWorld, materialAt, setFocus, voxelRangeM, WORLD_CELLS } from './terrain/terrain.ts'
 import { adaugaDesemnare, Desemnare, slotDesemnare } from './desemnari.ts'
@@ -225,6 +225,14 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       // cui o tinea.
       const out = sapaManual(w, cmd.wx, cmd.wy, cmd.z, rules)
       if (!out.ok) return out
+      // Graful se reconstruieste PE LOC, nu la tickul urmator. Altfel, intre comanda
+      // si tick, `regions` are blocuri murdare cu celulele de dinainte: bucla de
+      // acoperire din `stepAgents` decide pe ele (un pion cazut primea racire de
+      // replanificare si statea 42 de tickuri), iar `restoreRegions` le leaga pe
+      // terenul nou si creeaza blocuri pe care lumea continua le creeaza abia in
+      // reconstructie, nelegate. Un save luat in fereastra aia diverge (CONT-1).
+      // Invariantul: in afara unui tick, `regions.dirty` e gol.
+      rebuildDirty(w.terrain, w.regions, rules)
       return accept(0)
     }
 
@@ -260,6 +268,8 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       }
       const out = zidesteVoxel(w, rules, cmd.wx, cmd.wy, cmd.z, cmd.material)
       if (!out.ok) return out
+      // Ca la `dig`: fara fereastra comanda -> tick cu blocuri murdare.
+      rebuildDirty(w.terrain, w.regions, rules)
       return accept(0)
     }
 

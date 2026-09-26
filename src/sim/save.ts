@@ -98,11 +98,11 @@ export function encode(w: World): string {
       regiuni: {
         blocuri: [...w.regions.keys],
         legate: [...w.regions.legate].sort((a, b) => a - b),
-        // Si blocurile MURDARE. Sunt goale la sfarsit de tick, dar un save luat
-        // intre o comanda de teren si tickul urmator le are pline; fara ele,
-        // lumea incarcata nu mai reconstruieste ce reconstruieste cea continua
-        // la tickul urmator, si hash-ul diverge la +2 tickuri (masurat de
-        // recenzie, 40 din 143 de cazuri cu graf diferit).
+        // Si blocurile MURDARE. Sunt goale la sfarsit de tick si, de la CONT-1,
+        // si dupa orice comanda de teren (`applyCommand` reconstruieste pe loc):
+        // salvarea lor NU acoperea fereastra comanda -> tick, fiindca lumea
+        // incarcata le reconstruia din terenul nou, iar cea continua citea intai
+        // celulele vechi. Campul ramane pentru save-urile vechi, luate in fereastra.
         murdare: [...w.regions.dirty].sort((a, b) => a - b),
       },
       agents: {
