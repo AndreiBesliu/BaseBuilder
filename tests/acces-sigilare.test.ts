@@ -16,7 +16,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { componenta, componenteInchiseDe, componenteInchiseDeMemorat, memorieAcces, nodW } from '../src/sim/acces.ts'
+import { componenta, componenteInchiseDe, componenteInchiseDeMemorat, memorieAcces, nodW, siguraMemorat } from '../src/sim/acces.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { slotDesemnare } from '../src/sim/desemnari.ts'
 import { cellOf } from '../src/sim/drumuri.ts'
@@ -241,6 +241,11 @@ test('SIGILAREA pe memorie == forma pura, cu tot cu ordinea listelor, pe toate s
     assert.ok(piese.length > 40, `fixtura [${fel}]: doar ${piese.length} santiere`)
     const m = memorieAcces()
     for (let pas = 0; pas < 3; pas++) {
+      // Memoria INCALZITA, ca in joc (scanerul intreaba inainte de zidire): fara etichete, oprirea
+      // la etichetele deschise n-ar avea la ce sa se opreasca, iar oracolul ar compara doua forme
+      // identice.
+      for (let x = x0 - 2; x <= x0 + 6; x++) for (let y = y0 - 2; y <= y0 + 6; y++) for (let z = g - 1; z <= g + 5; z++) siguraMemorat(t, w.desemnari, R, m, x, y, z)
+      assert.ok(m.eticheta.size > 0, `fixtura [${fel}]: memoria n-are nicio eticheta`)
       for (const p of piese) {
         const a = componenteInchiseDeMemorat(t, w.desemnari, R, m, ...p)
         const b = componenteInchiseDe(t, R, ...p)

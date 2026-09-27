@@ -420,7 +420,7 @@ export const MUTATII = [
     f: 'src/sim/acces.ts',
     a: '      m.plan.add(k)\n      invalideaza(m, x, y, z, false)',
     b: '      m.plan.add(k)\n      invalideaza(m, x, y, z, true)',
-    t: 'tests/acces.test.ts', e: 'memoria == recalculul pe FERESTRE',
+    t: 'tests/acces-joc.test.ts', e: 'REVALIDAREA',
   },
   {
     n: 'editarea monotona sterge si flood-urile deschise (o reinundare „afara" la fiecare zidire)',
@@ -470,13 +470,13 @@ export const MUTATII = [
     f: 'src/sim/acces.ts',
     a: '  return deschisa || naturale >= rules.accesPlafonNatural || total > rules.accesPlafonTotal',
     b: '  return deschisa || naturale > rules.accesPlafonNatural || total > rules.accesPlafonTotal',
-    t: 'tests/acces.test.ts', e: 'memoria == recalculul pe FERESTRE',
+    t: 'tests/acces.test.ts', e: 'privirea pe memorie la GRANITA',
   },
   {
     n: 'privirea pe memorie: plafonul total nestrict',
     f: 'src/sim/acces.ts',
     a: '  return deschisa || naturale >= rules.accesPlafonNatural || total > rules.accesPlafonTotal',
     b: '  return deschisa || naturale >= rules.accesPlafonNatural || total >= rules.accesPlafonTotal',
-    t: 'tests/acces.test.ts', e: 'memoria == recalculul pe FERESTRE',
+    t: 'tests/acces.test.ts', e: 'privirea pe memorie la GRANITA',
   },
 ]

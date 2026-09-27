@@ -749,3 +749,28 @@ test('memoria refolosita pe ALT teren cu acelasi numar de editari nu citeste col
   assert.equal(nou, false, 'fixtura: in B celula e in incinta')
   assert.equal(inB, nou, 'memoria refolosita a citit terenul vechi')
 })
+
+test('privirea pe memorie la GRANITA pragurilor: reuniunea a doua pungi prin celula de peste p', () => {
+  // Un sant 1×5, adanc de 2 (fundul la g−1, marginea la g+1: punga), taiat in doua de coloana din
+  // mijloc, sapata cu inca 2 m mai adanc (o punga de o celula la g−3). p = santierul de pe fundul
+  // ei, la g−3: zidit, celula de peste el (g−2) leaga cele doua jumatati. Reuniunea: 5 celule, 4
+  // podele naturale (a celulei noi e p, de structura). Fuzz-ul pe ferestre nu nimereste egalitatea.
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  const t = w.terrain, d = w.desemnari
+  const x0 = wx + 4, y0 = wy + 4
+  for (let dx = 0; dx < 5; dx++) {
+    const adanc = dx === 2 ? 4 : 2
+    for (let h = 0; h < adanc; h++) assert.ok(dig(t, x0 + dx, y0, g - h).ok, `fixtura: santul (${dx}, ${g - h})`)
+  }
+  const p = [x0 + 2, y0, g - 3] as const
+  assert.ok(adaugaDesemnare(d, w.nextId++, Desemnare.CONSTRUIESTE, ...p, 3, Piesa.PODEA).ok)
+  const plan = new Set([cellKey(...p)])
+  const cel = [x0 + 1, y0, g - 1] as const
+  for (const [pragN, pragT, asteptat] of [[4, 100, true], [5, 5, false]] as const) {
+    const rules = cuPraguri(pragN, pragT)
+    assert.equal(esteSiguraPur({ t, plan, zidite: null }, rules, ...cel), false, `fixtura (${pragN}, ${pragT}): jumatatea trebuia sa fie punga`)
+    const pur = esteSiguraPur({ t, plan, zidite: new Set(plan) }, rules, ...cel)
+    assert.equal(pur, asteptat, `fixtura (${pragN}, ${pragT}): reuniunea`)
+    assert.equal(siguraDupaZidire(t, d, rules, memorieAcces(), ...cel, ...p), pur, `praguri (${pragN}, ${pragT}): privirea pe memorie difera de forma pura`)
+  }
+})
