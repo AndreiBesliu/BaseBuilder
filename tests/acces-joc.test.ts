@@ -12,7 +12,9 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { CauzaAcces, componenta, memorieAcces, nodW, predicatAcces } from '../src/sim/acces.ts'
+import { CauzaAcces, componenta, inchideriPlan, memorieAcces, nodW, predicatAcces } from '../src/sim/acces.ts'
+import { DEFAULT_RULES, parseRules } from '../src/sim/content.ts'
+import { dig, groundLevelM, materialAt, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 import { constructiaPosibila } from '../src/sim/stabilitate.ts'
 import { cellKey } from '../src/sim/path.ts'
 import { applyCommand } from '../src/sim/commands.ts'
@@ -23,7 +25,7 @@ import { codMotiv, Reason } from '../src/sim/result.ts'
 import { decode, encode } from '../src/sim/save.ts'
 import { Faction, FelJob, Item, Nevoie, NEVOI, PasConstruieste, Piesa } from '../src/sim/state.ts'
 import type { PiesaId, World } from '../src/sim/state.ts'
-import { Material } from '../src/sim/terrain/chunk.ts'
+import { isSolid, Material } from '../src/sim/terrain/chunk.ts'
 import { stergeItem } from '../src/sim/iteme.ts'
 import { Zona } from '../src/sim/zone.ts'
 import { advance } from '../src/sim/world.ts'
@@ -657,4 +659,195 @@ test('hash de referinta al accesului vertical: casa cu doua etaje dupa 12.000 de
   const { w } = santier(12345, casaCuEtaj(true))
   advance(w, 12000, R)
   assert.equal(hashWorld(w), '3550c897')
+})
+
+// ---------------------------------------------------------------------------
+// recenzia din 27.09: previzualizarea
+// ---------------------------------------------------------------------------
+
+/**
+ * Masa naturala INCHISA (2 m peste sol, S×S, deci punga), o gaura p in stratul de sus (PODEA) si
+ * un zid q pe marginea mesei, langa gaura. q se zideste de pe sol (atingerea +2); p are locuri de
+ * lucru DOAR pe masa. Adevarul: p nu se poate zidi — cu p pusa, masa ramane punga. Cu q zidit in
+ * aceeasi trecere, inaintea lui p, privirea inainte aduna punga de doua ori (eticheta veche a
+ * mesei + componenta noua care o contine, prin celula de peste q): 2n ≥ pragul, deci o promitea.
+ * Un pion pe masa: fara constructor in punga, privirea inainte nu s-ar folosi deloc.
+ */
+function mesa(ordine: 'qp' | 'pq'): { p: ReturnType<typeof constructiaPrevizualizata>; kp: number; kq: number } {
+  const rules = cuPraguriJoc(100, 400)
+  const S = 8
+  const { w, wx, wy, g } = sitPlat(4242, S + 4)
+  const mx = wx + 2, my = wy + 2
+  const px = mx + 4, py = my + 1
+  for (let x = mx; x < mx + S; x++) {
+    for (let y = my; y < my + S; y++) {
+      for (const z of [g + 1, g + 2]) {
+        if (x === px && y === py && z === g + 2) continue
+        const o = applyCommand(w, { kind: 'fill', wx: x, wy: y, z, material: Material.ROCA }, rules)
+        assert.ok(o.ok, `fixtura: masa (${x - mx},${y - my},${z - g})`)
+      }
+    }
+  }
+  const q = [px, py - 1, g + 3, Piesa.PERETE] as const
+  const p = [px, py, g + 2, Piesa.PODEA] as const
+  for (const [x, y, z, piesa] of ordine === 'qp' ? [q, p] : [p, q]) {
+    const o = applyCommand(w, { kind: 'desemneaza', wx: x, wy: y, z, piesa }, rules)
+    assert.ok(o.ok, `fixtura: santierul ${JSON.stringify(o)}`)
+  }
+  assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (mx + 6) * 1000 + 500, y: (my + 6) * 1000 + 500, z: g + 3, faction: Faction.ASEZARE }, rules).ok)
+  return { p: constructiaPrevizualizata(w, rules), kp: cellKey(p[0], p[1], p[2]), kq: cellKey(q[0], q[1], q[2]) }
+}
+
+function cuPraguriJoc(natural: number, total: number): typeof R {
+  const out = parseRules({ ...DEFAULT_RULES, accesPlafonNatural: natural, accesPlafonTotal: total })
+  assert.ok(out.ok, JSON.stringify(out))
+  return out.ok ? out.value : R
+}
+
+test('INCHIDEREA SIMULATA nu depinde de ordinea planului: masa naturala, cu privirea inainte in aceeasi trecere cu zidul', () => {
+  for (const ordine of ['qp', 'pq'] as const) {
+    const { p, kp, kq } = mesa(ordine)
+    assert.deepEqual(p.construibile, [kq], `[${ordine}] doar zidul de pe marginea mesei se zideste`)
+    assert.deepEqual(p.faraAcces, [kp], `[${ordine}] gaura din masa e fara acces`)
+    assert.deepEqual(p.cauze, [CauzaAcces.INCINTA])
+  }
+})
+
+test('PREVIZUALIZAREA nu promite privirea inainte dintr-o groapa fara niciun constructor (doar un salbatic)', () => {
+  // Groapa 3×3 adanca de 2, cu o treapta planificata pe fund; pionii sunt afara. Treapta se face
+  // doar prin privirea inainte (locurile ei de lucru sunt in groapa), care cere un constructor in
+  // punga. Recenzia (plasa 2): promisa pe 3/3 seminte, nezidita dupa 20.000 de tickuri.
+  const { w, wx, wy, g } = sitPlat(12345, 18)
+  const x0 = wx + 6, y0 = wy + 6
+  for (const z of [g, g - 1]) for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) sapaCmd(w, x0 + dx, y0 + dy, z)
+  curataMormane(w, x0 - 1, y0 - 1, x0 + 3, y0 + 3)
+  const o = applyCommand(w, { kind: 'desemneaza', wx: x0 + 1, wy: y0 + 2, z: g - 1, piesa: Piesa.SCARA }, R)
+  assert.ok(o.ok, JSON.stringify(o))
+  for (let i = 0; i < 3; i++) lasaItem(w, Item.PIATRA, 60, wx + 1, wy + 1 + i)
+  for (let i = 0; i < 6; i++) lasaItem(w, Item.HRANA, 75, wx + 14, wy + i)
+  for (let i = 0; i < 3; i++) pion(w, wx + 2, wy + 12 + i, g + 1)
+  // Un salbatic in groapa: e pion viu, dar nu ia joburi.
+  assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (x0 + 1) * 1000 + 500, y: (y0 + 1) * 1000 + 500, z: g - 1, faction: Faction.SALBATIC }, R).ok)
+  const p = constructiaPrevizualizata(w, R)
+  assert.deepEqual(p.construibile, [], 'treapta din groapa fara constructor e promisa')
+  assert.equal(p.faraAcces.length, 1)
+  assert.deepEqual(p.cauze, [CauzaAcces.INCINTA])
+  // Adevarul, cu pionii reali.
+  ruleaza(w, 20000)
+  assert.notEqual(slotDesemnare(w.desemnari, o.ok ? o.value : -1), -1, 'fixtura: pionii au zidit treapta, deci previzualizarea trebuia s-o promita')
+})
+
+/** Forma veche a lui `inchiseDePlan`, un flood pe celula intrebata: oracolul pungilor planului. */
+function inchiseReferinta(w: World, zidite: ReadonlySet<number>, celule: readonly number[]): number[] {
+  const acum = nodW(w.terrain, null, R)
+  const dupa = nodW(w.terrain, zidite, R)
+  const out: number[] = []
+  for (const k of celule) {
+    const x = k % WORLD_CELLS
+    const rest = (k - x) / WORLD_CELLS
+    const y = rest % WORLD_CELLS
+    const z = (rest - y) / WORLD_CELLS - 512
+    if (!dupa.calcabila(x, y, z) || componenta(dupa, R, x, y, z).deschisa) continue
+    if (acum.calcabila(x, y, z) && componenta(acum, R, x, y, z).deschisa) out.push(k)
+  }
+  return out
+}
+
+test('PUNGILE PLANULUI: enumerarea o data pe Z == un flood pe fiecare celula intrebata, pe camere, gropi si curti la intamplare', () => {
+  let comparatii = 0
+  let pline = 0
+  for (const seed of [12345, 4242, 17]) {
+    const { w, wx, wy, g } = sitPlat(seed, 24)
+    let s = seed >>> 0
+    const rnd = (n: number): number => { s = (s * 1103515245 + 12345) >>> 0; return (s >>> 8) % n }
+    // Camere de 3–6, pereti de 2, cu sau fara usa, unele pe o groapa; zidite = tot planul.
+    const zidite = new Set<number>()
+    for (let c = 0; c < 6; c++) {
+      const L = 3 + rnd(4)
+      const x0 = wx + rnd(24 - L), y0 = wy + rnd(24 - L)
+      const usa = rnd(3) !== 0
+      if (rnd(3) === 0) for (let dx = 1; dx < L - 1; dx++) for (let dy = 1; dy < L - 1; dy++) dig(w.terrain, x0 + dx, y0 + dy, g)
+      for (let z = g + 1; z <= g + 2; z++) {
+        for (let dx = 0; dx < L; dx++) {
+          for (let dy = 0; dy < L; dy++) {
+            if (dx !== 0 && dx !== L - 1 && dy !== 0 && dy !== L - 1) continue
+            if (usa && dx === 1 && dy === 0 && z === g + 1) continue
+            const m = materialAt(w.terrain, x0 + dx, y0 + dy, z)
+            if (m.ok && !isSolid(m.value)) zidite.add(cellKey(x0 + dx, y0 + dy, z))
+          }
+        }
+      }
+    }
+    // Celulele intrebate: toate celulele calcabile ACUM din sit, in ordine fixa.
+    const acum = nodW(w.terrain, null, R)
+    const celule: number[] = []
+    for (let x = wx - 1; x <= wx + 24; x++) for (let y = wy - 1; y <= wy + 24; y++) for (let z = g - 1; z <= g + 3; z++) if ((x + y + z) % 3 === 0 && acum.calcabila(x, y, z)) celule.push(cellKey(x, y, z))
+    const ref = inchiseReferinta(w, zidite, celule)
+    const ip = inchideriPlan(w.terrain, R, zidite)
+    assert.deepEqual(ip.inchise(celule), ref, `seed ${seed}: pungile planului difera de forma cu un flood pe celula`)
+    // Si pe bucati, in alta ordine: raspunsul e al celulei, nu al intrebarii.
+    const invers = celule.slice().reverse()
+    assert.deepEqual(ip.inchise(invers), ref.slice().reverse())
+    comparatii += celule.length
+    pline += ref.length
+  }
+  assert.ok(comparatii > 500, `fixtura: doar ${comparatii} celule`)
+  assert.ok(pline > 0, 'fixtura: planul n-a inchis nicio celula — oracolul a comparat liste goale')
+})
+
+/**
+ * Un sat de `n` case cu etaj si scara (grila de 4 pe rand, la 9 m), 8 pioni la marginea lui si
+ * `mormane` mormane de piatra imprastiate pe 400 × 400 m in jur.
+ */
+function sat(n: number, mormane: number): { w: World; piese: number; mormanePuse: number } {
+  const coloane = Math.min(n, 4)
+  const randuri = Math.ceil(n / coloane)
+  let sit: ReturnType<typeof sitPlat> | null = null
+  for (const seed of [12345, 4242, 17, 7, 12, 777]) { try { sit = sitPlat(seed, Math.max(coloane, randuri) * 9 + 2); break } catch { /* alta */ } }
+  assert.ok(sit, 'fixtura: niciun sit plat pentru sat')
+  const { w, wx, wy, g } = sit!
+  let piese = 0
+  for (let h = 0; h < n; h++) {
+    const x0 = wx + 1 + (h % coloane) * 9, y0 = wy + 1 + Math.floor(h / coloane) * 9
+    for (const [dx, dy, z, p] of casaCuEtaj(true)(g)) if (applyCommand(w, { kind: 'desemneaza', wx: x0 + dx, wy: y0 + dy, z, piesa: p }, R).ok) piese++
+  }
+  let mormanePuse = 0
+  let s = 12345
+  const rnd = (k: number): number => { s = (s * 1103515245 + 12345) >>> 0; return (s >>> 8) % k }
+  for (let i = 0; i < mormane * 3 && mormanePuse < mormane; i++) {
+    const x = wx - 200 + rnd(400), y = wy - 200 + rnd(400)
+    const gl = groundLevelM(w.terrain, x, y)
+    if (!gl.ok) continue
+    if (applyCommand(w, { kind: 'lasaItem', wx: x, wy: y, z: gl.value + 1, fel: Item.PIATRA, cantitate: 5 }, R).ok) mormanePuse++
+  }
+  for (let i = 0; i < 8; i++) assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (wx + 1 + i) * 1000 + 500, y: (wy - 1) * 1000 + 500, z: g + 1, faction: Faction.ASEZARE }, R).ok)
+  return { w, piese, mormanePuse }
+}
+
+test('K05: previzualizarea casei cu scara si a unui sat de 4 si 8 case inunda cel mult 2 × pragul natural + 12 × piesele', () => {
+  // Recenzia costului (27.09): poarta de mai sus n-avea niciun plan CONSTRUIBIL cu mai multe
+  // cladiri, iar casa cu scara a propriilor teste o depasea de 2,4×. Etichetele deschise nu
+  // redovedeau „afara": fiecare celula noua stabila pornea un flood de 2.048 de celule. Masurat
+  // dupa remediere: casa 3.307 (17 pe piesa), 4 case 7.182, 8 case 12.333 — cu pioni si mormane.
+  const casa = santier(12345, casaCuEtaj(true))
+  const cazuri: [string, World, number][] = [['casa', casa.w, casa.ids.length]]
+  for (const n of [4, 8]) {
+    const s = sat(n, 50)
+    cazuri.push([`${n} case`, s.w, s.piese])
+  }
+  for (const [nume, w, piese] of cazuri) {
+    const p = constructiaPrevizualizata(w, R)
+    assert.equal(p.construibile.length, piese, `fixtura [${nume}]: planul trebuia construibil integral`)
+    const plafon = 2 * R.accesPlafonNatural + 12 * piese
+    assert.ok(p.celuleInundate <= plafon, `[${nume}] ${p.celuleInundate} celule inundate, plafonul ${plafon}`)
+  }
+})
+
+test('K05: mormanele din LUME nu schimba costul previzualizarii (50 fata de 800, imprastiate)', () => {
+  // Prima forma a pungilor planului pornea un flood de la fiecare morman intrebat: 0,4–4,2 s
+  // pentru 50–800 de mormane imprastiate, fata de 0,2–1,1 ms pe HEAD-ul de dinainte.
+  const putine = sat(4, 50)
+  const multe = sat(4, 800)
+  assert.ok(multe.mormanePuse >= 700, `fixtura: doar ${multe.mormanePuse} mormane puse`)
+  assert.equal(constructiaPrevizualizata(multe.w, R).celuleInundate, constructiaPrevizualizata(putine.w, R).celuleInundate)
 })

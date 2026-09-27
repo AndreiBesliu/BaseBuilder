@@ -89,7 +89,7 @@ import type { Rules } from './content.ts'
 import type { Outcome, ReasonCode } from './result.ts'
 import { accept, codMotiv, refuse, Reason } from './result.ts'
 import type { FelJobId, World } from './state.ts'
-import { Categorie, CATEGORII, FelJob, Gand, GAND_PENTRU_NEVOIE, ITEME, Nevoie, NEVOI, PasCara, PasConstruieste, PasJob, pasDeMers, PasNevoie, puneGand } from './state.ts'
+import { Categorie, CATEGORII, Faction, FelJob, Gand, GAND_PENTRU_NEVOIE, ITEME, Nevoie, NEVOI, PasCara, PasConstruieste, PasJob, pasDeMers, PasNevoie, puneGand } from './state.ts'
 import { cellOf, clearPath } from './drumuri.ts'
 import { blockOfCell, ensureArea, find, isWalkable, markDirty, NO_REGION, regionAt, REGION_SIZE } from './regions.ts'
 import type { RegionStore } from './regions.ts'
@@ -97,8 +97,8 @@ import type { Terrain } from './terrain/terrain.ts'
 import { dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
 import { Material } from './terrain/chunk.ts'
 import type { MaterialId } from './terrain/chunk.ts'
-import { cauzaFaraAcces, componenteInchiseDeMemorat, etichetare, FelLucru, felDesemnare, felSapa, inchiseDePlan, nodStabil, predicatAcces, siguraDupaZidire, siguraMemorat } from './acces.ts'
-import type { CauzaAccesId, FelLucruId } from './acces.ts'
+import { cauzaFaraAcces, componenteInchiseDeMemorat, etichetare, FelLucru, felDesemnare, felSapa, inchideriPlan, nodStabil, predicatAcces, siguraDupaZidire, siguraMemorat } from './acces.ts'
+import type { CauzaAccesId, FelLucruId, InchideriPlan } from './acces.ts'
 import { niveluriDeLucru, vecinatate } from './acces.ts'
 import { cadeDaca, constructiaPosibila, cotaDeAsezare, multimeaCareCade, poateSustine, Sol, solLa, sustinutAcumMemorat } from './stabilitate.ts'
 import { cellKey, decodeCell, decodeCellIn } from './path.ts'
@@ -2945,9 +2945,12 @@ export function sapaVoxel(w: World, wx: number, wy: number, z: number, rules: Ru
  *     corpus (51 pe cazurile-limita) pe care pionii nu le zideau niciodata; simularea, 0;
  *   - `construibile`: restul, adica exact ce vor zidi pionii;
  *   - `cauze` (paralel cu `faraAcces`): INALTIME sau INCINTA;
- *   - `inchise`: pioni, mormane si celule de zona pe care planul le-ar inchide.
+ *   - `inchise`: pioni, mormane si celule de zona pe care planul le-ar inchide;
+ *   - `inchideri`: aceeasi intrebare, gata de pus din nou cu pionii de peste cateva tickuri —
+ *     pungile planului se enumera o data pe Z, iar o celula intrebata costa O(1). Fara ea, HUD-ul
+ *     spunea ce era adevarat la ultimul click (recenzia: vechi 11 s din 12).
  *
- * Costul: doua inchideri si flood-urile lor. Bugetul de click e in DEVLOG.
+ * Costul: doua inchideri si flood-urile lor, toate numarate in `celuleInundate`.
  */
 export function constructiaPrevizualizata(w: World, rules: Rules): {
   construibile: number[]
@@ -2955,7 +2958,8 @@ export function constructiaPrevizualizata(w: World, rules: Rules): {
   faraAcces: number[]
   cauze: CauzaAccesId[]
   inchise: { pioni: number; mormane: number; zone: number }
-  /** Celulele inundate de inchiderea simulata si de cauze — poarta de cost K05. */
+  inchideri: InchideriPlan | null
+  /** Celulele inundate de inchiderea simulata, de cauze si de pungile planului — poarta de cost K05. */
   celuleInundate: number
 } {
   const d = w.desemnari
@@ -2973,35 +2977,45 @@ export function constructiaPrevizualizata(w: World, rules: Rules): {
     if (rules.piese[d.piesa[i]!]!.material === Material.GRINDA) grinzi.push(k)
   }
   const gol = { pioni: 0, mormane: 0, zone: 0 }
-  if (celule.length === 0) return { construibile: [], imposibile: [], faraAcces: [], cauze: [], inchise: gol, celuleInundate: 0 }
+  if (celule.length === 0) return { construibile: [], imposibile: [], faraAcces: [], cauze: [], inchise: gol, inchideri: null, celuleInundate: 0 }
   const sprijin = constructiaPosibila(w.terrain, rules, celule, grinzi)
   const plan = new Set(celule)
-  const predicat = predicatAcces(w.terrain, rules, plan)
+  // Pionii care iau joburi: doar ei folosesc privirea inainte dintr-o punga.
+  const a = w.agents
+  const constructori: number[] = []
+  const pioni: number[] = []
+  for (let i = 0; i < a.count; i++) {
+    if (a.alive[i] !== 1) continue
+    const k = cellKey(cellOf(a.x[i]!), cellOf(a.y[i]!), a.z[i]!)
+    pioni.push(k)
+    if (a.faction[i] === Faction.ASEZARE) constructori.push(k)
+  }
+  const predicat = predicatAcces(w.terrain, rules, plan, constructori)
   const cuAcces = constructiaPosibila(w.terrain, rules, celule, grinzi, predicat)
   const zidite = new Set(cuAcces.construibile)
   const faraAcces = sprijin.construibile.filter((k) => !zidite.has(k))
-  const final = etichetare(nodStabil({ t: w.terrain, plan, zidite }, rules))
+  const final = etichetare(nodStabil({ t: w.terrain, plan, zidite }, rules), predicat.dovedite())
   const cauze = faraAcces.map((k) => cauzaFaraAcces(final, rules, k))
   // Ce ar inchide planul dus pana la capat: pionii, mormanele si celulele de zona de ACUM.
-  const a = w.agents
-  const pioni: number[] = []
-  for (let i = 0; i < a.count; i++) if (a.alive[i] === 1) pioni.push(cellKey(cellOf(a.x[i]!), cellOf(a.y[i]!), a.z[i]!))
   const mormane: number[] = []
   for (let i = 0; i < w.iteme.count; i++) if (w.iteme.alive[i] === 1) mormane.push(cellKey(w.iteme.wx[i]!, w.iteme.wy[i]!, w.iteme.z[i]!))
   const zone: number[] = []
   const zc = w.zone.celule
   for (let i = 0; i < zc.count; i++) if (zc.alive[i] === 1) zone.push(cellKey(zc.wx[i]!, zc.wy[i]!, zc.z[i]!))
+  const inchideri = inchideriPlan(w.terrain, rules, zidite, predicat.dovedite())
+  const inchise = {
+    pioni: inchideri.inchise(pioni).length,
+    mormane: inchideri.inchise(mormane).length,
+    zone: inchideri.inchise(zone).length,
+  }
   return {
     construibile: cuAcces.construibile,
     imposibile: sprijin.imposibile,
     faraAcces,
     cauze,
-    inchise: {
-      pioni: inchiseDePlan(w.terrain, rules, zidite, pioni).length,
-      mormane: inchiseDePlan(w.terrain, rules, zidite, mormane).length,
-      zone: inchiseDePlan(w.terrain, rules, zidite, zone).length,
-    },
-    celuleInundate: predicat.inundate() + final.inundate,
+    inchise,
+    inchideri,
+    celuleInundate: predicat.inundate() + final.inundate + inchideri.inundate(),
   }
 }
 

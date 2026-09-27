@@ -855,6 +855,11 @@ export type CauzaAccesId = (typeof CauzaAcces)[keyof typeof CauzaAcces]
  * neetichetata se inunda la prima intrebare. O componenta INCHISA e cunoscuta integral (o
  * singura eticheta pentru toata); una deschisa e dovedita doar pe ce a vizitat, deci alte celule
  * ale ei pot primi alte etichete — toate „deschise", ceea ce e tot ce conteaza.
+ *
+ * `dovedite`: celule dovedite DESCHISE intr-un graf care e subgraf al acestuia (aceleasi muchii,
+ * aceleasi podele naturale) — un flood se opreste la ele si le adauga pe ale lui. Recenzia
+ * costului (27.09): fara oprire, fiecare intrebare pe o celula neetichetata redovedea „afara"
+ * de la zero; un oras de 20 de case inunda 370.957 de celule, cu oprire 26.820.
  */
 export interface Etichetare {
   readonly nod: Nod
@@ -862,12 +867,13 @@ export interface Etichetare {
   readonly deschisa: boolean[]
   readonly total: number[]
   readonly naturale: number[]
+  readonly dovedite: Set<number> | null
   /** Cate celule s-au inundat, pentru poarta de cost. Nimic nu decide pe el. */
   inundate: number
 }
 
-export function etichetare(nod: Nod): Etichetare {
-  return { nod, comp: new Map(), deschisa: [], total: [], naturale: [], inundate: 0 }
+export function etichetare(nod: Nod, dovedite: Set<number> | null = null): Etichetare {
+  return { nod, comp: new Map(), deschisa: [], total: [], naturale: [], dovedite, inundate: 0 }
 }
 
 /** Componenta celulei (x, y, z), care TREBUIE sa fie calcabila in graf. */
@@ -875,13 +881,15 @@ export function idComponenta(e: Etichetare, rules: Rules, x: number, y: number, 
   const k = cellKey(x, y, z)
   const gasit = e.comp.get(k)
   if (gasit !== undefined) return gasit
-  const c = componenta(e.nod, rules, x, y, z)
+  const D = e.dovedite
+  const c = componenta(e.nod, rules, x, y, z, D === null ? null : (v) => D.has(v))
   e.inundate += c.total
   const id = e.deschisa.length
   e.deschisa.push(c.deschisa)
   e.total.push(c.total)
   e.naturale.push(c.naturale)
   for (const v of c.celule) e.comp.set(v, id)
+  if (D !== null && c.deschisa) for (const v of c.celule) D.add(v)
   return id
 }
 
@@ -889,10 +897,15 @@ export function idComponenta(e: Etichetare, rules: Rules, x: number, y: number, 
 export interface PredicatAcces {
   /** Celulele inundate de toate etichetarile lui, pentru poarta de cost. */
   inundate(): number
-  /** O trecere noua a inchiderii: etichetele vechi se arunca. */
+  /** O trecere noua a inchiderii: etichetele vechi se arunca (in afara de celulele dovedite deschise). */
   trecere(): void
   /** Are piesa `cheie` un loc de lucru SIGUR in lumea W ∪ Z? */
   poate(cheie: number, zidite: ReadonlySet<number>): boolean
+  /**
+   * Celulele dovedite deschise pana acum, pe un Z care nu face decat sa creasca: raman deschise
+   * in orice lume de dupa (teorema) — etichetarea finala si pungile planului se opresc la ele.
+   */
+  dovedite(): Set<number>
 }
 
 /**
@@ -903,15 +916,20 @@ export interface PredicatAcces {
  *
  * Etichetele se fac o data pe TRECERE, nu pe piesa: prima forma inunda pungile din nou la
  * fiecare piesa si copia Z pentru privirea inainte — 3,4 s la o previzualizare de 6.003 piese.
- * In timpul trecerii Z mai creste; etichetele facute pe un Z mai mic sunt o subestimare (ce
- * era deschis ramane deschis — teorema), deci trecerea e doar prudenta, iar trecerea care nu
- * mai adauga nimic are etichetele exacte: punctul fix e acelasi.
+ * In timpul trecerii Z mai creste; o eticheta DESCHISA ramane adevarata (teorema), deci celulele
+ * ei traiesc peste treceri si opresc flood-urile noi. O eticheta INCHISA facuta pe un Z mai mic
+ * poate fi doar o PARTE din componenta de acum: e prudenta cat timp e intrebata singura, dar nu
+ * intr-o SUMA — vezi garda de epoca. Trecerea care nu mai adauga nimic are Z fix si etichetele
+ * exacte: punctul fix e acelasi, oricare ar fi ordinea planului.
  *
  * Privirea inainte e O(1) tot prin teorema: zidirea lui p adauga o SINGURA celula stabila,
  * cea de deasupra lui p. Componenta ei noua e reuniunea componentelor vecinilor ei; o celula
- * dintr-o punga se deschide daca punga ei e printre ele si reuniunea e deschisa.
+ * dintr-o punga se deschide daca punga ei e printre ele si reuniunea e deschisa. Si doar daca
+ * in punga e un CONSTRUCTOR: o punga e inchisa prin definitie, deci privirea inainte o foloseste
+ * doar un pion deja inauntru. `constructori` = celulele pionilor care iau joburi (`null`: se
+ * presupune unul peste tot — testele pe teren gol).
  */
-export function predicatAcces(t: Terrain, rules: Rules, plan: ReadonlySet<number>): PredicatAcces {
+export function predicatAcces(t: Terrain, rules: Rules, plan: ReadonlySet<number>, constructori: readonly number[] | null = null): PredicatAcces {
   const r = cititor(t)
   const pas = Math.max(0, Math.min(4, rules.maxStepM))
   const niveluri = niveluriDeLucru(FelLucru.CONSTRUIESTE, rules)
@@ -921,6 +939,19 @@ export function predicatAcces(t: Terrain, rules: Rules, plan: ReadonlySet<number
   let inundateInainte = 0
   const inchise = new Set<number>()
   const vecine = new Set<number>()
+  const dovedite = new Set<number>()
+  /** |Z| cand s-a inundat fiecare componenta a etichetarii curente. */
+  const epoca: number[] = []
+  const id = (e: Etichetare, x: number, y: number, z: number, Z: ReadonlySet<number>): number => {
+    const i = idComponenta(e, rules, x, y, z)
+    if (epoca[i] === undefined) epoca[i] = Z.size
+    return i
+  }
+  const areConstructor = (e: Etichetare, i: number): boolean => {
+    if (constructori === null) return true
+    for (const k of constructori) if (e.comp.get(k) === i) return true
+    return false
+  }
   return {
     inundate() {
       return inundateInainte + (et === null ? 0 : et.inundate)
@@ -929,11 +960,15 @@ export function predicatAcces(t: Terrain, rules: Rules, plan: ReadonlySet<number
       if (et !== null) inundateInainte += et.inundate
       et = null
     },
+    dovedite() {
+      return dovedite
+    },
     poate(cheie, zidite) {
       if (et === null || lumeaEt !== zidite) {
         if (et !== null) inundateInainte += et.inundate
-        et = etichetare(nodStabil({ t, plan, zidite }, rules, r))
+        et = etichetare(nodStabil({ t, plan, zidite }, rules, r), dovedite)
         lumeaEt = zidite
+        epoca.length = 0
       }
       const e = et
       const px = cheie % WORLD_CELLS
@@ -946,9 +981,9 @@ export function predicatAcces(t: Terrain, rules: Rules, plan: ReadonlySet<number
         for (const [dx, dy] of directii) {
           const x = px + dx, y = py + dy
           if (!e.nod.calcabila(x, y, zs)) continue
-          const id = idComponenta(e, rules, x, y, zs)
-          if (e.deschisa[id]) return true
-          inchise.add(id)
+          const i = id(e, x, y, zs, zidite)
+          if (e.deschisa[i]) return true
+          inchise.add(i)
         }
       }
       if (inchise.size === 0) return false
@@ -957,22 +992,28 @@ export function predicatAcces(t: Terrain, rules: Rules, plan: ReadonlySet<number
       if (!sus.calcabila(px, py, pz + 1)) return false
       vecine.clear()
       let deschisa = false
+      let veche = false
       let total = 1
       let naturale = 0
       for (const [dx, dy] of DIR4) {
         for (let dz = -pas; dz <= pas; dz++) {
           const x = px + dx, y = py + dy, z = pz + 1 + dz
           if (!e.nod.calcabila(x, y, z)) continue
-          const id = idComponenta(e, rules, x, y, z)
-          if (vecine.has(id)) continue
-          vecine.add(id)
-          if (e.deschisa[id]) deschisa = true
-          total += e.total[id]!
-          naturale += e.naturale[id]!
+          const i = id(e, x, y, z, zidite)
+          if (vecine.has(i)) continue
+          vecine.add(i)
+          if (e.deschisa[i]) deschisa = true
+          else if (epoca[i] !== zidite.size) veche = true
+          total += e.total[i]!
+          naturale += e.naturale[i]!
         }
       }
+      // O punga inundata pe un Z mai mic poate fi o PARTE dintr-o componenta inundata dupa: suma
+      // ar numara-o de doua ori. Recenzia (continuitate 0, scena mesei): 2 × 1.598 ≥ 2.048, deci
+      // promitea o piesa pe care pionii n-o zideau, si doar intr-o ordine a planului. Prudent: nu.
+      if (!deschisa && veche) return false
       if (!deschisa && naturale < rules.accesPlafonNatural && total <= rules.accesPlafonTotal) return false
-      for (const id of inchise) if (vecine.has(id)) return true
+      for (const i of inchise) if (vecine.has(i) && areConstructor(e, i)) return true
       return false
     },
   }
@@ -1000,32 +1041,88 @@ export function cauzaFaraAcces(e: Etichetare, rules: Rules, cheie: number): Cauz
   return CauzaAcces.INALTIME
 }
 
+/** Ce ar inchide planul dus pana unde se poate, intrebat pe liste. */
+export interface InchideriPlan {
+  /** Celulele date (pioni, mormane, zone de ACUM) deschise azi si inchise la capatul planului. */
+  inchise(celule: readonly number[]): number[]
+  /** Celulele inundate, pentru poarta de cost. */
+  inundate(): number
+}
+
 /**
- * Ce ar INCHIDE planul, dus pana unde se poate (W ∪ Z): celulele date (pioni, mormane,
- * zone de acum) care sunt intr-o componenta deschisa azi si inchisa la capat. Avertisment,
- * nu refuz — regula de sigilare va opri ultima piesa cat timp ceva e inauntru.
+ * Ce ar INCHIDE planul, dus pana unde se poate (W ∪ Z): avertisment, nu refuz — regula de
+ * sigilare va opri ultima piesa cat timp ceva e inauntru.
+ *
+ * O componenta a lui W ∪ Z care nu contine si nu atinge nicio celula pe care Z o schimba (coloana
+ * fiecarei piese si cele 4 vecine, pe nivelurile pe care o muchie poate trece prin ea) e si
+ * componenta a lui W, cu aceleasi celule — deci inchisa si azi, nu din vina planului. Asa ca se
+ * enumera O DATA pe Z doar pungile care ating piesele, iar o celula intrebata costa O(1). Prima
+ * forma pornea un flood de la fiecare celula intrebata: mormanele din regiuni diferite plateau
+ * cate 2.048 de celule fiecare, plus un flood „acum" nereținut pe fiecare celula inchisa —
+ * recenzia a masurat 0,4–8,3 s pe click, crescand cu lumea, nu cu planul.
+ *
+ * `dovediteDupa`: celule dovedite deschise pe grafuri stabile cu Z' ⊆ Z (`PredicatAcces.dovedite`)
+ * — subgrafuri ale lui W ∪ Z, deci flood-urile „dupa" se opresc la ele. Enumerarea e lenesa: o
+ * intrebare pe o lista goala nu inunda nimic.
  */
-export function inchiseDePlan(t: Terrain, rules: Rules, zidite: ReadonlySet<number>, celule: readonly number[]): number[] {
+export function inchideriPlan(t: Terrain, rules: Rules, zidite: ReadonlySet<number>, dovediteDupa: ReadonlySet<number> | null = null): InchideriPlan {
   const r = cititor(t)
+  const H = rules.agentHeadroomM
+  const pas = Math.max(0, Math.min(4, rules.maxStepM))
   const acum = nodW(t, null, rules, r)
   const dupa = nodW(t, zidite, rules, r)
-  const deschiseDupa = new Set<number>()
-  const inchiseDupa = new Set<number>()
-  const out: number[] = []
-  const c = { x: 0, y: 0, z: 0 }
-  for (const k of celule) {
-    const x = k % WORLD_CELLS
-    const rest = (k - x) / WORLD_CELLS
-    const y = rest % WORLD_CELLS
-    c.x = x; c.y = y; c.z = (rest - y) / WORLD_CELLS - 512
-    if (!dupa.calcabila(c.x, c.y, c.z) || deschiseDupa.has(k)) continue
-    if (!inchiseDupa.has(k)) {
-      const comp = componenta(dupa, rules, c.x, c.y, c.z)
-      for (const v of comp.celule) (comp.deschisa ? deschiseDupa : inchiseDupa).add(v)
-      if (comp.deschisa) continue
+  let inundate = 0
+  let punga: Set<number> | null = null
+  const enumera = (): Set<number> => {
+    const out = new Set<number>()
+    const vazute = new Set<number>()
+    const deschise = new Set<number>()
+    const opreste = (k: number): boolean => deschise.has(k) || (dovediteDupa !== null && dovediteDupa.has(k))
+    for (const k of zidite) {
+      const px = k % WORLD_CELLS
+      const rest = (k - px) / WORLD_CELLS
+      const py = rest % WORLD_CELLS
+      const pz = (rest - py) / WORLD_CELLS - 512
+      for (const [dx, dy] of COLOANA_SI_DIR4) {
+        const x = px + dx, y = py + dy
+        for (let z = pz - H - pas; z <= pz + 1 + pas; z++) {
+          if (!dupa.calcabila(x, y, z) || vazute.has(cellKey(x, y, z))) continue
+          const comp = componenta(dupa, rules, x, y, z, opreste)
+          inundate += comp.total
+          for (const v of comp.celule) vazute.add(v)
+          for (const v of comp.celule) (comp.deschisa ? deschise : out).add(v)
+        }
+      }
     }
-    // Inchisa la capat. Era deschisa acum? Altfel nu e vina planului.
-    if (acum.calcabila(c.x, c.y, c.z) && componenta(acum, rules, c.x, c.y, c.z).deschisa) out.push(k)
+    return out
   }
-  return out
+  const acumDeschise = new Set<number>()
+  const acumInchise = new Set<number>()
+  return {
+    inundate: () => inundate,
+    inchise(celule) {
+      const out: number[] = []
+      if (celule.length === 0 || zidite.size === 0) return out
+      if (punga === null) punga = enumera()
+      for (const k of celule) {
+        if (!punga.has(k)) continue
+        const x = k % WORLD_CELLS
+        const rest = (k - x) / WORLD_CELLS
+        const y = rest % WORLD_CELLS
+        const z = (rest - y) / WORLD_CELLS - 512
+        // Inchisa la capat. Era deschisa acum? Altfel nu e vina planului.
+        if (acumInchise.has(k) || !acum.calcabila(x, y, z)) continue
+        if (!acumDeschise.has(k)) {
+          const comp = componenta(acum, rules, x, y, z, (v) => acumDeschise.has(v))
+          inundate += comp.total
+          for (const v of comp.celule) (comp.deschisa ? acumDeschise : acumInchise).add(v)
+          if (!comp.deschisa) continue
+        }
+        out.push(k)
+      }
+      return out
+    },
+  }
 }
+
+const COLOANA_SI_DIR4: readonly (readonly [number, number])[] = [[0, 0], ...DIR4]
