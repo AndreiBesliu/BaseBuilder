@@ -275,6 +275,15 @@ export interface Rules {
    * conteaza ca „afara" — limita e scrisa si testata la granita.
    */
   readonly accesPlafonTotal: number
+  /**
+   * COBORAREA DE URGENTA: de cat de sus sare un pion FARA TREABA ramas intr-o punga (o creasta de
+   * moloz, un etaj cu scara astupata, un stalp ramas dupa sapatura). Recenzia (27.09): la
+   * desfacerea unui zid de 5 m de la randul 2, 12 din 12 rulari lasau pioni blocati pe moloz, care
+   * plecau din asezare de foame; la demolarea etajului casei, 2–3 pioni pe fiecare rulare. Cu 8 m
+   * (acoperisul casei de proba e la g+7), pe cele 60 de scene ale recenziei: 0 pioni blocati la
+   * capat, 0 plecati, toate piesele desfacute. 0 = oprita.
+   */
+  readonly coborareUrgentaM: number
 
   // --- dispozitia (S16-19, taietura 3) ---
   //
@@ -385,6 +394,7 @@ const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield' | 'piese' | 'nevoi' | '
   // Masurat de panoul v2 cu citire pe coloana: 2048 naturale ~1,5 ms, 8192 total 5–14 ms.
   accesPlafonNatural: { min: 1, max: 16384 },
   accesPlafonTotal: { min: 1, max: 16384 },
+  coborareUrgentaM: { min: 0, max: 64 },
   dispozitieMax: { min: 1, max: 1000000 },
   dispozitieBaza: { min: 0, max: 1000000 },
   dispozitieTicks: { min: 1, max: 1000000 },
@@ -1087,6 +1097,7 @@ export const DEFAULT_RULES: Rules = {
   atingereSusM: 2,
   accesPlafonNatural: 2048,
   accesPlafonTotal: 8192,
+  coborareUrgentaM: 8,
   // Indexat cu `Nevoie`: FOAME, ODIHNA.
   nevoi: [
     { scurgere: 6, prag: 400, pragCritic: 150 },

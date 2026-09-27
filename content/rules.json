@@ -49,6 +49,7 @@
   "atingereSusM": 2,
   "accesPlafonNatural": 2048,
   "accesPlafonTotal": 8192,
+  "coborareUrgentaM": 8,
   "nevoieMax": 1000,
   "nevoiTicks": 250,
   "nevoieFazaPas": 137,

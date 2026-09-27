@@ -90,14 +90,14 @@ import type { Outcome, ReasonCode } from './result.ts'
 import { accept, codMotiv, refuse, Reason } from './result.ts'
 import type { FelJobId, World } from './state.ts'
 import { Categorie, CATEGORII, Faction, FelJob, Gand, GAND_PENTRU_NEVOIE, ITEME, Nevoie, NEVOI, PasCara, PasConstruieste, PasJob, pasDeMers, PasNevoie, puneGand } from './state.ts'
-import { cellOf, clearPath } from './drumuri.ts'
+import { cellOf, centerMm, clearPath } from './drumuri.ts'
 import { blockOfCell, ensureArea, find, isWalkable, markDirty, NO_REGION, regionAt, REGION_SIZE } from './regions.ts'
 import type { RegionStore } from './regions.ts'
 import type { Terrain } from './terrain/terrain.ts'
 import { dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
 import { Material } from './terrain/chunk.ts'
 import type { MaterialId } from './terrain/chunk.ts'
-import { cauzaFaraAcces, componenteInchiseDeMemorat, etichetare, FelLucru, felDesemnare, felSapa, inchideriPlan, nodStabil, predicatAcces, siguraDupaZidire, siguraMemorat } from './acces.ts'
+import { areDeLucruInPunga, cauzaFaraAcces, componenteInchiseDeMemorat, dovedireMemorie, etichetare, FelLucru, felDesemnare, felSapa, iesireDinPunga, inchideriPlan, nodStabil, predicatAcces, pungaDin, siguraDupaZidire, siguraMemorat } from './acces.ts'
 import type { CauzaAccesId, FelLucruId, InchideriPlan } from './acces.ts'
 import { niveluriDeLucru, vecinatate } from './acces.ts'
 import { cadeDaca, constructiaPosibila, cotaDeAsezare, multimeaCareCade, poateSustine, Sol, solLa, sustinutAcumMemorat } from './stabilitate.ts'
@@ -287,6 +287,8 @@ export interface JobTickReport {
   santierOcupat: number
   /** Cati pioni au CAZUT odata cu podeaua lor. Nu e acelasi lucru cu `ingropati`. */
   pioniCazuti: number
+  /** Cati pioni fara treaba au facut COBORAREA DE URGENTA dintr-o punga. */
+  pioniCoborati: number
   /**
    * Cati pioni au PLECAT din asezare in tickul asta (a treia treapta).
    *
@@ -315,7 +317,7 @@ const raport: JobTickReport = {
   tickuriDeLucru: 0, locuriDeLucruRefacute: 0, refuzuriDrum: 0,
   faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0, faraDepozit: 0, refuzatLaStart: 0,
   evaluariDestinatie: 0, itemeProduse: 0, unitatiProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
-  joburiDeNevoie: 0, unitatiMancate: 0, pasiNevoi: 0, plecati: 0, voxeliPrabusiti: 0, pioniCazuti: 0, pieseZidite: 0, santierOcupat: 0,
+  joburiDeNevoie: 0, unitatiMancate: 0, pasiNevoi: 0, plecati: 0, voxeliPrabusiti: 0, pioniCazuti: 0, pioniCoborati: 0, pieseZidite: 0, santierOcupat: 0,
   cautariSursa: 0, pasiCautareSursa: 0, pasiRezumat: 0,
 }
 
@@ -3169,6 +3171,49 @@ export function prabuseste(w: World, rules: Rules, chei: readonly number[]): num
     }
   }
   return chei.length
+}
+
+/**
+ * COBORAREA DE URGENTA a unui pion FARA TREABA (scanarea n-a gasit nimic, sau refuza munca) ramas
+ * intr-o PUNGA a lui W — acolo unde regula de acces nu pazeste: prabusirea, deconstructia,
+ * sapatura. Recenzia (27.09): la desfacerea unui zid de 5 m de la randul 2, 12 din 12 rulari
+ * lasau pioni pe creste de moloz; la demolarea etajului casei, molozul acoperisului astupa golul
+ * scarii si 2–3 pioni ramaneau sus. Toti plecau apoi din asezare, de foame, fara niciun semnal.
+ *
+ * FARA TREABA, nu imediat dupa editare: prima forma (coborarea la prabusire) ii smulgea de la
+ * lucru, iar demolarea etajului ramanea la 51–73 de piese din 97; pe codul vechi pionii prinsi
+ * o terminau (si ramaneau apoi sus). Si nu la prima scanare goala: una poate iesi goala trecator
+ * (tinte in racire, rezervate de altii), iar forma „prima scanare goala" lasa etajul la 61–64 de
+ * piese pe doua seminte din sase. Pionul prins ramane cat mai are ceva de sapat sau de desfacut
+ * de pe un loc de lucru din punga (`areDeLucruInPunga`) si nicio nevoie sub prag — o nevoie sub
+ * prag, la un pion fara treaba, inseamna ca n-a gasit cum s-o implineasca de acolo.
+ *
+ * Calea rapida e memoria lumii: o celula SIGURA e intr-o componenta deschisa si in W. Altfel,
+ * punga (`pungaDin`), cu flood-urile oprite la etichetele deschise ale memoriei.
+ */
+export function coboaraDacaIzolat(w: World, rules: Rules, slot: number): boolean {
+  if (rules.coborareUrgentaM === 0) return false
+  const a = w.agents
+  const x = cellOf(a.x[slot]!), y = cellOf(a.y[slot]!), z = a.z[slot]!
+  if (siguraMemorat(w.terrain, w.desemnari, rules, w.acces, x, y, z)) return false
+  const r = w.acces.cititor!
+  const dovedita = dovedireMemorie(w.acces)
+  const punga = pungaDin(w.terrain, rules, x, y, z, r, dovedita, w.acces.stat)
+  if (punga === null) return false
+  let nevoie = false
+  for (let n = 0; n < NEVOI; n++) if (a.nevoi[slot * NEVOI + n]! < rules.nevoi[n]!.prag) nevoie = true
+  if (!nevoie && areDeLucruInPunga(w.terrain, w.desemnari, rules, punga)) return false
+  const tinta = iesireDinPunga(w.terrain, rules, punga, r, dovedita, w.acces.stat)
+  if (tinta === null) return false
+  // Ca la cadere: pasul in curs si drumul se sterg. Job n-are (e fara treaba).
+  a.x[slot] = centerMm(tinta[0])
+  a.y[slot] = centerMm(tinta[1])
+  a.z[slot] = tinta[2]
+  a.hasGoal[slot] = 0
+  a.progresMm[slot] = 0
+  clearPath(w.paths, slot)
+  raport.pioniCoborati++
+  return true
 }
 
 /**

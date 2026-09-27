@@ -63,7 +63,7 @@ import { cellKey, findPath, pathLength } from './path.ts'
 import type { Ocupare } from './path.ts'
 import { Reason } from './result.ts'
 import { cellOf, centerMm, clearPath } from './drumuri.ts'
-import { cautaJob, drumRefuzat, lucreaza, miscaDispozitia, refuzaMunca, resetJobReport, scurgeNevoile, Sfarsit, StareRatiune, terminaJob, tintesteLocDeLucru, verificaNevoi, verificaPlecarea } from './joburi.ts'
+import { cautaJob, coboaraDacaIzolat, drumRefuzat, lucreaza, miscaDispozitia, refuzaMunca, resetJobReport, scurgeNevoile, Sfarsit, StareRatiune, terminaJob, tintesteLocDeLucru, verificaNevoi, verificaPlecarea } from './joburi.ts'
 
 // Drumurile si aritmetica de celule stau in `drumuri.ts` (ca `joburi.ts` sa le
 // poata folosi fara un ciclu de import). Re-exportate de aici pentru cine le
@@ -353,6 +353,9 @@ export function stepAgents(w: World, rules: Rules): void {
       } else {
         cautaJob(w, rules, i)
       }
+      // Fara nicio treaba, intr-o punga lasata de o prabusire, o deconstructie sau o sapatura:
+      // coboara de pe cea mai apropiata margine. Vezi `coboaraDacaIzolat`.
+      if (a.jobKind[i] === 0) coboaraDacaIzolat(w, rules, i)
     }
     if (a.jobKind[i] !== 0) {
       if (!pasDeMers(a.jobStep[i]!)) {

@@ -830,11 +830,7 @@ export function componenteInchiseDeMemorat(
   pz: number,
 ): number[][] {
   const r = pregateste(m, t, d, rules)
-  const dovedita = (k: number): boolean => {
-    const e = m.eticheta.get(k)
-    return e !== undefined && m.floods[e]!.deschisa
-  }
-  return componenteInchiseDe(t, rules, px, py, pz, r, dovedita, m.stat)
+  return componenteInchiseDe(t, rules, px, py, pz, r, dovedireMemorie(m), m.stat)
 }
 
 // ---------------------------------------------------------------------------
@@ -1128,3 +1124,126 @@ export function inchideriPlan(t: Terrain, rules: Rules, zidite: ReadonlySet<numb
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// coborarea de urgenta
+// ---------------------------------------------------------------------------
+
+/**
+ * Punga lui W in care sta (x, y, z), enumerata integral in ordinea BFS din ea; null daca celula nu
+ * e calcabila sau componenta ei e deschisa. `dovedita`: celule dovedite deschise intr-un subgraf al
+ * lui W (etichetele memoriei) — o componenta deschisa se opreste la ele.
+ */
+export function pungaDin(
+  t: Terrain,
+  rules: Rules,
+  x: number,
+  y: number,
+  z: number,
+  r: Cititor,
+  dovedita: ((k: number) => boolean) | null,
+  stat: MemorieAcces['stat'],
+): Componenta | null {
+  const nod = nodW(t, null, rules, r)
+  if (!nod.calcabila(x, y, z)) return null
+  const punga = componenta(nod, rules, x, y, z, dovedita)
+  stat.coborari++
+  stat.celuleCoborare += punga.total
+  return punga.deschisa ? null : punga
+}
+
+/**
+ * COBORAREA DE URGENTA din `punga` (a lui `pungaDin`): de pe marginea cea mai apropiata de celula
+ * de pornire (ordinea BFS), pe prima podea de dedesubt, daca e cel mult `coborareUrgentaM` mai jos
+ * si intr-o componenta DESCHISA. Iesirea: o celula a pungii cu un vecin ortogonal liber la
+ * inaltimea pionului (`agentHeadroomM` niveluri de aer), sub care se cade prin aer pana la o podea.
+ * Intoarce celula de aterizare, sau null (nicio margine de pe care sa se poata sari: jucatorul
+ * trebuie sa sape). Coborarea e INSTANTANEE: drumul prin punga nu se simuleaza.
+ */
+export function iesireDinPunga(
+  t: Terrain,
+  rules: Rules,
+  punga: Componenta,
+  r: Cititor,
+  dovedita: ((k: number) => boolean) | null,
+  stat: MemorieAcces['stat'],
+): [number, number, number] | null {
+  const H = rules.agentHeadroomM
+  const pas = Math.max(0, Math.min(4, rules.maxStepM))
+  const D = rules.coborareUrgentaM
+  if (D === 0) return null
+  const nod = nodW(t, null, rules, r)
+  const deschise = new Set<number>()
+  const opreste = (k: number): boolean => deschise.has(k) || (dovedita !== null && dovedita(k))
+  const solid = (a: number, b: number, c: number): boolean => isSolid(materialCitit(r, a, b, c))
+  for (const k of punga.celule) {
+    const cx = k % WORLD_CELLS
+    const rest = (k - cx) / WORLD_CELLS
+    const cy = rest % WORLD_CELLS
+    const cz = (rest - cy) / WORLD_CELLS - 512
+    for (const [dx, dy] of DIR4) {
+      const nx = cx + dx, ny = cy + dy
+      let liber = true
+      for (let h = 0; h < H && liber; h++) if (solid(nx, ny, cz + h)) liber = false
+      if (!liber) continue
+      // Caderea: prin aer, pana la prima podea — cel mult D niveluri.
+      let lz = cz
+      while (lz > cz - D && !solid(nx, ny, lz - 1)) lz--
+      // Un pas obisnuit ar fi fost o muchie a pungii; fara podea (mai adanc de D) nu e calcabila.
+      if (cz - lz <= pas || !nod.calcabila(nx, ny, lz)) continue
+      if (!opreste(cellKey(nx, ny, lz))) {
+        const jos = componenta(nod, rules, nx, ny, lz, opreste)
+        stat.coborari++
+        stat.celuleCoborare += jos.total
+        if (!jos.deschisa) continue
+        for (const v of jos.celule) deschise.add(v)
+      }
+      return [nx, ny, lz]
+    }
+  }
+  return null
+}
+
+/** `pungaDin` + `iesireDinPunga`: de unde coboara pionul de la (x, y, z), sau null. */
+export function iesireDeUrgenta(
+  t: Terrain,
+  rules: Rules,
+  x: number,
+  y: number,
+  z: number,
+  r: Cititor,
+  dovedita: ((k: number) => boolean) | null,
+  stat: MemorieAcces['stat'],
+): [number, number, number] | null {
+  const punga = pungaDin(t, rules, x, y, z, r, dovedita, stat)
+  return punga === null ? null : iesireDinPunga(t, rules, punga, r, dovedita, stat)
+}
+
+/**
+ * E vreun voxel de SAPAT sau de desfacut (desemnare SAPA vie) pe care un pion din `punga` il poate
+ * lucra de acolo — un loc de lucru al lui (felul, nivelurile si vecinatatea lui) in punga? Zidirea
+ * nu conteaza: materialul n-are cum ajunge intr-o punga.
+ */
+export function areDeLucruInPunga(t: Terrain, d: DesignationStore, rules: Rules, punga: Componenta): boolean {
+  const celule = new Set(punga.celule)
+  const sus = Math.max(Math.max(0, Math.min(4, rules.maxStepM)), rules.atingereSusM)
+  for (let s = 0; s < d.count; s++) {
+    if (d.alive[s] !== 1 || d.kind[s] !== Desemnare.SAPA) continue
+    const x = d.wx[s]!, y = d.wy[s]!, z = d.z[s]!
+    // Cutia pungii, largita cu cat ajunge un loc de lucru.
+    if (x < punga.x0 - 1 || x > punga.x1 + 1 || y < punga.y0 - 1 || y > punga.y1 + 1 || z < punga.z0 - sus || z > punga.z1 + sus) continue
+    const fel = felSapa(t, x, y, z)
+    for (const dzs of niveluriDeLucru(fel, rules)) {
+      for (const [dx, dy] of vecinatate(fel)) if (celule.has(cellKey(x + dx, y + dy, z + dzs))) return true
+    }
+  }
+  return false
+}
+
+/** Celula k e etichetata DESCHISA in memoria lumii (sincronizata)? Pentru opririle flood-urilor pe W. */
+export function dovedireMemorie(m: MemorieAcces): (k: number) => boolean {
+  return (k) => {
+    const e = m.eticheta.get(k)
+    return e !== undefined && m.floods[e]!.deschisa
+  }
+}
