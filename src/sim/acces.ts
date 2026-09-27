@@ -1053,9 +1053,12 @@ export interface InchideriPlan {
  * Ce ar INCHIDE planul, dus pana unde se poate (W ∪ Z): avertisment, nu refuz — regula de
  * sigilare va opri ultima piesa cat timp ceva e inauntru.
  *
- * O componenta a lui W ∪ Z care nu contine si nu atinge nicio celula pe care Z o schimba (coloana
- * fiecarei piese si cele 4 vecine, pe nivelurile pe care o muchie poate trece prin ea) e si
- * componenta a lui W, cu aceleasi celule — deci inchisa si azi, nu din vina planului. Asa ca se
+ * O componenta a lui W ∪ Z care nu contine si nu atinge nicio celula pe care Z o schimba e si
+ * componenta a lui W, cu aceleasi celule — deci inchisa si azi, nu din vina planului. Semintele
+ * sunt cele 4 coloane vecine fiecarei piese, pe nivelurile pe care o muchie poate trece prin
+ * coloana ei; coloana piesei insesi nu trebuie: celulele de sub ea nu mai sunt calcabile, iar
+ * cea de peste ea ori atinge o vecina (si e gasita de acolo), ori e singura, n-a fost calcabila
+ * azi si nu poate fi o celula intrebata. Asa ca se
  * enumera O DATA pe Z doar pungile care ating piesele, iar o celula intrebata costa O(1). Prima
  * forma pornea un flood de la fiecare celula intrebata: mormanele din regiuni diferite plateau
  * cate 2.048 de celule fiecare, plus un flood „acum" nereținut pe fiecare celula inchisa —
@@ -1083,7 +1086,7 @@ export function inchideriPlan(t: Terrain, rules: Rules, zidite: ReadonlySet<numb
       const rest = (k - px) / WORLD_CELLS
       const py = rest % WORLD_CELLS
       const pz = (rest - py) / WORLD_CELLS - 512
-      for (const [dx, dy] of COLOANA_SI_DIR4) {
+      for (const [dx, dy] of DIR4) {
         const x = px + dx, y = py + dy
         for (let z = pz - H - pas; z <= pz + 1 + pas; z++) {
           if (!dupa.calcabila(x, y, z) || vazute.has(cellKey(x, y, z))) continue
@@ -1125,4 +1128,3 @@ export function inchideriPlan(t: Terrain, rules: Rules, zidite: ReadonlySet<numb
   }
 }
 
-const COLOANA_SI_DIR4: readonly (readonly [number, number])[] = [[0, 0], ...DIR4]

@@ -543,11 +543,4 @@ export const MUTATII = [
     b: '        for (let z = pz; z <= pz + 1 + pas; z++) {\n          if (!dupa.calcabila(x, y, z) || vazute.has(cellKey(x, y, z))) continue',
     t: 'tests/acces-joc.test.ts', e: 'PUNGILE PLANULUI',
   },
-  {
-    n: 'pungile planului nu pornesc din coloana piesei (celula noua de peste ea)',
-    f: 'src/sim/acces.ts',
-    a: 'const COLOANA_SI_DIR4: readonly (readonly [number, number])[] = [[0, 0], ...DIR4]',
-    b: 'const COLOANA_SI_DIR4: readonly (readonly [number, number])[] = [...DIR4]',
-    t: 'tests/acces-joc.test.ts', e: 'PUNGILE PLANULUI',
-  },
 ]

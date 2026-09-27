@@ -584,6 +584,10 @@ test('PREVIZUALIZAREA numara ce ar INCHIDE planul — pioni, mormane, zone — d
   for (const z of [g, g - 1]) for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) sapaCmd(w, x0 + 10 + dx, y0 + dy, z)
   curataMormane(w, x0 + 9, y0 - 1, x0 + 13, y0 + 3)
   pion(w, x0 + 11, y0 + 1, g - 1)
+  // Si una LIPITA de zidul camerei: punga ei atinge piesele (se enumera), dar era inchisa si acum.
+  for (const z of [g, g - 1]) for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) sapaCmd(w, x0 + 5 + dx, y0 + 1 + dy, z)
+  curataMormane(w, x0 + 4, y0, x0 + 8, y0 + 4)
+  pion(w, x0 + 5, y0 + 2, g - 1)
   const p = constructiaPrevizualizata(w, R)
   assert.deepEqual(p.inchise, { pioni: 1, mormane: 1, zone: 1 })
 })
@@ -673,7 +677,7 @@ test('hash de referinta al accesului vertical: casa cu doua etaje dupa 12.000 de
  * mesei + componenta noua care o contine, prin celula de peste q): 2n ≥ pragul, deci o promitea.
  * Un pion pe masa: fara constructor in punga, privirea inainte nu s-ar folosi deloc.
  */
-function mesa(ordine: 'qp' | 'pq'): { p: ReturnType<typeof constructiaPrevizualizata>; kp: number; kq: number } {
+function mesa(ordine: 'qp' | 'pq'): { construibile: number[]; kp: number; kq: number } {
   const rules = cuPraguriJoc(100, 400)
   const S = 8
   const { w, wx, wy, g } = sitPlat(4242, S + 4)
@@ -694,8 +698,13 @@ function mesa(ordine: 'qp' | 'pq'): { p: ReturnType<typeof constructiaPrevizuali
     const o = applyCommand(w, { kind: 'desemneaza', wx: x, wy: y, z, piesa }, rules)
     assert.ok(o.ok, `fixtura: santierul ${JSON.stringify(o)}`)
   }
-  assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (mx + 6) * 1000 + 500, y: (my + 6) * 1000 + 500, z: g + 3, faction: Faction.ASEZARE }, rules).ok)
-  return { p: constructiaPrevizualizata(w, rules), kp: cellKey(p[0], p[1], p[2]), kq: cellKey(q[0], q[1], q[2]) }
+  // Predicatul direct, fara lista de constructori (= unul in orice punga): cu pionul pe masa,
+  // eticheta lui trece la componenta noua si filtrul constructorilor ascunde suma dubla aici —
+  // dar nu si cand o a treia punga, cu pion, e vecina celulei noi.
+  const kp = cellKey(p[0], p[1], p[2]), kq = cellKey(q[0], q[1], q[2])
+  const celule = ordine === 'qp' ? [kq, kp] : [kp, kq]
+  const cu = constructiaPosibila(w.terrain, rules, celule, [], predicatAcces(w.terrain, rules, new Set(celule)))
+  return { construibile: cu.construibile, kp, kq }
 }
 
 function cuPraguriJoc(natural: number, total: number): typeof R {
@@ -706,10 +715,8 @@ function cuPraguriJoc(natural: number, total: number): typeof R {
 
 test('INCHIDEREA SIMULATA nu depinde de ordinea planului: masa naturala, cu privirea inainte in aceeasi trecere cu zidul', () => {
   for (const ordine of ['qp', 'pq'] as const) {
-    const { p, kp, kq } = mesa(ordine)
-    assert.deepEqual(p.construibile, [kq], `[${ordine}] doar zidul de pe marginea mesei se zideste`)
-    assert.deepEqual(p.faraAcces, [kp], `[${ordine}] gaura din masa e fara acces`)
-    assert.deepEqual(p.cauze, [CauzaAcces.INCINTA])
+    const { construibile, kq } = mesa(ordine)
+    assert.deepEqual(construibile, [kq], `[${ordine}] doar zidul de pe marginea mesei se zideste; gaura din masa e fara acces`)
   }
 })
 
