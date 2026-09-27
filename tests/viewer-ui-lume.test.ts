@@ -177,6 +177,12 @@ test('model: alerta de foame tace cat mancarea e la indemana si apare cand nu se
   while (solid(departe.w, departe.sit.wx + dx, departe.sit.wy) === null) dx++
   lasaItem(departe.w, Item.HRANA, 75, departe.sit.wx + dx, departe.sit.wy)
   for (const w of [cu.w, departe.w]) for (let i = 0; i < w.agents.count; i++) w.agents.nevoi[i * NEVOI + Nevoie.FOAME] = R.nevoi[Nevoie.FOAME]!.prag - 50
+  // Definitia, direct: sub prag, dar fara sa fi CAUTAT (un om care lucreaza si mananca dupa job — viata
+  // normala), semnalul tace. Abia dupa o cautare esuata (`nevoieReincercaLaTick` in viitor) se aprinde.
+  assert.equal(semnaleAlerte(cu.w, R, null).get('flamanzi')?.activ, false, 'flamand care n-a cautat inca')
+  cu.w.agents.nevoieReincercaLaTick[0 * NEVOI + Nevoie.FOAME] = cu.w.tick + 100
+  assert.equal(semnaleAlerte(cu.w, R, null).get('flamanzi')?.activ, true, 'a cautat si n-a gasit')
+  cu.w.agents.nevoieReincercaLaTick[0 * NEVOI + Nevoie.FOAME] = 0
   const aCu = creeazaAlerte()
   const aDeparte = creeazaAlerte()
   let aMancat = 0

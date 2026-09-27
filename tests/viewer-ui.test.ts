@@ -272,6 +272,15 @@ test('alerte: apare exact dupa intarziere, si doar daca conditia TINE neintrerup
 })
 
 test('alerte: dupa ce dispare, nu reapare in racire, chiar daca revine conditia', () => {
+  // Fara intarziere, ca racirea sa fie SINGURA care opreste reaparitia: cu o intarziere egala cu
+  // racirea, reaparitia ar fi fost oprita oricum, iar testul n-ar fi legat racirea (proba RATATA).
+  const fara: RegulaAlerta[] = [{ id: 'r', severitate: Severitate.ATENTIE, intarziereS: 0, racireS: 10 }]
+  const b = creeazaAlerte()
+  assert.equal(actualizeaza(b, fara, new Map([['r', da()]]), 0, TPS).length, 1)
+  assert.equal(actualizeaza(b, fara, new Map(), 10, TPS).length, 0)
+  assert.equal(actualizeaza(b, fara, new Map([['r', da()]]), 20, TPS).length, 0, 'in racire (pana la 210)')
+  assert.equal(actualizeaza(b, fara, new Map([['r', da()]]), 209, TPS).length, 0)
+  assert.equal(actualizeaza(b, fara, new Map([['r', da()]]), 210, TPS).length, 1)
   const a = creeazaAlerte()
   actualizeaza(a, R, new Map([['a', da()]]), 0, TPS)
   actualizeaza(a, R, new Map([['a', da()]]), 100, TPS)
