@@ -35,6 +35,7 @@ import { Faction, FelJob, MM_PER_CELL, pasDeMers } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { isSolid } from '../src/sim/terrain/chunk.ts'
 import { groundLevelM, materialAt } from '../src/sim/terrain/terrain.ts'
+import { slotDeInstanta } from './tinta.ts'
 
 /** Pasi de simulare pe secunda. `ticksPerSecond` din content e sursa. */
 function pasMs(rules: Rules): number {
@@ -56,7 +57,14 @@ export interface AgentLayer {
   /** Milisecunde nescurse din tickul curent. Pentru interpolare. */
   rest: number
   vii: number
+  /**
+   * Instanta → slotul agentului, rescris la fiecare cadru (`slotDeInstanta`). Instantele sunt
+   * COMPACTATE pe cei vii, deci dupa prima plecare instanta n nu mai e slotul n: clicul pe un pion
+   * ar fi aratat altul (panoul de design al UI-ului, T9).
+   */
+  readonly sloturi: Int32Array
 }
+
 
 export function createAgentLayer(scene: THREE.Scene, capacity: number): AgentLayer {
   // O capsula: ceva ce se citeste ca „om" la distanta de camera, fara model.
@@ -74,7 +82,7 @@ export function createAgentLayer(scene: THREE.Scene, capacity: number): AgentLay
   mesh.count = 0
   mesh.frustumCulled = false
   scene.add(mesh)
-  return { mesh, rest: 0, vii: 0 }
+  return { mesh, rest: 0, vii: 0, sloturi: new Int32Array(capacity) }
 }
 
 /**
@@ -84,8 +92,10 @@ export function createAgentLayer(scene: THREE.Scene, capacity: number): AgentLay
  * z = 0, iar solul de sub ei era la -70 m. Un agent in aer nu ajunge in nicio
  * regiune, deci nu merge nicaieri — si costa o reconstructie de regiuni la
  * fiecare tick, la nesfarsit.
+ *
+ * `doarColonisti`: jocul nou porneste fara jefuitori. Demo-ul pastreaza unul din sase, ca inainte.
  */
-export function spawnNear(world: World, wx: number, wy: number, raza: number, cati: number): number {
+export function spawnNear(world: World, wx: number, wy: number, raza: number, cati: number, doarColonisti = false): number {
   let pusi = 0
   // Spirala patrata in jurul punctului: determinista si fara zar.
   for (let r = 0; r <= raza && pusi < cati; r++) {
@@ -101,7 +111,7 @@ export function spawnNear(world: World, wx: number, wy: number, raza: number, ca
           x: cx * MM_PER_CELL + MM_PER_CELL / 2,
           y: cy * MM_PER_CELL + MM_PER_CELL / 2,
           z: g.value + 1,
-          faction: pusi % 6 === 0 ? Faction.JEFUITOR : Faction.ASEZARE,
+          faction: doarColonisti || pusi % 6 !== 0 ? Faction.ASEZARE : Faction.JEFUITOR,
         })
         if (out.ok) pusi++
       }
@@ -162,9 +172,10 @@ export function updateAgentLayer(layer: AgentLayer, world: World, rules: Rules):
   // Fractiunea de tick scursa, ca miscarea sa fie neteda si intre doua tickuri.
   const alpha = Math.min(1, layer.rest / pasMs(rules))
 
+  const n0 = slotDeInstanta(a.alive, a.count, layer.sloturi)
   let n = 0
-  for (let i = 0; i < a.count; i++) {
-    if (a.alive[i] === 0) continue
+  for (let k = 0; k < n0; k++) {
+    const i = layer.sloturi[k]!
 
     const cx = cellOf(a.x[i]!)
     const cy = cellOf(a.y[i]!)

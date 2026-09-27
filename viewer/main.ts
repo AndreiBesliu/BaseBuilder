@@ -15,10 +15,10 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { createWorld, tick as simTick } from '../src/sim/world.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { describe } from '../src/sim/result.ts'
+import type { Refusal } from '../src/sim/result.ts'
 import { CHUNK_CELLS, isSolid, Material, promotedBaseM, VOXEL_LEVELS } from '../src/sim/terrain/chunk.ts'
 import type { Chunk } from '../src/sim/terrain/chunk.ts'
-import { groundLevelM, inWorld, materialAt } from '../src/sim/terrain/terrain.ts'
-import { Biome, MACRO_METERS, sampleMacro } from '../src/sim/terrain/macro.ts'
+import { groundLevelM, inWorld, materialAt, voxelRangeM } from '../src/sim/terrain/terrain.ts'
 import { Face, meshChunk } from '../src/render/mesher.ts'
 import type { ChunkNeighbours } from '../src/render/mesher.ts'
 import { AO_FACTOR, quadColor, variatiaLocului } from '../src/render/palette.ts'
@@ -30,20 +30,40 @@ import { createAmprentaOverlay, FORME, rebuildAmprentaOverlay } from './overlay-
 import { createJobOverlay, rebuildJobOverlay, rezumatJoburi } from './overlay-joburi.ts'
 import { actualizeazaInchise, avanseazaStabilitate, createStabilityOverlay, pornesteStabilitate, progresStabilitate, redeseneazaStabilitate } from './overlay-stabilitate.ts'
 import { Item, Piesa } from '../src/sim/state.ts'
-import { desemnareLaCelula } from '../src/sim/desemnari.ts'
-import { alegeColoana, celulaLangaFata, cubAtins, primulVizibil } from './tinta.ts'
+import { desemnareLaCelula, slotDesemnare } from '../src/sim/desemnari.ts'
 import type { CelulaJ, Impact, Raza } from './tinta.ts'
 import { celulaDeZonaLa } from '../src/sim/zone.ts'
-import { decodeCell } from '../src/sim/path.ts'
+import { cellKey } from '../src/sim/path.ts'
 import { createDensePanel, densePanelReport, PANEL_HZ, tickDensePanel } from './panel-dens.ts'
-import { rebuildDirty } from '../src/sim/regions.ts'
+import { isWalkable, rebuildDirty } from '../src/sim/regions.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
 import { meshHeightfield } from '../src/render/heightfield.ts'
 import { createAgentLayer, spawnNear, stepSim, updateAgentLayer } from './agenti.ts'
 import { buildM10 } from '../src/harness/fixture-m10.ts'
 import { SDIG_MAX_INCERCARI, SDIG_OFFSET_INCALZIRE, SDIG_SPAN_INCALZIRE, sapaturaUrmatoare } from '../src/harness/sdig.ts'
+import { decode, encode } from '../src/sim/save.ts'
+import type { Command } from '../src/sim/commands.ts'
+import type { World } from '../src/sim/state.ts'
+import { Faction, slotOf } from '../src/sim/state.ts'
+import { JURNAL_CAP } from '../src/sim/terrain/terrain.ts'
+import { alegeTinta } from './tinta.ts'
+import type { ModTinta } from './tinta.ts'
+import { modPornire, parametriJocNou } from './ui/pornire.ts'
+import { locDemo, locJocNou } from './ui/loc.ts'
+import { actiuneTasta, tintaEditabila } from './ui/taste.ts'
+import type { Actiune } from './ui/taste.ts'
+import { normalizeaza, planDreptunghi, textPlan, Unealta } from './ui/dreptunghi.ts'
+import type { Lumea, PlanDreptunghi, UnealtaId } from './ui/dreptunghi.ts'
+import { textMotiv } from './ui/texte.ts'
+import { cifreDinReguli } from './ui/model.ts'
+import { citesteSalvare, listaSalvari, scrieSalvare, stergeSalvare } from './ui/salvari-idb.ts'
+import { FORMAT_SALVARE, numeFisier, valideazaSalvare } from './ui/salvari-plic.ts'
+import type { Salvare } from './ui/salvari-plic.ts'
+import type { ContextUI, UI } from './ui/panouri.ts'
+import { previzInvechita } from './overlay-stabilitate.ts'
 
-const SEED = 20260913
+/** Lumea demo-ului, a modului de verificare si a gate-ului. Un joc nou isi alege seed-ul. */
+const SEED_DEMO = 20260913
 /** Cate chunk-uri in jurul focusului se deseneaza. 11 = discul rezident intreg. */
 const VIEW_RADIUS = 11
 
@@ -54,6 +74,12 @@ const params = new URLSearchParams(location.search)
 const SCENARIO = params.get('scenario')
 /** Proba negativa ceruta: instrumentul TREBUIE sa iasa rosu pe ea. */
 const NEGATIVE_PROBE = params.get('probe')
+/**
+ * Modul paginii (viewer/ui/pornire.ts, testat pe fiecare URL al lansatoarelor de gate): gate, ecranul
+ * de titlu cu demo-ul, joc nou, incarcare, verificare. UI-ul de joc NU se monteaza pe nicio pagina de
+ * masura — nici DOM, nici stil, nici ascultatori.
+ */
+const MOD = modPornire(params)
 
 /**
  * Modul de pornire pentru verificarile pe ecran (OWNER_VERIFY 13), tot din URL:
@@ -80,7 +106,8 @@ interface Pornire {
 }
 
 function citestePornirea(): Pornire | null {
-  if (SCENARIO !== null) return null
+  // Doar modul de verificare: la un joc nou, `piatra` si `hrana` sunt ale jocului, nu ale probei.
+  if (MOD.mod !== 'verificare') return null
   const ignorate: string[] = []
   const intreg = (nume: string, min: number): number | null => {
     const v = params.get(nume)
@@ -125,36 +152,38 @@ const el = (id: string) => document.getElementById(id)!
  * asaza jucatorul intr-o vale buna, nu la intamplare; viewerul face la fel,
  * si alegerea ramane determinista pentru acelasi seed.
  */
-function findSettleableChunk(): { cx: number; cy: number } {
-  let best = { cx: 250, cy: 250, score: -Infinity }
-  for (let cy = 60; cy < 460; cy += 7) {
-    for (let cx = 60; cx < 460; cx += 7) {
-      const sx = (cx * CHUNK_CELLS) / MACRO_METERS
-      const sy = (cy * CHUNK_CELLS) / MACRO_METERS
-      const s = sampleMacro(SEED, sx, sy)
-      if (s.biome === Biome.APA) continue
-      if (s.heightDm < 50 || s.heightDm > 700) continue
-      const around = [
-        sampleMacro(SEED, sx + 2, sy).heightDm,
-        sampleMacro(SEED, sx - 2, sy).heightDm,
-        sampleMacro(SEED, sx, sy + 2).heightDm,
-        sampleMacro(SEED, sx, sy - 2).heightDm,
-      ]
-      // Un pic de relief e bun — o vale in care sa sapi. Prea mult inseamna perete.
-      const spread = Math.max(...around) - Math.min(...around)
-      const score = s.soil + Math.min(spread, 300) / 4 - Math.max(0, spread - 400) / 2
-      if (score > best.score) best = { cx, cy, score }
-    }
-  }
-  return { cx: best.cx, cy: best.cy }
-}
+// Alegerea locului sta acum in viewer/ui/loc.ts (`locDemo`, neschimbata — testul o ancoreaza pe
+// 389/144 —, si `locJocNou`, care cauta un loc PLAT printre primii 30 de candidati).
 
-const spot = findSettleableChunk()
+/** Ce spune pornirea cand n-a mers cum s-a cerut (o salvare care nu se poate incarca). */
+let mesajPornireUI = ''
+let salvareIncarcata: Salvare | null = null
+let lumeIncarcata: World | null = null
+if (MOD.mod === 'incarca') {
+  // Singurul `await` inainte de lume, si doar aici: o pagina de gate nu trece niciodata pe aici.
+  try {
+    const r = await citesteSalvare(params.get('incarca') ?? '')
+    if (!r.ok) mesajPornireUI = r.motiv
+    else {
+      const d = decode(r.value.lume, DEFAULT_RULES)
+      if (!d.ok) mesajPornireUI = textMotiv('incarcare', d.reason, 0, d.params).titlu
+      else { lumeIncarcata = d.value; salvareIncarcata = r.value }
+    }
+  } catch (e) {
+    mesajPornireUI = `Salvările nu se pot citi: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
+const JOC_NOU = MOD.mod === 'joc-nou' ? parametriJocNou(params, DEFAULT_RULES.agentCapacity, SEED_DEMO) : null
+/** Modul in care chiar ruleaza pagina: o incarcare care n-a mers cade pe ecranul de titlu, cu motivul. */
+const MOD_JOC: 'gate' | 'titlu' | 'joc-nou' | 'incarca' | 'verificare' = MOD.mod === 'incarca' && lumeIncarcata === null ? 'titlu' : MOD.mod
+const SEED = lumeIncarcata?.seed ?? JOC_NOU?.seed ?? SEED_DEMO
+const LOC_NOU = JOC_NOU ? locJocNou(SEED) : null
+const spot = lumeIncarcata !== null ? { cx: lumeIncarcata.terrain.focusCx, cy: lumeIncarcata.terrain.focusCy } : LOC_NOU ?? locDemo(SEED)
 const FOCUS_CX = spot.cx
 const FOCUS_CY = spot.cy
 
-const world = createWorld(SEED)
-applyCommand(world, { kind: 'setFocus', cx: FOCUS_CX, cy: FOCUS_CY })
+const world = lumeIncarcata ?? createWorld(SEED)
+if (lumeIncarcata === null) applyCommand(world, { kind: 'setFocus', cx: FOCUS_CX, cy: FOCUS_CY })
 
 const baseX = FOCUS_CX * CHUNK_CELLS
 const baseY = FOCUS_CY * CHUNK_CELLS
@@ -218,24 +247,30 @@ const AGENTI_ACTIVI = SCENARIO === null
 // adica bugetul din PLAN §2 pentru asezarea de la luna 10. Un gate rulat pe cea
 // mica trece cu ORICE stiva si nu spune nimic; e fals pozitiv prin constructie.
 // De asta scenariile de gate incarca mereu M10, si niciodata fortareata.
-if (SCENARIO === null) {
-  buildFortress()
-} else {
+if (SCENARIO !== null) {
   buildM10(world.terrain, FOCUS_CX, FOCUS_CY)
+} else if (lumeIncarcata === null && JOC_NOU === null) {
+  // Demo, verificare si bisectie: fortareata, ca inainte. Un joc nou porneste pe un loc neatins.
+  buildFortress()
 }
 
-if (AGENTI_ACTIVI) {
-  spawnNear(world, baseX + 16, baseY + 16, 14, 24)
+if (AGENTI_ACTIVI && lumeIncarcata === null) {
+  if (JOC_NOU !== null && LOC_NOU !== null) spawnNear(world, LOC_NOU.wx, LOC_NOU.wy, 4, JOC_NOU.oameni, true)
+  else spawnNear(world, baseX + 16, baseY + 16, 14, 24)
 }
 
 const camCeruta = PORNIRE?.cam ?? null
 const camInLume = camCeruta !== null && inWorld(Math.floor(camCeruta.x / CHUNK_CELLS), Math.floor(camCeruta.y / CHUNK_CELLS))
-/** Unde priveste camera la pornire, in celule de lume: `?cam`, altfel fortareata. */
-const TINTA_START = camInLume ? camCeruta! : { x: baseX + 16, y: baseY + 16 }
+/** Tinta camerei din salvare, in celule. */
+const tintaSalvata = salvareIncarcata !== null ? { x: Math.floor(salvareIncarcata.meta.camera.tinta[0]), y: Math.floor(salvareIncarcata.meta.camera.tinta[2]) } : null
+/** Unde priveste camera la pornire, in celule de lume: `?cam`, salvarea, locul jocului nou, altfel fortareata. */
+const TINTA_START = camInLume ? camCeruta! : tintaSalvata ?? (LOC_NOU !== null ? { x: LOC_NOU.wx, y: LOC_NOU.wy } : { x: baseX + 16, y: baseY + 16 })
 /** Chunk-ul focusului la pornire. Cu `?cam`, cel de sub camera — si sim-ul il afla prin `setFocus`. */
 const START_CX = Math.floor(TINTA_START.x / CHUNK_CELLS)
 const START_CY = Math.floor(TINTA_START.y / CHUNK_CELLS)
-if (START_CX !== FOCUS_CX || START_CY !== FOCUS_CY) applyCommand(world, { kind: 'setFocus', cx: START_CX, cy: START_CY })
+// O lume incarcata are doar chunk-urile promovate: `decode` nu reface discul rezident (377 → 21,
+// masurat de panou, CS-12). `setFocus` il reface — deci si cand focusul e acelasi.
+if (lumeIncarcata !== null || START_CX !== FOCUS_CX || START_CY !== FOCUS_CY) applyCommand(world, { kind: 'setFocus', cx: START_CX, cy: START_CY })
 
 /**
  * Cate celule (pe distanta Chebyshev) raman libere in jurul tintei camerei. Casa din OWNER_VERIFY
@@ -286,6 +321,14 @@ if (PORNIRE !== null) {
   const ignorate = [...PORNIRE.ignorate, ...(camCeruta !== null && !camInLume ? [`cam=${camCeruta.x},${camCeruta.y} (in afara lumii)`] : [])]
   if (ignorate.length > 0) mesajPornire.push(`IGNORAT: ${ignorate.join(', ')}`)
 }
+if (JOC_NOU !== null && LOC_NOU !== null) {
+  // Mormanele jocului nou, prin comenzi, ca orice schimbare a lumii; inelele incep la 6 celule de
+  // centru, deci oamenii (nascuti la cel mult 4) nu stau pe ele.
+  const rp = lasaMormane(Item.PIATRA, JOC_NOU.piatra, LOC_NOU.wx, LOC_NOU.wy)
+  const rh = lasaMormane(Item.HRANA, JOC_NOU.hrana, LOC_NOU.wx, LOC_NOU.wy)
+  mesajPornire.push(`joc nou · seed ${SEED} · ${LOC_NOU.plate}/676 ferestre plate · piatra ${rp.pus} · hrana ${rh.pus}`)
+}
+if (lumeIncarcata !== null) mesajPornire.push(`incarcat · ${salvareIncarcata?.nume ?? ''}`)
 
 // --------------------------------------------------------------------------
 // 2. scena
@@ -463,6 +506,13 @@ const gCenter = groundLevelM(world.terrain, TINTA_START.x, TINTA_START.y)
 const centerY = gCenter.ok ? gCenter.value : 0
 controls.target.set(centerX, centerY + 4, centerZ)
 camera.position.set(centerX - 46, centerY + 34, centerZ + 46)
+// Un joc nou incepe aproape de oameni: de la 72 m, un pion avea 4×13 pixeli.
+if (JOC_NOU !== null) { controls.target.set(centerX + 0.5, centerY + 1, centerZ + 0.5); camera.position.set(centerX - 18, centerY + 17, centerZ + 19) }
+if (salvareIncarcata !== null) {
+  const c = salvareIncarcata.meta.camera
+  controls.target.set(c.tinta[0], c.tinta[1], c.tinta[2])
+  camera.position.set(c.pos[0], c.pos[1], c.pos[2])
+}
 controls.update()
 
 // --------------------------------------------------------------------------
@@ -525,6 +575,42 @@ function remeshAfterEdit(wx: number, wy: number, promotedBefore: Set<number>): v
     const c = world.terrain.chunks.get(key)
     if (c) buildChunkMesh(c)
   }
+}
+
+/**
+ * Mesh-urile de refacut dupa editarile de teren de la ultima trecere, din JURNALUL terenului
+ * (`terrain.jurnal`, ultimele `JURNAL_CAP` editari). Inainte, fiecare cadru cu un pion la lucru lua
+ * un instantaneu al tuturor cheilor de desemnare (0,3 ms mediana, 2 ms la 4096 de desemnari — panoul
+ * UI-ului, CG-7) si refacea doar in jurul desemnarilor disparute: o prabusire declansata de o sapatura
+ * edita celule care nu fusesera desemnate. Jurnalul le are pe toate, si costa 0 cand nu se sapa nimic.
+ *
+ * „Era promovat" = mesh-ul lui e deja de voxeli, sau chunk-ul n-are voxeli: se refac doar vecinii
+ * promovati ACUM (apron-ul) si chunk-urile atinse, ca in `remeshAfterEdit`.
+ */
+let editariVazute = world.terrain.editari
+const deRemesh = new Set<number>()
+const deRemeshEditare = new Set<number>()
+function remeshDinJurnal(): void {
+  const t = world.terrain
+  const noi = t.editari - editariVazute
+  if (noi === 0) return
+  deRemesh.clear()
+  if (noi > JURNAL_CAP) {
+    for (const key of meshes.keys()) deRemesh.add(key)
+  } else {
+    const eraPromovat = (key: number): boolean => meshes.get(key)?.material === voxelMaterial || t.chunks.get(key)?.voxels === null
+    for (let n = editariVazute; n < t.editari; n++) {
+      const j = (n % JURNAL_CAP) * 3
+      chunkuriDeRefacut(t.jurnal[j]!, t.jurnal[j + 1]!, (key) => t.chunks.has(key), eraPromovat, deRemeshEditare)
+      for (const k of deRemeshEditare) deRemesh.add(k)
+    }
+  }
+  editariVazute = t.editari
+  for (const key of deRemesh) {
+    const c = t.chunks.get(key)
+    if (c) buildChunkMesh(c)
+  }
+  recount()
 }
 
 function dropMesh(key: number): void {
@@ -673,6 +759,10 @@ if (PORNIRE?.slice != null) {
   sliceLevel = Math.max(lo, Math.min(hi, PORNIRE.slice))
   if (sliceLevel !== PORNIRE.slice) mesajPornire.push(`slice=${PORNIRE.slice} in afara ferestrei [${lo}, ${hi}], pus la ${sliceLevel}`)
 }
+if (salvareIncarcata !== null && salvareIncarcata.meta.slice !== null) {
+  const { lo, hi } = plajaSlice()
+  sliceLevel = Math.max(lo, Math.min(hi, salvareIncarcata.meta.slice))
+}
 applySlice()
 
 // --------------------------------------------------------------------------
@@ -772,9 +862,8 @@ const DRAG_PX = 4
 let tastaZ = false
 let tastaX = false
 let coltZona: { wx: number; wy: number; z: number } | null = null
-// Piesa aleasa cu P. Pe NICIUNA, click-ul cere o SAPATURA, ca pana acum; pe o piesa,
-// cere piesa in celula de aer din fata fetei atinse — fara asta, viewer-ul nu putea
-// desena nicio constructie, deci nici grinda.
+// Piesa aleasa cu P, FARA UI (rularile de gate): pe NICIUNA, click-ul cere o SAPATURA; pe o piesa,
+// cere piesa. Cu UI, piesa e a uneltei (`ui.unealta`, `ui.piesa`) — vezi `piesaCurenta`.
 const PIESE_VIEWER: readonly number[] = [Piesa.NICIUNA, Piesa.PERETE, Piesa.PODEA, Piesa.SCARA, Piesa.GRINDA]
 const NUME_PIESA_VIEWER: Readonly<Record<number, string>> = {
   [Piesa.NICIUNA]: 'sapa (P)',
@@ -784,8 +873,23 @@ const NUME_PIESA_VIEWER: Readonly<Record<number, string>> = {
   [Piesa.GRINDA]: 'grinda',
 }
 let piesaAleasa: number = Piesa.NICIUNA
-window.addEventListener('keydown', (ev) => { if (ev.key === 'z' || ev.key === 'Z') tastaZ = true; if (ev.key === 'x' || ev.key === 'X') tastaX = true })
+/** UI-ul de joc, montat la final (import dinamic) — `null` pe paginile de gate. */
+let ui: UI | null = null
+const cifre = cifreDinReguli(DEFAULT_RULES)
+
+/** Tinta evenimentului e un camp de text: tastele de joc nu au voie sa-l fure (panoul, I6). */
+function inCamp(ev: Event): boolean {
+  const t = ev.target as HTMLElement | null
+  return tintaEditabila(t?.tagName, t?.isContentEditable ?? false)
+}
+window.addEventListener('keydown', (ev) => {
+  if (inCamp(ev) || ev.ctrlKey || ev.metaKey || ev.altKey || (ui?.modalDeschis() ?? false)) return
+  if (ev.key === 'z' || ev.key === 'Z') tastaZ = true
+  if (ev.key === 'x' || ev.key === 'X') tastaX = true
+})
 window.addEventListener('keyup', (ev) => { if (ev.key === 'z' || ev.key === 'Z') tastaZ = false; if (ev.key === 'x' || ev.key === 'X') tastaX = false })
+// Un Alt+Tab cu Z tinut nu mai trimite keyup: fara asta, urmatorul click ar picta un depozit.
+window.addEventListener('blur', () => { tastaZ = false; tastaX = false })
 let downX = 0
 let downY = 0
 let moved = 0
@@ -816,22 +920,42 @@ function cuburiJ(): CelulaJ[] {
   return out
 }
 
+/** Unealta in vigoare: a UI-ului, sau — fara UI — cea pe care o implica piesa aleasa cu P. */
+function unealtaCurenta(): UnealtaId {
+  if (ui !== null) return ui.unealta
+  return piesaAleasa === Piesa.NICIUNA ? Unealta.SAPA : Unealta.CONSTRUIESTE
+}
+
+/** Piesa pe care o deseneaza click-ul simplu acum (`Piesa.NICIUNA` = sapa). */
+function piesaCurenta(): number {
+  if (ui !== null) return ui.unealta === Unealta.CONSTRUIESTE ? ui.piesa : Piesa.NICIUNA
+  return piesaAleasa
+}
+
+/**
+ * Felul tintei, din modificatori si unealta. Modificatorii de azi castiga peste orice unealta:
+ * Z/X tinute = zona, Ctrl = retrage, Alt = sapa pe loc (solidul), Shift = zideste pe loc (fata).
+ */
+function modTinta(m: Modificatori): ModTinta {
+  if (tastaZ || tastaX) return 'zona'
+  if (m.ctrl && !m.shift && !m.alt) return 'retrage'
+  if (m.alt) return 'sapa'
+  if (m.shift) return 'fata'
+  switch (unealtaCurenta()) {
+    case Unealta.SAPA: return 'sapa'
+    case Unealta.CONSTRUIESTE: return 'piesa'
+    case Unealta.ANULEAZA: return 'retrage'
+    case Unealta.ZONA:
+    case Unealta.STERGE_ZONA: return 'zona'
+    default: return 'inspecteaza'
+  }
+}
+
 /**
  * Celula pe care o tinteste un click la pixelul dat, cu modificatorii dati. O singura functie
- * pentru click si pentru cursorul-fantoma: ce arata fantoma e ce face click-ul.
- *
- * Trei feluri de tinta:
- *  - **Nivelul activ** — cu o piesa aleasa si slice-ul pornit (DESIGN §5.2: „toate ordinele se
- *    aplica la nivelul activ"): coloana lucrului VAZUT sub cursor, la cota nivelului activ. Regula
- *    si motivul ei sunt in viewer/tinta.ts. Shift+click NU intra aici: e unealta de test „zideste pe
- *    loc", si ramane pe fata atinsa, cu sau fara piesa aleasa.
- *  - **Retragerea** (Ctrl+click) — cubul J vazut, oriunde e atins, pe orice nivel netaiat; fara
- *    cub sub cursor, celula pe care ar fi desenat click-ul simplu.
- *  - **Fata atinsa** — restul: o jumatate de celula in fata fetei (zidit, piesa fara slice) sau in
- *    spatele ei (sapat). Punctul de impact sta EXACT pe suprafata, deci rotunjit ar nimeri
- *    sistematic celula de aer de deasupra solului. Fata e prima VIZIBILA: cu slice-ul pornit,
- *    raycaster-ul atinge si teren taiat, invizibil — un click pe solul unei vai, printr-un deal
- *    taiat, desemna o sapatura in dealul pe care nu-l vedea nimeni (recenzia, `p15-sapa-taiat.mjs`).
+ * pentru click, pentru cursorul-fantoma si pentru colturile dreptunghiului: ce arata fantoma e ce
+ * face click-ul. Ramificarea e in viewer/tinta.ts (`alegeTinta`, testata); aici doar raycast-ul.
+ * La `zona`, celula intoarsa e solidul: zona se picteaza pe celula de deasupra lui.
  */
 function tintaLa(px: number, py: number, m: Modificatori): TintaClick {
   pointer.x = (px / window.innerWidth) * 2 - 1
@@ -846,30 +970,12 @@ function tintaLa(px: number, py: number, m: Modificatori): TintaClick {
     // Mesh-urile de chunk sunt doar translatate, deci normala fetei e deja in lume.
     n: h.face ? { x: h.face.normal.x, y: h.face.normal.y, z: h.face.normal.z } : { x: 0, y: 1, z: 0 },
   }))
-  const zona = tastaZ || tastaX
-  const cuPiesa = piesaAleasa !== Piesa.NICIUNA && !m.alt && !zona
-  const cuPiesaSus = cuPiesa && !m.shift && sliceLevel !== null
-  const retrage = m.ctrl && !m.shift && !m.alt && !zona
-
-  if (retrage) {
-    const j = cubAtins(raza, cuburiJ(), -Infinity, sliceLevel === null ? Infinity : sliceLevel - 1)
-    if (j !== null) return { ok: true, ...j.c }
-  }
-  if (cuPiesaSus && sliceLevel !== null) {
-    const zActiv = sliceLevel - 1
-    const c = alegeColoana({
-      raza, zActiv, impacturi, cuburi: cuburiJ(), departeMax: DEPARTE_MAX_M,
-      desemnataPeNivel: (wx, wy) => desemnareLaCelula(world.desemnari, wx, wy, zActiv) !== -1,
-      plinaPeNivel: (wx, wy) => { const m = materialAt(world.terrain, wx, wy, zActiv); return m.ok && isSolid(m.value) },
-    })
-    if (!c.ok) return { ok: false, mesaj: 'nimic la nivelul activ sub cursor' }
-    return { ok: true, wx: c.wx, wy: c.wy, z: zActiv }
-  }
-  const v = primulVizibil(impacturi, sliceLevel)
-  if (v === null) {
-    return { ok: false, mesaj: sliceLevel !== null && impacturi.length > 0 ? 'nimic vizibil sub cursor: tot ce atinge raza e taiat de slice' : 'nimic sub cursor' }
-  }
-  return { ok: true, ...celulaLangaFata(v, m.shift || cuPiesa ? 1 : -1) }
+  const zActiv = sliceLevel === null ? 0 : sliceLevel - 1
+  return alegeTinta({
+    mod: modTinta(m), raza, impacturi, slice: sliceLevel, cuburi: cuburiJ(), departeMax: DEPARTE_MAX_M,
+    desemnataPeNivel: (wx, wy) => desemnareLaCelula(world.desemnari, wx, wy, zActiv) !== -1,
+    plinaPeNivel: (wx, wy) => { const r = materialAt(world.terrain, wx, wy, zActiv); return r.ok && isSolid(r.value) },
+  })
 }
 
 // --- cursorul-fantoma: celula pe care o va tinti click-ul, INAINTE de click ----------------
@@ -877,7 +983,8 @@ function tintaLa(px: number, py: number, m: Modificatori): TintaClick {
 // Fara el, jucatorul afla unde s-a pus piesa abia dupa click — iar cu paralaxa de dinainte afla
 // ca s-a pus cu doua celule mai incolo. Un cub de linii putin mai lat decat celula (cuburile J sunt
 // retrase in ea, deci se deosebesc), putin mai scund, ca muchiile de sus sa nu cada pe planul de
-// taiere; alb pentru o comanda, rosu pentru retragere. Desenat peste tot, ca si overlay-urile.
+// taiere; alb pentru o comanda, rosu pentru retragere, albastru-gheata pentru Selecteaza. Desenat
+// peste tot, ca si overlay-urile.
 const fantoma = (() => {
   const a = -0.04, b = 1.04, y0 = 0.02, y1 = 0.98
   const c = [[a, y0, a], [b, y0, a], [b, y0, b], [a, y0, b], [a, y1, a], [b, y1, a], [b, y1, b], [a, y1, b]]
@@ -894,6 +1001,7 @@ const fantoma = (() => {
 scene.add(fantoma)
 const CULOARE_FANTOMA = 0xffffff
 const CULOARE_FANTOMA_RETRAGE = 0xff5a3c
+const CULOARE_FANTOMA_INSPECTEAZA = 0x9fd3e0
 
 /** Ultima pozitie a mouse-ului peste canvas, cu modificatorii ei; `null` = in afara lui. */
 let ultimPointer: { x: number; y: number; m: Modificatori } | null = null
@@ -901,16 +1009,17 @@ let butonApasat = false
 
 function actualizeazaFantoma(): void {
   fantomaMurdara = false
-  if (ultimPointer === null || (butonApasat && moved > DRAG_PX)) { ascundeFantoma(); return }
+  if (ultimPointer === null || (butonApasat && moved > DRAG_PX) || dreptunghiActiv() || (ui?.modalDeschis() ?? false)) { ascundeFantoma(); return }
   const m = ultimPointer.m
   const t = tintaLa(ultimPointer.x, ultimPointer.y, m)
   if (!t.ok) { ascundeFantoma(t.mesaj); return }
-  // Depozitul (Z) si stergerea lui (X) lucreaza pe celula calcabila de DEASUPRA celei atinse.
-  const z = tastaZ || tastaX ? t.z + 1 : t.z
+  const mod = modTinta(m)
+  // Depozitul (Z, Zone) si stergerea lui (X) lucreaza pe celula calcabila de DEASUPRA celei atinse.
+  const z = mod === 'zona' ? t.z + 1 : t.z
   fantoma.position.set(t.wx, z, t.wy)
-  const retrage = m.ctrl && !m.shift && !m.alt && !tastaZ && !tastaX
+  const retrage = mod === 'retrage'
   fantoma.userData.retrage = retrage
-  ;(fantoma.material as THREE.LineBasicMaterial).color.setHex(retrage ? CULOARE_FANTOMA_RETRAGE : CULOARE_FANTOMA)
+  ;(fantoma.material as THREE.LineBasicMaterial).color.setHex(retrage ? CULOARE_FANTOMA_RETRAGE : mod === 'inspecteaza' ? CULOARE_FANTOMA_INSPECTEAZA : CULOARE_FANTOMA)
   fantoma.visible = true
   // Celula in cifre, pe randul „cursor": pasii de verificare pot spune „du cursorul pe 12391,4604".
   el('cursor').textContent = `${t.wx},${t.wy} · z ${z}${retrage ? ' · retrage' : ''}`
@@ -925,19 +1034,314 @@ function modificatori(ev: MouseEvent | KeyboardEvent): Modificatori {
   return { ctrl: ev.ctrlKey, shift: ev.shiftKey, alt: ev.altKey }
 }
 
+// --- dreptunghiul: o unealta trasa peste mai multe celule ------------------------------------
+//
+// Registrul S20-23: „linie/dreptunghi". Coltul 1 = tinta de la apasare, coltul 2 = tinta de sub
+// cursor (aceeasi functie ca fantoma); cota o decide `planDreptunghi` (viewer/ui/dreptunghi.ts):
+// nivelul activ cu slice-ul pornit, solul pe coloana cu slice-ul oprit. Porneste doar pe butonul
+// stang, doar cand coltul 2 iese din celula de start; Esc sau click-dreapta renunta.
+
+interface Tragere {
+  readonly unealta: UnealtaId
+  readonly start: { readonly wx: number; readonly wy: number; readonly z: number }
+  readonly m: Modificatori
+  colt: { wx: number; wy: number } | null
+  activ: boolean
+  plan: PlanDreptunghi | null
+}
+let tragere: Tragere | null = null
+function dreptunghiActiv(): boolean { return tragere !== null && tragere.activ }
+
+/** Unealta dreptunghiului, din modificatorii de la apasare: Ctrl = anuleaza, Z = depozit, X = sterge zona. */
+function unealtaTragerii(m: Modificatori): UnealtaId | null {
+  if (m.shift || m.alt) return null
+  if (tastaZ) return Unealta.ZONA
+  if (tastaX) return Unealta.STERGE_ZONA
+  if (m.ctrl) return Unealta.ANULEAZA
+  const u = unealtaCurenta()
+  // In modul de verificare, tragerea simpla roteste camera, ca in OWNER_VERIFY 12 si 13; dreptunghiul
+  // se face doar cu modificatori. In joc, orice unealta care nu e Selecteaza trage dreptunghiuri.
+  if (MOD_JOC === 'verificare' || ui === null) return null
+  return u === Unealta.SELECTEAZA ? null : u
+}
+
+/** Butonul stang al camerei: `null` cat o unealta trage dreptunghiuri, altfel rotire (ca azi). */
+function butoaneCamera(m: Modificatori | null): void {
+  if (ui === null) return
+  const rect = m !== null && unealtaTragerii(m) !== null
+  controls.mouseButtons.LEFT = rect ? null : THREE.MOUSE.ROTATE
+  // Rotita apasata roteste in ORICE mod, ca sa ramana o rotire si sub o unealta (panoul, I2).
+  controls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE
+}
+
+/** Lumea, pentru `planDreptunghi`. */
+const lumeaDreptunghiului: Lumea = {
+  solid: (wx, wy, z) => { const r = materialAt(world.terrain, wx, wy, z); return r.ok && isSolid(r.value) },
+  suprafata: (wx, wy) => suprafata(wx, wy),
+  calcabil: (wx, wy, z) => isWalkable(world.terrain, wx, wy, z, DEFAULT_RULES),
+  desemnare: (wx, wy, z) => { const s = desemnareLaCelula(world.desemnari, wx, wy, z); return s === -1 ? -1 : world.desemnari.id[s]! },
+  inZona: (wx, wy, z) => celulaDeZonaLa(world.zone, wx, wy, z) !== -1,
+  desemnariIn: (d, zMax) => {
+    const out: { id: number; wx: number; wy: number; z: number }[] = []
+    const ds = world.desemnari
+    for (let i = 0; i < ds.count; i++) {
+      if (ds.alive[i] !== 1 || ds.z[i]! > zMax) continue
+      if (ds.wx[i]! < d.x0 || ds.wx[i]! > d.x1 || ds.wy[i]! < d.y0 || ds.wy[i]! > d.y1) continue
+      out.push({ id: ds.id[i]!, wx: ds.wx[i]!, wy: ds.wy[i]!, z: ds.z[i]! })
+    }
+    return out
+  },
+  zoneIn: (d, zMax) => {
+    const c = world.zone.celule
+    const total = new Map<number, number>()
+    const inD = new Map<number, number>()
+    for (let i = 0; i < c.count; i++) {
+      if (c.alive[i] !== 1) continue
+      const id = c.zonaId[i]!
+      total.set(id, (total.get(id) ?? 0) + 1)
+      if (c.z[i]! > zMax + 1 || c.wx[i]! < d.x0 || c.wx[i]! > d.x1 || c.wy[i]! < d.y0 || c.wy[i]! > d.y1) continue
+      inD.set(id, (inD.get(id) ?? 0) + 1)
+    }
+    return [...inD.keys()].sort((a, b) => a - b).map((id) => ({ id, celule: total.get(id)!, celuleInDreptunghi: inD.get(id)! }))
+  },
+}
+
+/**
+ * Solidul de sus al coloanei. Pe un chunk promovat, din voxeli, de sus in jos (`groundLevelM` e
+ * relieful neatins: nu stie de sapaturi si de ziduri); pe unul nepromovat, relieful.
+ */
+function suprafata(wx: number, wy: number): number | null {
+  const iv = voxelRangeM(world.terrain, wx, wy)
+  if (!iv.ok) return null
+  const g = groundLevelM(world.terrain, wx, wy)
+  const c = world.terrain.chunks.get(Math.floor(wy / CHUNK_CELLS) * 512 + Math.floor(wx / CHUNK_CELLS))
+  if (!c || c.voxels === null) return g.ok ? g.value : null
+  for (let z = iv.value.max; z >= iv.value.min; z--) {
+    const r = materialAt(world.terrain, wx, wy, z)
+    if (r.ok && isSolid(r.value)) return z
+  }
+  return null
+}
+
+function optiuniDreptunghi(u: UnealtaId): Parameters<typeof planDreptunghi>[1] {
+  const r = DEFAULT_RULES
+  return {
+    unealta: u,
+    piesa: ui?.piesa ?? piesaAleasa,
+    zonaFel: u === Unealta.ZONA && tastaZ ? 0 : ui?.zonaFel ?? 0,
+    contur: ui?.contur ?? true,
+    unStrat: ui?.unStrat ?? false,
+    prioritate: ui?.prioritate ?? r.designationPriorityDefault,
+    zActiv: sliceLevel === null ? null : sliceLevel - 1,
+    inaltimeOm: r.agentHeadroomM,
+    locDesemnari: r.designationCapacity - world.desemnari.vii,
+    locZone: r.zoneCellCapacity - world.zone.celule.vii,
+  }
+}
+
+/** Cuburile-fantoma ale dreptunghiului: prealocate, rescrise cel mult o data pe cadru. */
+const FANTOME_MAX = 1024
+const fantomeDreptunghi = (() => {
+  const pos = new Float32Array(FANTOME_MAX * 24 * 3)
+  const geo = new THREE.BufferGeometry()
+  const a = new THREE.BufferAttribute(pos, 3)
+  a.setUsage(THREE.DynamicDrawUsage)
+  geo.setAttribute('position', a)
+  geo.setDrawRange(0, 0)
+  const l = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, depthTest: false }))
+  l.frustumCulled = false
+  l.renderOrder = 9
+  l.visible = false
+  return l
+})()
+scene.add(fantomeDreptunghi)
+let fantomeMurdare = false
+
+function scrieFantomeDreptunghi(): void {
+  fantomeMurdare = false
+  const t = tragere
+  if (t === null || !t.activ || t.plan === null) { fantomeDreptunghi.visible = false; return }
+  const pos = (fantomeDreptunghi.geometry.getAttribute('position') as THREE.BufferAttribute)
+  const arr = pos.array as Float32Array
+  let n = 0
+  const rosu = t.plan.refuz !== null || t.unealta === Unealta.ANULEAZA || t.unealta === Unealta.STERGE_ZONA
+  const cel = t.plan.celule
+  const muchii = [0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6, 6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7]
+  for (let k = 0; k < cel.length && k < FANTOME_MAX; k++) {
+    const c = cel[k]!
+    const x0 = c.wx + 0.06, x1 = c.wx + 0.94, y0 = c.z + 0.04, y1 = c.z + 0.96, z0 = c.wy + 0.06, z1 = c.wy + 0.94
+    const col = [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]]
+    for (const e of muchii) { const v = col[e]!; arr[n * 3] = v[0]!; arr[n * 3 + 1] = v[1]!; arr[n * 3 + 2] = v[2]!; n++ }
+  }
+  fantomeDreptunghi.geometry.setDrawRange(0, n)
+  pos.clearUpdateRanges()
+  if (n > 0) { pos.addUpdateRange(0, n * 3); pos.needsUpdate = true }
+  ;(fantomeDreptunghi.material as THREE.LineBasicMaterial).color.setHex(rosu ? CULOARE_FANTOMA_RETRAGE : CULOARE_FANTOMA)
+  fantomeDreptunghi.visible = true
+}
+
+function actualizeazaTragerea(px: number, py: number): void {
+  const t = tragere
+  if (t === null) return
+  const c = tintaLa(px, py, t.m)
+  // Fara tinta (cer, teren taiat): coltul ramane ultimul valid.
+  if (c.ok) t.colt = { wx: c.wx, wy: c.wy }
+  if (t.colt === null) return
+  if (!t.activ && (t.colt.wx !== t.start.wx || t.colt.wy !== t.start.wy)) t.activ = true
+  if (!t.activ) return
+  const d = normalizeaza(t.start.wx, t.start.wy, t.colt.wx, t.colt.wy)
+  t.plan = planDreptunghi(d, optiuniDreptunghi(t.unealta), lumeaDreptunghiului)
+  ui?.indiciuDreptunghi(`${d.x1 - d.x0 + 1} × ${d.y1 - d.y0 + 1} · ${textPlan(t.plan, t.unealta)} · Esc / clic dreapta = renunță`, t.plan.refuz !== null)
+  fantomeMurdare = true
+  fantomaMurdara = true
+}
+
+function renuntaLaTragere(): void {
+  if (tragere === null) return
+  tragere = null
+  // Butonul e inca apasat (Esc sau clic-dreapta in timpul tragerii): eliberarea lui aduce un `click`,
+  // care altfel ar desemna celula de sub cursor — exact ce jucatorul a vrut sa nu se intample.
+  if (butonApasat) clickConsumat = true
+  ui?.indiciuDreptunghi(null)
+  fantomeMurdare = true
+  fantomaMurdara = true
+}
+
+/** Comenzile unui dreptunghi se aplica feliat: cel mult atatea pe cadru (~21 µs pe celula, masurat de panou). */
+const COMENZI_PE_CADRU = 512
+interface Aplicare {
+  readonly unealta: UnealtaId
+  readonly plan: PlanDreptunghi
+  cursor: number
+  aplicate: number
+  readonly refuzuri: Map<string, number>
+  /** Id-urile desemnarilor create: „Anuleaza" din toast le retrage exact pe ele. */
+  readonly create: number[]
+  zonaId: number | null
+}
+let aplicare: Aplicare | null = null
+
+function aplicaDreptunghi(t: Tragere): void {
+  const plan = t.plan
+  if (plan === null) return
+  if (plan.refuz !== null) { ui?.toast(plan.refuz, true); return }
+  if (t.unealta === Unealta.STERGE_ZONA && plan.celuleInAfara > 20
+    && !window.confirm(`Zonele atinse se șterg ÎNTREGI: ${plan.celuleInAfara} celule sunt în afara dreptunghiului. Continui?`)) return
+  aplicare = { unealta: t.unealta, plan, cursor: 0, aplicate: 0, refuzuri: new Map(), create: [], zonaId: null }
+  // Zonele: bucatile, legate de prima (o zona), dintr-o data — sunt putine comenzi.
+  for (const b of plan.zone) {
+    const out = applyCommand(world, { kind: 'picteazaZona', x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, z: b.z, fel: optiuniDreptunghi(t.unealta).zonaFel, zonaId: aplicare.zonaId ?? undefined })
+    if (out.ok) { aplicare.zonaId = out.value; aplicare.aplicate++ } else noteazaRefuz(aplicare, out)
+  }
+}
+
+function noteazaRefuz(a: Aplicare, out: Refusal): void {
+  const t = textMotiv('comanda', out.reason, 0, out.params, cifre).titlu
+  a.refuzuri.set(t, (a.refuzuri.get(t) ?? 0) + 1)
+  el('spot').textContent = `refuzat: ${describe(out)}`
+}
+
+/** O felie de comenzi pe cadru; la capat, toastul si o singura redesenare. */
+function pasAplicare(): void {
+  const a = aplicare
+  if (a === null) return
+  const cmds = a.plan.comenzi
+  const pana = Math.min(cmds.length, a.cursor + COMENZI_PE_CADRU)
+  for (; a.cursor < pana; a.cursor++) {
+    const out = applyCommand(world, cmds[a.cursor]!)
+    if (out.ok) {
+      a.aplicate++
+      if (cmds[a.cursor]!.kind === 'desemneaza') a.create.push(out.value as number)
+    } else noteazaRefuz(a, out)
+  }
+  if (a.cursor < cmds.length) { ui?.indiciuDreptunghi(`Se aplică… ${a.cursor} / ${cmds.length}`); return }
+  aplicare = null
+  ui?.indiciuDreptunghi(null)
+  dupaComenzi(cmds.length > 0 ? cmds : a.plan.zone.length > 0 ? [{ kind: 'picteazaZona', x0: 0, y0: 0, x1: 0, y1: 0, z: 0 }] : [])
+  const refuz = [...a.refuzuri].map(([t, n]) => `${n} refuzate: ${t}`).join(' · ')
+  let text = textPlan(a.plan, a.unealta)
+  if (refuz) text += ` · ${refuz}`
+  if (a.unealta === Unealta.CONSTRUIESTE && a.create.length > 0 && ui !== null) {
+    // Ce n-ar sta in picioare nici dupa restul planului, numarat DOAR pe piesele noi (panoul, CS-3).
+    const p = ui.previz()
+    let n = 0
+    for (const id of a.create) {
+      const s = slotDesemnare(world.desemnari, id)
+      if (s !== -1 && p.imposibile.has(cellKey(world.desemnari.wx[s]!, world.desemnari.wy[s]!, world.desemnari.z[s]!))) n++
+    }
+    if (n > 0) text += ` · ${n} n-ar sta în picioare (pornește S)`
+  }
+  const create = a.create
+  const zonaNoua = a.zonaId
+  ui?.toast(text, refuz !== '' && a.aplicate === 0, create.length > 0 || zonaNoua !== null ? {
+    eticheta: 'Anulează',
+    f: () => {
+      const inapoi: Command[] = create.map((id) => ({ kind: 'anuleazaDesemnarea', id }))
+      if (zonaNoua !== null) inapoi.push({ kind: 'stergeZona', id: zonaNoua })
+      for (const c of inapoi) applyCommand(world, c)
+      dupaComenzi(inapoi)
+    },
+  } : undefined)
+}
+
+/**
+ * Dupa comenzi care nu editeaza terenul (desemnari, zone, prioritati): overlay-urile o singura data,
+ * si „Primii pasi". Comenzile de teren (Alt/Shift+click) se refac din jurnalul terenului.
+ */
+function dupaComenzi(cmds: readonly Command[]): void {
+  if (cmds.length === 0) return
+  for (const c of cmds) {
+    if (c.kind === 'desemneaza') ui?.noteaza(c.piesa === undefined || c.piesa === Piesa.NICIUNA ? 'sapa' : 'piesa')
+  }
+  if (jobOverlay.visible) rebuildJobOverlay(jobOverlay, world)
+  // „Imposibil", „fara acces" si previzualizarea de prabusire se refac pe loc, la fiecare actiune
+  // a jucatorului (cu S pornit) — o data pe click sau pe dreptunghi, nu pe celula.
+  redeseneazaStabilitate(stabOverlay, world, DEFAULT_RULES)
+}
+
 renderer.domElement.addEventListener('pointerdown', (ev) => {
   downX = ev.clientX
   downY = ev.clientY
   moved = 0
   butonApasat = true
+  // O apasare noua: un `click` consumat de la apasarea trecuta (eliberata in afara canvasului) nu mai vine.
+  if (ev.button === 0) clickConsumat = false
+  // Click-dreapta in timpul tragerii = renunta (convenția RimWorld / Going Medieval).
+  if (ev.button === 2 && tragere !== null) { renuntaLaTragere(); return }
+  if (ev.button !== 0 || ui === null || ui.modalDeschis()) return
+  const m = modificatori(ev)
+  const u = unealtaTragerii(m)
+  if (u === null) return
+  const t = tintaLa(ev.clientX, ev.clientY, m)
+  // Apasarea pe cer nu porneste nimic.
+  if (!t.ok) return
+  tragere = { unealta: u, start: { wx: t.wx, wy: t.wy, z: t.z }, m, colt: { wx: t.wx, wy: t.wy }, activ: false, plan: null }
 })
-window.addEventListener('pointerup', () => { butonApasat = false; fantomaMurdara = true })
+// Butoanele camerei se aleg INAINTE ca OrbitControls sa vada apasarea (el asculta pe canvas, fara
+// capture): o unealta trage dreptunghiuri pe butonul stang, Selecteaza roteste, ca azi.
+window.addEventListener('pointerdown', (ev) => { butoaneCamera(modificatori(ev)) }, { capture: true })
+window.addEventListener('pointerup', (ev) => {
+  butonApasat = false
+  fantomaMurdara = true
+  const t = tragere
+  if (t === null || ev.button !== 0) return
+  tragere = null
+  ui?.indiciuDreptunghi(null)
+  fantomeMurdare = true
+  if (t.activ) {
+    // Tragerea s-a facut dreptunghi: click-ul care urmeaza nu mai desemneaza nimic.
+    clickConsumat = true
+    aplicaDreptunghi(t)
+  }
+})
+renderer.domElement.addEventListener('contextmenu', (ev) => { if (tragere !== null) ev.preventDefault() })
 renderer.domElement.addEventListener('pointermove', (ev) => {
   const dx = ev.clientX - downX
   const dy = ev.clientY - downY
   moved = Math.max(moved, Math.hypot(dx, dy))
   ultimPointer = { x: ev.clientX, y: ev.clientY, m: modificatori(ev) }
   fantomaMurdara = true
+  if (tragere !== null) actualizeazaTragerea(ev.clientX, ev.clientY)
 })
 renderer.domElement.addEventListener('pointerleave', () => { ultimPointer = null; fantomaMurdara = true })
 // Ctrl/Shift/Alt/Z/X schimba tinta fara sa miste mouse-ul; la fel P, Q/E, J, S.
@@ -950,90 +1354,130 @@ for (const tip of ['keydown', 'keyup'] as const) {
 // Camera se misca si dupa ce s-a oprit mouse-ul (amortizarea OrbitControls): tinta de sub el se muta.
 controls.addEventListener('change', () => { fantomaMurdara = true })
 
+/** Pixelii in care un click prinde un pion: un pion are ~4×13 px la 720p, deci raza pe mesh ar rata. */
+const PION_PX = 14
+const m4 = new THREE.Matrix4()
+const v3 = new THREE.Vector3()
+
+/**
+ * Pionul de sub cursor, in spatiul ECRANULUI: cel mai apropiat de pixel, pe cel mult `PION_PX`,
+ * dintre cei VAZUTI — sub planul de taiere si nu in spatele terenului atins de raza. Raycast-ul pe
+ * `InstancedMesh` rata 21 din 24 de pioni dupa 10 s: sfera de incadrare se calculeaza o data, la
+ * primul cadru (panoul, I4). Intoarce id-ul agentului.
+ */
+function pionSubCursor(px: number, py: number): number | null {
+  pointer.x = (px / window.innerWidth) * 2 - 1
+  pointer.y = -(py / window.innerHeight) * 2 + 1
+  raycaster.setFromCamera(pointer, camera)
+  const teren = raycaster.intersectObjects(group.children, false).find((h) => sliceLevel === null || h.point.y <= sliceLevel + 1e-3)
+  let best: number | null = null
+  let bestD = PION_PX * PION_PX
+  for (let k = 0; k < agentLayer.vii; k++) {
+    agentLayer.mesh.getMatrixAt(k, m4)
+    v3.setFromMatrixPosition(m4)
+    if (sliceLevel !== null && v3.y >= sliceLevel) continue
+    v3.y += 0.7
+    const dist = v3.distanceTo(camera.position)
+    if (teren && dist > teren.distance + 1.5) continue
+    v3.project(camera)
+    if (v3.z > 1) continue
+    const sx = (v3.x + 1) / 2 * window.innerWidth
+    const sy = (1 - v3.y) / 2 * window.innerHeight
+    const d = (sx - px) ** 2 + (sy - py) ** 2
+    if (d <= bestD) { bestD = d; best = world.agents.id[agentLayer.sloturi[k]!]! }
+  }
+  return best
+}
+
+/** Tragerea tocmai s-a aplicat ca dreptunghi: evenimentul `click` care vine dupa ea nu mai face nimic. */
+let clickConsumat = false
+
 renderer.domElement.addEventListener('click', (ev) => {
-  if (moved > DRAG_PX) return
-  const t = tintaLa(ev.clientX, ev.clientY, modificatori(ev))
+  if (clickConsumat) { clickConsumat = false; return }
+  if (ui?.modalDeschis()) return
+  // O tragere mica, ramasa in celula de start: cu o unealta de dreptunghi, tot click e.
+  const cuUnealta = ui !== null && unealtaTragerii(modificatori(ev)) !== null
+  if (moved > DRAG_PX && !cuUnealta) return
+  const m = modificatori(ev)
+  const mod = modTinta(m)
   fantomaMurdara = true
+  if (mod === 'inspecteaza' && ui !== null) {
+    const pion = pionSubCursor(ev.clientX, ev.clientY)
+    if (pion !== null) { ui.inspecteazaPion(pion); return }
+  }
+  const t = tintaLa(ev.clientX, ev.clientY, m)
   // Un click care nu face nimic trebuie sa spuna de ce (cer, sau doar teren taiat sub cursor).
   if (!t.ok) {
     el('spot').textContent = t.mesaj
     return
   }
   const { wx, wy, z } = t
-  const cuPiesa = piesaAleasa !== Piesa.NICIUNA && !ev.altKey && !tastaZ && !tastaX
+  if (mod === 'inspecteaza') { ui?.inspecteazaCelula(wx, wy, z); return }
+  const u = unealtaCurenta()
 
-  const promotedBefore = promotedKeys()
-
-  // Click = DESEMNEAZA (un pion vine sa sape). Alt+click = sapa pe loc (unealta
-  // de debug, si ce chema scenariul de gate S-DIG). Ctrl+click = retrage
-  // desemnarea de pe celula. Shift+click = zideste, ca inainte.
+  // Click = DESEMNEAZA (un pion vine sa sape sau sa zideasca). Alt+click = sapa pe loc (unealta de
+  // debug, si ce chema scenariul de gate S-DIG). Ctrl+click (si Anuleaza) = retrage desemnarea de pe
+  // celula. Shift+click = zideste pe loc. Z/X tinute = depozit / sterge zona, ca inainte; uneltele
+  // Zone ale UI-ului picteaza o celula pe click (dreptunghiul se trage).
   let out
+  let dinTeren = false
   if (tastaZ) {
     // Depozitul se picteaza pe celula CALCABILA de deasupra solului atins.
     if (!coltZona) {
       coltZona = { wx, wy, z: z + 1 }
       el('spot').textContent = `depozit: coltul 1 la ${wx},${wy} — click cu Z pe coltul 2`
+      ui?.indiciuDreptunghi(`Depozit: colțul 1 la ${wx}, ${wy} — clic cu Z pe colțul 2 · Esc = renunță`)
       return
     }
     out = applyCommand(world, { kind: 'picteazaZona', x0: coltZona.wx, y0: coltZona.wy, x1: wx, y1: wy, z: coltZona.z })
     coltZona = null
-  } else if (tastaX) {
+    ui?.indiciuDreptunghi(null)
+  } else if (tastaX || (mod === 'zona' && u === Unealta.STERGE_ZONA)) {
     const cs = celulaDeZonaLa(world.zone, wx, wy, z + 1)
     out = cs === -1
       ? applyCommand(world, { kind: 'stergeZona', id: -1 })
       : applyCommand(world, { kind: 'stergeZona', id: world.zone.celule.zonaId[cs]! })
-  } else if (ev.shiftKey) {
+  } else if (mod === 'zona') {
+    out = applyCommand(world, { kind: 'picteazaZona', x0: wx, y0: wy, x1: wx, y1: wy, z: z + 1, fel: ui?.zonaFel ?? 0 })
+  } else if (m.shift) {
     out = applyCommand(world, { kind: 'fill', wx, wy, z, material: Material.PIATRA_CONSTRUITA })
-  } else if (ev.altKey) {
+    dinTeren = true
+  } else if (m.alt) {
     out = applyCommand(world, { kind: 'dig', wx, wy, z })
-  } else if (ev.ctrlKey) {
+    dinTeren = true
+  } else if (mod === 'retrage') {
     const ds = desemnareLaCelula(world.desemnari, wx, wy, z)
     out = ds === -1
       ? applyCommand(world, { kind: 'anuleazaDesemnarea', id: -1 })
       : applyCommand(world, { kind: 'anuleazaDesemnarea', id: world.desemnari.id[ds]! })
   } else {
-    out = applyCommand(world, { kind: 'desemneaza', wx, wy, z, piesa: cuPiesa ? piesaAleasa : undefined })
+    const piesa = piesaCurenta()
+    out = applyCommand(world, { kind: 'desemneaza', wx, wy, z, piesa: piesa === Piesa.NICIUNA ? undefined : piesa, prioritate: ui?.prioritate })
   }
 
-  // Un refuz care nu se vede e un buton care „nu face nimic". Contractul de
-  // Outcome poarta motivul — ar fi absurd sa-l arunc exact la capatul lantului.
+  // Un refuz care nu se vede e un buton care „nu face nimic". Contractul de Outcome poarta motivul —
+  // ar fi absurd sa-l arunc exact la capatul lantului. Diagnosticul pastreaza sirul brut.
   if (!out.ok) {
     console.warn(`refuzat la ${wx},${wy},${z}: ${describe(out)}`)
     el('spot').textContent = `refuzat: ${describe(out)}`
+    const tx = textMotiv('comanda', out.reason, 0, out.params, cifre)
+    ui?.toast(tx.actiune ? `${tx.titlu} ${tx.actiune}` : tx.titlu, true)
     return
   }
-  if (!ev.altKey && !ev.shiftKey) {
-    // Desemnarea si retragerea ei nu schimba terenul: nimic de remesh-uit.
-    // (Zidirea DA — prima versiune iesea si pentru Shift+click, iar zidul exista
-    // in simulare si nu se vedea. Exact punctul orb K13.)
-    if (jobOverlay.visible) rebuildJobOverlay(jobOverlay, world)
-    // „Imposibil", „fara acces" si previzualizarea de prabusire se refac pe loc, la fiecare
-    // click (cu S pornit). Nu sunt gratis — zeci de ms la o casa, sute pe planuri de mii de
-    // piese, vezi `redeseneazaStabilitate` —, dar un click e rar; scanarea pe celule, nu, ea
-    // merge feliata pe cadre.
-    redeseneazaStabilitate(stabOverlay, world, DEFAULT_RULES)
+  if (!dinTeren) {
+    // Desemnarea, retragerea si zonele nu schimba terenul: doar overlay-urile, o data.
+    const piesa = piesaCurenta()
+    dupaComenzi(mod === 'sapa' || mod === 'piesa'
+      ? [{ kind: 'desemneaza', wx, wy, z, piesa: piesa === Piesa.NICIUNA ? undefined : piesa }]
+      : [{ kind: 'anuleazaDesemnarea', id: -1 }])
     return
   }
 
-  // Se reconstruieste chunk-ul atins plus vecinii care CHIAR s-au schimbat.
-  //
-  // `dig` promoveaza un apron de 3×3, dar numai prima data: la a doua sapatura
-  // in acelasi chunk, vecinii sunt deja promovati si mesh-ul lor e neschimbat.
-  // Varianta care remesh-uia mereu 3×3 platea 9× pretul pentru un singur chunk
-  // murdar — 5,4 ms in loc de ~0,6 — si ar fi intrat in gate ca „limita stivei".
-  remeshAfterEdit(wx, wy, promotedBefore)
-  // Regiunile se intretin DOAR cat timp overlay-ul e deschis.
-  //
-  // Motivul e o cifra: `rebuildDirty` reconstruieste toate blocurile rezidente, iar
-  // cu overlay-ul pornit alea sunt ~735, deci un click costa peste 150 ms. Adica
-  // ~10 cadre pierdute la fiecare sapatura — introdus chiar de mine, in commit-ul
-  // de overlay, si gasit de un panou care citea codul.
-  //
-  // Deocamdata regiunile sunt o unealta de inspectie, deci asta e corect. Cand vor
-  // veni agentii vor cere intretinere permanenta, si ATUNCI reconstructia
-  // incrementala devine obligatorie — nu inainte, si nu mai tarziu.
-  // Murdarirea o face acum `applyCommand`; aici ramane doar reconstructia si
-  // redesenarea, si numai cand overlay-ul e vizibil.
+  // Zidirea si sapatul pe loc schimba terenul: mesh-urile se refac din JURNALUL terenului (fiecare
+  // celula editata, si prabusirile pe care le-a declansat), nu doar in jurul celulei atinse.
+  remeshDinJurnal()
+  // Regiunile se intretin DOAR cat timp overlay-ul e deschis: `rebuildDirty` reconstruieste toate
+  // blocurile rezidente (~735 cu overlay-ul pornit, peste 150 ms pe click).
   if (regionOverlay.visible) {
     rebuildDirty(world.terrain, regions, DEFAULT_RULES)
     refreshOverlay()
@@ -1041,77 +1485,180 @@ renderer.domElement.addEventListener('click', (ev) => {
   recount()
 })
 
-window.addEventListener('keydown', (ev) => {
-  // --- D20: amprenta unei cladiri asezate liber ---
-  if (ev.key === 'b' || ev.key === 'B') {
-    amprentaOverlay.visible = !amprentaOverlay.visible
-    amprentaOverlay.group.visible = amprentaOverlay.visible
-    refreshAmprenta()
-    return
-  }
-  if (amprentaOverlay.visible) {
-    if (ev.key === ',' || ev.key === '<') { amprentaOverlay.grade = (amprentaOverlay.grade + 355) % 360; refreshAmprenta(); return }
-    if (ev.key === '.' || ev.key === '>') { amprentaOverlay.grade = (amprentaOverlay.grade + 5) % 360; refreshAmprenta(); return }
-    if (ev.key === 'n' || ev.key === 'N') { amprentaOverlay.forma = (amprentaOverlay.forma + 1) % FORME.length; refreshAmprenta(); return }
-    if (ev.key === 'm' || ev.key === 'M') { amprentaOverlay.ancorat = !amprentaOverlay.ancorat; refreshAmprenta(); return }
-  }
-  if (ev.key === 'p' || ev.key === 'P') {
-    piesaAleasa = PIESE_VIEWER[(PIESE_VIEWER.indexOf(piesaAleasa) + 1) % PIESE_VIEWER.length]!
-    el('piesa').textContent = NUME_PIESA_VIEWER[piesaAleasa]!
-    return
-  }
-  if (ev.key === ' ') {
-    simPauza = !simPauza
-    ev.preventDefault()
-    return
-  }
-  if (ev.key === 'h' || ev.key === 'H') {
-    // Trei stari: tot → doar HUD-ul → nimic. La 1280×720, cu J si S pornite, HUD-ul si ajutorul
-    // acopereau 90% din ecran (recenzia, `p10-hud.mjs`); HUD-ul ramane cand ajutorul nu mai trebuie.
-    const keys = el('keys')
-    if (!keys.hidden) keys.hidden = true
-    else if (!hud.hidden) hud.hidden = true
-    else { hud.hidden = false; keys.hidden = false }
-    return
-  }
-  if (ev.key === 'g' || ev.key === 'G') {
-    regionOverlay.visible = !regionOverlay.visible
-    regionOverlay.group.visible = regionOverlay.visible
-    refreshOverlay()
-    return
-  }
-  if (ev.key === 'j' || ev.key === 'J') {
-    jobOverlay.visible = !jobOverlay.visible
-    jobOverlay.group.visible = jobOverlay.visible
-    rebuildJobOverlay(jobOverlay, world)
-    return
-  }
-  if (ev.key === 's' || ev.key === 'S') {
-    stabOverlay.visible = !stabOverlay.visible
-    stabOverlay.group.visible = stabOverlay.visible
-    refaStabilitate()
-    return
-  }
-  if (ev.key === 't' || ev.key === 'T') {
-    if (ev.shiftKey) traverseDir = -traverseDir
-    else traversing = !traversing
-    return
-  }
-  if (ev.key === 'f' || ev.key === 'F') {
-    traverseFixedClock = !traverseFixedClock
-    return
-  }
-  // Q porneste slice-ul in varful ferestrei si coboara; E urca, iar peste varf il opreste. Un
-  // nivel ramas in afara ferestrei (camera a trecut pe un chunk mai jos sau mai sus) se aduce in ea.
+// --- tastele: un singur dispecer (viewer/ui/taste.ts) ------------------------------------------
+
+function comutaG(): void {
+  regionOverlay.visible = !regionOverlay.visible
+  regionOverlay.group.visible = regionOverlay.visible
+  refreshOverlay()
+}
+function comutaJ(): void {
+  jobOverlay.visible = !jobOverlay.visible
+  jobOverlay.group.visible = jobOverlay.visible
+  rebuildJobOverlay(jobOverlay, world)
+}
+function comutaS(): void {
+  stabOverlay.visible = !stabOverlay.visible
+  stabOverlay.group.visible = stabOverlay.visible
+  refaStabilitate()
+}
+
+/** Nivelul, cu plaja lui: Q porneste slice-ul in varful ferestrei si coboara; E urca, iar peste varf il opreste. */
+function seteazaNivel(cota: number | null): void {
   const { lo, hi } = plajaSlice()
-  if (ev.key === 'q' || ev.key === 'Q') sliceLevel = sliceLevel === null ? hi : Math.max(lo, Math.min(hi, sliceLevel - 1))
-  else if (ev.key === 'e' || ev.key === 'E') sliceLevel = sliceLevel === null ? null : sliceLevel >= hi ? null : Math.max(lo, sliceLevel + 1)
-  else if (ev.key === 'r' || ev.key === 'R') sliceLevel = null
-  else return
+  sliceLevel = cota === null ? null : Math.max(lo, Math.min(hi, cota))
   applySlice()
   // Alt nivel = alta intrebare: trecerea veche se lasa, desenul ei se sterge.
   refaStabilitate()
+}
+function nivelJos(): void {
+  const { lo, hi } = plajaSlice()
+  seteazaNivel(sliceLevel === null ? hi : Math.max(lo, Math.min(hi, sliceLevel - 1)))
+}
+function nivelSus(): void {
+  const { lo, hi } = plajaSlice()
+  seteazaNivel(sliceLevel === null ? null : sliceLevel >= hi ? null : Math.max(lo, sliceLevel + 1))
+}
+
+/** Muta camera cu `pas` metri pe sol, in directia privirii (nord) sau lateral (est). */
+function mutaCamera(inainte: number, lateral: number): void {
+  const f = new THREE.Vector3().subVectors(controls.target, camera.position)
+  f.y = 0
+  if (f.lengthSq() === 0) return
+  f.normalize()
+  const r = new THREE.Vector3(-f.z, 0, f.x)
+  const d = f.multiplyScalar(inainte).add(r.multiplyScalar(lateral))
+  controls.target.add(d)
+  camera.position.add(d)
+}
+
+function executa(a: Actiune, ev: KeyboardEvent): void {
+  switch (a) {
+    // --- D20: amprenta unei cladiri asezate liber ---
+    case 'amprenta':
+      amprentaOverlay.visible = !amprentaOverlay.visible
+      amprentaOverlay.group.visible = amprentaOverlay.visible
+      refreshAmprenta()
+      return
+    case 'amprentaStanga': amprentaOverlay.grade = (amprentaOverlay.grade + 355) % 360; refreshAmprenta(); return
+    case 'amprentaDreapta': amprentaOverlay.grade = (amprentaOverlay.grade + 5) % 360; refreshAmprenta(); return
+    case 'amprentaForma': amprentaOverlay.forma = (amprentaOverlay.forma + 1) % FORME.length; refreshAmprenta(); return
+    case 'amprentaAncora': amprentaOverlay.ancorat = !amprentaOverlay.ancorat; refreshAmprenta(); return
+    case 'piesa':
+      if (ui !== null) ui.ciclezaPiesa()
+      else piesaAleasa = PIESE_VIEWER[(PIESE_VIEWER.indexOf(piesaAleasa) + 1) % PIESE_VIEWER.length]!
+      el('piesa').textContent = ui?.numePiesa() ?? NUME_PIESA_VIEWER[piesaAleasa]!
+      return
+    case 'pauza': seteazaPauza(!simPauza); return
+    case 'ciclulH': {
+      // Trei stari: tot → doar HUD-ul → nimic. La 1280×720, cu J si S pornite, HUD-ul si ajutorul
+      // acopereau 90% din ecran (recenzia, `p10-hud.mjs`); HUD-ul ramane cand ajutorul nu mai trebuie.
+      const keys = el('keys')
+      if (!keys.hidden) keys.hidden = true
+      else if (!hud.hidden) hud.hidden = true
+      else { hud.hidden = false; keys.hidden = false }
+      return
+    }
+    case 'overlayG': comutaG(); return
+    case 'overlayJ': comutaJ(); return
+    case 'overlayS': comutaS(); return
+    case 'traversare': traversing = !traversing; return
+    case 'traversareSens': traverseDir = -traverseDir; return
+    case 'ceas': traverseFixedClock = !traverseFixedClock; return
+    case 'nivelJos': nivelJos(); return
+    case 'nivelSus': nivelSus(); return
+    case 'nivelOprit': seteazaNivel(null); return
+    case 'selecteaza': ui?.alegeUnealta(Unealta.SELECTEAZA); return
+    case 'sapa': ui?.alegeUnealta(Unealta.SAPA); return
+    case 'construieste': ui?.alegeUnealta(Unealta.CONSTRUIESTE); return
+    case 'anuleaza': ui?.alegeUnealta(Unealta.ANULEAZA); return
+    case 'zona': ui?.alegeUnealta(ui.unealta === Unealta.ZONA ? Unealta.STERGE_ZONA : Unealta.ZONA); return
+    case 'oameni': ui?.comutaOameni(); return
+    case 'viteza1': case 'viteza2': case 'viteza3':
+      viteza = Number(a.slice(-1))
+      seteazaPauza(false)
+      return
+    case 'salveaza': ui?.salveazaAcum(); return
+    case 'ajutor': ui?.arataAjutorul(); return
+    case 'diagnostic': hud.hidden = !hud.hidden; return
+    case 'esc':
+      // Ordinea (panoul, I9): dreptunghiul in curs, coltul Z, apoi UI-ul (fereastra, unealta, selectia, meniul).
+      if (tragere !== null) { renuntaLaTragere(); return }
+      if (coltZona !== null) { coltZona = null; ui?.indiciuDreptunghi(null); el('spot').textContent = 'depozit: colțul 1 șters'; return }
+      ui?.esc()
+      return
+    case 'cameraVest': mutaCamera(0, -4); return
+    case 'cameraEst': mutaCamera(0, 4); return
+    case 'cameraNord': mutaCamera(4, 0); return
+    case 'cameraSud': mutaCamera(-4, 0); return
+  }
+  void ev
+}
+
+window.addEventListener('keydown', (ev) => {
+  const iesire = actiuneTasta({
+    key: ev.key, ctrl: ev.ctrlKey, shift: ev.shiftKey, alt: ev.altKey, meta: ev.metaKey,
+    editabil: inCamp(ev), compunere: ev.isComposing, modal: ui?.modalDeschis() ?? false,
+    mod: ui === null ? 'faraUI' : MOD_JOC === 'verificare' ? 'verificare' : 'joc',
+    amprenta: amprentaOverlay.visible,
+  })
+  if (iesire.consuma) ev.preventDefault()
+  if (iesire.actiune !== null) executa(iesire.actiune, ev)
 })
+
+/** Viteza simularii (1×, 2×, 3×). `stepSim` primeste `dt × viteza`; plafonul de tickuri pe cadru ramane. */
+let viteza = 1
+function seteazaPauza(p: boolean): void {
+  simPauza = p
+  // In pauza, previzualizarile scumpe ale lui S se refac o data: costul nu se mai vede (panoul, CG-2).
+  if (p && stabOverlay.visible && previzInvechita(stabOverlay, world)) redeseneazaStabilitate(stabOverlay, world, DEFAULT_RULES)
+}
+/**
+ * Viteza REALA, pe ferestre de 2 s: tickuri rulate pe secunda / `ticksPerSecond`. DESIGN §10: „3× e
+ * best effort, cu indicator in UI" — cand un tick costa 2–3 ms si cadrele se lungesc, plafonul de
+ * `MAX_TICKURI_PE_CADRU` arunca datoria, iar jucatorul trebuie sa vada ca 3× nu mai e 3×.
+ */
+let efTickuri = 0
+let efMs = 0
+let vitezaEfectiva = 0
+function noteazaTickuri(n: number, dtMs: number): void {
+  efTickuri += n
+  efMs += dtMs
+  if (efMs < 2000) return
+  vitezaEfectiva = efTickuri / (efMs / 1000) / DEFAULT_RULES.ticksPerSecond
+  efTickuri = 0
+  efMs = 0
+}
+
+/** Pionul urmarit de camera (id); `null` = nimeni. Orice tragere a camerei il opreste. */
+let urmaritId: number | null = null
+controls.addEventListener('start', () => { urmaritId = null })
+const vUrm = new THREE.Vector3()
+function urmareste(): void {
+  if (urmaritId === null) return
+  const slot = slotOf(world.agents, urmaritId)
+  if (slot === -1) { urmaritId = null; return }
+  for (let k = 0; k < agentLayer.vii; k++) {
+    if (agentLayer.sloturi[k] !== slot) continue
+    agentLayer.mesh.getMatrixAt(k, m4)
+    vUrm.setFromMatrixPosition(m4)
+    vUrm.y += 0.5
+    vUrm.sub(controls.target).multiplyScalar(0.12)
+    controls.target.add(vUrm)
+    camera.position.add(vUrm)
+    return
+  }
+}
+
+/** Camera la celula (wx, wy, z), cu aceeasi distanta si acelasi unghi; nivelul, daca se cere sau daca lucrul e taiat. */
+function duLa(wx: number, wy: number, z: number, slice: number | null): void {
+  const d = new THREE.Vector3(wx + 0.5, z + 1, wy + 0.5).sub(controls.target)
+  controls.target.add(d)
+  camera.position.add(d)
+  if (slice !== null) seteazaNivel(slice)
+  else if (sliceLevel !== null && z + 1 > sliceLevel) seteazaNivel(z + 2)
+  fantomaMurdara = true
+}
 
 // --------------------------------------------------------------------------
 // 5. HUD si masuratori
@@ -1436,18 +1983,10 @@ function stepFrame(ts: number): void {
     // variantei „doar cei in LUCREAZA la inceputul cadrului".
     // In pauza (Spatiu) simularea nu avanseaza deloc: nicio comanda nu se pierde, doar nu se misca nimeni.
     if (!simPauza) {
-      let cuJob = 0
-      for (let i = 0; i < world.agents.count; i++) if (world.agents.alive[i] === 1 && world.agents.jobKind[i] !== 0) cuJob++
-      const cheiInainte = cuJob > 0 ? new Set(world.desemnari.laCelula.keys()) : null
-      const promotedInainte = cuJob > 0 ? promotedKeys() : null
-      stepSim(agentLayer, world, DEFAULT_RULES, dt, simTick)
-      if (cheiInainte && promotedInainte) {
-        for (const k of cheiInainte) {
-          if (world.desemnari.laCelula.has(k)) continue
-          const c = decodeCell(k)
-          remeshAfterEdit(c.wx, c.wy, promotedInainte)
-        }
-      }
+      noteazaTickuri(stepSim(agentLayer, world, DEFAULT_RULES, dt * viteza, simTick), dt)
+      remeshDinJurnal()
+    } else {
+      noteazaTickuri(0, dt)
     }
     // Si in pauza: pornit cu `?pauza=1`, stratul pionilor n-ar fi fost desenat niciodata (HUD: „0").
     updateAgentLayer(agentLayer, world, DEFAULT_RULES)
@@ -1464,6 +2003,13 @@ function stepFrame(ts: number): void {
   }
   // Trecerea de stabilitate, feliata: cel mult bugetul pe cadru, si doar cu overlay-ul pornit.
   avanseazaStabilitate(stabOverlay, world, DEFAULT_RULES, BUGET_STABILITATE_MS)
+  // UI-ul de joc: nimic din asta nu exista intr-o rulare de gate (`ui === null`).
+  if (ui !== null) {
+    pasAplicare()
+    if (fantomeMurdare) scrieFantomeDreptunghi()
+    urmareste()
+    ui.cadru(dt)
+  }
   // Cursorul-fantoma: cel mult o raza pe cadru, si doar cand s-a schimbat ceva. Niciodata intr-o
   // rulare de gate — acolo nu misca nimeni mouse-ul, iar un draw call in plus ar fi drift de masura.
   if (fantomaMurdara && !gateRun) actualizeazaFantoma()
@@ -1509,7 +2055,8 @@ function stepFrame(ts: number): void {
     el('build').textContent = amprentaOverlay.visible
       ? `${FORME[amprentaOverlay.forma]!.nume} · ${amprentaOverlay.grade}° · ${amprentaOverlay.celule} cel. (×${amprentaOverlay.grasime.toFixed(2)}) · CENTRU ${amprentaOverlay.celuleCentru}${amprentaOverlay.ancorat ? ' · ancorat' : ''}`
       : 'B'
-    el('agents').textContent = AGENTI_ACTIVI ? `${agentLayer.vii} · t${world.tick}${simPauza ? ' · PAUZA (Spatiu)' : ''}` : 'oprit la gate'
+    el('agents').textContent = AGENTI_ACTIVI ? `${agentLayer.vii} · t${world.tick}${simPauza ? ' · PAUZA (Spatiu)' : ` · ${viteza}×${vitezaEfectiva > 0 && vitezaEfectiva < viteza * 0.9 ? ` (real ${vitezaEfectiva.toFixed(2)}×)` : ''}`}` : 'oprit la gate'
+    el('piesa').textContent = ui?.numePiesa() ?? NUME_PIESA_VIEWER[piesaAleasa]!
     el('regions').textContent = regionOverlay.visible
       ? `${regionOverlay.cells.toLocaleString('ro-RO')} celule · ${regionOverlay.components} componente · ${lastOverlayMs.toFixed(0)} ms`
       : 'G'
@@ -1559,7 +2106,151 @@ el('backend').textContent = `${gpuName()} · ${buildMs.toFixed(0)} ms build`
 el('spot').textContent = `chunk ${FOCUS_CX}/${FOCUS_CY} · seed ${SEED}` + (mesajPornire.length > 0 ? ` · ${mesajPornire.join(' · ')}` : '')
 busy.remove()
 hud.removeAttribute('hidden')
+
+// --------------------------------------------------------------------------
+// 6. UI-ul de joc — doar in afara rularilor de gate, si doar prin import dinamic
+// --------------------------------------------------------------------------
+
+/** Plicul unei salvari: lumea (`encode`) si ce e al viewer-ului. Intoarce si cat a costat `encode`. */
+function plicSalvare(id: string, nume: string, primiPasi: readonly boolean[]): { s: Salvare; ms: number } {
+  let oameni = 0
+  for (let i = 0; i < world.agents.count; i++) if (world.agents.alive[i] === 1 && world.agents.faction[i] === Faction.ASEZARE) oameni++
+  const t0 = performance.now()
+  const lume = encode(world)
+  const ms = performance.now() - t0
+  return {
+    ms,
+    s: {
+      format: FORMAT_SALVARE, id, nume, salvatLa: new Date().toISOString(), tick: world.tick, seed: world.seed, oameni,
+      meta: {
+        camera: { pos: [camera.position.x, camera.position.y, camera.position.z], tinta: [controls.target.x, controls.target.y, controls.target.z] },
+        slice: sliceLevel, viteza, primiPasi: [...primiPasi],
+      },
+      lume,
+    },
+  }
+}
+
+/** O alta lume inseamna alta pagina: lumea se construieste o singura data pe pagina, ca inainte. */
+function navigheaza(cautare: string): void {
+  if ((MOD_JOC === 'joc-nou' || MOD_JOC === 'incarca') && !window.confirm('Jocul de acum se închide. Ce n-ai salvat se pierde (salvarea automată e la cel mult câteva minute în urmă). Continui?')) return
+  location.search = cautare
+}
+
+function cifreOverlay(o: 'J' | 'S' | 'G'): string {
+  if (o === 'G') return regionOverlay.visible ? `${regionOverlay.components} componente · ${regionOverlay.cells.toLocaleString('ro-RO')} celule` : ''
+  if (o === 'J') {
+    const j = jobOverlay
+    if (!j.visible) return ''
+    const liber = j.desemnari - j.rezervate - j.faraLoc - j.faraLocSigur - j.inchide - j.componente - j.altRefuz
+    const bucati = [`${j.desemnari} lucrări: ${j.rezervate} în lucru, ${liber} libere`]
+    const blocate = j.faraLoc + j.faraLocSigur + j.inchide + j.componente + j.altRefuz
+    if (blocate > 0) bucati.push(`${blocate} blocate`)
+    bucati.push(`${j.iteme} mormane${j.itemeFaraDepozit > 0 ? ` (${j.itemeFaraDepozit} fără depozit)` : ''}`)
+    if (j.celuleDepozit > 0) bucati.push(`depozit ${j.celuleOcupate}/${j.celuleDepozit}`)
+    return bucati.join(' · ')
+  }
+  const st = stabOverlay
+  if (!st.visible) return ''
+  if (st.piedica !== '') return ''
+  const bucati: string[] = []
+  if (st.ultimaScanare !== null) bucati.push(`ultima celulă ${st.ultima} · cade ${st.cade}`)
+  if (st.previzualizate > 0) bucati.push(`lucrările ar prăbuși ${st.previzualizate}`)
+  if (st.imposibile > 0) bucati.push(`${st.imposibile} piese n-ar sta`)
+  if (st.faraAcces > 0) bucati.push(`${st.faraAcces} fără acces (${st.faraAccesInaltime} scară, ${st.faraAcces - st.faraAccesInaltime} deschidere)`)
+  if (st.inchise !== '') bucati.push(`PLANUL ÎNCHIDE ${st.inchise}`)
+  const pr = progresStabilitate(st)
+  if (pr !== null) bucati.push(`scanare ${Math.floor(100 * pr)}%`)
+  return bucati.join(' · ')
+}
+
+if (!MOD.faraUI && MOD_JOC !== 'gate') {
+  const modUI = MOD_JOC
+  const { monteazaUI } = await import('./ui/panouri.ts')
+  const ctx: ContextUI = {
+    world,
+    rules: DEFAULT_RULES,
+    mod: modUI,
+    mesajPornire: mesajPornireUI,
+    primiPasi: salvareIncarcata?.meta.primiPasi ?? null,
+    pauza: () => simPauza,
+    seteazaPauza,
+    viteza: () => viteza,
+    seteazaViteza: (v) => { viteza = v },
+    vitezaEfectiva: () => (simPauza ? 0 : vitezaEfectiva),
+    aplica: (cmds) => {
+      const refuzuri: string[] = []
+      let aplicate = 0
+      for (const c of cmds) {
+        const out = applyCommand(world, c)
+        if (out.ok) { aplicate++; continue }
+        refuzuri.push(textMotiv('comanda', out.reason, 0, out.params, cifre).titlu)
+        el('spot').textContent = `refuzat: ${describe(out)}`
+      }
+      dupaComenzi(cmds)
+      if (refuzuri.length > 0) ui?.toast(refuzuri[0]!, true)
+      return { aplicate, refuzuri }
+    },
+    nivel: () => {
+      const { lo, hi } = plajaSlice()
+      const g = groundLevelM(world.terrain, Math.floor(controls.target.x), Math.floor(controls.target.z))
+      return { cota: sliceLevel, lo, hi, sol: g.ok ? g.value : null }
+    },
+    seteazaNivel,
+    overlayPornit: (o) => (o === 'J' ? jobOverlay.visible : o === 'S' ? stabOverlay.visible : regionOverlay.visible),
+    comutaOverlay: (o) => { if (o === 'J') comutaJ(); else if (o === 'S') comutaS(); else comutaG() },
+    cifreOverlay,
+    stabilitateInvechita: () => previzInvechita(stabOverlay, world),
+    refaStabilitatea: () => redeseneazaStabilitate(stabOverlay, world, DEFAULT_RULES),
+    duLa,
+    urmareste: (id) => { urmaritId = id },
+    distantaLaCamera: (wx, wy, z) => Math.hypot(wx + 0.5 - controls.target.x, z - controls.target.y, wy + 0.5 - controls.target.z),
+    comutaDiagnostic: () => { hud.hidden = !hud.hidden },
+    tragere: () => tragere !== null || aplicare !== null,
+    salveaza: async (id, nume, primiPasi) => {
+      const { s, ms } = plicSalvare(id, nume, primiPasi)
+      await scrieSalvare(s)
+      el('spot').textContent = `salvat „${nume}" · encode ${ms.toFixed(1)} ms · ${(s.lume.length / 1024).toFixed(0)} KiB`
+      return ms
+    },
+    descarca: (primiPasi) => {
+      const { s } = plicSalvare(`fisier-${world.tick}`, `Kinstead · lumea ${world.seed}`, primiPasi)
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(s)], { type: 'application/json' }))
+      a.download = numeFisier(s, DEFAULT_RULES.ticksPerSecond)
+      a.click()
+      URL.revokeObjectURL(a.href)
+    },
+    listaSalvari,
+    incarca: (id) => navigheaza(`?incarca=${encodeURIComponent(id)}`),
+    stergeSalvarea: stergeSalvare,
+    incarcaFisier: async (f) => {
+      let x: unknown
+      try { x = JSON.parse(await f.text()) } catch { return 'Fișierul nu e o salvare Kinstead.' }
+      const v = valideazaSalvare(x)
+      if (!v.ok) return v.motiv
+      const d = decode(v.value.lume, DEFAULT_RULES)
+      if (!d.ok) return textMotiv('incarcare', d.reason, 0, d.params).titlu
+      const id = `f${Date.now().toString(36)}`
+      await scrieSalvare({ ...v.value, id, nume: `${v.value.nume} (din fișier)` })
+      navigheaza(`?incarca=${id}`)
+      return null
+    },
+    jocNou: (q) => navigheaza(`?joc=nou&seed=${q.seed}&oameni=${q.oameni}&piatra=${q.piatra}&hrana=${q.hrana}`),
+  }
+  ui = monteazaUI(ctx)
+  if (modUI !== 'verificare') {
+    // In joc, Diagnosticul si ajutorul vechi pornesc ascunse (F3; Ajutorul UI-ului pe F1 / H), iar
+    // Planul (J) aprins: fara el, ce desenezi nu se vede (panoul, JN-3). In verificare, ca azi.
+    hud.hidden = true
+    el('keys').hidden = true
+    if (!jobOverlay.visible) comutaJ()
+  }
+  butoaneCamera(null)
+  el('piesa').textContent = ui.numePiesa()
+}
+
 requestAnimationFrame(tick)
 
 // Expus pentru masuratori din consola, nu pentru joc.
-Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport, fantoma, jobOverlay, stabOverlay } })
+Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport, fantoma, jobOverlay, stabOverlay, ui, mod: MOD_JOC, agentLayer, tintaLa, suprafata } })

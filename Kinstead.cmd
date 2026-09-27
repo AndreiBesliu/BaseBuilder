@@ -51,17 +51,15 @@ if not exist "node_modules\three" (
 )
 
 echo.
-echo   Kinstead — viewer de teren
+echo   Kinstead
 echo   ---------------------------------------------------------------
 echo.
-echo   drag           roteste           click stanga   sapa un voxel
-echo   rotita         zoom              Shift+click    construieste
-echo   click dr.+drag panoramare        Q / E / R      nivel de slice
+echo   Se deschide ecranul de titlu: Joc nou, Incarca, Exploreaza demo-ul.
+echo   In joc: F1 = ajutorul (toate tastele), Esc = meniul, Ctrl+S = salveaza.
 echo.
-echo   G   overlay de regiuni — aceeasi culoare inseamna ca se poate
-echo       ajunge dintr-o zona in cealalta. Sapa un sant si vezi cum
-echo       se rupe componenta.
-echo   T   traversare 40 m/s (Shift+T schimba sensul)
+echo   V selecteaza   D sapa   C construieste   A anuleaza   K zone
+echo   trage cu o unealta = dreptunghi      Q / E / R = nivelul
+echo   Spatiu = pauza      1 2 3 = viteza      O = oamenii
 echo.
 echo   ---------------------------------------------------------------
 echo   Se deschide singur in browser. Inchide fereastra asta ca sa opresti.

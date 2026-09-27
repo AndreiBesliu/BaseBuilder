@@ -243,3 +243,84 @@ export function alegeColoana(q: IntrebareColoana): RaspunsColoana {
   if (dist > q.departeMax) return { ok: false }
   return { ok: true, wx: Math.floor(x), wy: Math.floor(z), sursa: 'plan' }
 }
+
+// ---------------------------------------------------------------------------------------------
+// tinta clicului, pe unealta
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Ce fel de tinta cauta clicul. Ramificarea statea in main.ts (`tintaLa`); acum e aici, ca sa aiba
+ * test (panoul de design al UI-ului, I5):
+ *  - `sapa`      — solidul VAZUT (fata atinsa, spre inauntru): sapatul, Alt+clic;
+ *  - `piesa`     — cu nivelul pornit, coloana de la nivelul activ (`alegeColoana`); altfel aerul din
+ *                  fata fetei atinse;
+ *  - `fata`      — aerul din fata fetei atinse, mereu (Shift+clic: „zideste pe loc", unealta de test);
+ *  - `retrage`   — cubul J VAZUT (pe niveluri netaiate), altfel solidul vazut. Varianta veche cadea,
+ *                  fara cub sub cursor, pe ramura piesei alese: anularea lovea terenul de DUPA cub;
+ *  - `inspecteaza` — cubul J vazut, altfel solidul vazut (pionul il alege apelantul, inainte);
+ *  - `zona`      — solidul vazut; zona se picteaza pe celula de deasupra lui (apelantul adauga 1).
+ *                  Cu nivelul pornit, celula de la nivelul activ (ca piesa): acolo se sta.
+ */
+export type ModTinta = 'sapa' | 'piesa' | 'fata' | 'retrage' | 'inspecteaza' | 'zona'
+
+export interface IntrebareTinta {
+  readonly mod: ModTinta
+  readonly raza: Raza
+  readonly impacturi: readonly Impact[]
+  /** Cota planului de taiere (nivelul activ = slice − 1), sau null. */
+  readonly slice: number | null
+  /** Cuburile J desenate (gol cand overlay-ul J e oprit): ce nu se vede nu se tinteste. */
+  readonly cuburi: readonly CelulaJ[]
+  readonly departeMax: number
+  readonly desemnataPeNivel: (wx: number, wy: number) => boolean
+  readonly plinaPeNivel: (wx: number, wy: number) => boolean
+}
+
+export type RaspunsTinta =
+  | { readonly ok: true; readonly wx: number; readonly wy: number; readonly z: number; readonly sursa: SursaColoanei | 'cub' }
+  | { readonly ok: false; readonly mesaj: string }
+
+export function alegeTinta(q: IntrebareTinta): RaspunsTinta {
+  const zMaxVazut = q.slice === null ? Infinity : q.slice - 1
+  if (q.mod === 'retrage' || q.mod === 'inspecteaza') {
+    const j = cubAtins(q.raza, q.cuburi, -Infinity, zMaxVazut)
+    const v = primulVizibil(q.impacturi, q.slice)
+    // Cubul se deseneaza peste tot (fara test de adancime), deci castiga si fata de terenul din fata lui.
+    if (j !== null) return { ok: true, ...j.c, sursa: 'cub' }
+    if (v === null) return faraTinta(q)
+    return { ok: true, ...celulaLangaFata(v, -1), sursa: 'teren' }
+  }
+  if ((q.mod === 'piesa' || q.mod === 'zona') && q.slice !== null) {
+    const zActiv = q.slice - 1
+    const c = alegeColoana({
+      raza: q.raza, zActiv, impacturi: q.impacturi, cuburi: q.cuburi, departeMax: q.departeMax,
+      desemnataPeNivel: q.desemnataPeNivel, plinaPeNivel: q.plinaPeNivel,
+    })
+    if (!c.ok) return { ok: false, mesaj: 'nimic la nivelul activ sub cursor' }
+    // Zona se picteaza pe celula calcabila: la nivelul activ e chiar celula asta, deci apelantul o
+    // primeste cu o cota mai jos (el adauga 1, ca pe solidul vazut).
+    return { ok: true, wx: c.wx, wy: c.wy, z: q.mod === 'zona' ? zActiv - 1 : zActiv, sursa: c.sursa }
+  }
+  const v = primulVizibil(q.impacturi, q.slice)
+  if (v === null) return faraTinta(q)
+  const spreAer = q.mod === 'piesa' || q.mod === 'fata'
+  return { ok: true, ...celulaLangaFata(v, spreAer ? 1 : -1), sursa: 'fata' }
+}
+
+function faraTinta(q: IntrebareTinta): RaspunsTinta {
+  return { ok: false, mesaj: q.slice !== null && q.impacturi.length > 0 ? 'nimic vizibil sub cursor: tot ce atinge raza e taiat de slice' : 'nimic sub cursor' }
+}
+
+/**
+ * Maparea instanta → slot a stratului de pioni: instantele se dau in ordinea sloturilor VII, deci dupa
+ * prima plecare instanta n nu mai e slotul n (panoul, T9). Intoarce cate instante sunt.
+ */
+export function slotDeInstanta(alive: ArrayLike<number>, count: number, out: Int32Array): number {
+  let n = 0
+  for (let i = 0; i < count; i++) {
+    if (alive[i] === 0) continue
+    out[n] = i
+    n++
+  }
+  return n
+}

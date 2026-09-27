@@ -1204,7 +1204,7 @@ let candPrio: number[] = []
  * aratat ca „fiecare la 3 sare peste celelalte" facea un pion cu ambele la 3
  * inert, fara cauza.
  */
-function categoriiActive(w: World, rules: Rules, slot: number): { sapa: boolean; cara: boolean; construieste: boolean } {
+export function categoriiActive(w: World, rules: Rules, slot: number): { sapa: boolean; cara: boolean; construieste: boolean } {
   const a = w.agents
   const pS = a.prioPersonala[slot * CATEGORII + Categorie.SAPA]!
   const pC = a.prioPersonala[slot * CATEGORII + Categorie.CARA]!

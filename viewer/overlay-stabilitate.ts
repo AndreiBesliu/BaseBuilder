@@ -94,14 +94,26 @@ export interface StabilityOverlay {
   scanare: Scanare | null
   /** Ultima trecere TERMINATA: ea se deseneaza. */
   ultimaScanare: Scanare | null
+  /**
+   * Previzualizarile (prabusire, imposibile, fara acces) de la ultima refacere, cu tickul si costul
+   * ei. Cand refacerea a costat peste `PREVIZ_SCUMP_MS`, capatul unei treceri nu le mai reface — le
+   * redeseneaza pe cele vechi —, iar legenda spune cat de vechi sunt (panoul de design al UI-ului,
+   * CG-2: 88–180 ms la capatul FIECAREI treceri, cam o data pe secunda cat pionii lucreaza).
+   */
+  previz: { readonly prabusire: readonly number[]; readonly imposibile: readonly number[]; readonly faraAcces: readonly number[] } | null
+  previzTick: number
+  previzMs: number
 }
+
+/** Peste atat, previzualizarile nu se mai refac la capatul unei treceri, ci doar la cerere. */
+export const PREVIZ_SCUMP_MS = 8
 
 export function createStabilityOverlay(): StabilityOverlay {
   const group = new THREE.Group()
   group.visible = false
   return {
     group, visible: false, sigur: 0, ultima: 0, cade: 0, previzualizate: 0, imposibile: 0, faraAcces: 0, faraAccesInaltime: 0, inchise: '', inchideri: null, inchideriLa: '', scanate: 0, piedica: '',
-    scanare: null, ultimaScanare: null,
+    scanare: null, ultimaScanare: null, previz: null, previzTick: -1, previzMs: 0,
   }
 }
 
@@ -129,6 +141,9 @@ function uita(o: StabilityOverlay): void {
   o.inchideri = null
   o.inchideriLa = ''
   o.scanate = 0
+  o.previz = null
+  o.previzTick = -1
+  o.previzMs = 0
 }
 
 function textInchise(pioni: number, mormane: number, zone: number): string {
@@ -224,7 +239,12 @@ export function avanseazaStabilitate(o: StabilityOverlay, w: World, rules: Rules
   if (!avanseazaScanare(o.scanare, w, rules, () => performance.now(), bugetMs)) return
   o.ultimaScanare = o.scanare
   o.scanare = null
-  redeseneazaStabilitate(o, w, rules)
+  redeseneazaStabilitate(o, w, rules, o.previz === null || o.previzMs <= PREVIZ_SCUMP_MS)
+}
+
+/** Previzualizarile desenate sunt mai vechi decat lumea (s-au sarit la capatul unei treceri)? */
+export function previzInvechita(o: StabilityOverlay, w: World): boolean {
+  return o.visible && o.previz !== null && o.previzTick !== w.tick && o.inchideriLa !== cheieLume(w)
 }
 
 /** Cat din trecerea in curs s-a facut, 0..1; `null` fara trecere. Pentru HUD. */
@@ -241,7 +261,7 @@ export function progresStabilitate(o: StabilityOverlay): number | null {
  * terminata se deseneaza doar previzualizarile, pentru intrebarea trecerii din curs;
  * patratele de stare vin la capatul ei.
  */
-export function redeseneazaStabilitate(o: StabilityOverlay, w: World, rules: Rules): void {
+export function redeseneazaStabilitate(o: StabilityOverlay, w: World, rules: Rules, refaPreviz = true): void {
   const s = o.ultimaScanare
   // Cand exista amandoua, sunt aceeasi intrebare: `pornesteStabilitate` o uita pe cea veche altfel.
   const q = s ?? o.scanare
@@ -265,9 +285,23 @@ export function redeseneazaStabilitate(o: StabilityOverlay, w: World, rules: Rul
   //
   // Se calculeaza pe MULTIMEA desemnarilor, nu pe fiecare in parte: o pivnita de
   // 7x7 e 49 de comenzi, si niciuna dintre ele, luata singura, nu doboara nimic.
-  const previz = prabusireaPrevizualizata(w, rules)
-  o.previzualizate = previz.length
-  for (const cheie of previz) {
+  if (refaPreviz || o.previz === null) {
+    const t0 = performance.now()
+    const prabusire = prabusireaPrevizualizata(w, rules)
+    const constr = constructiaPrevizualizata(w, rules)
+    o.previzMs = performance.now() - t0
+    o.previzTick = w.tick
+    o.previz = { prabusire, imposibile: constr.imposibile, faraAcces: constr.faraAcces }
+    o.previzualizate = prabusire.length
+    o.imposibile = constr.imposibile.length
+    o.faraAcces = constr.faraAcces.length
+    o.faraAccesInaltime = constr.cauze.filter((cz) => cz === CauzaAcces.INALTIME).length
+    o.inchise = textInchise(constr.inchise.pioni, constr.inchise.mormane, constr.inchise.zone)
+    o.inchideri = constr.inchideri
+    o.inchideriLa = cheieLume(w)
+  }
+  const pv = o.previz!
+  for (const cheie of pv.prabusire) {
     const c = decodeCell(cheie)
     if (Math.abs(c.wx - cx) > raza || Math.abs(c.wy - cy) > raza) continue
     // Proiectat pe nivelul activ: voxelul care cade e de obicei la z+1, adica
@@ -298,9 +332,7 @@ export function redeseneazaStabilitate(o: StabilityOverlay, w: World, rules: Rul
   // HUD-ul poate spune „6 piese NU se pot zidi" cand se vede una singura. Verificat
   // pe ecran: mutand camera, celelalte cinci apar. Daca vreodata deranjeaza, leacul
   // e sa spuna cate se vad DIN cate, nu sa se taie numarul global.
-  const constr = constructiaPrevizualizata(w, rules)
-  o.imposibile = constr.imposibile.length
-  for (const cheie of constr.imposibile) {
+  for (const cheie of pv.imposibile) {
     const c = decodeCell(cheie)
     if (Math.abs(c.wx - cx) > raza || Math.abs(c.wy - cy) > raza) continue
     // Ca la previzualizarea de prabusire: proiectat pe nivelul activ daca piesa e
@@ -312,12 +344,7 @@ export function redeseneazaStabilitate(o: StabilityOverlay, w: World, rules: Rul
   //
   // Acelasi predicat ca scanerul (inchiderea simulata): ce se deseneaza turcoaz e exact ce
   // pionii NU vor zidi. INALTIME cere o scara; INCINTA, o usa.
-  o.faraAcces = constr.faraAcces.length
-  o.faraAccesInaltime = constr.cauze.filter((cz) => cz === CauzaAcces.INALTIME).length
-  o.inchise = textInchise(constr.inchise.pioni, constr.inchise.mormane, constr.inchise.zone)
-  o.inchideri = constr.inchideri
-  o.inchideriLa = cheieLume(w)
-  for (const cheie of constr.faraAcces) {
+  for (const cheie of pv.faraAcces) {
     const c = decodeCell(cheie)
     if (Math.abs(c.wx - cx) > raza || Math.abs(c.wy - cy) > raza) continue
     patrat(pozitii, culori, c.wx, c.wy, Math.min(c.z, zActiv) + 0.94, INSET_IMPOSIBIL, CULOARE_FARA_ACCES)

@@ -1,0 +1,185 @@
+/*
+ * UI-ul de joc. Un singur strat peste canvas; panourile sunt insule pe margini, scena ramane ce se
+ * vede. Fonturi de sistem: jocul merge offline, in Electron. Se incarca DOAR din panouri.ts, care
+ * se incarca doar dinamic — o pagina de gate nu primeste nici stilul asta (panoul, CG-1).
+ *
+ * Paleta pleaca din HUD-ul de diagnostic (--ink, --frost, --ember), cu neutrul tras spre piatra
+ * calda a terenului. Nicio stare doar prin culoare (DESIGN §9 regula 9): barele au cifra, alertele
+ * iconita si text, prioritatile cuvant.
+ */
+:root {
+  --ui-bg: rgba(19, 18, 15, 0.9);
+  --ui-bg-2: rgba(33, 31, 26, 0.95);
+  --ui-bg-3: #2b2921;
+  --ui-line: #3d3a31;
+  --ui-line-2: #57523f;
+  --ui-ink: #ece6d8;
+  --ui-ink-2: #a79f90;
+  --ui-ink-3: #7a7365;
+  --ui-accent: #63aec0;
+  --ui-accent-ink: #0f2126;
+  --ui-warn: #e0934f;
+  --ui-crit: #e0604a;
+  --ui-ok: #92c273;
+  --res-piatra: #bdb8ad;
+  --res-hrana: #dcb54e;
+  --res-pamant: #a57b52;
+  --res-lemn: #c0915a;
+  --ui-font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --ui-mono: "Cascadia Mono", Consolas, "IBM Plex Mono", ui-monospace, monospace;
+  --ui-titlu: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+  --ui-r: 6px;
+}
+
+.ui { font: 13px/1.4 var(--ui-font); color: var(--ui-ink); }
+.ui * { box-sizing: border-box; }
+.ui button { font: inherit; color: inherit; }
+.ui :focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 1px; }
+.ui .num { font-family: var(--ui-mono); font-variant-numeric: tabular-nums; }
+.ui .eticheta { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ui-ink-2); }
+.ui .sub { color: var(--ui-ink-2); font-size: 12px; }
+.ui [hidden] { display: none !important; }
+
+/* ---- bara de sus ------------------------------------------------------------------------ */
+.ui-sus {
+  position: fixed; top: 0; left: 0; right: 0; height: 40px; z-index: 20;
+  display: flex; align-items: center; gap: 2px; padding: 0 6px;
+  background: var(--ui-bg); border-bottom: 1px solid var(--ui-line);
+}
+.ui-sus .grup { display: flex; align-items: center; gap: 2px; padding: 0 8px; border-right: 1px solid var(--ui-line); height: 100%; }
+.ui-sus .grup:last-child { border-right: 0; }
+.ui-sus .spatiu { flex: 1; }
+.ui-marca { font: 600 15px/1 var(--ui-titlu); letter-spacing: .22em; color: var(--ui-ink); padding: 0 6px; }
+.ui-timp { color: var(--ui-ink-2); min-width: 60px; font-size: 12px; }
+.ui-res { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: var(--ui-r); cursor: default; white-space: nowrap; }
+.ui-res:hover { background: var(--ui-bg-3); }
+.ui-res .pata { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.ui-res .val { font-family: var(--ui-mono); font-variant-numeric: tabular-nums; }
+.ui-res .prognoza { font: 11px var(--ui-mono); color: var(--ui-ink-2); }
+.ui-res .prognoza.atentie { color: var(--ui-warn); }
+.ui-res .prognoza.critic { color: var(--ui-crit); }
+.ui-insigna { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 10px; font-size: 12px; background: var(--ui-bg-3); white-space: nowrap; }
+.ui-insigna.atentie { color: var(--ui-warn); }
+.ui-insigna.critic { color: var(--ui-crit); }
+
+.ui-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-width: 30px; height: 30px; padding: 0 8px; border: 1px solid transparent; border-radius: var(--ui-r);
+  background: transparent; cursor: pointer; white-space: nowrap;
+}
+.ui-btn:hover { background: var(--ui-bg-3); border-color: var(--ui-line); }
+.ui-btn[aria-pressed="true"] { background: var(--ui-accent); color: var(--ui-accent-ink); border-color: var(--ui-accent); }
+.ui-btn:disabled { opacity: .45; cursor: not-allowed; }
+.ui-btn svg { width: 18px; height: 18px; flex: none; }
+.ui-btn .tasta { font: 11px var(--ui-mono); opacity: .7; }
+.ui-viteza-efectiva { font: 11px var(--ui-mono); color: var(--ui-warn); margin-left: 2px; min-width: 38px; }
+
+/* ---- stanga: nivelul, hartile, legenda, primii pasi ------------------------------------ */
+.ui-stanga { position: fixed; top: 50px; left: 10px; z-index: 15; display: flex; flex-direction: column; gap: 8px; width: 138px; }
+.ui-insula { background: var(--ui-bg); border: 1px solid var(--ui-line); border-radius: var(--ui-r); padding: 8px; }
+.ui-nivel { display: grid; gap: 4px; text-align: center; }
+.ui-nivel .cota { font: 600 20px/1 var(--ui-mono); }
+.ui-nivel .rel { font-size: 12px; color: var(--ui-ink-2); }
+.ui-overlay { display: grid; gap: 4px; }
+.ui-overlay .ui-btn { justify-content: flex-start; width: 100%; }
+.ui-legenda { position: fixed; top: 50px; left: 158px; z-index: 15; width: 300px; max-height: calc(100vh - 170px); overflow: auto; }
+.ui-legenda h3 { margin: 0 0 6px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--ui-ink-2); display: flex; justify-content: space-between; align-items: center; }
+.ui-legenda ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ui-legenda li { display: grid; grid-template-columns: 16px 1fr; gap: 8px; align-items: start; font-size: 12px; }
+.ui-legenda .mostra { width: 14px; height: 14px; border-radius: 2px; margin-top: 2px; border: 1px solid rgba(0,0,0,.4); }
+.ui-legenda .mostra.diag { background-image: repeating-linear-gradient(45deg, rgba(0,0,0,.6) 0 2px, transparent 2px 5px); }
+.ui-legenda .cifre { margin-top: 6px; font: 12px var(--ui-mono); color: var(--ui-ink-2); overflow-wrap: anywhere; }
+/* Jos-stanga, langa bara de unelte: in coloana de 138 px textul se rupea pe 5 randuri si iesea din ecran la 720. */
+.ui-pasi { position: fixed; left: 10px; bottom: 64px; z-index: 14; width: 300px; }
+.ui-pasi ol { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; }
+.ui-pasi li.facut { color: var(--ui-ink-3); text-decoration: line-through; }
+.ui-pasi .hrana { margin-top: 6px; font-size: 12px; color: var(--ui-warn); }
+
+/* ---- bara de unelte (jos) --------------------------------------------------------------- */
+.ui-jos { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: calc(100vw - 20px); }
+.ui-unelte { display: flex; gap: 2px; padding: 4px; background: var(--ui-bg); border: 1px solid var(--ui-line); border-radius: 8px; }
+.ui-sep { width: 1px; align-self: stretch; background: var(--ui-line); margin: 4px 3px; }
+.ui-sub { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; padding: 3px; background: var(--ui-bg-2); border: 1px solid var(--ui-line); border-radius: 8px; align-items: center; }
+.ui-sub .eticheta { padding: 0 6px; }
+.ui-indiciu { font-size: 12px; color: var(--ui-ink-2); background: var(--ui-bg); border: 1px solid var(--ui-line); border-radius: 12px; padding: 3px 12px; text-align: center; }
+.ui-indiciu b { color: var(--ui-ink); font-weight: 600; }
+.ui-indiciu.rosu { border-color: var(--ui-crit); color: var(--ui-ink); }
+
+/* ---- dreapta: alerte + inspector / oameni ---------------------------------------------- */
+.ui-dreapta { position: fixed; top: 50px; right: 10px; z-index: 15; width: 330px; display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 150px); }
+.ui-alerte { display: grid; gap: 4px; }
+.ui-alerta { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: center; padding: 6px 8px; border-radius: var(--ui-r); background: var(--ui-bg); border: 1px solid var(--ui-line); border-left-width: 3px; cursor: pointer; text-align: left; width: 100%; }
+.ui-alerta:hover { background: var(--ui-bg-2); }
+.ui-alerta.atentie { border-left-color: var(--ui-warn); }
+.ui-alerta.critic { border-left-color: var(--ui-crit); }
+.ui-alerta svg { width: 16px; height: 16px; }
+.ui-alerta.atentie svg { color: var(--ui-warn); }
+.ui-alerta.critic svg { color: var(--ui-crit); }
+.ui-alerte-antet { display: flex; justify-content: flex-end; }
+.ui-sertar { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.ui-file { display: flex; gap: 2px; margin-bottom: 6px; }
+.ui-file .ui-btn { flex: 1; height: 26px; font-size: 12px; }
+.ui-sertar .corp { overflow: auto; min-height: 0; }
+.ui-inspector h2 { margin: 0; font: 600 15px/1.25 var(--ui-font); }
+.ui-inspector section { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--ui-line); display: grid; gap: 4px; }
+.ui-kv { display: flex; justify-content: space-between; gap: 12px; }
+.ui-kv > span:first-child { color: var(--ui-ink-2); }
+.ui-motiv { padding: 6px 8px; border-radius: var(--ui-r); background: var(--ui-bg-3); border-left: 3px solid var(--ui-warn); }
+.ui-motiv.bine { border-left-color: var(--ui-ok); }
+.ui-motiv.critic { border-left-color: var(--ui-crit); }
+.ui-motiv .actiune { color: var(--ui-ink-2); margin-top: 2px; }
+.ui-bara { position: relative; height: 8px; border-radius: 4px; background: #0e0d0b; overflow: hidden; }
+.ui-bara > i { position: absolute; inset: 0 auto 0 0; background: var(--ui-ok); }
+.ui-bara.atentie > i { background: var(--ui-warn); }
+.ui-bara.critic > i { background: var(--ui-crit); }
+.ui-bara > b { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,.55); }
+.ui-bara > u { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ui-accent); text-decoration: none; }
+.ui-nevoie { display: grid; grid-template-columns: 78px 1fr 40px; gap: 8px; align-items: center; font-size: 12px; }
+.ui-prio { display: inline-grid; place-items: center; min-width: 30px; height: 22px; padding: 0 4px; border-radius: 4px; border: 1px solid var(--ui-line); background: var(--ui-bg-3); cursor: pointer; font: 12px var(--ui-mono); }
+.ui-prio[data-v="0"] { color: var(--ui-ink-3); background: transparent; }
+.ui-prio.excl { border-color: var(--ui-accent); color: var(--ui-accent); }
+.ui-prio.oprita { text-decoration: line-through; color: var(--ui-ink-3); }
+.ui-actiuni { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.ui-actiuni .ui-btn { border-color: var(--ui-line); }
+.ui-oameni table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.ui-oameni th { position: sticky; top: 0; background: var(--ui-bg-2); text-align: left; font-weight: 600; color: var(--ui-ink-2); padding: 4px 4px; cursor: pointer; user-select: none; white-space: nowrap; }
+.ui-oameni td { padding: 3px 4px; border-top: 1px solid var(--ui-line); white-space: nowrap; }
+.ui-oameni td.act { white-space: normal; max-width: 110px; }
+.ui-oameni tr.ales td { background: rgba(99, 174, 192, .16); }
+.ui-oameni tbody tr { cursor: pointer; }
+.ui-oameni tbody tr:hover td { background: var(--ui-bg-3); }
+.ui-oameni .ui-bara { width: 38px; }
+
+/* ---- carduri, toast ------------------------------------------------------------------------ */
+.ui-toast { position: fixed; bottom: 112px; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; gap: 10px; align-items: center; padding: 8px 10px 8px 14px; border-radius: var(--ui-r); background: var(--ui-bg-2); border: 1px solid var(--ui-line-2); max-width: min(760px, 90vw); }
+.ui-toast.refuz { border-color: var(--ui-warn); }
+.ui-toast .ui-btn { border-color: var(--ui-line); height: 26px; }
+
+/* ---- ferestre: meniu, titlu, joc nou, incarcare, ajutor, jurnal ------------------------ */
+.ui-voal { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: rgba(8, 9, 10, .55); }
+.ui-fereastra { width: min(580px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: auto; background: var(--ui-bg-2); border: 1px solid var(--ui-line-2); border-radius: 10px; padding: 20px; }
+.ui-fereastra h2 { margin: 0 0 12px; font: 600 18px/1.2 var(--ui-font); }
+.ui-meniu { display: grid; gap: 6px; }
+.ui-meniu .ui-btn { justify-content: flex-start; height: 38px; border-color: var(--ui-line); background: var(--ui-bg-3); }
+.ui-titlu { text-align: center; }
+.ui-titlu h1 { margin: 6px 0 0; font: 400 54px/1 var(--ui-titlu); letter-spacing: .32em; padding-left: .32em; }
+.ui-titlu .motto { margin: 12px 0 24px; color: var(--ui-ink-2); font-style: italic; }
+.ui-titlu .ui-meniu .ui-btn { justify-content: center; }
+.ui-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin: 12px 0; }
+.ui-form label { display: grid; gap: 4px; font-size: 12px; color: var(--ui-ink-2); }
+.ui-form input { font: 14px var(--ui-mono); color: var(--ui-ink); background: #0f0e0c; border: 1px solid var(--ui-line-2); border-radius: 4px; padding: 6px 8px; width: 100%; }
+.ui-salvari { display: grid; gap: 4px; }
+.ui-salvare { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 8px; border: 1px solid var(--ui-line); border-radius: var(--ui-r); background: var(--ui-bg-3); }
+.ui-ajutor p { margin: 0 0 10px; }
+.ui-ajutor h3 { margin: 14px 0 6px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--ui-ink-2); }
+.ui-ajutor dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; font-size: 13px; }
+.ui-ajutor dt { font-family: var(--ui-mono); color: var(--ui-accent); }
+.ui-ajutor dd { margin: 0; }
+.ui-jurnal { display: grid; gap: 2px; font-size: 12px; }
+.ui-jurnal div { display: grid; grid-template-columns: 64px 1fr; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--ui-line); }
+.ui-golita p { margin: 0 0 8px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .ui-toast { animation: ui-urca .18s ease-out; }
+  @keyframes ui-urca { from { transform: translate(-50%, 6px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+}
