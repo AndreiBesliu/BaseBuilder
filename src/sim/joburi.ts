@@ -97,7 +97,7 @@ import type { Terrain } from './terrain/terrain.ts'
 import { dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
 import { Material } from './terrain/chunk.ts'
 import type { MaterialId } from './terrain/chunk.ts'
-import { cauzaFaraAcces, componenteInchiseDe, etichetare, FelLucru, felDesemnare, felSapa, inchiseDePlan, nodStabil, predicatAcces, siguraDupaZidire, siguraMemorat } from './acces.ts'
+import { cauzaFaraAcces, componenteInchiseDeMemorat, etichetare, FelLucru, felDesemnare, felSapa, inchiseDePlan, nodStabil, predicatAcces, siguraDupaZidire, siguraMemorat } from './acces.ts'
 import type { CauzaAccesId, FelLucruId } from './acces.ts'
 import { niveluriDeLucru, vecinatate } from './acces.ts'
 import { cadeDaca, constructiaPosibila, cotaDeAsezare, multimeaCareCade, poateSustine, Sol, solLa, sustinutAcumMemorat } from './stabilitate.ts'
@@ -2780,7 +2780,7 @@ function refaLoculDeLucruEvitandCurentul(
 function locSigurPentru(w: World, rules: Rules, px: number, py: number, pz: number): (x: number, y: number, z: number) => boolean {
   return (x, y, z) =>
     siguraMemorat(w.terrain, w.desemnari, rules, w.acces, x, y, z) ||
-    siguraDupaZidire(w.terrain, rules, w.acces, x, y, z, px, py, pz)
+    siguraDupaZidire(w.terrain, w.desemnari, rules, w.acces, x, y, z, px, py, pz)
 }
 
 /**
@@ -2797,11 +2797,11 @@ function detaliuFaraLoc(w: World, rules: Rules, ds: number): number {
 
 /**
  * Regula de sigilare: zidirea piesei de la (px, py, pz) ar inchide un pion viu, un morman sau o
- * celula de zona intr-o incinta fara iesire? Vezi `componenteInchiseDe`. `AR_INCHIDE` cu ce si
- * unde; altfel `accept`.
+ * celula de zona intr-o incinta fara iesire? Vezi `componenteInchiseDe` (aici pe memoria lumii,
+ * acelasi raspuns). `AR_INCHIDE` cu ce si unde; altfel `accept`.
  */
 export function arInchideCeva(w: World, rules: Rules, px: number, py: number, pz: number): Outcome<void> {
-  const inchise = componenteInchiseDe(w.terrain, rules, px, py, pz)
+  const inchise = componenteInchiseDeMemorat(w.terrain, w.desemnari, rules, w.acces, px, py, pz)
   if (inchise.length === 0) return accept()
   const a = w.agents
   const pioni = new Map<number, number>()

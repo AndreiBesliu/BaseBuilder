@@ -12,6 +12,8 @@ import assert from 'node:assert/strict'
 import {
   cititor,
   componenta,
+  componenteInchiseDe,
+  componenteInchiseDeMemorat,
   esteSiguraPur,
   FelLucru,
   materialCitit,
@@ -19,10 +21,11 @@ import {
   niveluriDeLucru,
   nodStabil,
   nodW,
+  siguraDupaZidire,
   siguraMemorat,
   vecinatate,
 } from '../src/sim/acces.ts'
-import { adaugaDesemnare, Desemnare, stergeDesemnare } from '../src/sim/desemnari.ts'
+import { adaugaDesemnare, Desemnare, desemnareLaCelula, stergeDesemnare } from '../src/sim/desemnari.ts'
 import { Piesa } from '../src/sim/state.ts'
 import { JURNAL_CAP } from '../src/sim/terrain/terrain.ts'
 import type { LumeAcces } from '../src/sim/acces.ts'
@@ -30,8 +33,8 @@ import { DEFAULT_RULES, parseRules } from '../src/sim/content.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { isWalkable, materialFast } from '../src/sim/regions.ts'
 import { cellKey } from '../src/sim/path.ts'
-import { dig, fill, groundLevelM, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
-import { CHUNK_CELLS, Material } from '../src/sim/terrain/chunk.ts'
+import { dig, fill, groundLevelM, materialAt, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
+import { CHUNK_CELLS, isSolid, Material } from '../src/sim/terrain/chunk.ts'
 import { createWorld } from '../src/sim/world.ts'
 import { R, sitPlat } from './fixturi.ts'
 
@@ -540,4 +543,209 @@ test('memoria vede editarea de PESTE capul vecinului de pas, la pas 2', () => {
   const b = siguraMemorat(t, w.desemnari, rules, nou, x0 + 2, y0 + 2, g + 1)
   assert.equal(b, true, 'fixtura: creasta eliberata trebuia sa lege camera')
   assert.equal(siguraMemorat(t, w.desemnari, rules, m, x0 + 2, y0 + 2, g + 1), b, 'memoria n-a vazut editarea de peste capul vecinului')
+})
+
+/**
+ * FERESTRE de 1–4 editari intre doua sincronizari, cu praguri mici (pungile se deschid si se
+ * inchid des). Recenzia costului, 27.09: memoria sterge acum doar flood-urile INCHISE la o
+ * editare monotona (santier scos din C, piesa din C zidita), iar fuzz-ul de mai sus
+ * sincronizeaza dupa FIECARE pas si are pragul 2048 — nu vede nici doua editari pe aceeasi celula
+ * in aceeasi fereastra, nici o componenta deschisa care se inchide. Pe o implementare cu
+ * „orice editare de teren e monotona", seed 777 da 12 diferente; fara „solida acum", 14.
+ *
+ * Tot aici, doua ORACOLE pe aceeasi lume: regula de sigilare pe memorie (oprita la etichetele
+ * deschise) fata de forma pura, cu tot cu ordinea listelor; privirea inainte pe memorie
+ * (reuniunea etichetelor) fata de `esteSiguraPur` cu Z = {p}.
+ */
+function fuzzFerestre(seed: number, ferestre: number, pragN: number, pragT: number): { comparatii: number; sigilari: number; sigilariPline: number; priviri: number; privireAdevarata: number; flooduri: number } {
+  const rules = cuPraguri(pragN, pragT)
+  const { w, wx, wy, g } = sitPlat(seed, 13)
+  const t = w.terrain
+  const d = w.desemnari
+  const x0 = wx + 3, y0 = wy + 3
+  const planifica = (x: number, y: number, z: number): boolean => adaugaDesemnare(d, w.nextId++, Desemnare.CONSTRUIESTE, x, y, z, 3, Piesa.PERETE).ok
+  for (let z = g + 1; z <= g + 2; z++) {
+    for (let dx = 0; dx < 7; dx++) {
+      for (let dy = 0; dy < 7; dy++) {
+        if (dx !== 0 && dx !== 6 && dy !== 0 && dy !== 6) continue
+        if (dx === 3 && dy === 0) continue
+        planifica(x0 + dx, y0 + dy, z)
+      }
+    }
+  }
+  planifica(x0 + 3, y0 + 1, g + 1); planifica(x0 + 3, y0 + 2, g + 1); planifica(x0 + 3, y0 + 2, g + 2)
+  for (let dx = 0; dx < 7; dx++) for (let dy = 3; dy < 7; dy++) planifica(x0 + dx, y0 + dy, g + 3)
+
+  let s = (seed * 2654435761) >>> 0
+  const rnd = (n: number): number => { s = (s * 1103515245 + 12345) >>> 0; return (s >>> 8) % n }
+  const vii = (): number[] => {
+    const o: number[] = []
+    for (let i = 0; i < d.count; i++) if (d.alive[i] === 1 && d.kind[i] === Desemnare.CONSTRUIESTE) o.push(i)
+    return o
+  }
+  const planul = (): Set<number> => new Set(vii().map((i) => cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!)))
+  const m = memorieAcces()
+  const rez = { comparatii: 0, sigilari: 0, sigilariPline: 0, priviri: 0, privireAdevarata: 0, flooduri: 0 }
+  const niveluri = niveluriDeLucru(FelLucru.CONSTRUIESTE, rules)
+  const compara = (f: number): void => {
+    const nou = memorieAcces()
+    for (let x = x0 - 3; x <= x0 + 9; x++) {
+      for (let y = y0 - 3; y <= y0 + 9; y++) {
+        for (let z = g - 2; z <= g + 6; z++) {
+          const a = siguraMemorat(t, d, rules, m, x, y, z)
+          const b = siguraMemorat(t, d, rules, nou, x, y, z)
+          if (a !== b) assert.fail(`seed ${seed} fereastra ${f}: memoria spune ${a}, recalculul ${b} la (${x - x0},${y - y0},${z - g})`)
+          rez.comparatii++
+        }
+      }
+    }
+    // Oracolele, pe trei santiere vii la intamplare.
+    const v = vii()
+    const plan = planul()
+    for (let q = 0; q < 3 && v.length > 0; q++) {
+      const i = v[rnd(v.length)]!
+      const px = d.wx[i]!, py = d.wy[i]!, pz = d.z[i]!
+      const a = componenteInchiseDeMemorat(t, d, rules, m, px, py, pz)
+      const b = componenteInchiseDe(t, rules, px, py, pz)
+      assert.deepEqual(a, b, `seed ${seed} fereastra ${f}: sigilarea pe memorie difera de forma pura la (${px - x0},${py - y0},${pz - g})`)
+      rez.sigilari++
+      if (b.length > 0) rez.sigilariPline++
+      const Z = new Set([cellKey(px, py, pz)])
+      for (const dzs of niveluri) {
+        for (const [dx, dy] of vecinatate(FelLucru.CONSTRUIESTE)) {
+          const x = px + dx, y = py + dy, z = pz + dzs
+          const pm = siguraDupaZidire(t, d, rules, m, x, y, z, px, py, pz)
+          const pp = esteSiguraPur({ t, plan, zidite: Z }, rules, x, y, z)
+          if (pm !== pp) assert.fail(`seed ${seed} fereastra ${f}: privirea inainte pe memorie spune ${pm}, forma pura ${pp} la (${x - x0},${y - y0},${z - g}) pentru p (${px - x0},${py - y0},${pz - g})`)
+          rez.priviri++
+          if (pp && !siguraMemorat(t, d, rules, m, x, y, z)) rez.privireAdevarata++
+        }
+      }
+    }
+  }
+  compara(-1)
+  for (let f = 0; f < ferestre; f++) {
+    const n = 1 + rnd(4)
+    for (let k = 0; k < n; k++) {
+      const q = rnd(100)
+      const v = vii()
+      if (q < 25 && v.length > 0) {
+        // zidire, ca `zideste`
+        const i = v[rnd(v.length)]!
+        if (fill(t, d.wx[i]!, d.wy[i]!, d.z[i]!, Material.PIATRA_CONSTRUITA).ok) stergeDesemnare(d, i)
+      } else if (q < 35) {
+        dig(t, x0 - 3 + rnd(13), y0 - 3 + rnd(13), g - 2 + rnd(9))
+      } else if (q < 45) {
+        fill(t, x0 - 3 + rnd(13), y0 - 3 + rnd(13), g - 2 + rnd(9), rnd(2) === 0 ? Material.MOLOZ : Material.PIATRA_CONSTRUITA)
+      } else if (q < 60 && v.length > 0) {
+        // moloz pe un santier viu (prabusirea il poate depune acolo)
+        const i = v[rnd(v.length)]!
+        fill(t, d.wx[i]!, d.wy[i]!, d.z[i]!, Material.MOLOZ)
+      } else if (q < 72 && v.length > 0) {
+        // molozul de pe un santier, sapat
+        const i = v[rnd(v.length)]!
+        const mt = materialAt(t, d.wx[i]!, d.wy[i]!, d.z[i]!)
+        if (mt.ok && isSolid(mt.value)) dig(t, d.wx[i]!, d.wy[i]!, d.z[i]!)
+      } else if (q < 88) {
+        const x = x0 - 3 + rnd(13), y = y0 - 3 + rnd(13), z = g + 1 + rnd(4)
+        const mt = materialAt(t, x, y, z)
+        if (mt.ok && !isSolid(mt.value)) planifica(x, y, z)
+      } else if (v.length > 0) {
+        stergeDesemnare(d, v[rnd(v.length)]!)
+      }
+    }
+    compara(f)
+  }
+  rez.flooduri = m.stat.flooduri
+  return rez
+}
+
+test('memoria == recalculul pe FERESTRE de 1–4 editari cu praguri mici; sigilarea si privirea pe memorie == formele pure', () => {
+  let priviri = 0, adevarate = 0, sigilariPline = 0
+  for (const seed of [12345, 777, 4242]) {
+    for (const [pragN, pragT] of [[12, 60], [6, 20]] as const) {
+      const r = fuzzFerestre(seed, 150, pragN, pragT)
+      assert.ok(r.comparatii > 100000, `fixtura: doar ${r.comparatii} comparatii`)
+      priviri += r.priviri
+      adevarate += r.privireAdevarata
+      sigilariPline += r.sigilariPline
+    }
+  }
+  // Fixtura VIE: oracolele au comparat si raspunsuri care conteaza.
+  assert.ok(adevarate > 0, `fixtura: privirea inainte n-a deschis nicio punga in ${priviri} intrebari`)
+  assert.ok(sigilariPline > 0, 'fixtura: nicio sigilare n-a inchis nimic')
+})
+
+test('memoria pe molozul unui santier, sapat si zidit in ACEEASI fereastra: podeaua de deasupra nu mai e naturala', () => {
+  // Doua intrari de teren pe aceeasi celula intr-o fereastra: efectul net nu e W ∪ {c}. Celula
+  // de deasupra molozului avea podea NATURALA; dupa, de structura — naturalele scad, iar o
+  // componenta deschisa DOAR prin numarul lor se inchide (recenzia, verif-cost-0: memoria
+  // spunea „deschis", recalculul „inchis").
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  const t = w.terrain, d = w.desemnari
+  const x0 = wx + 3, y0 = wy + 3
+  inel(t, x0, y0, g, 5, 2)
+  const px = x0 + 2, py = y0 + 2, pz = g + 1
+  assert.ok(adaugaDesemnare(d, w.nextId++, Desemnare.CONSTRUIESTE, px, py, pz, 3, Piesa.PERETE).ok)
+  assert.ok(fill(t, px, py, pz, Material.MOLOZ).ok, 'fixtura: molozul de pe santier')
+  // 8 celule la g+1 cu podea de iarba + cea de pe moloz la g+2 = 9 naturale: deschisa la prag 9.
+  const rules = cuPraguri(9, 100)
+  const cel = [x0 + 1, y0 + 1, g + 1] as const
+  const m = memorieAcces()
+  assert.equal(siguraMemorat(t, d, rules, m, ...cel), true, 'fixtura: camera trebuia deschisa prin cele 9 podele naturale')
+  // O fereastra: molozul sapat, piesa zidita (umplerea de structura + santierul sters, ca `zideste`).
+  assert.ok(dig(t, px, py, pz).ok && fill(t, px, py, pz, Material.PIATRA_CONSTRUITA).ok)
+  stergeDesemnare(d, desemnareLaCelula(d, px, py, pz))
+  const b = siguraMemorat(t, d, rules, memorieAcces(), ...cel)
+  assert.equal(b, false, 'fixtura: cu podeaua de structura camera trebuia sa fie punga')
+  assert.equal(siguraMemorat(t, d, rules, m, ...cel), b, 'memoria a tinut flood-ul deschis peste o editare care nu era monotona')
+})
+
+test('memoria elibereaza un flood deschis ale carui etichete au fost luate toate de flood-uri mai noi', () => {
+  // Un flood deschis ramane viu peste editarile monotone, iar etichetele lui pot trece toate la
+  // flood-uri mai noi; fara eliberare, satul rasfirat al recenziei tinea 102 flood-uri cu 209.917
+  // celule pentru 8.669 de etichete. Scena, cu pragul natural 2 (un flood se opreste la a doua
+  // celula): F1 din X ia {X, X+(1,0)}; F2 din X−(1,0) ia {X−(1,0), X}; F3 din X+(1,1), cu trei
+  // vecini ziditi, ia {X+(1,1), X+(1,0)}. F1 ramane fara nicio eticheta.
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  const t = w.terrain, d = w.desemnari
+  const x = wx + 4, y = wy + 4, z = g + 1
+  for (const [dx, dy] of [[2, 1], [0, 1], [1, 2]] as const) {
+    for (let h = 0; h < 2; h++) assert.ok(fill(t, x + dx, y + dy, z + h, Material.PIATRA_CONSTRUITA).ok, 'fixtura: zidul')
+  }
+  const rules = cuPraguri(2, 400)
+  const m = memorieAcces()
+  for (const [dx, dy] of [[0, 0], [-1, 0], [1, 1]] as const) assert.equal(siguraMemorat(t, d, rules, m, x + dx, y + dy, z), true)
+  assert.equal(m.stat.flooduri, 3, 'fixtura: trei flood-uri')
+  assert.equal(m.stat.eliberate, 1, 'flood-ul ramas fara etichete n-a fost eliberat')
+  const vii = m.floods.filter((f) => f !== null)
+  for (const f of vii) assert.ok(f.etichete > 0, 'un flood fara nicio eticheta a ramas in memorie')
+  let etichete = 0
+  for (const f of vii) etichete += f.etichete
+  assert.equal(etichete, m.eticheta.size, 'numaratoarea etichetelor pe flood nu bate cu etichetele')
+  assert.equal(vii.length, m.vii)
+})
+
+test('memoria refolosita pe ALT teren cu acelasi numar de editari nu citeste coloanele celui vechi', () => {
+  // Latent in joc (`w.terrain` nu se schimba), dar contractul spune „terenul schimbat goleste
+  // tot": golirea lasa cititorul terenului vechi, iar `cititorLa === t.editari` il refolosea
+  // (recenzia, continuitate 2).
+  const a = sitPlat(4242, 13)
+  const b = sitPlat(4242, 13)
+  inel(b.w.terrain, b.wx, b.wy, b.g, 5, 2)
+  const n = b.w.terrain.editari - a.w.terrain.editari
+  for (let i = 0; i < n; i++) {
+    const x = a.wx + (a.wx < WORLD_CELLS / 2 ? 300 : -300) + i
+    const y = a.wy + (a.wy < WORLD_CELLS / 2 ? 300 : -300)
+    const gl = groundLevelM(a.w.terrain, x, y)
+    assert.ok(gl.ok && fill(a.w.terrain, x, y, gl.value + 1, Material.PIATRA_CONSTRUITA).ok, 'fixtura: editarea departe')
+  }
+  assert.equal(a.w.terrain.editari, b.w.terrain.editari, 'fixtura: acelasi numar de editari')
+  const m = memorieAcces()
+  const inA = siguraMemorat(a.w.terrain, a.w.desemnari, R, m, a.wx + 2, a.wy + 2, a.g + 1)
+  const inB = siguraMemorat(b.w.terrain, b.w.desemnari, R, m, b.wx + 2, b.wy + 2, b.g + 1)
+  const nou = siguraMemorat(b.w.terrain, b.w.desemnari, R, memorieAcces(), b.wx + 2, b.wy + 2, b.g + 1)
+  assert.equal(inA, true, 'fixtura: in A celula e afara')
+  assert.equal(nou, false, 'fixtura: in B celula e in incinta')
+  assert.equal(inB, nou, 'memoria refolosita a citit terenul vechi')
 })

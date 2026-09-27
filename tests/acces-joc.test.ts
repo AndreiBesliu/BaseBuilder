@@ -633,15 +633,21 @@ test('K05: previzualizarea inunda cel mult 4 × (pragul natural + piesele), pe p
   }
 })
 
-test('K05: memoria scanerului inunda cel mult 2 × piese × pragul natural pe casa cu doua etaje', () => {
-  // Masurat: 260 de flood-uri, ~2.070 de celule pe piesa zidita (o inundare „afara" dupa fiecare
-  // zidire din cutia ei). Fara etichetele retinute, fiecare intrebare a scanerului ar inunda.
+test('K05: accesul din simulare (memoria, sigilarea, coborarea) inunda cel mult 400 de celule pe piesa, pe casa cu doua etaje', () => {
+  // TOATE flood-urile accesului din tick, intr-un singur contor — recenzia costului (27.09):
+  // poarta veche numara doar memoria (2 × piese × 2.048 = 790.528), iar sigilarea si privirea o
+  // ocoleau. Masurat atunci pe d0ae20c: memoria ~399.000 de celule, sigilarea ~1,2 M. Dupa
+  // remedieri (memoria sterge doar flood-urile INCHISE la o zidire; sigilarea se opreste la
+  // etichetele deschise ale memoriei si sare piesele care nu scot nicio celula calcabila;
+  // privirea pe etichete): 30.201 + 4.081 de celule, 178 pe piesa, pe 3 seminte.
   const { w, ids } = santier(12345, casaCuEtaj(true))
   const n = panaCand(w, 90000, () => ramase(w, ids).length === 0)
   assert.ok(n >= 0, 'fixtura: casa nu s-a terminat')
-  const plafon = 2 * ids.length * R.accesPlafonNatural
-  assert.ok(w.acces.stat.celuleFlood <= plafon, `${w.acces.stat.celuleFlood} celule inundate, plafonul ${plafon}`)
-  assert.ok(w.acces.stat.flooduri > 0, 'fixtura: memoria n-a lucrat deloc')
+  const st = w.acces.stat
+  const celule = st.celuleFlood + st.celuleSigilare + st.celuleCoborare
+  const plafon = 400 * ids.length
+  assert.ok(celule <= plafon, `${celule} celule inundate (memoria ${st.celuleFlood}, sigilarea ${st.celuleSigilare}, coborarea ${st.celuleCoborare}), plafonul ${plafon}`)
+  assert.ok(st.flooduri > 0 && st.sigilari > 0, 'fixtura: memoria sau sigilarea n-au lucrat deloc')
 })
 
 test('hash de referinta al accesului vertical: casa cu doua etaje dupa 12.000 de tickuri', () => {

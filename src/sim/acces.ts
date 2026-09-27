@@ -315,8 +315,21 @@ export interface Componenta {
  * Muchiile sunt ale lui `canStep`: vecin ORTOGONAL, ambele calcabile, `|dz| <= maxStepM`.
  * Ordinea de vizitare e fixa (coada, directii si niveluri in ordine fixa), dar raspunsul nu
  * depinde de ea — vezi antetul.
+ *
+ * `dovedita(k)`: celula k e DEJA dovedita intr-o componenta deschisa a unui graf care e
+ * subgraf al lui `nod` (aceleasi muchii, aceleasi podele naturale) — flood-ul care o atinge e
+ * in aceeasi componenta, deci deschis, si se opreste. Recenzia costului (27.09): fara oprire,
+ * fiecare intrebare pe o celula neetichetata redovedea „afara" de la zero, 2.048+ celule.
+ * O componenta INCHISA nu atinge nicio celula dovedita, deci se enumera tot integral.
  */
-export function componenta(nod: Nod, rules: Rules, x: number, y: number, z: number): Componenta {
+export function componenta(
+  nod: Nod,
+  rules: Rules,
+  x: number,
+  y: number,
+  z: number,
+  dovedita: ((k: number) => boolean) | null = null,
+): Componenta {
   const pas = Math.max(0, Math.min(4, rules.maxStepM))
   const pragN = rules.accesPlafonNatural
   const pragT = rules.accesPlafonTotal
@@ -328,6 +341,7 @@ export function componenta(nod: Nod, rules: Rules, x: number, y: number, z: numb
   let naturale = nod.naturala(x, y, z) ? 1 : 0
   let x0 = x, x1 = x, y0 = y, y1 = y, z0 = z, z1 = z
   let deschisa = naturale >= pragN || celule.length > pragT
+  if (dovedita !== null && dovedita(cellKey(x, y, z))) deschisa = true
   for (let h = 0; h < coada.length && !deschisa; h += 3) {
     const cx = coada[h]!, cy = coada[h + 1]!, cz = coada[h + 2]!
     for (const [dx, dy] of DIR4) {
@@ -348,6 +362,7 @@ export function componenta(nod: Nod, rules: Rules, x: number, y: number, z: numb
         if (nz < z0) z0 = nz
         if (nz > z1) z1 = nz
         if (naturale >= pragN || celule.length > pragT) deschisa = true
+        if (dovedita !== null && dovedita(k)) deschisa = true
       }
       if (deschisa) break
     }
@@ -366,10 +381,14 @@ export function esteSiguraPur(l: LumeAcces, rules: Rules, x: number, y: number, 
 // memoria din lume
 // ---------------------------------------------------------------------------
 
-/** Un flood retinut: concluzia, celulele etichetate si cutia din care a CITIT. */
+/** Un flood retinut: concluzia, marimile, celulele etichetate si cutia din care a CITIT. */
 interface FloodMemorat {
   readonly deschisa: boolean
+  /** Podelele naturale vizitate — exacte la o componenta INCHISA (enumerata integral). */
+  readonly naturale: number
   readonly celule: number[]
+  /** Cate celule poarta inca eticheta lui. La 0 nu mai raspunde nimic si se elibereaza. */
+  etichete: number
   readonly x0: number
   readonly x1: number
   readonly y0: number
@@ -394,6 +413,11 @@ interface FloodMemorat {
  * `z1 + maxStepM + agentHeadroomM − 1` (capul vecinului de peste pas). Designul v2 avea
  * [−1, +H]: panoul a gasit o umplere pe fundul unui sant de 2 m care nu golea memoria,
  * cu 180 de celule declarate sigure pe care recalculul le refuza.
+ *
+ * O editare MONOTONA (un santier scos din C; o celula din C umpluta) sterge doar flood-urile
+ * INCHISE din cutie: dupa teorema din antet, ce era deschis ramane deschis. Recenzia costului
+ * (27.09): cu stergerea tuturor, fiecare zidire reinunda „afara" (~2.048+ celule), iar intr-un
+ * oras de 12 case cu etaj accesul lua 61% din tick.
  */
 export interface MemorieAcces {
   teren: Terrain | null
@@ -411,8 +435,23 @@ export interface MemorieAcces {
   readonly eticheta: Map<number, number>
   cititor: Cititor | null
   cititorLa: number
-  /** Pentru teste si pentru poarta de cost: nimic din simulare nu le citeste. */
-  readonly stat: { flooduri: number; celuleFlood: number; invalidate: number; goliri: number }
+  /**
+   * Pentru teste si pentru poarta de cost: nimic din simulare nu le citeste. TOATE flood-urile
+   * accesului din simulare trec pe aici — memoria, regula de sigilare, coborarea de urgenta —,
+   * ca poarta K05 sa numere tot (recenzia: sigilarea si privirea ocoleau contorul).
+   */
+  readonly stat: {
+    flooduri: number
+    celuleFlood: number
+    invalidate: number
+    goliri: number
+    eliberate: number
+    sigilari: number
+    celuleSigilare: number
+    sigilariSarite: number
+    coborari: number
+    celuleCoborare: number
+  }
 }
 
 export function memorieAcces(): MemorieAcces {
@@ -428,7 +467,18 @@ export function memorieAcces(): MemorieAcces {
     eticheta: new Map(),
     cititor: null,
     cititorLa: -1,
-    stat: { flooduri: 0, celuleFlood: 0, invalidate: 0, goliri: 0 },
+    stat: {
+      flooduri: 0,
+      celuleFlood: 0,
+      invalidate: 0,
+      goliri: 0,
+      eliberate: 0,
+      sigilari: 0,
+      celuleSigilare: 0,
+      sigilariSarite: 0,
+      coborari: 0,
+      celuleCoborare: 0,
+    },
   }
 }
 
@@ -438,7 +488,7 @@ function golesteFlooduri(m: MemorieAcces): void {
   m.eticheta.clear()
 }
 
-/** Golire integrala: C refacut din store, niciun flood. */
+/** Golire integrala: C refacut din store, niciun flood, niciun cititor. */
 function goleste(m: MemorieAcces, t: Terrain, d: DesignationStore, rules: Rules): void {
   m.stat.goliri++
   m.teren = t
@@ -451,14 +501,41 @@ function goleste(m: MemorieAcces, t: Terrain, d: DesignationStore, rules: Rules)
     if (d.alive[i] === 1 && d.kind[i] === Desemnare.CONSTRUIESTE) m.plan.add(cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!))
   }
   golesteFlooduri(m)
+  // Cititorul e al terenului VECHI: o memorie refolosita pe alt teren cu acelasi `editari`
+  // citea coloanele lui (recenzia, continuitate 2 — latent: in joc `w.terrain` nu se schimba).
+  m.cititor = null
+  m.cititorLa = -1
 }
 
-/** O editare la (x, y, z): se sterg flood-urile a caror cutie de dependenta o contine. */
-function invalideaza(m: MemorieAcces, x: number, y: number, z: number): void {
+/** Eticheta celulei c trece la flood-ul idx; flood-ul care o pierde ramane fara ea. */
+function eticheteaza(m: MemorieAcces, c: number, idx: number): void {
+  const vechi = m.eticheta.get(c)
+  if (vechi === idx) return
+  if (vechi !== undefined) {
+    const f = m.floods[vechi]!
+    // Un flood deschis ramane viu peste editarile monotone, iar etichetele lui pot fi luate
+    // toate de flood-uri mai noi. Fara eliberare, satul rasfirat al recenziei tinea 102 flood-uri
+    // cu 209.917 celule pentru 8.669 de etichete.
+    if (--f.etichete === 0) {
+      m.floods[vechi] = null
+      m.vii--
+      m.stat.eliberate++
+    }
+  }
+  m.eticheta.set(c, idx)
+  m.floods[idx]!.etichete++
+}
+
+/**
+ * O editare la (x, y, z): se sterg flood-urile a caror cutie de dependenta o contine — la o
+ * editare MONOTONA, doar cele inchise.
+ */
+function invalideaza(m: MemorieAcces, x: number, y: number, z: number, monotona: boolean): void {
   for (let i = 0; i < m.floods.length; i++) {
     const f = m.floods[i]
     if (!f) continue
     if (x < f.x0 || x > f.x1 || y < f.y0 || y > f.y1 || z < f.z0 || z > f.z1) continue
+    if (monotona && f.deschisa) continue
     for (const c of f.celule) if (m.eticheta.get(c) === i) m.eticheta.delete(c)
     m.floods[i] = null
     m.vii--
@@ -470,10 +547,12 @@ function invalideaza(m: MemorieAcces, x: number, y: number, z: number): void {
     const vii = m.floods.filter((f): f is FloodMemorat => f !== null)
     m.floods.length = 0
     m.eticheta.clear()
+    m.vii = vii.length
     for (const f of vii) {
       const idx = m.floods.length
+      f.etichete = 0
       m.floods.push(f)
-      for (const c of f.celule) m.eticheta.set(c, idx)
+      for (const c of f.celule) eticheteaza(m, c, idx)
     }
   }
 }
@@ -490,39 +569,67 @@ function sincronizeaza(m: MemorieAcces, t: Terrain, d: DesignationStore, rules: 
     goleste(m, t, d, rules)
     return
   }
+  // Santierele scoase din C in fereastra (zidite sau anulate).
+  const scoase = new Set<number>()
   for (let n = m.vazuteDes; n < d.editariConstr; n++) {
     const j = (n % JURNAL_DESEMNARI_CAP) * 3
     const x = d.jurnalConstr[j]!, y = d.jurnalConstr[j + 1]!, z = d.jurnalConstr[j + 2]!
     const s = desemnareLaCelula(d, x, y, z)
     const k = cellKey(x, y, z)
-    if (s !== -1 && d.kind[s] === Desemnare.CONSTRUIESTE) m.plan.add(k)
-    else m.plan.delete(k)
-    invalideaza(m, x, y, z)
+    if (s !== -1 && d.kind[s] === Desemnare.CONSTRUIESTE) {
+      // Un santier nou strange F: poate scoate celule din graful stabil.
+      m.plan.add(k)
+      invalideaza(m, x, y, z, false)
+    } else {
+      // Un santier scos din C: celula lui si cele de sub ea, in limita capului, pot deveni
+      // stabile; cea de deasupra n-avea podea in W. Multimea stabila doar CRESTE.
+      if (m.plan.delete(k)) scoase.add(k)
+      invalideaza(m, x, y, z, true)
+    }
   }
   m.vazuteDes = d.editariConstr
+  // O celula aparuta O SINGURA data in fereastra si SOLIDA acum a fost umpluta dintr-o celula
+  // goala: `fill` refuza o celula plina, iar `dig` lasa aer. Cu doua intrari, ramanea deschisa
+  // o gaura in contract (recenzia, verif-cost-0): molozul de pe un santier sapat si zidit in
+  // aceeasi fereastra schimba podeaua de deasupra din naturala in structura, deci naturalele
+  // unei componente deschise SCAD — memoria spunea „deschis", recalculul „inchis".
+  const ori = new Map<number, number>()
   for (let n = m.vazuteTeren; n < t.editari; n++) {
     const j = (n % JURNAL_CAP) * 3
-    invalideaza(m, t.jurnal[j]!, t.jurnal[j + 1]!, t.jurnal[j + 2]!)
+    const k = cellKey(t.jurnal[j]!, t.jurnal[j + 1]!, t.jurnal[j + 2]!)
+    ori.set(k, (ori.get(k) ?? 0) + 1)
+  }
+  for (let n = m.vazuteTeren; n < t.editari; n++) {
+    const j = (n % JURNAL_CAP) * 3
+    const x = t.jurnal[j]!, y = t.jurnal[j + 1]!, z = t.jurnal[j + 2]!
+    const k = cellKey(x, y, z)
+    // MONOTONA: o piesa din C (acum, sau la inceputul ferestrei) zidita — efectul net e
+    // W ∪ {k} cu F neschimbat, exact teorema. Orice alta editare (sapat, umplere in afara
+    // planului) poate inchide ceva, deci sterge tot din cutie.
+    let monotona = (m.plan.has(k) || scoase.has(k)) && ori.get(k) === 1
+    if (monotona) {
+      const mt = materialAt(t, x, y, z)
+      monotona = mt.ok && isSolid(mt.value)
+    }
+    invalideaza(m, x, y, z, monotona)
   }
   m.vazuteTeren = t.editari
 }
 
-/**
- * E SIGURA celula (x, y, z) in lumea de acum — stabila in (W, C) si in componenta deschisa?
- * Acelasi raspuns ca `esteSiguraPur` pe planul viu, oricand; testul-oracol il compara cu o
- * memorie noua dupa fiecare pas al unui fuzz.
- */
-export function siguraMemorat(t: Terrain, d: DesignationStore, rules: Rules, m: MemorieAcces, x: number, y: number, z: number): boolean {
+/** Memoria la zi si cititorul terenului de acum. Orice intrebare pe memorie trece pe aici. */
+function pregateste(m: MemorieAcces, t: Terrain, d: DesignationStore, rules: Rules): Cititor {
   sincronizeaza(m, t, d, rules)
   if (m.cititor === null || m.cititorLa !== t.editari) {
     m.cititor = cititor(t)
     m.cititorLa = t.editari
   }
-  const nod = nodStabil({ t, plan: m.plan, zidite: null }, rules, m.cititor)
-  if (!nod.calcabila(x, y, z)) return false
-  const k = cellKey(x, y, z)
-  const e = m.eticheta.get(k)
-  if (e !== undefined) return m.floods[e]!.deschisa
+  return m.cititor
+}
+
+/** Indexul flood-ului care eticheteaza celula STABILA (x, y, z); o inunda daca nu e etichetata. */
+function idMemorat(m: MemorieAcces, rules: Rules, nod: Nod, x: number, y: number, z: number): number {
+  const e = m.eticheta.get(cellKey(x, y, z))
+  if (e !== undefined) return e
   const c = componenta(nod, rules, x, y, z)
   m.stat.flooduri++
   m.stat.celuleFlood += c.total
@@ -530,7 +637,9 @@ export function siguraMemorat(t: Terrain, d: DesignationStore, rules: Rules, m: 
   const idx = m.floods.length
   m.floods.push({
     deschisa: c.deschisa,
+    naturale: c.naturale,
     celule: c.celule,
+    etichete: 0,
     x0: c.x0 - 1,
     x1: c.x1 + 1,
     y0: c.y0 - 1,
@@ -539,8 +648,20 @@ export function siguraMemorat(t: Terrain, d: DesignationStore, rules: Rules, m: 
     z1: c.z1 + pas + rules.agentHeadroomM - 1,
   })
   m.vii++
-  for (const v of c.celule) m.eticheta.set(v, idx)
-  return c.deschisa
+  for (const v of c.celule) eticheteaza(m, v, idx)
+  return idx
+}
+
+/**
+ * E SIGURA celula (x, y, z) in lumea de acum — stabila in (W, C) si in componenta deschisa?
+ * Acelasi raspuns ca `esteSiguraPur` pe planul viu, oricand; testul-oracol il compara cu o
+ * memorie noua dupa fiecare pas al unui fuzz.
+ */
+export function siguraMemorat(t: Terrain, d: DesignationStore, rules: Rules, m: MemorieAcces, x: number, y: number, z: number): boolean {
+  const r = pregateste(m, t, d, rules)
+  const nod = nodStabil({ t, plan: m.plan, zidite: null }, rules, r)
+  if (!nod.calcabila(x, y, z)) return false
+  return m.floods[idMemorat(m, rules, nod, x, y, z)]!.deschisa
 }
 
 /**
@@ -550,11 +671,17 @@ export function siguraMemorat(t: Terrain, d: DesignationStore, rules: Rules, m: 
  * salvat ca pe HEAD doar cu privirea inainte). Sigur prin teorema: dupa zidirea lui p lumea e
  * W ∪ {p} cu acelasi F, iar pionul sta intr-o componenta deschisa.
  *
- * Cere memoria deja sincronizata (`siguraMemorat` intrebat inainte) — `plan` e al ei, si p
- * e in el: e un santier viu. (Z ⊆ C e ipoteza grafului stabil.)
+ * Acelasi raspuns ca `esteSiguraPur` cu Z = {p} (testul-oracol le compara), dar pe etichetele
+ * memoriei, fara flood-ul pungii la fiecare intrebare — recenzia costului: intr-o curte fara
+ * poarta, 67% din timp era aici. Tot prin teorema: zidirea lui p adauga O SINGURA celula
+ * stabila, cea de deasupra lui p. Celula de lucru e intr-o coloana VECINA (stabilitatea ei nu
+ * depinde de p), iar componenta ei noua e reuniunea componentelor vecinilor celulei noi, daca
+ * a ei e printre ele. O punga e etichetata integral, deci marimile ei sunt exacte; o
+ * componenta deschisa printre vecini face reuniunea deschisa.
  */
 export function siguraDupaZidire(
   t: Terrain,
+  d: DesignationStore,
   rules: Rules,
   m: MemorieAcces,
   x: number,
@@ -564,9 +691,36 @@ export function siguraDupaZidire(
   py: number,
   pz: number,
 ): boolean {
-  const kp = cellKey(px, py, pz)
-  const r = m.cititor !== null && m.cititorLa === t.editari ? m.cititor : cititor(t)
-  return esteSiguraPur({ t, plan: m.plan, zidite: new Set([kp]) }, rules, x, y, z, r)
+  const r = pregateste(m, t, d, rules)
+  const nod = nodStabil({ t, plan: m.plan, zidite: null }, rules, r)
+  if (!nod.calcabila(x, y, z)) return false
+  const ic = idMemorat(m, rules, nod, x, y, z)
+  if (m.floods[ic]!.deschisa) return true
+  const sus = nodStabil({ t, plan: m.plan, zidite: null, inPlus: cellKey(px, py, pz) }, rules, r)
+  if (!sus.calcabila(px, py, pz + 1)) return false
+  const pas = Math.max(0, Math.min(4, rules.maxStepM))
+  const vecine: number[] = []
+  let deschisa = false
+  let total = 1
+  let naturale = 0
+  let gasita = false
+  for (const [dx, dy] of DIR4) {
+    for (let dz = -pas; dz <= pas; dz++) {
+      const nx = px + dx, ny = py + dy, nz = pz + 1 + dz
+      if (!nod.calcabila(nx, ny, nz)) continue
+      const id = idMemorat(m, rules, nod, nx, ny, nz)
+      if (vecine.includes(id)) continue
+      vecine.push(id)
+      const f = m.floods[id]!
+      if (f.deschisa) deschisa = true
+      total += f.celule.length
+      naturale += f.naturale
+      if (id === ic) gasita = true
+    }
+  }
+  // Punga celulei de lucru nu atinge celula noua: p n-o schimba.
+  if (!gasita) return false
+  return deschisa || naturale >= rules.accesPlafonNatural || total > rules.accesPlafonTotal
 }
 
 /**
@@ -583,27 +737,104 @@ export function siguraDupaZidire(
  * Semintele: celulele calcabile in W ∪ {p} din cele 4 coloane vecine, pe nivelurile pe care
  * o muchie putea trece prin coloana lui p. O componenta care nu atinge coloana lui p nu se
  * poate schimba.
+ *
+ * `r`, `dovedita`, `stat`: ale memoriei, prin `componenteInchiseDeMemorat` — ACEEASI functie,
+ * doar mai ieftina; testul-oracol compara cele doua forme, cu tot cu ordinea listelor.
  */
-export function componenteInchiseDe(t: Terrain, rules: Rules, px: number, py: number, pz: number): number[][] {
-  const r = cititor(t)
+export function componenteInchiseDe(
+  t: Terrain,
+  rules: Rules,
+  px: number,
+  py: number,
+  pz: number,
+  r: Cititor = cititor(t),
+  dovedita: ((k: number) => boolean) | null = null,
+  stat: MemorieAcces['stat'] | null = null,
+): number[][] {
   const H = rules.agentHeadroomM
   const pas = Math.max(0, Math.min(4, rules.maxStepM))
   const cuP = nodW(t, new Set([cellKey(px, py, pz)]), rules, r)
   const faraP = nodW(t, null, rules, r)
-  const vazute = new Set<number>()
+  // p solida scoate din W doar celulele coloanei ei pe care le umple sau carora le ia capul
+  // (pz − H + 1 .. pz). Daca niciuna nu era calcabila, graful doar CRESTE (poate aparea
+  // celula de peste p) si nimic nu se inchide: acoperisurile, placile, randurile de sus.
+  let scoate = false
+  for (let h = 0; h < H && !scoate; h++) if (faraP.calcabila(px, py, pz - h)) scoate = true
+  if (!scoate) {
+    if (stat !== null) stat.sigilariSarite++
+    return []
+  }
+  // celula → componenta ei cu p pusa: indexul in `cuP_` daca e INCHISA, −1 daca e deschisa.
+  // O componenta inchisa cu p poate UNI o punga veche din W (creasta peretilor) cu o regiune
+  // deschisa in W, prin celula de peste p: verdictul „inchisa DE p" e al ORICAREI seminte din
+  // ea, nu al primei. Prima forma il lua de la prima: cand samanta crestei venea inainte,
+  // interiorul nu se mai verifica, iar pionul de inauntru era zidit (recenzia, plasa: 6 din
+  // 314 cazuri de fuzz; in joc, pionul care dormea, seed 777).
+  const cuPId = new Map<number, number>()
+  const cuP_: number[][] = []
+  const puse: boolean[] = []
+  // celula → componenta ei in W e deschisa? (exacta: o componenta, un raspuns)
+  const inW = new Map<number, boolean>()
   const out: number[][] = []
   for (const [dx, dy] of DIR4) {
     const x = px + dx, y = py + dy
     for (let z = pz - H - pas; z <= pz + 1 + pas; z++) {
-      if (vazute.has(cellKey(x, y, z)) || !cuP.calcabila(x, y, z)) continue
-      const dupa = componenta(cuP, rules, x, y, z)
-      for (const c of dupa.celule) vazute.add(c)
-      if (dupa.deschisa) continue
+      if (!cuP.calcabila(x, y, z)) continue
+      const k = cellKey(x, y, z)
+      let id = cuPId.get(k)
+      if (id === undefined) {
+        const dupa = componenta(cuP, rules, x, y, z, dovedita)
+        if (stat !== null) {
+          stat.sigilari++
+          stat.celuleSigilare += dupa.total
+        }
+        id = dupa.deschisa ? -1 : cuP_.push(dupa.celule) - 1
+        for (const c of dupa.celule) cuPId.set(c, id)
+      }
+      if (id === -1 || puse[id] === true) continue
       if (!faraP.calcabila(x, y, z)) continue
-      if (componenta(faraP, rules, x, y, z).deschisa) out.push(dupa.celule)
+      let deschisaInW = inW.get(k)
+      if (deschisaInW === undefined) {
+        const acum = componenta(faraP, rules, x, y, z, dovedita)
+        if (stat !== null) {
+          stat.sigilari++
+          stat.celuleSigilare += acum.total
+        }
+        deschisaInW = acum.deschisa
+        for (const c of acum.celule) inW.set(c, acum.deschisa)
+      }
+      if (deschisaInW) {
+        puse[id] = true
+        out.push(cuP_[id]!)
+      }
     }
   }
   return out
+}
+
+/**
+ * Regula de sigilare pe memoria lumii: `componenteInchiseDe`, cu cititorul memoriei si cu
+ * flood-urile oprite la prima celula etichetata DESCHISA. Corect pentru ca p ∈ C: graful
+ * stabil (W ∩ F) e subgraf si al lui W, si al lui W ∪ {p}, cu aceleasi muchii si aceleasi
+ * podele naturale, deci o componenta stabila deschisa e inclusa intr-una deschisa in ambele.
+ * Recenzia costului: fara oprire, doua flood-uri complete pe fiecare piesa, 7,98 M coloane
+ * citite intr-un oras, nenumarate de nicio poarta.
+ */
+export function componenteInchiseDeMemorat(
+  t: Terrain,
+  d: DesignationStore,
+  rules: Rules,
+  m: MemorieAcces,
+  px: number,
+  py: number,
+  pz: number,
+): number[][] {
+  const r = pregateste(m, t, d, rules)
+  const dovedita = (k: number): boolean => {
+    const e = m.eticheta.get(k)
+    return e !== undefined && m.floods[e]!.deschisa
+  }
+  return componenteInchiseDe(t, rules, px, py, pz, r, dovedita, m.stat)
 }
 
 // ---------------------------------------------------------------------------
