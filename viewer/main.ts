@@ -29,7 +29,7 @@ import { createRegionOverlay, rebuildRegionOverlay } from './overlay-regions.ts'
 import { createAmprentaOverlay, FORME, rebuildAmprentaOverlay } from './overlay-amprenta.ts'
 import { createJobOverlay, rebuildJobOverlay, rezumatJoburi } from './overlay-joburi.ts'
 import { avanseazaStabilitate, createStabilityOverlay, pornesteStabilitate, progresStabilitate, redeseneazaStabilitate } from './overlay-stabilitate.ts'
-import { Piesa } from '../src/sim/state.ts'
+import { Item, Piesa } from '../src/sim/state.ts'
 import { desemnareLaCelula } from '../src/sim/desemnari.ts'
 import { alegeColoana, celulaLangaFata, cubAtins, primulVizibil } from './tinta.ts'
 import type { CelulaJ, Impact, Raza } from './tinta.ts'
@@ -54,6 +54,55 @@ const params = new URLSearchParams(location.search)
 const SCENARIO = params.get('scenario')
 /** Proba negativa ceruta: instrumentul TREBUIE sa iasa rosu pe ea. */
 const NEGATIVE_PROBE = params.get('probe')
+
+/**
+ * Modul de pornire pentru verificarile pe ecran (OWNER_VERIFY 13), tot din URL:
+ *   ?cam=X,Y    camera deasupra celulei (X, Y) a lumii
+ *   ?slice=L    slice-ul pornit la L m (nivelul activ = L - 1)
+ *   ?piatra=N   N unitati de piatra, in mormane in jurul tintei camerei
+ *   ?hrana=N    la fel, hrana
+ *   ?pauza=1    pionii pornesc in pauza (Spatiu ii porneste): cu piatra langa casa, un plan se
+ *               zideste pe masura ce se deseneaza, iar un pas de verificare de tipul „sterge o
+ *               treapta" nu mai gaseste treapta ca desemnare — e deja zidita
+ * Motivul e o cifra: lumea viewer-ului are ~440 de piatra si nicio hrana, iar casa cu doua etaje
+ * cere 193 de piese × 20 de piatra (recenzia accesului vertical, `m1-teren.ts` / `m3-casa.ts`).
+ * DOAR la privit liber: o rulare de gate nu citeste nimic de aici, ca sa ramana reproductibila.
+ * Mormanele intra PRIN COMENZI (`lasaItem`), ca orice schimbare a lumii.
+ */
+interface Pornire {
+  readonly cam: { readonly x: number; readonly y: number } | null
+  readonly slice: number | null
+  readonly piatra: number
+  readonly hrana: number
+  readonly pauza: boolean
+  /** Parametrii care n-au putut fi cititi — se spun pe randul „loc", nu se inghit. */
+  readonly ignorate: readonly string[]
+}
+
+function citestePornirea(): Pornire | null {
+  if (SCENARIO !== null) return null
+  const ignorate: string[] = []
+  const intreg = (nume: string, min: number): number | null => {
+    const v = params.get(nume)
+    if (v === null) return null
+    const n = Number(v)
+    if (v.trim() === '' || !Number.isInteger(n) || n < min) { ignorate.push(`${nume}=${v}`); return null }
+    return n
+  }
+  let cam: { x: number; y: number } | null = null
+  const c = params.get('cam')
+  if (c !== null) {
+    const [x, y, ...rest] = c.split(',').map((s) => Number(s.trim()))
+    if (rest.length === 0 && Number.isInteger(x) && Number.isInteger(y)) cam = { x: x!, y: y! }
+    else ignorate.push(`cam=${c}`)
+  }
+  const p = params.get('pauza')
+  if (p !== null && p !== '0' && p !== '1') ignorate.push(`pauza=${p}`)
+  return { cam, slice: intreg('slice', -1e6), piatra: intreg('piatra', 0) ?? 0, hrana: intreg('hrana', 0) ?? 0, pauza: p === '1', ignorate }
+}
+const PORNIRE = citestePornirea()
+/** Pionii stau (Spatiu). Doar la privit liber; o rulare de gate n-are pioni. */
+let simPauza = PORNIRE?.pauza ?? false
 
 // Paleta si regula de culoare stau in src/render/palette.ts, una singura pentru
 // teren si pentru voxeli. `FACE_SHADE` a disparut: umbrirea per directie era un
@@ -177,6 +226,65 @@ if (SCENARIO === null) {
 
 if (AGENTI_ACTIVI) {
   spawnNear(world, baseX + 16, baseY + 16, 14, 24)
+}
+
+const camCeruta = PORNIRE?.cam ?? null
+const camInLume = camCeruta !== null && inWorld(Math.floor(camCeruta.x / CHUNK_CELLS), Math.floor(camCeruta.y / CHUNK_CELLS))
+/** Unde priveste camera la pornire, in celule de lume: `?cam`, altfel fortareata. */
+const TINTA_START = camInLume ? camCeruta! : { x: baseX + 16, y: baseY + 16 }
+/** Chunk-ul focusului la pornire. Cu `?cam`, cel de sub camera — si sim-ul il afla prin `setFocus`. */
+const START_CX = Math.floor(TINTA_START.x / CHUNK_CELLS)
+const START_CY = Math.floor(TINTA_START.y / CHUNK_CELLS)
+if (START_CX !== FOCUS_CX || START_CY !== FOCUS_CY) applyCommand(world, { kind: 'setFocus', cx: START_CX, cy: START_CY })
+
+/**
+ * Cate celule (pe distanta Chebyshev) raman libere in jurul tintei camerei. Casa din OWNER_VERIFY
+ * 13 are 7×7 (±3); inelul de la 6 lasa doua celule libere pe unde lucreaza constructorii.
+ */
+const RAZA_LIBERA = 6
+
+/** Cata marfa de felul dat e in lume. Pentru mesajul de pornire: cat s-a pus DE FAPT, nu cat s-a cerut. */
+function marfaInLume(fel: number): number {
+  let s = 0
+  for (let i = 0; i < world.iteme.count; i++) if (world.iteme.alive[i] === 1 && world.iteme.kind[i] === fel) s += world.iteme.cantitate[i]!
+  return s
+}
+
+/** Pune `total` unitati in mormane pline, pe inele tot mai largi in jurul lui (cx, cy), prin `lasaItem`. */
+function lasaMormane(fel: number, total: number, cx: number, cy: number): { pus: number; mormane: number } {
+  const inainte = marfaInLume(fel)
+  let cerut = 0
+  let mormane = 0
+  for (let r = RAZA_LIBERA; r <= RAZA_LIBERA + 30 && cerut < total; r++) {
+    for (let dy = -r; dy <= r && cerut < total; dy++) {
+      for (let dx = -r; dx <= r && cerut < total; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue
+        const g = groundLevelM(world.terrain, cx + dx, cy + dy)
+        if (!g.ok) continue
+        const c = Math.min(DEFAULT_RULES.itemStackMax, total - cerut)
+        if (applyCommand(world, { kind: 'lasaItem', fel, cantitate: c, wx: cx + dx, wy: cy + dy, z: g.value + 1 }).ok) {
+          cerut += c
+          mormane++
+        }
+      }
+    }
+  }
+  return { pus: marfaInLume(fel) - inainte, mormane }
+}
+
+/** Ce a facut modul de pornire, pentru randul „loc". Gol = nimic de spus. */
+const mesajPornire: string[] = []
+if (PORNIRE !== null) {
+  if (PORNIRE.piatra > 0) {
+    const r = lasaMormane(Item.PIATRA, PORNIRE.piatra, TINTA_START.x, TINTA_START.y)
+    mesajPornire.push(`piatra ${r.pus}/${PORNIRE.piatra} in ${r.mormane} mormane`)
+  }
+  if (PORNIRE.hrana > 0) {
+    const r = lasaMormane(Item.HRANA, PORNIRE.hrana, TINTA_START.x, TINTA_START.y)
+    mesajPornire.push(`hrana ${r.pus}/${PORNIRE.hrana} in ${r.mormane} mormane`)
+  }
+  const ignorate = [...PORNIRE.ignorate, ...(camCeruta !== null && !camInLume ? [`cam=${camCeruta.x},${camCeruta.y} (in afara lumii)`] : [])]
+  if (ignorate.length > 0) mesajPornire.push(`IGNORAT: ${ignorate.join(', ')}`)
 }
 
 // --------------------------------------------------------------------------
@@ -342,16 +450,16 @@ function buildChunkMesh(chunk: Chunk): void {
 const buildStart = performance.now()
 for (const key of world.terrain.keys) {
   const chunk = world.terrain.chunks.get(key)!
-  const d2 = (chunk.cx - FOCUS_CX) ** 2 + (chunk.cy - FOCUS_CY) ** 2
+  const d2 = (chunk.cx - START_CX) ** 2 + (chunk.cy - START_CY) ** 2
   if (d2 > VIEW_RADIUS * VIEW_RADIUS) continue
   buildChunkMesh(chunk)
 }
 const buildMs = performance.now() - buildStart
 
-// Camera peste fortareata, nu peste mijlocul geometric al discului.
-const centerX = baseX + 16
-const centerZ = baseY + 16
-const gCenter = groundLevelM(world.terrain, centerX, centerZ)
+// Camera peste fortareata, nu peste mijlocul geometric al discului — sau peste `?cam`.
+const centerX = TINTA_START.x + (camInLume ? 0.5 : 0)
+const centerZ = TINTA_START.y + (camInLume ? 0.5 : 0)
+const gCenter = groundLevelM(world.terrain, TINTA_START.x, TINTA_START.y)
 const centerY = gCenter.ok ? gCenter.value : 0
 controls.target.set(centerX, centerY + 4, centerZ)
 camera.position.set(centerX - 46, centerY + 34, centerZ + 46)
@@ -376,8 +484,8 @@ controls.update()
 /** Cate chunk-uri se construiesc cel mult intr-un cadru. Bugetul, nu graba. */
 const BUILD_BUDGET_PER_FRAME = 2
 
-let focusCx = FOCUS_CX
-let focusCy = FOCUS_CY
+let focusCx = START_CX
+let focusCy = START_CY
 /** Chei de chunk asteptand geometrie, sortate DESCRESCATOR dupa distanta: `pop()` ia cel mai apropiat. */
 const buildQueue: number[] = []
 let lastFocusMs = 0
@@ -560,6 +668,11 @@ function applySlice(): void {
 }
 renderer.localClippingEnabled = true
 renderer.clippingPlanes = [clipPlane]
+if (PORNIRE?.slice != null) {
+  const { lo, hi } = plajaSlice()
+  sliceLevel = Math.max(lo, Math.min(hi, PORNIRE.slice))
+  if (sliceLevel !== PORNIRE.slice) mesajPornire.push(`slice=${PORNIRE.slice} in afara ferestrei [${lo}, ${hi}], pus la ${sliceLevel}`)
+}
 applySlice()
 
 // --------------------------------------------------------------------------
@@ -947,6 +1060,11 @@ window.addEventListener('keydown', (ev) => {
     el('piesa').textContent = NUME_PIESA_VIEWER[piesaAleasa]!
     return
   }
+  if (ev.key === ' ') {
+    simPauza = !simPauza
+    ev.preventDefault()
+    return
+  }
   if (ev.key === 'h' || ev.key === 'H') {
     // Trei stari: tot → doar HUD-ul → nimic. La 1280×720, cu J si S pornite, HUD-ul si ajutorul
     // acopereau 90% din ecran (recenzia, `p10-hud.mjs`); HUD-ul ramane cand ajutorul nu mai trebuie.
@@ -1316,19 +1434,23 @@ function stepFrame(ts: number): void {
     // desemnarile vii inainte si dupa pas si se remesh-uieste in jurul celor
     // care au disparut. Un pion care sosea si sapa in acelasi cadru scapa
     // variantei „doar cei in LUCREAZA la inceputul cadrului".
-    let cuJob = 0
-    for (let i = 0; i < world.agents.count; i++) if (world.agents.alive[i] === 1 && world.agents.jobKind[i] !== 0) cuJob++
-    const cheiInainte = cuJob > 0 ? new Set(world.desemnari.laCelula.keys()) : null
-    const promotedInainte = cuJob > 0 ? promotedKeys() : null
-    stepSim(agentLayer, world, DEFAULT_RULES, dt, simTick)
-    updateAgentLayer(agentLayer, world, DEFAULT_RULES)
-    if (cheiInainte && promotedInainte) {
-      for (const k of cheiInainte) {
-        if (world.desemnari.laCelula.has(k)) continue
-        const c = decodeCell(k)
-        remeshAfterEdit(c.wx, c.wy, promotedInainte)
+    // In pauza (Spatiu) simularea nu avanseaza deloc: nicio comanda nu se pierde, doar nu se misca nimeni.
+    if (!simPauza) {
+      let cuJob = 0
+      for (let i = 0; i < world.agents.count; i++) if (world.agents.alive[i] === 1 && world.agents.jobKind[i] !== 0) cuJob++
+      const cheiInainte = cuJob > 0 ? new Set(world.desemnari.laCelula.keys()) : null
+      const promotedInainte = cuJob > 0 ? promotedKeys() : null
+      stepSim(agentLayer, world, DEFAULT_RULES, dt, simTick)
+      if (cheiInainte && promotedInainte) {
+        for (const k of cheiInainte) {
+          if (world.desemnari.laCelula.has(k)) continue
+          const c = decodeCell(k)
+          remeshAfterEdit(c.wx, c.wy, promotedInainte)
+        }
       }
     }
+    // Si in pauza: pornit cu `?pauza=1`, stratul pionilor n-ar fi fost desenat niciodata (HUD: „0").
+    updateAgentLayer(agentLayer, world, DEFAULT_RULES)
     if (jobOverlay.visible && frameIndex % 6 === 0) rebuildJobOverlay(jobOverlay, world)
     // Mult mai rar decat overlay-ul de joburi. Cererea nu reporneste trecerea din curs,
     // nici una terminata pe acelasi teren (vezi `ceFacCuTrecerea`): o celula ajunsa la
@@ -1385,7 +1507,7 @@ function stepFrame(ts: number): void {
     el('build').textContent = amprentaOverlay.visible
       ? `${FORME[amprentaOverlay.forma]!.nume} · ${amprentaOverlay.grade}° · ${amprentaOverlay.celule} cel. (×${amprentaOverlay.grasime.toFixed(2)}) · CENTRU ${amprentaOverlay.celuleCentru}${amprentaOverlay.ancorat ? ' · ancorat' : ''}`
       : 'B'
-    el('agents').textContent = AGENTI_ACTIVI ? `${agentLayer.vii} · t${world.tick}` : 'oprit la gate'
+    el('agents').textContent = AGENTI_ACTIVI ? `${agentLayer.vii} · t${world.tick}${simPauza ? ' · PAUZA (Spatiu)' : ''}` : 'oprit la gate'
     el('regions').textContent = regionOverlay.visible
       ? `${regionOverlay.cells.toLocaleString('ro-RO')} celule · ${regionOverlay.components} componente · ${lastOverlayMs.toFixed(0)} ms`
       : 'G'
@@ -1432,7 +1554,7 @@ window.addEventListener('resize', () => {
 
 recount()
 el('backend').textContent = `${gpuName()} · ${buildMs.toFixed(0)} ms build`
-el('spot').textContent = `chunk ${FOCUS_CX}/${FOCUS_CY} · seed ${SEED}`
+el('spot').textContent = `chunk ${FOCUS_CX}/${FOCUS_CY} · seed ${SEED}` + (mesajPornire.length > 0 ? ` · ${mesajPornire.join(' · ')}` : '')
 busy.remove()
 hud.removeAttribute('hidden')
 requestAnimationFrame(tick)
