@@ -334,7 +334,8 @@ un morman sau o zonă. **SCARA** se poate, în sfârșit, construi: e de piatră
 pion blocat); fără scară, rămân exact etajul și acoperișul, turcoaz. **Cum arată rău:** un pion rămâne
 sus fără drum; turcoazul promite ce pionii fac sau invers; nu poți desena un etaj.
 
-**Șase decizii care sunt ale tale:**
+**Șase decizii — APROBATE de owner pe 27.09, toate cu varianta implicită** („ok la toate"). Rămâne
+deschisă doar verificarea pe ecran, pașii de mai sus. Cum sunt acum în joc:
 1. **Atingerea +2** și la **deconstrucție** (ce s-a zidit de pe sol se desface de pe sol). Altfel, rândul 3
    și placa cer o scară doar ca să fie demolate. Implicit: da.
 2. **Pragurile de „afară"** (`accesPlafonNatural` 2048, `accesPlafonTotal` 8192): o curte închisă cu

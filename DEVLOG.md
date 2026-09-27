@@ -4319,3 +4319,21 @@ de teste. **407/407** probe în 6 min 56 s local; izolare 268/268.
 - Cifrele de acces pe un oraș mare (15+ case) rămân de măsurat pe codul livrat.
 
 La owner: OWNER_VERIFY 13 — pașii în viewer și șase decizii.
+
+---
+
+## Task Started — recenzia adversarială a accesului vertical
+
+**Model:** Claude Opus 5.5
+**Prompt de start:** „ok la toate" (27.09), la întrebarea despre cele șase decizii din OWNER_VERIFY 13
+
+**Deciziile owner-ului (27.09): toate șase aprobate, cu varianta implicită** — deconstrucția cu
+atingerea +2; pragurile de „afară" 2.048 / 8.192; SCARA de piatră până la lemn; PERETE 400 vs PODEA
+300 lăsate cum sunt; planurile care își mută accesul rămân în ordinea jucătorului; săpătura care taie
+accesul e următoarea în registru. Owner-ul a întrebat întâi ce are de decis: lista din OWNER_VERIFY 13
+era scrisă ca întrebări deschise, deși fiecare avea deja o variantă în cod — de acum, o decizie de
+owner se scrie cu varianta implicită în față și „nu trebuie să faci nimic dacă ești de acord".
+
+Recenzia codului (diff `48d7115..d0ae20c`) pornise la finalul sesiunii de 26.09 și s-a oprit odată cu
+ea, neterminată; se reia de la capăt, cu același plan: 5 lentile care reproduc (regula, continuitate,
+cost, plasa, viewer + documente) și verificatori (2 pe CRITIC, 1 pe MARE); buget anunțat ~5–7 M.
