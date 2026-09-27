@@ -3005,15 +3005,7 @@ export function constructiaPrevizualizata(w: World, rules: Rules): {
   const sprijin = constructiaPosibila(w.terrain, rules, celule, grinzi)
   const plan = new Set(celule)
   // Pionii care iau joburi: doar ei folosesc privirea inainte dintr-o punga.
-  const a = w.agents
-  const constructori: number[] = []
-  const pioni: number[] = []
-  for (let i = 0; i < a.count; i++) {
-    if (a.alive[i] !== 1) continue
-    const k = cellKey(cellOf(a.x[i]!), cellOf(a.y[i]!), a.z[i]!)
-    pioni.push(k)
-    if (a.faction[i] === Faction.ASEZARE) constructori.push(k)
-  }
+  const { pioni, constructori, mormane, zone } = celuleDeInchis(w)
   const predicat = predicatAcces(w.terrain, rules, plan, constructori)
   const cuAcces = constructiaPosibila(w.terrain, rules, celule, grinzi, predicat)
   const zidite = new Set(cuAcces.construibile)
@@ -3021,11 +3013,6 @@ export function constructiaPrevizualizata(w: World, rules: Rules): {
   const final = etichetare(nodStabil({ t: w.terrain, plan, zidite }, rules), predicat.dovedite())
   const cauze = faraAcces.map((k) => cauzaFaraAcces(final, rules, k))
   // Ce ar inchide planul dus pana la capat: pionii, mormanele si celulele de zona de ACUM.
-  const mormane: number[] = []
-  for (let i = 0; i < w.iteme.count; i++) if (w.iteme.alive[i] === 1) mormane.push(cellKey(w.iteme.wx[i]!, w.iteme.wy[i]!, w.iteme.z[i]!))
-  const zone: number[] = []
-  const zc = w.zone.celule
-  for (let i = 0; i < zc.count; i++) if (zc.alive[i] === 1) zone.push(cellKey(zc.wx[i]!, zc.wy[i]!, zc.z[i]!))
   const inchideri = inchideriPlan(w.terrain, rules, zidite, predicat.dovedite())
   const inchise = {
     pioni: inchideri.inchise(pioni).length,
@@ -3041,6 +3028,29 @@ export function constructiaPrevizualizata(w: World, rules: Rules): {
     inchideri,
     celuleInundate: predicat.inundate() + final.inundate + inchideri.inundate(),
   }
+}
+
+/**
+ * Celulele de ACUM pe care un plan le-ar putea inchide — pionii vii, mormanele, celulele de zona —
+ * si ale constructorilor (pionii care iau joburi). Un singur loc: previzualizarea le intreaba la
+ * calcul, iar HUD-ul le intreaba din nou, cu pionii mutati, pe aceleasi pungi ale planului.
+ */
+export function celuleDeInchis(w: World): { pioni: number[]; constructori: number[]; mormane: number[]; zone: number[] } {
+  const a = w.agents
+  const constructori: number[] = []
+  const pioni: number[] = []
+  for (let i = 0; i < a.count; i++) {
+    if (a.alive[i] !== 1) continue
+    const k = cellKey(cellOf(a.x[i]!), cellOf(a.y[i]!), a.z[i]!)
+    pioni.push(k)
+    if (a.faction[i] === Faction.ASEZARE) constructori.push(k)
+  }
+  const mormane: number[] = []
+  for (let i = 0; i < w.iteme.count; i++) if (w.iteme.alive[i] === 1) mormane.push(cellKey(w.iteme.wx[i]!, w.iteme.wy[i]!, w.iteme.z[i]!))
+  const zone: number[] = []
+  const zc = w.zone.celule
+  for (let i = 0; i < zc.count; i++) if (zc.alive[i] === 1) zone.push(cellKey(zc.wx[i]!, zc.wy[i]!, zc.z[i]!))
+  return { pioni, constructori, mormane, zone }
 }
 
 export function prabusireaPrevizualizata(w: World, rules: Rules): number[] {

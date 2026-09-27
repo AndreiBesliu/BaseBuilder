@@ -28,7 +28,7 @@ import { Ballast, Bisector, checkGuards, clockGranularityMs, FrameProbe, heapMB 
 import { createRegionOverlay, rebuildRegionOverlay } from './overlay-regions.ts'
 import { createAmprentaOverlay, FORME, rebuildAmprentaOverlay } from './overlay-amprenta.ts'
 import { createJobOverlay, rebuildJobOverlay, rezumatJoburi } from './overlay-joburi.ts'
-import { avanseazaStabilitate, createStabilityOverlay, pornesteStabilitate, progresStabilitate, redeseneazaStabilitate } from './overlay-stabilitate.ts'
+import { actualizeazaInchise, avanseazaStabilitate, createStabilityOverlay, pornesteStabilitate, progresStabilitate, redeseneazaStabilitate } from './overlay-stabilitate.ts'
 import { Item, Piesa } from '../src/sim/state.ts'
 import { desemnareLaCelula } from '../src/sim/desemnari.ts'
 import { alegeColoana, celulaLangaFata, cubAtins, primulVizibil } from './tinta.ts'
@@ -1456,6 +1456,8 @@ function stepFrame(ts: number): void {
     // nici una terminata pe acelasi teren (vezi `ceFacCuTrecerea`): o celula ajunsa la
     // scanarea scumpa costa zeci de µs departe de grinzi, dar 4–20 ms langa ele.
     if (stabOverlay.visible && frameIndex % 30 === 0) refaStabilitate()
+    // „PLANUL INCHIDE" pe pionii de acum: pungile planului raman, se intreaba din nou (O(1) pe celula).
+    if (stabOverlay.visible && frameIndex % 30 === 15) actualizeazaInchise(stabOverlay, world)
     // Overlay-ul de regiuni (G) se reimprospateaza cand graful s-a schimbat —
     // sapaturile pionilor si acoperirea desemnarilor il schimba fara niciun click.
     if (regionOverlay.visible && world.regions.epoca !== epocaDesenata) refreshOverlay()

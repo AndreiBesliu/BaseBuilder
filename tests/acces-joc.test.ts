@@ -30,7 +30,7 @@ import { stergeItem } from '../src/sim/iteme.ts'
 import { Zona } from '../src/sim/zone.ts'
 import { advance } from '../src/sim/world.ts'
 import { lasaItem, panaCand, R, ruleaza, sitPlat } from './fixturi.ts'
-import { constructiaPrevizualizata, unitatiDeMunca } from '../src/sim/joburi.ts'
+import { celuleDeInchis, constructiaPrevizualizata, unitatiDeMunca } from '../src/sim/joburi.ts'
 
 type Piesa_ = readonly [number, number, number, PiesaId]
 
@@ -857,4 +857,19 @@ test('K05: mormanele din LUME nu schimba costul previzualizarii (50 fata de 800,
   const multe = sat(4, 800)
   assert.ok(multe.mormanePuse >= 700, `fixtura: doar ${multe.mormanePuse} mormane puse`)
   assert.equal(constructiaPrevizualizata(multe.w, R).celuleInundate, constructiaPrevizualizata(putine.w, R).celuleInundate)
+})
+
+test('PREVIZUALIZAREA: pungile planului se intreaba din nou cu pionii de ACUM, fara sa se refaca (HUD-ul „PLANUL INCHIDE")', () => {
+  // Camera fara usa peste un pion. HUD-ul spunea ce era adevarat la ultimul click (recenzia: vechi
+  // 11 s din 12): acum intreaba aceleasi pungi cu pozitiile de acum.
+  const { w, x0, y0, g } = santier(12345, (gg) => { const o: Piesa_[] = []; pereti(o, 0, 0, 5, gg + 1, gg + 2); return o }, 0)
+  const i = pion(w, x0 + 2, y0 + 2, g + 1)
+  const p = constructiaPrevizualizata(w, R)
+  assert.equal(p.inchise.pioni, 1, 'fixtura: pionul din camera trebuia numarat')
+  assert.ok(p.inchideri !== null)
+  w.agents.x[i] = (x0 - 3) * 1000 + 500
+  assert.equal(p.inchideri!.inchise(celuleDeInchis(w).pioni).length, 0, 'pionul iesit e tot numarat')
+  assert.equal(constructiaPrevizualizata(w, R).inchise.pioni, 0, 'fixtura: calculul proaspat')
+  w.agents.x[i] = (x0 + 2) * 1000 + 500
+  assert.equal(p.inchideri!.inchise(celuleDeInchis(w).pioni).length, 1)
 })

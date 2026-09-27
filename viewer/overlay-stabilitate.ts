@@ -50,8 +50,9 @@ import type { World } from '../src/sim/state.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { decodeCell } from '../src/sim/path.ts'
 import { StareSapat } from '../src/sim/stabilitate.ts'
-import { constructiaPrevizualizata, prabusireaPrevizualizata } from '../src/sim/joburi.ts'
+import { celuleDeInchis, constructiaPrevizualizata, prabusireaPrevizualizata } from '../src/sim/joburi.ts'
 import { CauzaAcces } from '../src/sim/acces.ts'
+import type { InchideriPlan } from '../src/sim/acces.ts'
 import { avanseazaScanare, ceFacCuTrecerea, pornesteScanare, Trecere } from './scanare-stabilitate.ts'
 import type { Scanare } from './scanare-stabilitate.ts'
 
@@ -78,6 +79,13 @@ export interface StabilityOverlay {
   faraAccesInaltime: number
   /** Ce ar inchide planul, gata de HUD („1 pion, 3 mormane"); gol daca nimic. */
   inchise: string
+  /**
+   * Pungile planului de la ultima previzualizare si lumea pe care s-au facut (`editari` teren :
+   * santiere). Cat lumea e aceeasi, `inchise` se reface pe ele cu pionii de ACUM — altfel HUD-ul
+   * spunea ce era adevarat la ultimul click (recenzia: vechi 11 s din 12, in ambele directii).
+   */
+  inchideri: InchideriPlan | null
+  inchideriLa: string
   /** Cate celule au ajuns la scanarea SCUMPA. Pentru bugetul de cadru. */
   scanate: number
   /** Ce sa scrie in HUD cand overlay-ul nu poate desena nimic. Gol daca poate. */
@@ -92,7 +100,7 @@ export function createStabilityOverlay(): StabilityOverlay {
   const group = new THREE.Group()
   group.visible = false
   return {
-    group, visible: false, sigur: 0, ultima: 0, cade: 0, previzualizate: 0, imposibile: 0, faraAcces: 0, faraAccesInaltime: 0, inchise: '', scanate: 0, piedica: '',
+    group, visible: false, sigur: 0, ultima: 0, cade: 0, previzualizate: 0, imposibile: 0, faraAcces: 0, faraAccesInaltime: 0, inchise: '', inchideri: null, inchideriLa: '', scanate: 0, piedica: '',
     scanare: null, ultimaScanare: null,
   }
 }
@@ -118,7 +126,31 @@ function uita(o: StabilityOverlay): void {
   o.faraAcces = 0
   o.faraAccesInaltime = 0
   o.inchise = ''
+  o.inchideri = null
+  o.inchideriLa = ''
   o.scanate = 0
+}
+
+function textInchise(pioni: number, mormane: number, zone: number): string {
+  const bucati: string[] = []
+  if (pioni > 0) bucati.push(`${pioni} pion${pioni === 1 ? '' : 'i'}`)
+  if (mormane > 0) bucati.push(`${mormane} morman${mormane === 1 ? '' : 'e'}`)
+  if (zone > 0) bucati.push(`${zone} celul${zone === 1 ? 'a' : 'e'} de zona`)
+  return bucati.join(', ')
+}
+
+function cheieLume(w: World): string {
+  return `${w.terrain.editari}:${w.desemnari.editariConstr}`
+}
+
+/**
+ * „PLANUL INCHIDE" pe pionii, mormanele si zonele de ACUM, pe pungile ultimei previzualizari — cat
+ * terenul si santierele sunt aceleasi. O celula intrebata costa O(1): se poate chema des.
+ */
+export function actualizeazaInchise(o: StabilityOverlay, w: World): void {
+  if (!o.visible || o.inchideri === null || o.inchideriLa !== cheieLume(w)) return
+  const c = celuleDeInchis(w)
+  o.inchise = textInchise(o.inchideri.inchise(c.pioni).length, o.inchideri.inchise(c.mormane).length, o.inchideri.inchise(c.zone).length)
 }
 
 // Luminozitatea poarta valoarea, nuanta poarta ACTIUNEA. Vezi DESIGN §9 regula 9.
@@ -282,11 +314,9 @@ export function redeseneazaStabilitate(o: StabilityOverlay, w: World, rules: Rul
   // pionii NU vor zidi. INALTIME cere o scara; INCINTA, o usa.
   o.faraAcces = constr.faraAcces.length
   o.faraAccesInaltime = constr.cauze.filter((cz) => cz === CauzaAcces.INALTIME).length
-  const bucati: string[] = []
-  if (constr.inchise.pioni > 0) bucati.push(`${constr.inchise.pioni} pion${constr.inchise.pioni === 1 ? '' : 'i'}`)
-  if (constr.inchise.mormane > 0) bucati.push(`${constr.inchise.mormane} morman${constr.inchise.mormane === 1 ? '' : 'e'}`)
-  if (constr.inchise.zone > 0) bucati.push(`${constr.inchise.zone} celul${constr.inchise.zone === 1 ? 'a' : 'e'} de zona`)
-  o.inchise = bucati.join(', ')
+  o.inchise = textInchise(constr.inchise.pioni, constr.inchise.mormane, constr.inchise.zone)
+  o.inchideri = constr.inchideri
+  o.inchideriLa = cheieLume(w)
   for (const cheie of constr.faraAcces) {
     const c = decodeCell(cheie)
     if (Math.abs(c.wx - cx) > raza || Math.abs(c.wy - cy) > raza) continue
