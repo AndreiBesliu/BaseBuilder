@@ -4337,3 +4337,95 @@ owner se scrie cu varianta implicită în față și „nu trebuie să faci nimi
 Recenzia codului (diff `48d7115..d0ae20c`) pornise la finalul sesiunii de 26.09 și s-a oprit odată cu
 ea, neterminată; se reia de la capăt, cu același plan: 5 lentile care reproduc (regula, continuitate,
 cost, plasa, viewer + documente) și verificatori (2 pe CRITIC, 1 pe MARE); buget anunțat ~5–7 M.
+
+## Task Completed — recenzia adversarială a accesului vertical, și remedierea ei
+
+**Model:** Claude Opus 5.5
+**Prompt de start:** „ok la toate" (27.09); apoi „Continua" prin remediere.
+
+**Recenzia** (wf_360d5234-618, 4,54 M tokeni, în bugetul anunțat de ~5–7 M): 5 lentile care reproduc
+(regula, continuitate, cost, plasa, viewer + documente), 42 de constatări, verificatori pe fiecare
+MARE. Verdictul, pe scurt: **garanția de zidire ține** — corpusul panoului 39.456 construibile =
+39.456 zidite, 0 pioni blocați de o zidire, 0 divergențe M5 în 914.270 de comparații, memoria egală cu
+recalculul pe 507 M de comparații. Dar: **deconstrucția și prăbușirea lăsau pioni blocați** (zidul de 5 m
+desfăcut de la rândul 2: 12 din 12 rulări; etajul casei: pioni sus pe fiecare rulare, apoi plecați de
+foame); **un defect viu în regula de sigilare** (verdictul îl dădea prima sămânță a unei componente —
+pionul care dormea, zidit, seed 777); **costul creștea cu lumea**, nu cu munca (orașul de 12 case: 61%
+din tick în acces); previzualizarea promitea două feluri de piese pe care pionii nu le zidesc; viewer-ul
+punea piesa în altă coloană decât cea de sub cursor; iar pașii din OWNER_VERIFY 13 nu se puteau urma.
+
+### Ce s-a reparat
+
+| | înainte (d0ae20c) | după |
+|---|---|---|
+| regula de sigilare, prima sămânță decide | pion zidit (6 din 314 cazuri de fuzz; seed 777 în joc) | fiecare sămânță a unei componente închise își verifică W; 0 |
+| deconstrucție și demolare, 60 de scene ale recenziei | zidul de 5 m: 12/12 cu pioni blocați; etajul: 2–3 blocați și plecați pe rulare | 0 blocați la capăt, 0 plecați, toate piesele desfăcute |
+| orașul: 12 case cu etaj, 36 de pioni, 30.000 de tickuri | 1.007–1.018 µs/tick, p99 11,2 ms, 968 de tickuri peste 8 ms | 393–425 µs/tick, p99 5,0–5,4 ms, 33–47 peste 8 ms (aceleași 1.870 de piese) |
+| celule inundate de acces în oraș (toate) | memoria 9,8 M (sigilarea nenumărată) | memoria 590 k + sigilarea 58 k: ~347 pe piesă zidită |
+| casa cu etaj (K05, toate flood-urile din tick) | ~399 k + ~1,2 M | 30.201 + 4.081 (178 pe piesă) |
+| previzualizarea: casa / 4 case / 8 case | 22,6 ms la casă; orașul 243–459 ms; mormanele împrăștiate 0,4–8,3 s | 3.307 / 7.182 / 12.333 de celule; 50 sau 800 de mormane, același cost |
+| privirea înainte dintr-o groapă fără constructor | promisă, nezidită (3/3) | fără acces |
+| privirea înainte, sumă dublă pe o pungă veche (masa) | promisă într-o ordine a planului | garda de epocă |
+| constructorul, spre o piesă care ar închide un morman | ~120 de drumuri cu piatră degeaba în 30.000 de tickuri | scanerul întreabă regula înainte de drum |
+
+**Coborârea de urgență** (registrul o avea pentru „mai târziu"; recenzia a arătat că e necesară acum):
+un pion FĂRĂ TREABĂ rămas într-o pungă a lui W coboară de pe cea mai apropiată margine, cel mult
+`coborareUrgentaM` = 8 m, pe o podea deschisă — dar rămâne cât mai are în pungă ceva de săpat sau de
+desfăcut și nicio nevoie sub prag. Două forme măsurate și respinse: coborârea imediat după prăbușire îi
+smulgea de la lucru (etajul rămânea la 51–73 de piese din 97); coborârea la prima scanare goală, la
+61–64 pe două semințe din șase (o scanare poate ieși goală trecător: ținte în răcire, rezervate).
+Acoperă și săpătura naturală care taie drumul unui pion — nu și hrana sau depozitul rămase sus
+(registrul).
+
+**Costul**, pe forma pe care recenzia a măsurat-o: memoria șterge la o editare MONOTONĂ doar flood-urile
+închise (cu condiția verificatorului: o singură intrare de teren pe celulă în fereastră — altfel molozul
+de pe un șantier, săpat și zidit în aceeași fereastră, lăsa memoria „deschis" pe o pungă); sigilarea se
+oprește la etichetele deschise ale memoriei și sare piesele care nu scot nimic; privirea înainte citește
+etichetele; previzualizarea ține celulele dovedite deschise peste treceri și enumeră pungile planului o
+dată pe Z. Fiecare vine cu oracolul lui (forma pe memorie == forma pură, cu ordinea listelor; fuzz pe
+ferestre de 1–4 editări cu praguri mici) și cu probe. Porțile K05 numără acum TOATE flood-urile.
+
+**Viewer** (un agent separat, în paralel, pe o ramură adusă apoi în `main`): țintirea click-ului
+alege acum celula din ce SE VEDE (funcție pură, `viewer/tinta.ts`, cu 13 teste): pe locul plat 42/42 în
+celula văzută (înainte 20/42), zid 7/7, placă 25/25, retragerea cu Ctrl pe cubul J 28/28 (7/28); un
+cursor-fantomă; Shift+click rămâne pe fața atinsă (OWNER_VERIFY 12 iar se poate urma); „fără loc sigur"
+se deosebește prin formă (nicio culoare nu ajungea la ΔE2000 ≥ 30 față de toate culorile J); săpatul
+nu mai țintește teren tăiat de slice; tasta H; modul de pornire `?cam=`, `?slice=`, `?piatra=`,
+`?hrana=`, `?pauza=` și pauza pe Spațiu. HUD-ul „PLANUL ÎNCHIDE" se reface pe pionii de acum (proba
+recenziei: 10 din 12 eșantioane egale cu calculul proaspăt, față de vechi 11 s din 12). **Pașii din
+OWNER_VERIFY 13, rescriși și rulați cap-coadă în viewer cu input real:** casa 193/193 în celula din
+plan, fără treaptă „89 fără acces (89 scară)", casa ridicată de pioni în 4.590 de tickuri, 0 blocați;
+redesenarea previzualizării în viewer, pe casă: 3,7–6,2 ms (pe ramura viewer-ului, fără remedierile de
+cost: 24–32 ms).
+
+**Plasa:** cele 22 de teste cu care lentila a legat mutațiile care treceau toată suita, plus depășirea
+EXACTĂ a ambelor jurnale (CAP + 1, cu editarea care contează cea mai veche) și cutia verticală pe ambele
+direcții.
+
+Hash-ul scenariului standard: **52b16ed2**, neschimbat; al casei cu etaj: **3550c897**, neschimbat.
+**633/633** de teste. **470/470** de probe; izolare 312/312.
+
+### Ce a găsit remedierea
+
+- **Probele mi-au arătat de trei ori un oracol vid.** Sigilarea pe memorie comparată cu forma pură, pe
+  o memorie fără nicio etichetă (oprirea n-avea la ce să se oprească); privirea înainte la praguri pe
+  un fuzz care nu nimerea egalitatea; masa cu un pion pe ea — eticheta lui trecea la componenta nouă,
+  iar filtrul constructorilor ascundea chiar suma dublă pe care garda de epocă o repară.
+- **Seminte inutile.** Pungile planului porneau și din coloana piesei; proba a ieșit ratată — pe drept:
+  celulele de sub piesă dispar, iar cea de peste ea e găsită din vecine sau n-a fost calcabilă azi.
+- **Scanerul care întreabă regula înainte de drum a ascuns proba de la primul tick**: scena ei avea
+  mormanul în cameră de la început. Acum mormanul apare cât constructorul cară piatra.
+- Lansatorul meu paralel de scene a rulat la început altceva decât credeam (un `shift` în plus mânca
+  prefixul `FORMA=`): 20 de rulări cerute ca „cameră" și „casă" au rulat, în tăcere, varianta
+  implicită, „zid". Refăcute cu un rulator pe linie și un fișier de ieșire pe rulare.
+
+### Registru
+
+- **Săpătura care taie accesul** la hrană și depozit (pionii coboară acum singuri; marfa nu).
+- **Previzualizarea ignoră săpăturile** (regula 4): un zid cu șanț pe ambele părți promite rândul 3.
+- **Insulele sub 2.048 de celule naturale** (regula 5): nicio celulă sigură, iar cauza afișată
+  („lasă o ușă") e greșită; la alegerea sitului sau o cauză „teren izolat".
+- Apelanții rari ai lui `celulaDeLucru` (coridorul scanerului, somnul, refacerea la săpat) și
+  `detaliuFaraLoc` pe geometria diagonală — gărzi fără scenă (plasa 14, J12).
+- O poartă de cost pe oraș în suită (azi: casa în sim; casa și satul de 8 în previzualizare).
+- Planurile care își mută accesul; șablonul de scară și unealta linie/dreptunghi (din registrul de ieri).

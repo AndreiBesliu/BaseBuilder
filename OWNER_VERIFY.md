@@ -246,9 +246,12 @@ dacă e greu de judecat fără o comparație, spune și pun o tastă care comut�
 verticală, dădea o cifră de piatră falsă, promitea un overlay de „4 ms pe cadru" și avea pași care
 nu se puteau urma în viewer.)*
 
-**Ce te uiți — pașii, în viewer.** Pornește slice view-ul (**Q**/**E**) pe nivelul unde vrei podeaua.
+**Ce te uiți — pașii, în viewer.** Pornește slice view-ul (**Q**/**E**) până când HUD-ul spune „activ" = nivelul
+podelei. **Cubul alb** din scenă arată celula pe care o ia click-ul (rândul „cursor" din HUD, în cifre).
 1. **Shift+click** ridică un zid de 2–3 niveluri și primele 2 celule ale unei fâșii care iese din el,
-   la nivelul podelei. *(Shift+click zidește pe loc, din nimic — e unealta de test.)*
+   la nivelul podelei. *(Shift+click zidește pe loc, din nimic — e unealta de test. Cu slice-ul pornit
+   atinge doar fețele care se văd, deci zidul crește cel mult un nivel peste podea; unul mai înalt se
+   ridică întâi cu **R**, slice oprit.)*
 2. **P** de patru ori (rândul „piesa" din HUD spune **grinda**), apoi **click** pe fața celulei a
    doua: grinda se desenează în celula de aer din fața ei, a treia de la zid.
 3. **Alt+click** pe o rocă oarecare: săpătura lasă un morman de 20 de piatră, cât costă grinda. Un
@@ -307,52 +310,91 @@ contează.
 
 ## 13. Accesul vertical — se construiește un etaj, și se citește de ce nu, când nu?
 
-**Ce s-a schimbat pentru tine.** Pionii zidesc acum până la celula de deasupra capului (tavanul unei
-camere de 2 m se pune de pe podeaua ei) și pe diagonală (colțurile etajelor). Un pion nu mai lucrează
-de pe o celulă din care ar rămâne blocat când se termină planul: creasta unui zid fără scară,
-interiorul unei camere fără ușă, o piesă a planului. Nicio piesă nu se pune dacă ar închide un pion,
-un morman sau o zonă. **SCARA** se poate, în sfârșit, construi: e de piatră, cât o podea.
+*(Rescris după recenzia adversarială din 27.09: pașii de dinainte nu se puteau urma — lumea viewer-ului
+avea 440 de piatră și nicio hrană, click-ul punea piesa în altă coloană decât cea de sub cursor, iar
+pionul din pasul 7 ieșea din cameră în câteva secunde. Pașii de mai jos au fost rulați cap-coadă în
+viewer, cu taste și click-uri reale.)*
 
-**Ce te uiți — pașii, în viewer.**
-1. **Q** până la solul unui loc plat (rândul „nivel slice" din HUD). **P** până la **perete**.
-   **Click** desenează acum **la nivelul activ** — coloana de sub cursor, nu fața atinsă. Desenează
-   o cameră 7×7 cu pereți pe două niveluri (**E** urcă nivelul) și un gol de ușă.
-2. **E** încă o dată, **P** până la **podea**, și acoperă camera, lăsând două celule libere pe mijloc.
-3. **P** până la **scara**: în cele două celule libere, pe nivelurile de jos, o coloană de 1 și una de
-   2 (a doua lângă peretele din spate).
-4. **E**, **P** → **perete**: un etaj peste placă; apoi o placă peste el.
-5. **S**: ce e **turcoaz** ar sta în picioare, dar n-ar ajunge nimeni la el. Șterge o treaptă
-   (**Ctrl+click** pe ea): etajul și acoperișul devin turcoaz, iar HUD-ul spune „N fără acces (N scară,
-   0 ușă)". Pune-o la loc.
-6. Piatra: **P** până la **sapa** și **click** pe câteva zeci de celule de rocă — pionii sapă și fac
-   mormane (20 pe celulă, cât o piesă) —, apoi lasă-i să construiască. **J**:
-   șantierele **turcoaz** așteaptă un loc sigur (scara încă nezidită), cele **roz** ar închide pe cineva.
-7. Desenează o cameră închisă cu un pion înăuntru: HUD-ul spune „PLANUL ÎNCHIDE 1 pion", iar ultima
-   piesă nu se pune cât timp e acolo.
+**Ce s-a schimbat pentru tine.** Pionii zidesc până la celula de deasupra capului (tavanul unei camere
+de 2 m se pune de pe podeaua ei) și pe diagonală (colțurile etajelor). Un pion nu lucrează de pe o
+celulă din care ar rămâne blocat când se termină planul: creasta unui zid fără scară, interiorul unei
+camere fără ușă. Nicio piesă nu se pune dacă ar închide un pion, un morman sau o zonă — și acum
+constructorul nici nu mai pornește cu piatra spre ea. **SCARA** se construiește: e de piatră, cât o
+podea. Și, nou după recenzie: **un pion rămas fără treabă sus** (pe molozul unei demolări, pe un etaj
+cu scara astupată, pe un stâlp) **sare jos** de pe cea mai apropiată margine, de cel mult 8 m — dar abia
+după ce termină ce mai are de săpat de acolo.
 
-**Cum arată bine:** casa cu două etaje se ridică toată (în teste: 193/193 pe trei semințe, fără niciun
-pion blocat); fără scară, rămân exact etajul și acoperișul, turcoaz. **Cum arată rău:** un pion rămâne
-sus fără drum; turcoazul promite ce pionii fac sau invers; nu poți desena un etaj.
+**Pornirea.** `npm run viewer`, apoi deschide:
+
+http://localhost:5175/?cam=12391,4603&slice=48&piatra=4000&hrana=750&pauza=1
+
+- camera se uită la un loc plat; HUD-ul spune „nivel slice **48 m · activ 47**", iar rândul „loc"
+  spune „piatra 4000/4000 in 54 mormane · hrana 750/750 in 10 mormane";
+- pionii stau (**PAUZA**, **Spațiu** o oprește): altfel, cu piatra lângă ei, ar zidi casa cât o desenezi;
+- **cubul alb** din scenă arată celula pe care o ia click-ul (rândul „**cursor**" din HUD o spune în
+  cifre); cu **Ctrl** ținut devine **roșu** și arată ce se retrage; **H** ascunde ajutorul, apoi HUD-ul.
+
+**Casa**: 7×7, între colțurile (12388,4600) și (12394,4606); ușa la (12391,4600); treptele la
+(12391,4604) și (12391,4605). Apasă **J** acum și lasă-l pornit: fără el pereții desenați nu se văd.
+
+1. **Parterul.** **P** până la „perete". Click pe sol pe cele 23 de celule ale conturului (fără ușă).
+   **E** („activ 48") și click pe capacul fiecărui cub al rândului de jos: al doilea rând se pune peste.
+2. **Placa.** **E** („activ 49"), **P** până la „podea". Pe margine, click pe capacele pereților; în
+   interior și în golul ușii, click pe podeaua camerei (se vede prin pereți). Lasă libere (12391,4604)
+   și (12391,4605).
+3. **Scara.** **P** până la „scara", **Q** de două ori („activ 47"): click pe podea la (12391,4604) și
+   (12391,4605). **E** („activ 48"): click pe capacul treptei de la (12391,4605).
+4. **Etajul și acoperișul.** **P** până la „perete", **E** de două ori („activ 50"): inelul 7×7 pe
+   capacele plăcii; **E** („activ 51"): al doilea inel. **P** până la „podea", **E** („activ 52"):
+   acoperișul. Casa are acum 193 de piese desenate.
+5. **Scara lipsă.** **S**. **Q** până la „activ 47". Ține **Ctrl**, du cubul roșu pe treapta de la
+   **(12391,4604)** și dă click. Etajul și acoperișul devin **turcoaz** pe nivelul activ, iar HUD-ul
+   spune „**89 fara acces (89 scara, 0 usa)**" (cifra depinde de loc: câteva mai mult sau mai puțin
+   dacă muți casa). Pune treapta la loc (**P** până la „scara", click pe podea): turcoazul dispare.
+6. **Pionii.** **Spațiu**, apoi **R** (slice oprit) ca să vezi toată casa. În **J**: cuburile
+   chihlimbar devin albastre (vine cineva), apoi dispar (zidite). **Turcoaz cu diagonale pe fețe** =
+   șantier care așteaptă un loc SIGUR de lucru (etajul, până se zidesc scara și placa). **Roz** = ar
+   închide pe cineva. Casa se ridică toată în ~4 minute de joc.
+7. **O cameră care ar închide un morman.** **P** până la „sapa", click pe o celulă de iarbă la câțiva
+   pași de casă, de ex. (12389,4613). Un pion o sapă (~20 s) și lasă o groapă cu un morman de pământ.
+   Lasă-l să plece de lângă ea, apoi **Spațiu** (pauză), **S**, **Q/E** până la „activ 47", **P** până
+   la „perete": click pe cele 8 celule de sol din jurul gropii. HUD-ul spune „**PLANUL INCHIDE 1
+   morman**". Încă un rând pe capace (**E**), apoi **Spațiu**: pionii zidesc aproape tot, dar ultimele
+   piese care ar închide groapa rămân nezidite cât timp mormanul e înăuntru.
+8. *(Opțional, lung: ~100 de click-uri.)* **Demolarea etajului.** **P** până la „sapa" și click pe
+   pereții și acoperișul etajului. Molozul poate astupa golul scării; pionii rămași sus termină întâi ce
+   pot desface de acolo, apoi sar de pe margine. *(Măsurat în simulare, pe cele 60 de scene ale
+   recenziei; nu și în viewer.)*
+
+**Cum arată bine:** cubul alb stă unde se pune piesa; casa se ridică toată, fără pion blocat; fără
+treapta (12391,4604), exact etajul și acoperișul sunt turcoaz; „PLANUL ÎNCHIDE" se schimbă când iese
+pionul sau mormanul. **Cum arată rău:** cubul alb nu e unde se pune piesa; un pion rămâne sus fără
+drum și fără treabă; turcoazul promite ce pionii fac sau invers; nu poți desena un etaj.
 
 **Șase decizii — APROBATE de owner pe 27.09, toate cu varianta implicită** („ok la toate"). Rămâne
 deschisă doar verificarea pe ecran, pașii de mai sus. Cum sunt acum în joc:
-1. **Atingerea +2** și la **deconstrucție** (ce s-a zidit de pe sol se desface de pe sol). Altfel, rândul 3
-   și placa cer o scară doar ca să fie demolate. Implicit: da.
+1. **Atingerea +2** și la **deconstrucție** (ce s-a zidit de pe sol se desface de pe sol).
 2. **Pragurile de „afară"** (`accesPlafonNatural` 2048, `accesPlafonTotal` 8192): o curte închisă cu
-   podea naturală de peste ~45×45 contează ca „afară" — pionii pot rămâne în ea; un acoperiș fără scară
-   de peste 8.192 de celule la fel. Sub ele, orice incintă e pungă.
-3. **SCARA de piatră acum**, de lemn când va exista lemn. Azi e identică cu PODEA (20 de piatră, 300 de
-   muncă) — o treaptă mai ieftină ar fi fost un zid mai ieftin.
-4. **PERETE (400 de muncă) vs PODEA/SCARA (300)** — același voxel, deci podeaua e un perete mai ieftin.
-   Existent, nu adus aici; spune dacă piesele trebuie să difere prin altceva decât preț.
-5. **Planurile care își mută accesul** (închid rampa veche și fac o scară nouă) sunt fără acces până
-   se zidește întâi scara nouă. Previzualizarea o spune; o ordine automată ar fi o altă felie.
-6. **Săparea singurei scări** lasă hrana și depozitul de sus fără drum — azi fără avertisment (era și
-   înainte). E următorul lucru din registru; spune dacă e prioritar.
+   podea naturală de peste ~45×45 contează ca „afară"; un acoperiș fără scară de peste 8.192 de celule
+   la fel. Sub ele, orice incintă e pungă — **și o insulă mai mică de atât** (recenzia): acolo nicio
+   celulă nu e sigură. E în registru.
+3. **SCARA de piatră acum**, de lemn când va exista lemn (azi identică cu PODEA: 20 de piatră, 300 de muncă).
+4. **PERETE (400 de muncă) vs PODEA/SCARA (300)**, lăsate cum sunt.
+5. **Planurile care își mută accesul** rămân în ordinea jucătorului; previzualizarea spune ce așteaptă.
+6. **Săpătura care taie accesul** e următoarea în registru. Pionii prinși coboară acum singuri; hrana și
+   depozitul rămase sus, nu.
 
-**De ce nu pot eu.** Regula e probată: teorema de monotonie pe 7 milioane de verificări (panoul) și ca
-test de proprietate; memoria comparată cu recalculul după fiecare pas al unui fuzz, pe margini țintite;
-M5 în coada casei cu etaj; 47 de probe de mutație pe suita accesului. Dar dacă un etaj se desenează
-ușor, dacă turcoazul și roz-ul se înțeleg și dacă cele șase decizii fac jocul bun se vede doar pe ecran.
+**O valoare nouă, cu implicitul ei** (nu trebuie să faci nimic dacă ești de acord):
+`coborareUrgentaM` = **8** în `content/rules.json` — de cât de sus sare un pion prins. 8 m acoperă
+acoperișul unei case cu etaj; 0 oprește coborârea. Pe cele 60 de scene de demolare ale recenziei, cu 8:
+0 pioni blocați, 0 plecați, totul desfăcut.
 
-**Pașii tăi:** `npm run viewer`, apoi http://localhost:5175/ ; commit-urile: https://github.com/AndreiBesliu/BaseBuilder/compare/48d7115...main
+**De ce nu pot eu.** Regula e probată: teorema de monotonie, oracole care compară fiecare scurtătură a
+memoriei cu calculul de la zero, 470 de probe de mutație, scenele recenziei rulate cu pioni reali. Iar
+pașii de mai sus au fost rulați în viewer cu input real. Dar dacă un etaj se desenează ușor, dacă
+turcoazul, roz-ul și cubul alb se înțeleg și dacă o săritură de pe acoperiș arată firesc se vede doar
+pe ecran.
+
+**Pașii tăi:** `npm run viewer`, apoi
+http://localhost:5175/?cam=12391,4603&slice=48&piatra=4000&hrana=750&pauza=1 ; commit-urile:
+https://github.com/AndreiBesliu/BaseBuilder/compare/48d7115...main
