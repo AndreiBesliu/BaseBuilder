@@ -15,9 +15,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { createWorld, tick as simTick } from '../src/sim/world.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { describe } from '../src/sim/result.ts'
-import { CHUNK_CELLS, Material, VOXEL_LEVELS } from '../src/sim/terrain/chunk.ts'
+import { CHUNK_CELLS, isSolid, Material, promotedBaseM, VOXEL_LEVELS } from '../src/sim/terrain/chunk.ts'
 import type { Chunk } from '../src/sim/terrain/chunk.ts'
-import { groundLevelM, inWorld } from '../src/sim/terrain/terrain.ts'
+import { groundLevelM, inWorld, materialAt } from '../src/sim/terrain/terrain.ts'
 import { Biome, MACRO_METERS, sampleMacro } from '../src/sim/terrain/macro.ts'
 import { Face, meshChunk } from '../src/render/mesher.ts'
 import type { ChunkNeighbours } from '../src/render/mesher.ts'
@@ -31,6 +31,8 @@ import { createJobOverlay, rebuildJobOverlay, rezumatJoburi } from './overlay-jo
 import { avanseazaStabilitate, createStabilityOverlay, pornesteStabilitate, progresStabilitate, redeseneazaStabilitate } from './overlay-stabilitate.ts'
 import { Piesa } from '../src/sim/state.ts'
 import { desemnareLaCelula } from '../src/sim/desemnari.ts'
+import { alegeColoana, celulaLangaFata, cubAtins, primulVizibil } from './tinta.ts'
+import type { CelulaJ, Impact, Raza } from './tinta.ts'
 import { celulaDeZonaLa } from '../src/sim/zone.ts'
 import { decodeCell } from '../src/sim/path.ts'
 import { createDensePanel, densePanelReport, PANEL_HZ, tickDensePanel } from './panel-dens.ts'
@@ -516,8 +518,28 @@ function pumpBuildQueue(): void {
 // 3. slice view — ascunde tot ce e peste nivelul activ
 // --------------------------------------------------------------------------
 
-let sliceLevel = VOXEL_LEVELS
+/**
+ * Cota planului de taiere, in METRI DE LUME: se pastreaza y <= sliceLevel, iar nivelul activ e
+ * `sliceLevel - 1`. `null` = slice-ul oprit.
+ *
+ * Plaja e fereastra de voxeli a chunk-ului focusului, nu [0, 64] m: cota e in lume, iar o vale sub
+ * 0 m sau un deal peste 64 m nu se puteau lua ca nivel activ deloc (recenzia: sub −1 m nu se putea
+ * desena). Vezi `plajaSlice`.
+ */
+let sliceLevel: number | null = null
 const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0)
+/** Cursorul-fantoma trebuie recalculat (s-a miscat mouse-ul, camera, slice-ul, piesa...). Vezi sectiunea 4. */
+let fantomaMurdara = false
+
+/**
+ * Cotele posibile ale planului: nivelul activ merge pe toate cele VOXEL_LEVELS niveluri ale ferestrei
+ * chunk-ului focusului (`promotedBaseM` — si pe un chunk ne-promovat, e fereastra pe care ar avea-o).
+ */
+function plajaSlice(): { readonly lo: number; readonly hi: number } {
+  const c = world.terrain.chunks.get(focusCy * 512 + focusCx)
+  const base = c ? promotedBaseM(c) : 0
+  return { lo: base + 1, hi: base + VOXEL_LEVELS }
+}
 
 // Planul e MEREU activ, si cand slice-ul e oprit: impins atat de sus incat nu
 // taie nimic. Motivul e de masuratoare, nu de randare — numarul de clipping
@@ -527,13 +549,14 @@ const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0)
 const SLICE_OFF = 1e6
 
 function applySlice(): void {
-  if (sliceLevel >= VOXEL_LEVELS) {
+  if (sliceLevel === null) {
     clipPlane.constant = SLICE_OFF
     el('slice').textContent = 'toate'
   } else {
     clipPlane.constant = sliceLevel
-    el('slice').textContent = `${sliceLevel} m`
+    el('slice').textContent = `${sliceLevel} m · activ ${sliceLevel - 1}`
   }
+  fantomaMurdara = true
 }
 renderer.localClippingEnabled = true
 renderer.clippingPlanes = [clipPlane]
@@ -592,7 +615,7 @@ const BUGET_STABILITATE_MS = 4
  * de ce tace, in loc sa deseneze zero patrate fara explicatie.
  */
 function refaStabilitate(): void {
-  const zActiv = sliceLevel >= VOXEL_LEVELS ? null : sliceLevel - 1
+  const zActiv = sliceLevel === null ? null : sliceLevel - 1
   pornesteStabilitate(stabOverlay, world, DEFAULT_RULES, zActiv, focusCx * CHUNK_CELLS + 16, focusCy * CHUNK_CELLS + 16, 16)
 }
 
@@ -654,58 +677,177 @@ let downX = 0
 let downY = 0
 let moved = 0
 
+/**
+ * Cat de departe de camera poate cadea planul de rezerva al nivelului activ (viewer/tinta.ts,
+ * regula 3). Cat sa cuprinda o casa privita de la distanta de pornire a camerei (~72 m), fara sa
+ * desemneze o piesa pe cer, la sute de metri.
+ */
+const DEPARTE_MAX_M = 150
+
+interface Modificatori {
+  readonly ctrl: boolean
+  readonly shift: boolean
+  readonly alt: boolean
+}
+
+type TintaClick =
+  | { readonly ok: true; readonly wx: number; readonly wy: number; readonly z: number }
+  | { readonly ok: false; readonly mesaj: string }
+
+/** Cuburile J DESENATE — deci nimic cand overlay-ul e oprit: ce nu se vede nu se tinteste. */
+function cuburiJ(): CelulaJ[] {
+  if (!jobOverlay.visible) return []
+  const d = world.desemnari
+  const out: CelulaJ[] = []
+  for (let i = 0; i < d.count; i++) if (d.alive[i] === 1) out.push({ wx: d.wx[i]!, wy: d.wy[i]!, z: d.z[i]! })
+  return out
+}
+
+/**
+ * Celula pe care o tinteste un click la pixelul dat, cu modificatorii dati. O singura functie
+ * pentru click si pentru cursorul-fantoma: ce arata fantoma e ce face click-ul.
+ *
+ * Trei feluri de tinta:
+ *  - **Nivelul activ** — cu o piesa aleasa si slice-ul pornit (DESIGN §5.2: „toate ordinele se
+ *    aplica la nivelul activ"): coloana lucrului VAZUT sub cursor, la cota nivelului activ. Regula
+ *    si motivul ei sunt in viewer/tinta.ts. Shift+click NU intra aici: e unealta de test „zideste pe
+ *    loc", si ramane pe fata atinsa, cu sau fara piesa aleasa.
+ *  - **Retragerea** (Ctrl+click) — cubul J vazut, oriunde e atins, pe orice nivel netaiat; fara
+ *    cub sub cursor, celula pe care ar fi desenat click-ul simplu.
+ *  - **Fata atinsa** — restul: o jumatate de celula in fata fetei (zidit, piesa fara slice) sau in
+ *    spatele ei (sapat). Punctul de impact sta EXACT pe suprafata, deci rotunjit ar nimeri
+ *    sistematic celula de aer de deasupra solului. Fata e prima VIZIBILA: cu slice-ul pornit,
+ *    raycaster-ul atinge si teren taiat, invizibil — un click pe solul unei vai, printr-un deal
+ *    taiat, desemna o sapatura in dealul pe care nu-l vedea nimeni (recenzia, `p15-sapa-taiat.mjs`).
+ */
+function tintaLa(px: number, py: number, m: Modificatori): TintaClick {
+  pointer.x = (px / window.innerWidth) * 2 - 1
+  pointer.y = -(py / window.innerHeight) * 2 + 1
+  raycaster.setFromCamera(pointer, camera)
+  const o = raycaster.ray.origin
+  const d = raycaster.ray.direction
+  const raza: Raza = { o: { x: o.x, y: o.y, z: o.z }, d: { x: d.x, y: d.y, z: d.z } }
+  const impacturi: Impact[] = raycaster.intersectObjects(group.children, false).map((h) => ({
+    t: h.distance,
+    p: { x: h.point.x, y: h.point.y, z: h.point.z },
+    // Mesh-urile de chunk sunt doar translatate, deci normala fetei e deja in lume.
+    n: h.face ? { x: h.face.normal.x, y: h.face.normal.y, z: h.face.normal.z } : { x: 0, y: 1, z: 0 },
+  }))
+  const zona = tastaZ || tastaX
+  const cuPiesa = piesaAleasa !== Piesa.NICIUNA && !m.alt && !zona
+  const cuPiesaSus = cuPiesa && !m.shift && sliceLevel !== null
+  const retrage = m.ctrl && !m.shift && !m.alt && !zona
+
+  if (retrage) {
+    const j = cubAtins(raza, cuburiJ(), -Infinity, sliceLevel === null ? Infinity : sliceLevel - 1)
+    if (j !== null) return { ok: true, ...j.c }
+  }
+  if (cuPiesaSus && sliceLevel !== null) {
+    const zActiv = sliceLevel - 1
+    const c = alegeColoana({
+      raza, zActiv, impacturi, cuburi: cuburiJ(), departeMax: DEPARTE_MAX_M,
+      desemnataPeNivel: (wx, wy) => desemnareLaCelula(world.desemnari, wx, wy, zActiv) !== -1,
+      plinaPeNivel: (wx, wy) => { const m = materialAt(world.terrain, wx, wy, zActiv); return m.ok && isSolid(m.value) },
+    })
+    if (!c.ok) return { ok: false, mesaj: 'nimic la nivelul activ sub cursor' }
+    return { ok: true, wx: c.wx, wy: c.wy, z: zActiv }
+  }
+  const v = primulVizibil(impacturi, sliceLevel)
+  if (v === null) {
+    return { ok: false, mesaj: sliceLevel !== null && impacturi.length > 0 ? 'nimic vizibil sub cursor: tot ce atinge raza e taiat de slice' : 'nimic sub cursor' }
+  }
+  return { ok: true, ...celulaLangaFata(v, m.shift || cuPiesa ? 1 : -1) }
+}
+
+// --- cursorul-fantoma: celula pe care o va tinti click-ul, INAINTE de click ----------------
+//
+// Fara el, jucatorul afla unde s-a pus piesa abia dupa click — iar cu paralaxa de dinainte afla
+// ca s-a pus cu doua celule mai incolo. Un cub de linii putin mai lat decat celula (cuburile J sunt
+// retrase in ea, deci se deosebesc), putin mai scund, ca muchiile de sus sa nu cada pe planul de
+// taiere; alb pentru o comanda, rosu pentru retragere. Desenat peste tot, ca si overlay-urile.
+const fantoma = (() => {
+  const a = -0.04, b = 1.04, y0 = 0.02, y1 = 0.98
+  const c = [[a, y0, a], [b, y0, a], [b, y0, b], [a, y0, b], [a, y1, a], [b, y1, a], [b, y1, b], [a, y1, b]]
+  const e = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]
+  const pos: number[] = []
+  for (const [i, j] of e) pos.push(...c[i!]!, ...c[j!]!)
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
+  const linii = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, depthTest: false }))
+  linii.visible = false
+  linii.renderOrder = 10
+  return linii
+})()
+scene.add(fantoma)
+const CULOARE_FANTOMA = 0xffffff
+const CULOARE_FANTOMA_RETRAGE = 0xff5a3c
+
+/** Ultima pozitie a mouse-ului peste canvas, cu modificatorii ei; `null` = in afara lui. */
+let ultimPointer: { x: number; y: number; m: Modificatori } | null = null
+let butonApasat = false
+
+function actualizeazaFantoma(): void {
+  fantomaMurdara = false
+  if (ultimPointer === null || (butonApasat && moved > DRAG_PX)) { ascundeFantoma(); return }
+  const m = ultimPointer.m
+  const t = tintaLa(ultimPointer.x, ultimPointer.y, m)
+  if (!t.ok) { ascundeFantoma(t.mesaj); return }
+  // Depozitul (Z) si stergerea lui (X) lucreaza pe celula calcabila de DEASUPRA celei atinse.
+  const z = tastaZ || tastaX ? t.z + 1 : t.z
+  fantoma.position.set(t.wx, z, t.wy)
+  const retrage = m.ctrl && !m.shift && !m.alt && !tastaZ && !tastaX
+  fantoma.userData.retrage = retrage
+  ;(fantoma.material as THREE.LineBasicMaterial).color.setHex(retrage ? CULOARE_FANTOMA_RETRAGE : CULOARE_FANTOMA)
+  fantoma.visible = true
+  // Celula in cifre, pe randul „cursor": pasii de verificare pot spune „du cursorul pe 12391,4604".
+  el('cursor').textContent = `${t.wx},${t.wy} · z ${z}${retrage ? ' · retrage' : ''}`
+}
+
+function ascundeFantoma(dece = '—'): void {
+  fantoma.visible = false
+  el('cursor').textContent = dece
+}
+
+function modificatori(ev: MouseEvent | KeyboardEvent): Modificatori {
+  return { ctrl: ev.ctrlKey, shift: ev.shiftKey, alt: ev.altKey }
+}
+
 renderer.domElement.addEventListener('pointerdown', (ev) => {
   downX = ev.clientX
   downY = ev.clientY
   moved = 0
+  butonApasat = true
 })
+window.addEventListener('pointerup', () => { butonApasat = false; fantomaMurdara = true })
 renderer.domElement.addEventListener('pointermove', (ev) => {
   const dx = ev.clientX - downX
   const dy = ev.clientY - downY
   moved = Math.max(moved, Math.hypot(dx, dy))
+  ultimPointer = { x: ev.clientX, y: ev.clientY, m: modificatori(ev) }
+  fantomaMurdara = true
 })
+renderer.domElement.addEventListener('pointerleave', () => { ultimPointer = null; fantomaMurdara = true })
+// Ctrl/Shift/Alt/Z/X schimba tinta fara sa miste mouse-ul; la fel P, Q/E, J, S.
+for (const tip of ['keydown', 'keyup'] as const) {
+  window.addEventListener(tip, (ev) => {
+    if (ultimPointer !== null) ultimPointer = { ...ultimPointer, m: modificatori(ev) }
+    fantomaMurdara = true
+  })
+}
+// Camera se misca si dupa ce s-a oprit mouse-ul (amortizarea OrbitControls): tinta de sub el se muta.
+controls.addEventListener('change', () => { fantomaMurdara = true })
 
 renderer.domElement.addEventListener('click', (ev) => {
   if (moved > DRAG_PX) return
-  pointer.x = (ev.clientX / window.innerWidth) * 2 - 1
-  pointer.y = -(ev.clientY / window.innerHeight) * 2 + 1
-  raycaster.setFromCamera(pointer, camera)
-  const hits = raycaster.intersectObjects(group.children, false)
-  // Cu o piesa aleasa si slice-ul pornit, se deseneaza la NIVELUL ACTIV (DESIGN §5.2: „toate
-  // ordinele se aplica la nivelul activ"), nu in fata fetei de teren lovite. Altfel etajele nu
-  // se puteau desena inainte sa existe placa: panoul accesului vertical a numarat 9 „valuri"
-  // de desenat pentru o casa cu doua etaje, iar „fara acces" nu aparea niciodata la planificare.
-  const cuPiesaSus = piesaAleasa !== Piesa.NICIUNA && !ev.altKey && !tastaZ && !tastaX && sliceLevel < VOXEL_LEVELS
-  if (hits.length === 0 && !cuPiesaSus) return
-
-  // Punctul de impact sta EXACT pe suprafata, deci nu apartine niciunei celule:
-  // rotunjirea lui nimerea sistematic celula de deasupra solului, adica aer, iar
-  // fiecare click se termina in LIPSA_MATERIAL. Corect e sa intri o jumatate de
-  // celula in directia normalei — inauntru pentru sapat, in afara pentru zidit.
-  //
-  // Merge la fel pe suprafata de heightfield (unde cota e fractionara: teren la
-  // -4,37 m inseamna sol solid de la -5 in jos) si pe o fata de voxel (unde cota
-  // e intreaga si punctul cade fix pe granita dintre doua celule).
-  // Cu o piesa aleasa, celula e cea de AER din fata fetei, ca la Shift+click — si tot
-  // acolo tinteste Ctrl+click, ca sa poata retrage o piesa desenata.
-  const cuPiesa = piesaAleasa !== Piesa.NICIUNA && !ev.altKey && !tastaZ && !tastaX
-  let target: THREE.Vector3
-  if (cuPiesaSus) {
-    // Planul de deasupra nivelului activ (y = zActiv + 1): exact ce vede jucatorul de sus,
-    // fiindca taierea pastreaza y <= sliceLevel. Coloana de sub cursor, la cota zActiv.
-    const zActiv = sliceLevel - 1
-    const p = raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -(zActiv + 1)), new THREE.Vector3())
-    if (!p) return
-    target = new THREE.Vector3(p.x, zActiv + 0.5, p.z)
-  } else {
-    const hit = hits[0]!
-    const normal = hit.face ? hit.face.normal : new THREE.Vector3(0, 1, 0)
-    target = hit.point.clone().addScaledVector(normal, ev.shiftKey || cuPiesa ? 0.5 : -0.5)
+  const t = tintaLa(ev.clientX, ev.clientY, modificatori(ev))
+  fantomaMurdara = true
+  // Un click care nu face nimic trebuie sa spuna de ce (cer, sau doar teren taiat sub cursor).
+  if (!t.ok) {
+    el('spot').textContent = t.mesaj
+    return
   }
-
-  const wx = Math.floor(target.x)
-  const wy = Math.floor(target.z)
-  const z = Math.floor(target.y)
+  const { wx, wy, z } = t
+  const cuPiesa = piesaAleasa !== Piesa.NICIUNA && !ev.altKey && !tastaZ && !tastaX
 
   const promotedBefore = promotedKeys()
 
@@ -832,9 +974,12 @@ window.addEventListener('keydown', (ev) => {
     traverseFixedClock = !traverseFixedClock
     return
   }
-  if (ev.key === 'q' || ev.key === 'Q') sliceLevel = Math.max(0, sliceLevel - 1)
-  else if (ev.key === 'e' || ev.key === 'E') sliceLevel = Math.min(VOXEL_LEVELS, sliceLevel + 1)
-  else if (ev.key === 'r' || ev.key === 'R') sliceLevel = VOXEL_LEVELS
+  // Q porneste slice-ul in varful ferestrei si coboara; E urca, iar peste varf il opreste. Un
+  // nivel ramas in afara ferestrei (camera a trecut pe un chunk mai jos sau mai sus) se aduce in ea.
+  const { lo, hi } = plajaSlice()
+  if (ev.key === 'q' || ev.key === 'Q') sliceLevel = sliceLevel === null ? hi : Math.max(lo, Math.min(hi, sliceLevel - 1))
+  else if (ev.key === 'e' || ev.key === 'E') sliceLevel = sliceLevel === null ? null : sliceLevel >= hi ? null : Math.max(lo, sliceLevel + 1)
+  else if (ev.key === 'r' || ev.key === 'R') sliceLevel = null
   else return
   applySlice()
   // Alt nivel = alta intrebare: trecerea veche se lasa, desenul ei se sterge.
@@ -1024,7 +1169,8 @@ function driveScenario(frame: number): void {
     camera.position.set(settleCenterX + Math.cos(a) * r, y, settleCenterZ + Math.sin(a) * r)
     controls.target.set(settleCenterX, y - 40, settleCenterZ)
     if (SLICE_AT.includes(frame)) {
-      sliceLevel = sliceLevel >= VOXEL_LEVELS ? 18 : VOXEL_LEVELS
+      // 18 m de LUME, ca inainte de plaja pe fereastra chunk-ului: protocolul de gate nu se schimba.
+      sliceLevel = sliceLevel === null ? 18 : null
       applySlice()
     }
     return
@@ -1185,6 +1331,9 @@ function stepFrame(ts: number): void {
   }
   // Trecerea de stabilitate, feliata: cel mult bugetul pe cadru, si doar cu overlay-ul pornit.
   avanseazaStabilitate(stabOverlay, world, DEFAULT_RULES, BUGET_STABILITATE_MS)
+  // Cursorul-fantoma: cel mult o raza pe cadru, si doar cand s-a schimbat ceva. Niciodata intr-o
+  // rulare de gate — acolo nu misca nimeni mouse-ul, iar un draw call in plus ar fi drift de masura.
+  if (fantomaMurdara && !gateRun) actualizeazaFantoma()
   driveScenario(frameIndex)
   stepNegativeProbe()
   stepTraverse(dt)
@@ -1280,4 +1429,4 @@ hud.removeAttribute('hidden')
 requestAnimationFrame(tick)
 
 // Expus pentru masuratori din consola, nu pentru joc.
-Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport } })
+Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport, fantoma, jobOverlay, stabOverlay } })

@@ -67,6 +67,7 @@
     <div class="row"><span>regiuni</span><span id="regions">G</span></div>
     <div class="row"><span>joburi</span><span id="jobs">—</span></div>
     <div class="row"><span>piesa</span><span id="piesa">sapa (P)</span></div>
+    <div class="row"><span>cursor</span><span id="cursor">—</span></div>
     <hr>
     <div class="row"><span>nivel slice</span><span id="slice">—</span></div>
     <div class="row"><span>renderer</span><span id="backend">—</span></div>
@@ -74,9 +75,9 @@
   </div>
   <div id="keys">
     <b>drag</b> roteste · <b>rotita</b> zoom · <b>click dreapta+drag</b> panoramare<br>
-    <b>Q</b> / <b>E</b> coboara / urca nivelul de slice · <b>R</b> reseteaza slice<br>
-    <b>click stanga pe teren</b> cere sa se sape (vine un pion) · <b>Ctrl+click</b> retrage cererea · <b>Alt+click</b> sapa pe loc · <b>Shift+click</b> construieste<br>
-    <b>P</b> alege piesa: sapa · perete · podea · scara · grinda — cu o piesa aleasa, <b>click</b> o deseneaza in fata fetei atinse — iar cu slice-ul pornit (<b>Q</b>/<b>E</b>), la NIVELUL ACTIV, ca sa poti desena un etaj inainte sa existe placa —, <b>Ctrl+click</b> o retrage<br>
+    <b>Q</b> / <b>E</b> coboara / urca nivelul de slice (in fereastra chunk-ului de sub camera; peste varf, <b>E</b> il opreste) · <b>R</b> opreste slice-ul<br>
+    <b>click stanga pe teren</b> cere sa se sape (vine un pion) · <b>Ctrl+click</b> retrage cererea — pe un cub J, cubul ala · <b>Alt+click</b> sapa pe loc · <b>Shift+click</b> zideste pe loc, in fata fetei atinse (si cu o piesa aleasa)<br>
+    <b>P</b> alege piesa: sapa · perete · podea · scara · grinda — cu o piesa aleasa, <b>click</b> o deseneaza in fata fetei atinse; cu slice-ul pornit, la NIVELUL ACTIV, in coloana a ce se vede sub cursor (solul, sau capacul unui cub J de pe nivelul de dedesubt — asa pui un rand peste unul nezidit), ca sa poti desena un etaj inainte sa existe placa · <b>cubul alb</b> arata celula inainte de click, <b>rosu</b> cu Ctrl (ce se retrage)<br>
     <b>S</b> overlay de stabilitate (cere slice view) — chihlimbar: ultima celula · rosu: cade · portocaliu: desemnarile ar prabusi · violet: piesa nu se poate zidi · turcoaz: ar sta, dar nu ajunge nimeni (pune o scara / lasa o usa; HUD: „planul inchide" = ar ramane ceva inauntru); langa grinzi se calculeaza pe mai multe cadre (HUD: scanare %)<br>
     <b>Z+click</b> de doua ori = picteaza un depozit (doua colturi) · <b>X+click</b> sterge depozitul de acolo<br>
     <b>J</b> overlay de joburi — cereri: chihlimbar libera · albastru rezervata · rosu fara loc de lucru · turcoaz CU DIAGONALE pe fete: niciun loc SIGUR (scara, usa, sau asteapta o piesa) · roz ar inchide pe cineva/ceva · violet nu se ajunge · portocaliu un pion a renuntat (ostil, buget); mormane (cuburi mici, inalte cat sunt de pline): chihlimbar liber · albastru vine un caraus · rosu n-are depozit · violet nu se ajunge; depozit: patrate verzi, mai luminoase cand sunt pline, albastre cand vine cineva; linie = pionul merge acolo; pion aramiu = cara ceva<br>
