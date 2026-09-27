@@ -12,6 +12,9 @@
  *   - LIBERA (nimeni n-a respins-o): chihlimbar
  *   - REZERVATA (cineva vine sau lucreaza): albastru
  *   - FARA LOC DE LUCRU (n-are niciun vecin pe care sa stai): rosu — sapa o rampa
+ *   - FARA LOC SIGUR (are unde sta, dar nicaieri de unde n-ar ramane blocat): turcoaz, cu
+ *     DIAGONALE pe fete — pune o scara / lasa o usa, sau asteapta o piesa inca nezidita
+ *   - AR INCHIDE (zidirea ar inchide un pion, un morman sau o zona): roz
  *   - COMPONENTE DIFERITE (are loc, dar nu se ajunge): violet — leaga zonele
  *   - alt refuz memorat (un pion a renuntat: ostil in drum, drum peste buget):
  *     portocaliu — nu e a tintei, e a cuiva; altcineva o poate lua
@@ -34,13 +37,24 @@ import { rezervariPentru, Strat } from '../src/sim/rezervari.ts'
 import { DetaliuItem, itemLaCelula } from '../src/sim/iteme.ts'
 import { tintaDispozitiei } from '../src/sim/joburi.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
+import { MARGINE_CUB_J } from './tinta.ts'
 
 const CHIHLIMBAR = new THREE.Color(0xd9a441)
 const ALBASTRU = new THREE.Color(0x63aec0)
 const ROSU = new THREE.Color(0xb1553f)
 const VIOLET = new THREE.Color(0x9b6bb5)
 const PORTOCALIU = new THREE.Color(0xe08a3c)
-/** Are unde sta, dar niciun loc SIGUR: o scara, o usa — sau asteapta o piesa inca nezidita. */
+/**
+ * Are unde sta, dar niciun loc SIGUR: o scara, o usa — sau asteapta o piesa inca nezidita.
+ *
+ * Turcoazul singur se confunda cu albastrul „rezervata": dE2000 12,0 la vedere normala si 6,0 in
+ * deuteranopie (recenzia, `culori.mjs`). Nicio culoare nu poate sta la dE2000 >= 30 de TOATE cele
+ * opt culori J (cu linia alba a pionilor), nici macar la vedere normala: pe grila sRGB cu pas 4
+ * (171.616 candidate vizibile pe fundal), cel mai departe ajunge 28,2 la vedere normala si 17,6 in
+ * deuteranopie (scratchpad-ul reparatiei, `viewer-fix/culori-cauta.mjs`). Deci
+ * deosebirea o poarta FORMA — diagonalele pe fete (`cubCuDiagonale`) —, iar nuanta ramane
+ * turcoazul din overlay-ul S, unde inseamna acelasi lucru: nu ajunge nimeni.
+ */
 const TURCOAZ = new THREE.Color(0x3fb8b0)
 /** Zidirea ar inchide un pion, un morman sau o zona. */
 const ROZ = new THREE.Color(0xd9708f)
@@ -102,6 +116,25 @@ function cub(out: number[], wx: number, wy: number, z: number, m: number, h: num
   for (const [a, b] of e) out.push(...c[a!]!, ...c[b!]!)
 }
 
+/**
+ * Cubul lui `cub`, plus cate o diagonala pe fiecare dintre cele sase fete: semnul lui FARA LOC
+ * SIGUR, care se citeste si fara culoare (vezi TURCOAZ).
+ */
+function cubCuDiagonale(out: number[], wx: number, wy: number, z: number, m: number): void {
+  cub(out, wx, wy, z, m, 1)
+  const x0 = wx + m, x1 = wx + 1 - m
+  const y0 = z + m, y1 = z + 1 - m
+  const z0 = wy + m, z1 = wy + 1 - m
+  out.push(
+    x0, y0, z0, x1, y1, z0, // fata -z
+    x0, y0, z1, x1, y1, z1, // fata +z
+    x0, y0, z0, x0, y1, z1, // fata -x
+    x1, y0, z0, x1, y1, z1, // fata +x
+    x0, y1, z0, x1, y1, z1, // capacul
+    x0, y0, z0, x1, y0, z1, // baza
+  )
+}
+
 /** Un patrat pe podeaua celulei (wx, wy, z), usor retras. */
 function patrat(out: number[], wx: number, wy: number, z: number, m: number): void {
   const x0 = wx + m, x1 = wx + 1 - m
@@ -155,7 +188,9 @@ export function rebuildJobOverlay(o: JobOverlay, w: World): void {
       else if (motiv !== null) { culoare = PORTOCALIU; o.altRefuz++ }
     }
     const inainte = pos.length
-    cub(pos, d.wx[i]!, d.wy[i]!, d.z[i]!, 0.1, 1)
+    // Cutia desenata e EXACT cea pe care o atinge click-ul (viewer/tinta.ts, `cubAtins`).
+    if (culoare === TURCOAZ) cubCuDiagonale(pos, d.wx[i]!, d.wy[i]!, d.z[i]!, MARGINE_CUB_J)
+    else cub(pos, d.wx[i]!, d.wy[i]!, d.z[i]!, MARGINE_CUB_J, 1)
     adauga(inainte, culoare)
   }
 
