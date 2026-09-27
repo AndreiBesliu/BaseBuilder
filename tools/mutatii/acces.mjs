@@ -563,7 +563,7 @@ export const MUTATII = [
     f: 'src/sim/acces.ts',
     a: '      for (const [dx, dy] of vecinatate(fel)) if (celule.has(cellKey(x + dx, y + dy, z + dzs))) return true',
     b: '      for (const [dx, dy] of vecinatate(FelLucru.CONSTRUIESTE)) if (celule.has(cellKey(x + dx, y + dy, z + dzs))) return true',
-    t: 'tests/acces-coborare.test.ts', e: 'COBORAREA: un pion fara treaba ramane cat altul lucreaza',
+    t: 'tests/acces-coborare.test.ts', e: 'COBORAREA: o piatra doar pe DIAGONALA pungii',
   },
   {
     n: 'coborarea sare un nivel mai adanc decat coborareUrgentaM',

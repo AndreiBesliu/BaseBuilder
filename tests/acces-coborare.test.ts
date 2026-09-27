@@ -212,3 +212,16 @@ test('COBORAREA: un pion fara treaba ramane cat altul lucreaza in punga; flamand
     assert.equal(plecatInainte, flamand, flamand ? 'pionul flamand a ramas in punga fara hrana' : 'pionul a coborat cat mai era de lucru in punga')
   }
 })
+
+test('COBORAREA: o piatra doar pe DIAGONALA pungii nu tine pionul — sapatul se face ortogonal', () => {
+  // Stalpul cu pionul si, pe diagonala lui, alt stalp cu o piatra desemnata la nivelul pionului:
+  // nimeni n-o poate sapa de pe capul stalpului (sapatul are 4 vecini), deci nu e treaba lui.
+  const { w, i } = stalp(Material.PIATRA_CONSTRUITA, R)
+  const x0 = cellOf(w.agents.x[i]!), y0 = cellOf(w.agents.y[i]!), z = w.agents.z[i]!
+  for (const dz of [2, 1]) umple(w, x0 + 1, y0 + 1, z - dz)
+  assert.ok(fill(w.terrain, x0 + 1, y0 + 1, z, Material.ROCA).ok)
+  assert.ok(applyCommand(w, { kind: 'desemneaza', wx: x0 + 1, wy: y0 + 1, z }, R).ok)
+  assert.ok(blocat(w, i), 'fixtura: stalpul e punga')
+  advance(w, 2 * R.jobRescanTicks, R)
+  assert.equal(blocat(w, i), false, 'pionul asteapta o piatra pe care n-o poate sapa de acolo')
+})
