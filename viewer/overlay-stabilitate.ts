@@ -179,8 +179,9 @@ export function pornesteStabilitate(
   if (d === Trecere.CONTINUA || d === Trecere.GATA) return
   if (d === Trecere.UITA_SI_PORNESTE) uita(o)
   o.scanare = pornesteScanare(w, rules, zActiv, cx, cy, raza)
-  // Fara desen vechi pentru intrebarea asta, previzualizarile ieftine (violet si portocaliu)
-  // se deseneaza ACUM, nu la capatul trecerii scumpe (recenzia, V2: ~450 de cadre fara ele
+  // Fara desen vechi pentru intrebarea asta, previzualizarile (violet, portocaliu, turcoaz) — fara
+  // scanarea pe celule, dar nu gratis, vezi `redeseneazaStabilitate` — se deseneaza ACUM, nu la
+  // capatul trecerii scumpe (recenzia, V2: ~450 de cadre fara ele
   // langa grinzi, cu HUD-ul aratand „ultima-celula 0 cade 0").
   if (o.ultimaScanare === null) redeseneazaStabilitate(o, w, rules)
 }
@@ -201,8 +202,10 @@ export function progresStabilitate(o: StabilityOverlay): number | null {
 
 /**
  * Deseneaza ultima trecere TERMINATA, plus cele doua previzualizari pe desemnarile de
- * ACUM. Fara `stareSapat`, deci ieftin: se cheama si cand s-au schimbat doar
- * desemnarile — o piesa desenata isi vede pe loc eticheta de „imposibil". Fara o trecere
+ * ACUM. Fara `stareSapat` — dar nu gratis: previzualizarile cresc cu planul (zeci de ms la o
+ * casa, sute pe planuri de mii de piese; cifrele, la „ce nu se poate zidi"). Se cheama si
+ * cand s-au schimbat doar desemnarile — o piesa desenata isi vede pe loc eticheta de
+ * „imposibil". Fara o trecere
  * terminata se deseneaza doar previzualizarile, pentru intrebarea trecerii din curs;
  * patratele de stare vin la capatul ei.
  */
@@ -249,9 +252,15 @@ export function redeseneazaStabilitate(o: StabilityOverlay, w: World, rules: Rul
   // Iar „imposibil" e ACTIONABIL — e singura stare la care jucatorul are ce face.
   //
   // Raspunsul se ia pe MULTIMEA desemnarilor, ca punct fix: o piesa sprijinita de
-  // alta piesa desenata e construibila, desi singura n-ar fi. Costul, masurat:
-  // 0,19 ms la 177 de piese si 6,3 ms la 1231, iar overlay-ul se reconstruieste o
-  // data la 30 de cadre — deci ~0,2 ms amortizat, fara memoizare.
+  // alta piesa desenata e construibila, desi singura n-ar fi. Costul NU e mic: de la
+  // accesul vertical, previzualizarea simuleaza si cine ar ajunge la fiecare piesa, deci
+  // creste cu planul. Masurat pe casele recenziei, ambele previzualizari (asta si cea de
+  // prabusire), mediana dupa o desemnare noua, doua rulari: 23–26 ms la 193 de piese,
+  // 40–46 ms la 1.201, 177–182 ms la 4.096 (scratchpad-ul reparatiei viewer-ului,
+  // `viewer-fix/bench-previz.mjs`); toata redesenarea, in viewer, pe casa din OWNER_VERIFY 13
+  // (174 si 192 de piese, doua rulari): 22–36 ms (`viewer-fix/m-ov13.mjs`). Se plateste la fiecare click care
+  // schimba desemnarile (cu S pornit), la pornirea unei treceri fara desen vechi si la capatul
+  // ei — nu pe cadru.
   // CONTORUL e global, DESENUL e in fereastra de +-16 celule din jurul focusului —
   // la fel ca previzualizarea de prabusire de mai sus, si din acelasi motiv. Deci
   // HUD-ul poate spune „6 piese NU se pot zidi" cand se vede una singura. Verificat

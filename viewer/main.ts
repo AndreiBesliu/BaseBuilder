@@ -752,7 +752,10 @@ renderer.domElement.addEventListener('click', (ev) => {
     // (Zidirea DA — prima versiune iesea si pentru Shift+click, iar zidul exista
     // in simulare si nu se vedea. Exact punctul orb K13.)
     if (jobOverlay.visible) rebuildJobOverlay(jobOverlay, world)
-    // „Imposibil" si previzualizarea se refac pe loc — sunt ieftine; scanarea nu.
+    // „Imposibil", „fara acces" si previzualizarea de prabusire se refac pe loc, la fiecare
+    // click (cu S pornit). Nu sunt gratis — zeci de ms la o casa, sute pe planuri de mii de
+    // piese, vezi `redeseneazaStabilitate` —, dar un click e rar; scanarea pe celule, nu, ea
+    // merge feliata pe cadre.
     redeseneazaStabilitate(stabOverlay, world, DEFAULT_RULES)
     return
   }
