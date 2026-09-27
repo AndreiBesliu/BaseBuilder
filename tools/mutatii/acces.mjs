@@ -393,6 +393,13 @@ export const MUTATII = [
     b: '',
     t: 'tests/acces-joc.test.ts', e: 'K05: accesul din simulare',
   },
+  {
+    n: 'raspunsul „deschisa in W" retinut pe componenta marcheaza deschise si pungile',
+    f: 'src/sim/acces.ts',
+    a: '        for (const c of acum.celule) inW.set(c, acum.deschisa)',
+    b: '        for (const c of acum.celule) inW.set(c, true)',
+    t: 'tests/acces-joc.test.ts', e: 'SIGILAREA inchide doar ce era DESCHIS',
+  },
   // --- recenzia din 27.09: memoria ---
   {
     n: 'orice editare de teren e tratata monoton (memoria tine deschis ce s-a inchis)',
