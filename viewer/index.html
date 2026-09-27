@@ -23,13 +23,15 @@
     color: var(--ink); background: var(--panel);
     border: 1px solid var(--rule); padding: 12px 14px;
     min-width: 260px; backdrop-filter: blur(6px);
+    /* Randul „joburi" are sute de caractere: fara plafon, HUD-ul se intindea pe toata latimea. */
+    max-width: min(560px, calc(100vw - 24px));
   }
   #hud h1 {
     margin: 0 0 8px; font: 600 13px/1.2 "IBM Plex Mono", monospace;
     letter-spacing: .14em; text-transform: uppercase; color: var(--frost);
   }
   #hud .row { display: flex; justify-content: space-between; gap: 14px; }
-  #hud .row span:last-child { color: var(--ink); font-variant-numeric: tabular-nums; }
+  #hud .row span:last-child { color: var(--ink); font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
   #hud .row span:first-child { color: var(--ink-2); }
   #hud hr { border: 0; border-top: 1px solid var(--rule); margin: 9px 0; }
   #hud .warn { color: var(--ember); }
@@ -74,7 +76,7 @@
     <div class="row"><span>loc</span><span id="spot">—</span></div>
   </div>
   <div id="keys">
-    <b>drag</b> roteste · <b>rotita</b> zoom · <b>click dreapta+drag</b> panoramare<br>
+    <b>drag</b> roteste · <b>rotita</b> zoom · <b>click dreapta+drag</b> panoramare · <b>H</b> ascunde ajutorul, a doua oara si HUD-ul, a treia oara le arata<br>
     <b>Q</b> / <b>E</b> coboara / urca nivelul de slice (in fereastra chunk-ului de sub camera; peste varf, <b>E</b> il opreste) · <b>R</b> opreste slice-ul<br>
     <b>click stanga pe teren</b> cere sa se sape (vine un pion) · <b>Ctrl+click</b> retrage cererea — pe un cub J, cubul ala · <b>Alt+click</b> sapa pe loc · <b>Shift+click</b> zideste pe loc, in fata fetei atinse (si cu o piesa aleasa)<br>
     <b>P</b> alege piesa: sapa · perete · podea · scara · grinda — cu o piesa aleasa, <b>click</b> o deseneaza in fata fetei atinse; cu slice-ul pornit, la NIVELUL ACTIV, in coloana a ce se vede sub cursor (solul, sau capacul unui cub J de pe nivelul de dedesubt — asa pui un rand peste unul nezidit), ca sa poti desena un etaj inainte sa existe placa · <b>cubul alb</b> arata celula inainte de click, <b>rosu</b> cu Ctrl (ce se retrage)<br>

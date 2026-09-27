@@ -947,6 +947,15 @@ window.addEventListener('keydown', (ev) => {
     el('piesa').textContent = NUME_PIESA_VIEWER[piesaAleasa]!
     return
   }
+  if (ev.key === 'h' || ev.key === 'H') {
+    // Trei stari: tot → doar HUD-ul → nimic. La 1280×720, cu J si S pornite, HUD-ul si ajutorul
+    // acopereau 90% din ecran (recenzia, `p10-hud.mjs`); HUD-ul ramane cand ajutorul nu mai trebuie.
+    const keys = el('keys')
+    if (!keys.hidden) keys.hidden = true
+    else if (!hud.hidden) hud.hidden = true
+    else { hud.hidden = false; keys.hidden = false }
+    return
+  }
   if (ev.key === 'g' || ev.key === 'G') {
     regionOverlay.visible = !regionOverlay.visible
     regionOverlay.group.visible = regionOverlay.visible
