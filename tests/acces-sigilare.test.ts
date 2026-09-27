@@ -262,3 +262,17 @@ test('SIGILAREA pe memorie == forma pura, cu tot cu ordinea listelor, pe toate s
   assert.ok(comparatii > 500, `fixtura: doar ${comparatii} comparatii`)
   assert.ok(neVide > 0, 'fixtura: nicio piesa n-a inchis nimic — oracolul n-a comparat liste pline')
 })
+
+test('SIGILAREA: o piesa pe fundul unei gropi deja inchise nu inchide nimic, din nicio samanta', () => {
+  // Groapa 3×3 adanca de 2 e o punga in W; p pe mijlocul fundului o lasa punga (un inel de 8).
+  // Patru seminte, toate in aceeasi componenta cu p si in aceeasi punga din W: raspunsul „era
+  // deschisa in W?" se retine pe componenta, iar a doua samanta il citeste de acolo.
+  const { w, wx, wy, g } = sitPlat(12345, 13)
+  const t = w.terrain
+  const x0 = wx + 4, y0 = wy + 4
+  for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) for (let h = 0; h < 2; h++) sapa(w, x0 + dx, y0 + dy, g - h)
+  curataMormane(w, x0 - 1, y0 - 1, x0 + 3, y0 + 3)
+  const faraP = nodW(t, null, R)
+  assert.ok(faraP.calcabila(x0 + 1, y0 + 1, g - 1) && !componenta(faraP, R, x0 + 1, y0 + 1, g - 1).deschisa, 'fixtura: groapa trebuia sa fie punga')
+  assert.deepEqual(componenteInchiseDe(t, R, x0 + 1, y0 + 1, g - 1), [], 'o groapa deja inchisa a fost numarata „inchisa de p"')
+})

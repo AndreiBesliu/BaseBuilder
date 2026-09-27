@@ -398,7 +398,7 @@ export const MUTATII = [
     f: 'src/sim/acces.ts',
     a: '        for (const c of acum.celule) inW.set(c, acum.deschisa)',
     b: '        for (const c of acum.celule) inW.set(c, true)',
-    t: 'tests/acces-joc.test.ts', e: 'SIGILAREA inchide doar ce era DESCHIS',
+    t: 'tests/acces-sigilare.test.ts', e: 'SIGILAREA: o piesa pe fundul unei gropi deja inchise',
   },
   // --- recenzia din 27.09: memoria ---
   {
