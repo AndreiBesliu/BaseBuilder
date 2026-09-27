@@ -397,37 +397,37 @@ test('SIGILAREA la zidire: un pion intrat in camera CAT TIMP se lucra la ultima 
 })
 
 test('SIGILAREA la primul tick: o piesa care ar inchide ceva nu consuma munca', () => {
-  // Un morman in camera; constructorul ajunge la usa. Refuzul trebuie sa vina INAINTE de munca
-  // — altfel fiecare incercare arde `lucru` tickuri pe o piesa care nu se poate pune. (Un morman,
-  // nu un pion care doarme: pionul iese uneori la plimbare inainte sa adoarma, iar scena n-ar mai
-  // proba ce spune.)
+  // Refuzul trebuie sa vina INAINTE de munca — altfel fiecare incercare arde `lucru` tickuri pe o
+  // piesa care nu se poate pune. Scanerul intreaba regula inainte de drum, deci ce e de inchis
+  // apare DUPA: un morman lasat in camera cat constructorul cara piatra spre buiandrug. (Un
+  // morman, nu un pion care doarme: pionul iese uneori la plimbare, iar scena n-ar mai proba ce
+  // spune.)
   const { w, wx, wy, g } = sitPlat(12345, 18)
   const x0 = wx + 6, y0 = wy + 6
   cameraZidita(w, x0, y0, g, [[2, 0]])
-  lasaItem(w, Item.HRANA, 30, x0 + 2, y0 + 2)
-  // Doua piese in usa. Cea de JOS, singura, nu inchide nimic — peste un prag de 1 m se trece —
-  // deci munca pe ea e legitima. Cea de SUS (buiandrugul) inchide: pe ea nu se munceste deloc.
-  const usa: number[] = []
-  for (const z of [g + 1, g + 2]) {
-    const o = applyCommand(w, { kind: 'desemneaza', wx: x0 + 2, wy: y0, z, piesa: Piesa.PERETE }, R)
-    assert.ok(o.ok)
-    if (o.ok) usa.push(o.value)
-  }
-  const buiandrug = usa[1]!
+  // Doar buiandrugul (sus, in golul usii): el inchide camera. Pragul de jos n-ar inchide nimic.
+  const o = applyCommand(w, { kind: 'desemneaza', wx: x0 + 2, wy: y0, z: g + 2, piesa: Piesa.PERETE }, R)
+  assert.ok(o.ok, JSON.stringify(o))
+  const buiandrug = o.ok ? o.value : -1
   lasaItem(w, Item.PIATRA, 40, x0 + 2, y0 - 3)
   const constructor = pion(w, x0 + 4, y0 - 3, g + 1)
+  let pus = false
   let munca = 0
   let refuzuri = 0
   for (let t = 0; t < 1500; t++) {
     advance(w, 1, R)
     const a = w.agents
-    if (a.jobKind[constructor] === FelJob.CONSTRUIESTE && a.jobDest[constructor] === buiandrug && a.jobStep[constructor] === PasConstruieste.ZIDESTE && a.jobProgres[constructor]! > 0) munca++
-    for (let i = 0; i < w.desemnari.count; i++) {
-      if (w.desemnari.alive[i] === 1 && w.desemnari.ultimulMotiv[i] === codMotiv(Reason.AR_INCHIDE)) refuzuri++
+    if (!pus && a.jobKind[constructor] === FelJob.CONSTRUIESTE && a.jobDest[constructor] === buiandrug && a.jobStep[constructor] === PasConstruieste.MERGE_SANTIER) {
+      lasaItem(w, Item.HRANA, 30, x0 + 2, y0 + 2)
+      pus = true
     }
+    if (a.jobKind[constructor] === FelJob.CONSTRUIESTE && a.jobDest[constructor] === buiandrug && a.jobStep[constructor] === PasConstruieste.ZIDESTE && a.jobProgres[constructor]! > 0) munca++
+    const s = slotDesemnare(w.desemnari, buiandrug)
+    if (s !== -1 && w.desemnari.ultimulMotiv[s] === codMotiv(Reason.AR_INCHIDE)) refuzuri++
   }
+  assert.ok(pus, 'fixtura: constructorul n-a pornit cu piatra spre buiandrug')
   assert.ok(refuzuri > 0, 'fixtura: buiandrugul n-a fost refuzat niciodata')
-  assert.equal(slotDesemnare(w.desemnari, usa[0]!), -1, 'fixtura: pragul de jos trebuia zidit — el nu inchide nimic')
+  assert.notEqual(slotDesemnare(w.desemnari, buiandrug), -1, 'fixtura: buiandrugul s-a pus peste morman')
   assert.equal(munca, 0, `s-au muncit ${munca} tickuri pe un buiandrug care nu se putea pune`)
   assert.deepEqual(blocati(w), [])
 })
