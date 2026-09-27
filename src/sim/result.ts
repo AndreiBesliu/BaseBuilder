@@ -56,8 +56,9 @@ export const Reason = {
   CELULA_PLINA: 'CELULA_PLINA',
   /**
    * Zidirea ar INCHIDE un pion, un morman sau o celula de zona intr-o incinta fara iesire
-   * (o componenta deschisa acum, inchisa cu piesa pusa). Nu e un refuz pe veci: pionul iese,
-   * marfa se cara. Actionabil: lasa o usa, sau scoate ce e inauntru.
+   * (o componenta deschisa acum, inchisa cu piesa pusa). Tine cat tine ce e inauntru: pionul
+   * iese singur, dar un morman iese doar daca are unde sa fie carat, iar o celula de zona nu
+   * iese deloc. Actionabil: lasa o usa, muta mormanul, sterge zona.
    */
   AR_INCHIDE: 'AR_INCHIDE',
 } as const

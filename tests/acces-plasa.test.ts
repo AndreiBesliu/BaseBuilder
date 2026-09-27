@@ -12,7 +12,7 @@ import assert from 'node:assert/strict'
 import { CauzaAcces, componenta, felSapa, FelLucru, memorieAcces, nodStabil, nodW, siguraMemorat } from '../src/sim/acces.ts'
 import { adaugaDesemnare, Desemnare, DetaliuMotiv, JURNAL_DESEMNARI_CAP, slotDesemnare, stergeDesemnare } from '../src/sim/desemnari.ts'
 import { applyCommand } from '../src/sim/commands.ts'
-import { constructiaPrevizualizata } from '../src/sim/joburi.ts'
+import { cautaJob, constructiaPrevizualizata } from '../src/sim/joburi.ts'
 import { codMotiv, Reason } from '../src/sim/result.ts'
 import { isWalkable } from '../src/sim/regions.ts'
 import { cellOf } from '../src/sim/drumuri.ts'
@@ -508,4 +508,23 @@ test('memoria: la EXACT JURNAL_DESEMNARI_CAP + 1 schimbari de santier nevazute, 
   const b = siguraMemorat(w.terrain, d, R, memorieAcces(), wx + 3, wy + 3, g + 1)
   assert.equal(b, false, 'fixtura: celula santierului nu e stabila')
   assert.equal(siguraMemorat(w.terrain, d, R, m, wx + 3, wy + 3, g + 1), b, 'memoria a citit un inel suprascris')
+})
+
+test('SCANERUL: la deconstructie, marginea de scor ajunge pana la locul de pe diagonala, 2 mai jos', () => {
+  // Pionul sta chiar pe locul de lucru al unei deconstructii (varful unui stalp de 3, desfacut de
+  // pe diagonala, de 2 mai jos: distanta reala 0) si la 1 de locul unei sapaturi naturale. Cu
+  // marginea veche `1 + pas`, candidatul deconstructiei se taia devreme si pionul lua sapatura
+  // (recenzia, viewer-docs 5, pe 3/3 seminte).
+  for (const seed of [12345, 777, 4242]) {
+    const { w, wx, wy, g } = sitPlat(seed, 12)
+    const x = wx + 4, y = wy + 4
+    for (const z of [g + 1, g + 2, g + 3]) zidesteCmd(w, x + 1, y + 1, z)
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) for (const z of [g + 1, g + 2]) zidesteCmd(w, x + 1 + dx, y + 1 + dy, z)
+    const B = applyCommand(w, { kind: 'desemneaza', wx: x + 1, wy: y + 1, z: g + 3 }, R)
+    const A = applyCommand(w, { kind: 'desemneaza', wx: x + 1, wy: y + 3, z: g }, R)
+    assert.ok(A.ok && B.ok, JSON.stringify([A, B]))
+    const slot = pion(w, x + 2, y + 2, g + 1)
+    assert.ok(cautaJob(w, R, slot), `seed ${seed}: fixtura: niciun job`)
+    assert.equal(w.agents.jobTarget[slot], B.ok ? B.value : -1, `seed ${seed}: pionul a luat sapatura de alaturi, nu deconstructia de sub el`)
+  }
 })

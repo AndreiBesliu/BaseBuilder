@@ -22,6 +22,7 @@ import { slotDesemnare } from '../src/sim/desemnari.ts'
 import { cellOf } from '../src/sim/drumuri.ts'
 import { cellKey } from '../src/sim/path.ts'
 import { Faction, FelJob, Item, Nevoie, NEVOI, PasConstruieste, Piesa } from '../src/sim/state.ts'
+import { codMotiv, Reason } from '../src/sim/result.ts'
 import type { World } from '../src/sim/state.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
 import { stergeItem } from '../src/sim/iteme.ts'
@@ -275,4 +276,32 @@ test('SIGILAREA: o piesa pe fundul unei gropi deja inchise nu inchide nimic, din
   const faraP = nodW(t, null, R)
   assert.ok(faraP.calcabila(x0 + 1, y0 + 1, g - 1) && !componenta(faraP, R, x0 + 1, y0 + 1, g - 1).deschisa, 'fixtura: groapa trebuia sa fie punga')
   assert.deepEqual(componenteInchiseDe(t, R, x0 + 1, y0 + 1, g - 1), [], 'o groapa deja inchisa a fost numarata „inchisa de p"')
+})
+
+test('SIGILAREA inainte de drum: o piesa care ar inchide un morman nu porneste niciun drum cu piatra', () => {
+  // Camera zidita cu golul usii pe doua niveluri; se deseneaza doar buiandrugul, care o inchide.
+  // Inauntru, un morman de hrana fara niciun depozit: nu iese singur. Refuzul venea abia la
+  // primul tick de munca, dupa drumul cu piatra — si se repeta la fiecare racire (recenzia:
+  // ~120 de drumuri degeaba in 30.000 de tickuri). Acum scanerul nu porneste jobul.
+  const { w, wx, wy, g } = sitPlat(12345, 18)
+  const x0 = wx + 6, y0 = wy + 6
+  for (let z = g + 1; z <= g + 2; z++) {
+    for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) {
+      if (dx !== 0 && dx !== 4 && dy !== 0 && dy !== 4) continue
+      if (dx === 2 && dy === 0) continue
+      umple(w, x0 + dx, y0 + dy, z)
+    }
+  }
+  lasaItem(w, Item.HRANA, 30, x0 + 2, y0 + 2)
+  const piatra = lasaItem(w, Item.PIATRA, 40, x0 + 2, y0 - 4)
+  const o = applyCommand(w, { kind: 'desemneaza', wx: x0 + 2, wy: y0, z: g + 2, piesa: Piesa.PERETE }, R)
+  assert.ok(o.ok, JSON.stringify(o))
+  pion(w, x0 + 5, y0 - 3, g + 1)
+  ruleaza(w, 1500)
+  const s = slotDesemnare(w.desemnari, o.ok ? o.value : -1)
+  assert.notEqual(s, -1, 'fixtura: buiandrugul s-a pus peste morman')
+  assert.equal(w.desemnari.ultimulMotiv[s], codMotiv(Reason.AR_INCHIDE))
+  let cantitate = -1
+  for (let i = 0; i < w.iteme.count; i++) if (w.iteme.alive[i] === 1 && w.iteme.id[i] === piatra) cantitate = w.iteme.cantitate[i]!
+  assert.equal(cantitate, 40, 'constructorul a carat piatra la un santier care n-avea voie sa se zideasca')
 })

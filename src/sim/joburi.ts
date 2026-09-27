@@ -14,7 +14,8 @@
  * in ordinea slotului): racire pe tinta, racire pe perechea (pion, tinta),
  * distanta Manhattan, rezervare. Nu atinge terenul. Ce trece e un candidat cu o
  * MARGINE SUPERIOARA de scor: pentru o desemnare, celula de lucru e la cel mult
- * `1 + maxStepM` de ea; pentru un item, prioritatea destinatiei e cel mult
+ * `2 + max(maxStepM, atingereSusM)` de ea (diagonala si atingerea la zidire si
+ * deconstructie); pentru un item, prioritatea destinatiei e cel mult
  * `maxPrioLibera[fel]`. Candidatii AMBELOR surse intra intr-o singura lista —
  * nu „intai sapatul, apoi caratul": panoul a aratat ca ordinea pe categorii e
  * sortarea lexicografica pe care DESIGN §5.4 o interzice, si ca ar tine depozitul
@@ -509,7 +510,8 @@ export function uitaTintele(w: World, slot: number): void {
  * pozitie de lucru libera in jurul unei tinte" — drept semnalul de alarma al
  * gropii fara fund a genului. De aia e scris cat de ingust se poate:
  *
- *   - cei 4 vecini ORIZONTALI, niciodata voxelul insusi: dupa sapare podeaua
+ *   - vecinii ORIZONTALI din `vecinatate(fel)` — 4 la sapat si la somn, 8 (si diagonala)
+ *     la zidire si deconstructie —, niciodata voxelul insusi: dupa sapare podeaua
  *     dispare, iar `isWalkable` cere podea solida; un pion care isi sapa celula
  *     de sub picioare ar ramane in aer.
  *   - nici o celula a carei PODEA e o desemnare vie: altfel pionul A sta pe
@@ -1267,9 +1269,11 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
   const az = a.z[slot]!
   let compAgent = find(w.regions, regionAt(w.regions, ax, ay, az))
   const eu = a.id[slot]!
-  // Celula de lucru e la cel mult atat de desemnare; marginea de scor foloseste
-  // distanta pana la desemnare minus atat.
-  const margine = 1 + Math.max(0, Math.min(4, rules.maxStepM))
+  // Celula de lucru e la cel mult atat de desemnare (Manhattan); marginea de scor foloseste
+  // distanta pana la desemnare minus atat. La zidire si la deconstructie locul poate fi pe
+  // DIAGONALA (2) si cu `atingereSusM` mai jos: pana la 4. Cu `1 + pas`, un pion aflat chiar pe
+  // locul unei deconstructii lua sapatura de alaturi (recenzia, viewer-docs 5).
+  const margine = 2 + Math.max(Math.max(0, Math.min(4, rules.maxStepM)), rules.atingereSusM)
 
   // --- trecerea ieftina: porti fara teren, peste tot ---
   let n = 0
@@ -1712,6 +1716,24 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
     return false
   }
 
+  // Regula de sigilare INAINTE de drumul cu marfa: o piesa care ar inchide ACUM un pion, un
+  // morman sau o celula de zona nu porneste. Refuzul venea abia la primul tick de munca, dupa
+  // drum — iar ce nu iese singur (un morman fara unde sa fie carat, o zona) il repeta la fiecare
+  // racire: recenzia a numarat ~120 de drumuri cu piatra degeaba in 30.000 de tickuri. Aici e o
+  // singura intrebare pe scanare, pe castigator; ramane si cea de la primul tick si cea de dinainte
+  // de zidire, fiindca in drumul cu marfa cineva poate intra.
+  if (candFel[best] === CAND_CONSTRUIESTE) {
+    const s = candSlot[best]!
+    const inchide = arInchideCeva(w, rules, d.wx[s]!, d.wy[s]!, d.z[s]!)
+    if (!inchide.ok) {
+      d.reincercaLaTick[s] = w.tick + racireDesemnare(w, rules)
+      d.ultimulMotiv[s] = codMotiv(inchide.reason)
+      d.ultimulMotivDetaliu[s] = detaliuDesemnareDin(inchide.reason)
+      rat.stare[slot] = StareRatiune.RESPINS
+      rat.motivFinal[slot] = codMotiv(inchide.reason)
+      return false
+    }
+  }
   const out = pornesteCandidatul(w, rules, slot, candFel[best]!, candSlot[best]!, bestWork, bestCs, bestCant)
   if (!out.ok) {
     // Verificat la scan, refuzat la start: intre ele nu s-a schimbat nimic pe
@@ -2541,11 +2563,11 @@ function ridica(w: World, rules: Rules, slot: number): void {
     // ajunge la ea — si atunci el pleaca spre o tinta imposibila, arde plafonul de
     // incercari pe refuzuri de drum, si abia dupa aia afla.
     //
-    // Masurat cat NU face: `DIRECTII` e 4-directionala, deci toti vecinii calcabili
-    // ai unui santier calcabil sunt conectati INTRE EI prin celula santierului.
-    // Filtrul nu poate deci alege alta celula cand pionul ajunge la vreuna; schimba
-    // doar cazul in care nu ajunge la NICIUNA — dintr-o plimbare inutila intr-un
-    // refuz imediat, cu cauza corecta pe tinta. Fail-fast, nu alegere reparata.
+    // Cu vecinatatea de zidire (8 vecini, nivelurile −2..+1) locurile de lucru ale unui
+    // santier NU mai sunt legate intre ele prin celula lui: filtrul pe componenta
+    // alege acum alta celula cand prima in ordinea fixa e in alta componenta (creasta
+    // unui zid, fundul unei gropi), nu doar transforma o plimbare inutila intr-un
+    // refuz imediat, cu cauza corecta pe tinta.
     const comp = find(w.regions, regionAt(w.regions, cellOf(a.x[slot]!), cellOf(a.y[slot]!), a.z[slot]!))
     const loc = celulaDeLucru(w.terrain, w.regions, d, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, rules, FelLucru.CONSTRUIESTE, comp, -1, locSigurPentru(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!))
     if (loc === null) {

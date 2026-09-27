@@ -209,7 +209,7 @@ export const MUTATII = [
   },
   // --- pasul 5: D1 + D2 in joc ---
   {
-    n: 'locul de lucru la zidire nu mai trebuie sa fie SIGUR (pionul urca pe creasta)',
+    n: 'locul de lucru la zidire nu mai trebuie sa fie SIGUR (scanerul si revalidarea nu mai sunt de acord: camera fara usa se blocheaza)',
     f: 'src/sim/joburi.ts',
     a: '      if (sigura !== null && !sigura(nx, ny, zs)) continue',
     b: '      void sigura',
@@ -775,5 +775,20 @@ export const MUTATII = [
     a: '  accesPlafonNatural: { min: 1, max: 16384 },',
     b: '  accesPlafonNatural: { min: 0, max: 16384 },',
     t: 'tests/acces-plasa.test.ts', e: 'accesPlafonNatural 0 e refuzat',
+  },
+  // --- recenzia din 27.09: scanerul ---
+  {
+    n: 'scanerul porneste drumul cu piatra spre o piesa care ar inchide ceva (refuzul vine dupa drum)',
+    f: 'src/sim/joburi.ts',
+    a: '  if (candFel[best] === CAND_CONSTRUIESTE) {\n    const s = candSlot[best]!\n    const inchide = arInchideCeva(',
+    b: '  if (false) {\n    const s = candSlot[best]!\n    const inchide = arInchideCeva(',
+    t: 'tests/acces-sigilare.test.ts', e: 'SIGILAREA inainte de drum',
+  },
+  {
+    n: 'marginea de scor presupune locul de lucru la un pas ortogonal (deconstructia de sub pion pierde)',
+    f: 'src/sim/joburi.ts',
+    a: '  const margine = 2 + Math.max(Math.max(0, Math.min(4, rules.maxStepM)), rules.atingereSusM)',
+    b: '  const margine = 1 + Math.max(0, Math.min(4, rules.maxStepM))',
+    t: 'tests/acces-plasa.test.ts', e: 'SCANERUL: la deconstructie, marginea de scor',
   },
 ]
