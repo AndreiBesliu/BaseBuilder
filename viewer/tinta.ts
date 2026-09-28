@@ -274,6 +274,12 @@ export interface IntrebareTinta {
   readonly departeMax: number
   readonly desemnataPeNivel: (wx: number, wy: number) => boolean
   readonly plinaPeNivel: (wx: number, wy: number) => boolean
+  /**
+   * Viewer-ul FARA UI (modul de verificare, gate): `zona` si `retrage` fara cub tintesc ca la 3613652.
+   * Z/X picta pe solidul vazut si sub un nivel pornit; Ctrl fara cub sub cursor cadea pe tinta piesei
+   * alese. Contractul modului de verificare e „exact ca azi" (recenzia UI-ului, INT-10).
+   */
+  readonly caAzi?: { readonly cuPiesa: boolean } | undefined
 }
 
 export type RaspunsTinta =
@@ -282,6 +288,15 @@ export type RaspunsTinta =
 
 export function alegeTinta(q: IntrebareTinta): RaspunsTinta {
   const zMaxVazut = q.slice === null ? Infinity : q.slice - 1
+  if (q.caAzi && q.mod === 'zona') {
+    const v = primulVizibil(q.impacturi, q.slice)
+    return v === null ? faraTinta(q) : { ok: true, ...celulaLangaFata(v, -1), sursa: 'fata' }
+  }
+  if (q.caAzi && q.mod === 'retrage') {
+    const cub = cubAtins(q.raza, q.cuburi, -Infinity, zMaxVazut)
+    if (cub !== null) return { ok: true, ...cub.c, sursa: 'cub' }
+    return alegeTinta({ ...q, mod: q.caAzi.cuPiesa ? 'piesa' : 'sapa', caAzi: undefined })
+  }
   if (q.mod === 'retrage' || q.mod === 'inspecteaza') {
     const j = cubAtins(q.raza, q.cuburi, -Infinity, zMaxVazut)
     const v = primulVizibil(q.impacturi, q.slice)

@@ -718,15 +718,22 @@ export function monteazaUI(ctx: ContextUI): UI {
   }
 
   // ---- toast ---------------------------------------------------------------------------------
-  let toastEl: HTMLElement | null = null
-  let toastTimer = 0
+  /**
+   * Toasturile se STIVUIESC (cel mult `TOASTURI_MAX`, cel mai vechi iese primul): doua dreptunghiuri
+   * trase unul dupa altul au fiecare „Anulează"-ul lui. Cu un singur toast, al doilea il stergea pe
+   * primul, cu butonul lui cu tot (recenzia UI-ului, INT-4).
+   */
+  const TOASTURI_MAX = 3
+  const toasturi = h('div', { class: 'ui ui-toasturi' })
+  document.body.append(toasturi)
   function toast(mesaj: string, refuz = false, actiune?: { eticheta: string; f: () => void }): void {
-    toastEl?.remove()
-    const b = actiune ? butonText(actiune.eticheta, () => { actiune.f(); toastEl?.remove(); toastEl = null }) : null
-    toastEl = h('div', { class: `ui ui-toast${refuz ? ' refuz' : ''}`, role: 'status' }, h('span', {}, mesaj), b)
-    document.body.append(toastEl)
-    window.clearTimeout(toastTimer)
-    toastTimer = window.setTimeout(() => { toastEl?.remove(); toastEl = null }, actiune ? 8000 : refuz ? 5000 : 2600)
+    let timer = 0
+    const scoate = () => { window.clearTimeout(timer); t.remove() }
+    const b = actiune ? butonText(actiune.eticheta, () => { actiune.f(); scoate() }) : null
+    const t = h('div', { class: `ui-toast${refuz ? ' refuz' : ''}`, role: 'status' }, h('span', {}, mesaj), b)
+    toasturi.append(t)
+    while (toasturi.children.length > TOASTURI_MAX) toasturi.firstElementChild?.remove()
+    timer = window.setTimeout(scoate, actiune ? 8000 : refuz ? 5000 : 2600)
   }
 
   // ---- ferestrele ----------------------------------------------------------------------------

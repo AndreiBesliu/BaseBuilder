@@ -152,7 +152,8 @@
 .ui-oameni .ui-bara { width: 38px; }
 
 /* ---- carduri, toast ------------------------------------------------------------------------ */
-.ui-toast { position: fixed; bottom: 112px; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; gap: 10px; align-items: center; padding: 8px 10px 8px 14px; border-radius: var(--ui-r); background: var(--ui-bg-2); border: 1px solid var(--ui-line-2); max-width: min(760px, 90vw); }
+.ui-toasturi { position: fixed; bottom: 112px; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+.ui-toast { display: flex; gap: 10px; align-items: center; padding: 8px 10px 8px 14px; border-radius: var(--ui-r); background: var(--ui-bg-2); border: 1px solid var(--ui-line-2); max-width: min(760px, 90vw); pointer-events: auto; }
 .ui-toast.refuz { border-color: var(--ui-warn); }
 .ui-toast .ui-btn { border-color: var(--ui-line); height: 26px; }
 
@@ -182,5 +183,5 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .ui-toast { animation: ui-urca .18s ease-out; }
-  @keyframes ui-urca { from { transform: translate(-50%, 6px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+  @keyframes ui-urca { from { transform: translateY(6px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 }

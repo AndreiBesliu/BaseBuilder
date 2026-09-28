@@ -174,6 +174,9 @@ if (MOD.mod === 'incarca') {
     mesajPornireUI = `Salvările nu se pot citi: ${e instanceof Error ? e.message : String(e)}`
   }
 }
+// Un joc incarcat porneste IN PAUZA, cu viteza lui (recenzia UI-ului, INT-9: pornea la 1× si rula,
+// deci pionii lucrau inainte ca jucatorul sa vada unde e; `meta.viteza` era scris si niciodata citit).
+if (salvareIncarcata !== null) simPauza = true
 const JOC_NOU = MOD.mod === 'joc-nou' ? parametriJocNou(params, DEFAULT_RULES.agentCapacity, SEED_DEMO) : null
 /** Modul in care chiar ruleaza pagina: o incarcare care n-a mers cade pe ecranul de titlu, cu motivul. */
 const MOD_JOC: 'gate' | 'titlu' | 'joc-nou' | 'incarca' | 'verificare' = MOD.mod === 'incarca' && lumeIncarcata === null ? 'titlu' : MOD.mod
@@ -979,6 +982,8 @@ function tintaLa(px: number, py: number, m: Modificatori): TintaClick {
   const zActiv = sliceLevel === null ? 0 : sliceLevel - 1
   return alegeTinta({
     mod: modTinta(m), raza, impacturi, slice: sliceLevel, cuburi: cuburiJ(), departeMax: DEPARTE_MAX_M,
+    // Fara UI (verificare, gate): Z/X si Ctrl tintesc ca viewer-ul de la 3613652 (recenzia UI-ului, INT-10).
+    caAzi: ui === null ? { cuPiesa: piesaCurenta() !== Piesa.NICIUNA } : undefined,
     desemnataPeNivel: (wx, wy) => desemnareLaCelula(world.desemnari, wx, wy, zActiv) !== -1,
     plinaPeNivel: (wx, wy) => { const r = materialAt(world.terrain, wx, wy, zActiv); return r.ok && isSolid(r.value) },
   })
@@ -1049,6 +1054,8 @@ function modificatori(ev: MouseEvent | KeyboardEvent): Modificatori {
 
 interface Tragere {
   readonly unealta: UnealtaId
+  /** Felul zonei, fixat la APASARE: Z eliberat inaintea butonului picta altceva decat arata (INT-11). */
+  readonly zonaFel: number
   readonly start: { readonly wx: number; readonly wy: number; readonly z: number }
   readonly m: Modificatori
   colt: { wx: number; wy: number } | null
@@ -1129,12 +1136,12 @@ function suprafata(wx: number, wy: number): number | null {
   return null
 }
 
-function optiuniDreptunghi(u: UnealtaId): Parameters<typeof planDreptunghi>[1] {
+function optiuniDreptunghi(u: UnealtaId, zonaFel?: number): Parameters<typeof planDreptunghi>[1] {
   const r = DEFAULT_RULES
   return {
     unealta: u,
     piesa: ui?.piesa ?? piesaAleasa,
-    zonaFel: u === Unealta.ZONA && tastaZ ? 0 : ui?.zonaFel ?? 0,
+    zonaFel: zonaFel ?? (u === Unealta.ZONA && tastaZ ? 0 : ui?.zonaFel ?? 0),
     contur: ui?.contur ?? true,
     unStrat: ui?.unStrat ?? false,
     prioritate: ui?.prioritate ?? r.designationPriorityDefault,
@@ -1196,7 +1203,7 @@ function actualizeazaTragerea(px: number, py: number): void {
   if (!t.activ && (t.colt.wx !== t.start.wx || t.colt.wy !== t.start.wy)) t.activ = true
   if (!t.activ) return
   const d = normalizeaza(t.start.wx, t.start.wy, t.colt.wx, t.colt.wy)
-  t.plan = planDreptunghi(d, optiuniDreptunghi(t.unealta), lumeaDreptunghiului)
+  t.plan = planDreptunghi(d, optiuniDreptunghi(t.unealta, t.zonaFel), lumeaDreptunghiului)
   ui?.indiciuDreptunghi(`${d.x1 - d.x0 + 1} × ${d.y1 - d.y0 + 1} · ${textPlan(t.plan, t.unealta)} · Esc / clic dreapta = renunță`, t.plan.refuz !== null)
   fantomeMurdare = true
   fantomaMurdara = true
@@ -1228,6 +1235,13 @@ interface Aplicare {
 let aplicare: Aplicare | null = null
 
 function aplicaDreptunghi(t: Tragere): void {
+  // Un dreptunghi tras cat cel de dinainte inca se aplica feliat il taia in tacere: al doilea
+  // suprascria aplicarea in curs (recenzia UI-ului, INT-4: 1.552 de sapaturi pierdute, fara toast).
+  // Cel vechi se termina acum, sincron (~21 µs pe celula), iar planul celui nou se reface peste el.
+  if (aplicare !== null) {
+    while (aplicare !== null) pasAplicare()
+    if (t.plan !== null && t.colt !== null) t.plan = planDreptunghi(normalizeaza(t.start.wx, t.start.wy, t.colt.wx, t.colt.wy), optiuniDreptunghi(t.unealta, t.zonaFel), lumeaDreptunghiului)
+  }
   const plan = t.plan
   if (plan === null) return
   if (plan.refuz !== null) { ui?.toast(plan.refuz, true); return }
@@ -1236,7 +1250,7 @@ function aplicaDreptunghi(t: Tragere): void {
   aplicare = { unealta: t.unealta, plan, cursor: 0, aplicate: 0, refuzuri: new Map(), create: [], zonaId: null }
   // Zonele: bucatile, legate de prima (o zona), dintr-o data — sunt putine comenzi.
   for (const b of plan.zone) {
-    const out = applyCommand(world, { kind: 'picteazaZona', x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, z: b.z, fel: optiuniDreptunghi(t.unealta).zonaFel, zonaId: aplicare.zonaId ?? undefined })
+    const out = applyCommand(world, { kind: 'picteazaZona', x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, z: b.z, fel: t.zonaFel, zonaId: aplicare.zonaId ?? undefined })
     if (out.ok) { aplicare.zonaId = out.value; aplicare.aplicate++ } else noteazaRefuz(aplicare, out)
   }
 }
@@ -1311,7 +1325,7 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
   moved = 0
   butonApasat = true
   // O apasare noua: un `click` consumat de la apasarea trecuta (eliberata in afara canvasului) nu mai vine.
-  if (ev.button === 0) clickConsumat = false
+  if (ev.button === 0) { clickConsumat = false; apasareCuUnealta = false }
   // Click-dreapta in timpul tragerii = renunta (convenția RimWorld / Going Medieval).
   if (ev.button === 2 && tragere !== null) { renuntaLaTragere(); return }
   if (ev.button !== 0 || ui === null || ui.modalDeschis()) return
@@ -1321,7 +1335,8 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
   const t = tintaLa(ev.clientX, ev.clientY, m)
   // Apasarea pe cer nu porneste nimic.
   if (!t.ok) return
-  tragere = { unealta: u, start: { wx: t.wx, wy: t.wy, z: t.z }, m, colt: { wx: t.wx, wy: t.wy }, activ: false, plan: null }
+  tragere = { unealta: u, zonaFel: optiuniDreptunghi(u).zonaFel, start: { wx: t.wx, wy: t.wy, z: t.z }, m, colt: { wx: t.wx, wy: t.wy }, activ: false, plan: null }
+  apasareCuUnealta = true
 })
 // Butoanele camerei se aleg INAINTE ca OrbitControls sa vada apasarea (el asculta pe canvas, fara
 // capture): o unealta trage dreptunghiuri pe butonul stang, Selecteaza roteste, ca azi.
@@ -1340,6 +1355,11 @@ window.addEventListener('pointerup', (ev) => {
     aplicaDreptunghi(t)
   }
 })
+// Clic-dreapta CU stangul tinut nu da `pointerdown` (Pointer Events: un buton in plus e un
+// `pointermove` „chorded"), deci renuntarea se prinde pe `buttons`. Fara asta, gestul promis de indiciu
+// („clic dreapta = renunță") APLICA dreptunghiul la eliberare (recenzia UI-ului, INT-2). Pe `window`,
+// cu capture, ca eliberarea: nu depinde de elementul de sub cursor.
+window.addEventListener('pointermove', (ev) => { if (tragere !== null && (ev.buttons & 2) !== 0) renuntaLaTragere() }, { capture: true })
 renderer.domElement.addEventListener('contextmenu', (ev) => { if (tragere !== null) ev.preventDefault() })
 renderer.domElement.addEventListener('pointermove', (ev) => {
   const dx = ev.clientX - downX
@@ -1397,13 +1417,18 @@ function pionSubCursor(px: number, py: number): number | null {
 
 /** Tragerea tocmai s-a aplicat ca dreptunghi: evenimentul `click` care vine dupa ea nu mai face nimic. */
 let clickConsumat = false
+/**
+ * Apasarea a armat un dreptunghi (o unealta, pe teren). Decide, la `click`, daca o tragere mai lunga
+ * de DRAG_PX mai e clic: din APASARE, nu din modificatorii de la eliberare — o apasare pe cer, sau
+ * o panoramare cu Shift eliberat primul, lasau o lucrare sub cursor (recenzia UI-ului, INT-3).
+ */
+let apasareCuUnealta = false
 
 renderer.domElement.addEventListener('click', (ev) => {
   if (clickConsumat) { clickConsumat = false; return }
   if (ui?.modalDeschis()) return
   // O tragere mica, ramasa in celula de start: cu o unealta de dreptunghi, tot click e.
-  const cuUnealta = ui !== null && unealtaTragerii(modificatori(ev)) !== null
-  if (moved > DRAG_PX && !cuUnealta) return
+  if (moved > DRAG_PX && !apasareCuUnealta) return
   const m = modificatori(ev)
   const mod = modTinta(m)
   fantomaMurdara = true
@@ -1482,6 +1507,10 @@ renderer.domElement.addEventListener('click', (ev) => {
   // Zidirea si sapatul pe loc schimba terenul: mesh-urile se refac din JURNALUL terenului (fiecare
   // celula editata, si prabusirile pe care le-a declansat), nu doar in jurul celulei atinse.
   remeshDinJurnal()
+  // O actiune a jucatorului: previzualizarile lui S se refac (ca dupa `dupaComenzi`), oricat ar costa.
+  // Fara asta, in modul de verificare HUD-ul spunea „89 fara acces" dupa ce treapta fusese zidita
+  // (recenzia UI-ului, V3).
+  redeseneazaStabilitate(stabOverlay, world, DEFAULT_RULES)
   // Regiunile se intretin DOAR cat timp overlay-ul e deschis: `rebuildDirty` reconstruieste toate
   // blocurile rezidente (~735 cu overlay-ul pornit, peste 150 ms pe click).
   if (regionOverlay.visible) {
@@ -1493,6 +1522,8 @@ renderer.domElement.addEventListener('click', (ev) => {
 
 // --- tastele: un singur dispecer (viewer/ui/taste.ts) ------------------------------------------
 
+/** Planul a fost stins de amprenta (B) si se reaprinde la iesirea din ea. */
+let jStinsDeAmprenta = false
 function comutaG(): void {
   regionOverlay.visible = !regionOverlay.visible
   regionOverlay.group.visible = regionOverlay.visible
@@ -1528,6 +1559,8 @@ function nivelSus(): void {
 
 /** Muta camera cu `pas` metri pe sol, in directia privirii (nord) sau lateral (est). */
 function mutaCamera(inainte: number, lateral: number): void {
+  // Sagetile sunt o cerere a jucatorului: urmarirea s-ar fi tras camera inapoi in 2 s (INT-5).
+  urmaritId = null
   const f = new THREE.Vector3().subVectors(controls.target, camera.position)
   f.y = 0
   if (f.lengthSq() === 0) return
@@ -1545,6 +1578,10 @@ function executa(a: Actiune, ev: KeyboardEvent): void {
       amprentaOverlay.visible = !amprentaOverlay.visible
       amprentaOverlay.group.visible = amprentaOverlay.visible
       refreshAmprenta()
+      // Planul (J) foloseste aceleasi culori (chihlimbar, rosu): in joc, unde e aprins, amprenta se
+      // judeca peste zeci de mormane rosii (recenzia UI-ului, V4). Se stinge cat e ea aprinsa.
+      if (amprentaOverlay.visible && jobOverlay.visible) { jStinsDeAmprenta = true; comutaJ() }
+      else if (!amprentaOverlay.visible && jStinsDeAmprenta) { jStinsDeAmprenta = false; if (!jobOverlay.visible) comutaJ() }
       return
     case 'amprentaStanga': amprentaOverlay.grade = (amprentaOverlay.grade + 355) % 360; refreshAmprenta(); return
     case 'amprentaDreapta': amprentaOverlay.grade = (amprentaOverlay.grade + 5) % 360; refreshAmprenta(); return
@@ -1581,7 +1618,7 @@ function executa(a: Actiune, ev: KeyboardEvent): void {
     case 'zona': ui?.alegeUnealta(ui.unealta === Unealta.ZONA ? Unealta.STERGE_ZONA : Unealta.ZONA); return
     case 'oameni': ui?.comutaOameni(); return
     case 'viteza1': case 'viteza2': case 'viteza3':
-      viteza = Number(a.slice(-1))
+      seteazaViteza(Number(a.slice(-1)))
       seteazaPauza(false)
       return
     case 'salveaza': ui?.salveazaAcum(); return
@@ -1613,8 +1650,9 @@ window.addEventListener('keydown', (ev) => {
 })
 
 /** Viteza simularii (1×, 2×, 3×). `stepSim` primeste `dt × viteza`; plafonul de tickuri pe cadru ramane. */
-let viteza = 1
+let viteza = salvareIncarcata !== null ? Math.max(1, Math.min(3, Math.round(salvareIncarcata.meta.viteza))) : 1
 function seteazaPauza(p: boolean): void {
+  if (p !== simPauza) golesteVitezaEfectiva()
   simPauza = p
   // In pauza, previzualizarile scumpe ale lui S se refac o data: costul nu se mai vede (panoul, CG-2).
   if (p && stabOverlay.visible && previzInvechita(stabOverlay, world)) redeseneazaStabilitate(stabOverlay, world, DEFAULT_RULES)
@@ -1627,6 +1665,20 @@ function seteazaPauza(p: boolean): void {
 let efTickuri = 0
 let efMs = 0
 let vitezaEfectiva = 0
+/**
+ * La pauza si la schimbarea vitezei fereastra incepe din nou: amestecand cadrele de pauza si pe cele
+ * de la viteza veche, indicatorul spunea „≈0,4×" ~2 s dupa fiecare Spatiu, exact cand se uita
+ * jucatorul (recenzia UI-ului, INT-8). 0 = inca nemasurata; UI-ul nu arata nimic atunci.
+ */
+function golesteVitezaEfectiva(): void {
+  efTickuri = 0
+  efMs = 0
+  vitezaEfectiva = 0
+}
+function seteazaViteza(v: number): void {
+  if (v !== viteza) golesteVitezaEfectiva()
+  viteza = v
+}
 function noteazaTickuri(n: number, dtMs: number): void {
   efTickuri += n
   efMs += dtMs
@@ -1658,6 +1710,9 @@ function urmareste(): void {
 
 /** Camera la celula (wx, wy, z), cu aceeasi distanta si acelasi unghi; nivelul, daca se cere sau daca lucrul e taiat. */
 function duLa(wx: number, wy: number, z: number, slice: number | null): void {
+  // „Du-mă la el", randul unui om, o alerta: camera merge unde s-a cerut. Cu un alt om urmarit,
+  // urmarirea o tragea inapoi in 2 s, iar inspectorul arata pe altcineva (recenzia UI-ului, INT-5).
+  urmaritId = null
   const d = new THREE.Vector3(wx + 0.5, z + 1, wy + 0.5).sub(controls.target)
   controls.target.add(d)
   camera.position.add(d)
@@ -1991,8 +2046,6 @@ function stepFrame(ts: number): void {
     if (!simPauza) {
       noteazaTickuri(stepSim(agentLayer, world, DEFAULT_RULES, dt * viteza, simTick), dt)
       remeshDinJurnal()
-    } else {
-      noteazaTickuri(0, dt)
     }
     // Si in pauza: pornit cu `?pauza=1`, stratul pionilor n-ar fi fost desenat niciodata (HUD: „0").
     updateAgentLayer(agentLayer, world, DEFAULT_RULES)
@@ -2010,7 +2063,7 @@ function stepFrame(ts: number): void {
     if (regionOverlay.visible && world.regions.epoca !== epocaDesenata) refreshOverlay()
   }
   // Trecerea de stabilitate, feliata: cel mult bugetul pe cadru, si doar cu overlay-ul pornit.
-  avanseazaStabilitate(stabOverlay, world, DEFAULT_RULES, BUGET_STABILITATE_MS)
+  avanseazaStabilitate(stabOverlay, world, DEFAULT_RULES, BUGET_STABILITATE_MS, ui === null)
   // UI-ul de joc: nimic din asta nu exista intr-o rulare de gate (`ui === null`).
   if (ui !== null) {
     pasAplicare()
@@ -2139,9 +2192,25 @@ function plicSalvare(id: string, nume: string, primiPasi: readonly boolean[]): {
   }
 }
 
+/** Tickul ultimei salvari (manuale sau automate) a lumii de acum: dupa el, plecarea cere confirmare. */
+let tickUltimaSalvare = world.tick
+let plecareAprobata = false
+if (MOD_JOC === 'joc-nou' || MOD_JOC === 'incarca') {
+  // Inapoi, butonul lateral al mouse-ului, F5, inchiderea tabului: fara asta jocul pleca fara nicio
+  // intrebare, cu tot ce era dupa ultima salvare automata (recenzia UI-ului, INT-6).
+  window.addEventListener('beforeunload', (ev) => {
+    if (plecareAprobata || world.tick === tickUltimaSalvare) return
+    ev.preventDefault()
+    ev.returnValue = ''
+  })
+}
+
 /** O alta lume inseamna alta pagina: lumea se construieste o singura data pe pagina, ca inainte. */
 function navigheaza(cautare: string): void {
-  if ((MOD_JOC === 'joc-nou' || MOD_JOC === 'incarca') && !window.confirm('Jocul de acum se închide. Ce n-ai salvat se pierde (salvarea automată e la cel mult câteva minute în urmă). Continui?')) return
+  if ((MOD_JOC === 'joc-nou' || MOD_JOC === 'incarca') && world.tick !== tickUltimaSalvare
+    && !window.confirm('Jocul de acum se închide. Ce n-ai salvat se pierde (salvarea automată e la cel mult câteva minute în urmă). Continui?')) return
+  // Confirmat aici: `beforeunload` nu mai intreaba o data.
+  plecareAprobata = true
   location.search = cautare
 }
 
@@ -2184,7 +2253,7 @@ if (!MOD.faraUI && MOD_JOC !== 'gate') {
     pauza: () => simPauza,
     seteazaPauza,
     viteza: () => viteza,
-    seteazaViteza: (v) => { viteza = v },
+    seteazaViteza,
     vitezaEfectiva: () => (simPauza ? 0 : vitezaEfectiva),
     aplica: (cmds) => {
       const refuzuri: string[] = []
@@ -2218,6 +2287,7 @@ if (!MOD.faraUI && MOD_JOC !== 'gate') {
     salveaza: async (id, nume, primiPasi) => {
       const { s, ms } = plicSalvare(id, nume, primiPasi)
       await scrieSalvare(s)
+      tickUltimaSalvare = s.tick
       el('spot').textContent = `salvat „${nume}" · encode ${ms.toFixed(1)} ms · ${(s.lume.length / 1024).toFixed(0)} KiB`
       return ms
     },
@@ -2256,9 +2326,10 @@ if (!MOD.faraUI && MOD_JOC !== 'gate') {
   }
   butoaneCamera(null)
   el('piesa').textContent = ui.numePiesa()
+  if (salvareIncarcata !== null) ui.toast(`Încărcat: ${salvareIncarcata.nume}. Jocul e în pauză — Spațiu pornește.`)
 }
 
 requestAnimationFrame(tick)
 
 // Expus pentru masuratori din consola, nu pentru joc.
-Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport, fantoma, jobOverlay, stabOverlay, ui, mod: MOD_JOC, agentLayer, tintaLa, suprafata, stratResurse } })
+Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport, fantoma, jobOverlay, stabOverlay, ui, mod: MOD_JOC, agentLayer, tintaLa, suprafata, stratResurse, stare: () => ({ viteza, pauza: simPauza }) } })

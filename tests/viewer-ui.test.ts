@@ -516,6 +516,23 @@ test('tinta: zona cu nivelul pornit e celula de la nivelul activ (apelantul adau
   assert.ok(piesa.ok && piesa.z === 47)
 })
 
+test('tinta: fara UI (verificare), Z si Ctrl tintesc ca la 3613652 — solidul vazut, tinta piesei', () => {
+  // Nivelul pornit la sol+4 (slice 52, activ 51), sol plat cu fata de sus la y = 47 (solid pana la 46).
+  const raza = razaSpre({ x: 50.5, y: 47, z: 60.5 })
+  const baza = { raza, impacturi: peSol(raza, 47), slice: 52, cuburi: [], departeMax: 150, desemnataPeNivel: () => false, plinaPeNivel: () => false }
+  // In joc: zona pe nivelul activ (apelantul adauga 1). Fara UI: pe solidul vazut, ca inainte (INT-10).
+  const joc = alegeTinta({ ...baza, mod: 'zona' })
+  assert.ok(joc.ok && joc.z === 50, JSON.stringify(joc))
+  const azi = alegeTinta({ ...baza, mod: 'zona', caAzi: { cuPiesa: false } })
+  assert.ok(azi.ok && azi.wx === 50 && azi.wy === 60 && azi.z === 46, JSON.stringify(azi))
+  // Ctrl fara cub sub cursor, cu o piesa aleasa: tinta piesei (coloana de la nivelul activ), nu solidul.
+  const retrage = alegeTinta({ ...baza, mod: 'retrage', caAzi: { cuPiesa: true } })
+  assert.ok(retrage.ok && retrage.z === 51, JSON.stringify(retrage))
+  const fara = alegeTinta({ ...baza, slice: null, mod: 'retrage', caAzi: { cuPiesa: true } })
+  assert.ok(fara.ok && fara.z === 47, `fara nivel: aerul din fata fetei, ${JSON.stringify(fara)}`)
+  assert.ok((() => { const t = alegeTinta({ ...baza, slice: null, mod: 'retrage', caAzi: { cuPiesa: false } }); return t.ok && t.z === 46 })(), 'fara piesa: solidul vazut')
+})
+
 // ---------------------------------------------------------------------------------------------
 // recenzia codului UI-ului (28.09): textele, alertele, dreptunghiul, salvarile, tastele, pornirea
 // ---------------------------------------------------------------------------------------------

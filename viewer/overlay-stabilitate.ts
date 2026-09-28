@@ -234,12 +234,14 @@ export function pornesteStabilitate(
 }
 
 /** Avanseaza trecerea din curs cu cel mult `bugetMs` de lucru (plus celula din curs); la capat, o deseneaza. */
-export function avanseazaStabilitate(o: StabilityOverlay, w: World, rules: Rules, bugetMs: number): void {
+export function avanseazaStabilitate(o: StabilityOverlay, w: World, rules: Rules, bugetMs: number, mereuPreviz = false): void {
   if (!o.visible || o.scanare === null) return
   if (!avanseazaScanare(o.scanare, w, rules, () => performance.now(), bugetMs)) return
   o.ultimaScanare = o.scanare
   o.scanare = null
-  redeseneazaStabilitate(o, w, rules, o.previz === null || o.previzMs <= PREVIZ_SCUMP_MS)
+  // `mereuPreviz` (fara UI: verificare, gate): ca la 3613652, unde nu exista nici semnul „vechi", nici
+  // butonul „Refă" care sa spuna ca desenul a ramas in urma (recenzia UI-ului, V3).
+  redeseneazaStabilitate(o, w, rules, mereuPreviz || o.previz === null || o.previzMs <= PREVIZ_SCUMP_MS)
 }
 
 /** Previzualizarile desenate sunt mai vechi decat lumea (s-au sarit la capatul unei treceri)? */
