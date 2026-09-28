@@ -29,6 +29,7 @@ import type { UnealtaId } from './dreptunghi.ts'
 import { eTimpulSalvariiAutomate, ID_AUTOMATA } from './salvari-plic.ts'
 import type { RezumatSalvare } from './salvari-plic.ts'
 import { HRANA_PE_OM } from './pornire.ts'
+import { FEL_RESURSA } from '../resurse.ts'
 
 export type Overlay = 'J' | 'S' | 'G'
 export type ModJoc = 'titlu' | 'joc-nou' | 'incarca' | 'verificare'
@@ -287,7 +288,10 @@ export function monteazaUI(ctx: ContextUI): UI {
   const prognoza = h('span', { class: 'prognoza' })
   for (const fel of [Item.PIATRA, Item.HRANA, Item.PAMANT, Item.LEMN]) {
     const val = h('span', { class: 'val' }, '0')
-    const rad = h('span', { class: 'ui-res' }, h('span', { class: 'pata', style: `background:${CULOARE_ITEM[fel]}` }), h('span', {}, NUME_ITEM[fel]!), val, fel === Item.HRANA ? prognoza : null)
+    // Iconita din Blender (tools/assets/resurse.py); pana se incarca (sau daca lipseste), culoarea resursei.
+    const icoana = h('img', { class: 'icoana', alt: '', width: 20, height: 20, src: new URL(`resurse/icoane/${FEL_RESURSA[fel]}.png`, document.baseURI).href, style: `background:${CULOARE_ITEM[fel]}` })
+    icoana.addEventListener('load', () => { icoana.style.background = 'none' }, { once: true })
+    const rad = h('span', { class: 'ui-res' }, icoana, h('span', {}, NUME_ITEM[fel]!), val, fel === Item.HRANA ? prognoza : null)
     resurse.set(fel, { rad, val })
     grupRes.append(rad)
   }

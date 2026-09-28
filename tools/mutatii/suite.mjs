@@ -16,6 +16,7 @@ import { MUTATII as unelte } from './unelte.mjs'
 import { MUTATII as grinda } from './grinda.mjs'
 import { MUTATII as acces } from './acces.mjs'
 import { MUTATII as ui } from './ui.mjs'
+import { MUTATII as resurse } from './resurse.mjs'
 
 export const SUITE = [
   { nume: 'carat', despre: 'taietura 2: iteme, carat, zone pictate', M: carat },
@@ -27,5 +28,6 @@ export const SUITE = [
   { nume: 'grinda', despre: 'S20-23 t.4: grinda — indexul DERIVED si regula stratificata', M: grinda },
   { nume: 'acces', despre: 'S20-23 t.5: accesul vertical — atingerea pe fel, siguranta, sigilarea, previzualizarea', M: acces },
   { nume: 'ui', despre: 'UI-ul de joc: pornirea, tastele, textele, dreptunghiul, alertele, salvarile, modelul', M: ui },
+  { nume: 'resurse', despre: 'mormanele de resurse pe ecran: treapta, rotatia, instantele, culoarea din fisier', M: resurse },
   { nume: 'unelte', despre: 'instrumentele: harnasamentul de mutatii (doar testul numit)', M: unelte },
 ]

@@ -54,6 +54,7 @@
 .ui-res { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: var(--ui-r); cursor: default; white-space: nowrap; }
 .ui-res:hover { background: var(--ui-bg-3); }
 .ui-res .pata { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.ui-res .icoana { width: 20px; height: 20px; flex: none; border-radius: 3px; object-fit: contain; }
 .ui-res .val { font-family: var(--ui-mono); font-variant-numeric: tabular-nums; }
 .ui-res .prognoza { font: 11px var(--ui-mono); color: var(--ui-ink-2); }
 .ui-res .prognoza.atentie { color: var(--ui-warn); }

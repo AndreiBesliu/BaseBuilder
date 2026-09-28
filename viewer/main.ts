@@ -61,6 +61,7 @@ import { FORMAT_SALVARE, numeFisier, valideazaSalvare } from './ui/salvari-plic.
 import type { Salvare } from './ui/salvari-plic.ts'
 import type { ContextUI, UI } from './ui/panouri.ts'
 import { previzInvechita } from './overlay-stabilitate.ts'
+import { actualizeazaStratResurse, creeazaStratResurse } from './strat-resurse.ts'
 
 /** Lumea demo-ului, a modului de verificare si a gate-ului. Un joc nou isi alege seed-ul. */
 const SEED_DEMO = 20260913
@@ -351,6 +352,11 @@ scene.add(sun)
 
 const agentLayer = createAgentLayer(scene, DEFAULT_RULES.agentCapacity)
 agentLayer.mesh.visible = AGENTI_ACTIVI
+/**
+ * Mormanele de resurse (plasele din Blender, tools/assets/resurse.py). Nu si in gate: o geometrie in
+ * plus in bucla masurata ar fi drift. URL-ul e relativ la pagina, ca sa mearga si pe build.
+ */
+const stratResurse = MOD.mod === 'gate' ? null : creeazaStratResurse(scene, new URL('resurse/mormane.glb', document.baseURI).href)
 
 const controls = new OrbitControls(camera, renderer.domElement)
 controls.enableDamping = true
@@ -1990,6 +1996,8 @@ function stepFrame(ts: number): void {
     }
     // Si in pauza: pornit cu `?pauza=1`, stratul pionilor n-ar fi fost desenat niciodata (HUD: „0").
     updateAgentLayer(agentLayer, world, DEFAULT_RULES)
+    // Mormanele se schimba doar cand pionii sapa, cara sau zidesc: la 10 cadre ajunge (O(mormane)).
+    if (stratResurse !== null && frameIndex % 10 === 0) actualizeazaStratResurse(stratResurse, world, DEFAULT_RULES.itemStackMax)
     if (jobOverlay.visible && frameIndex % 6 === 0) rebuildJobOverlay(jobOverlay, world)
     // Mult mai rar decat overlay-ul de joburi. Cererea nu reporneste trecerea din curs,
     // nici una terminata pe acelasi teren (vezi `ceFacCuTrecerea`): o celula ajunsa la
@@ -2253,4 +2261,4 @@ if (!MOD.faraUI && MOD_JOC !== 'gate') {
 requestAnimationFrame(tick)
 
 // Expus pentru masuratori din consola, nu pentru joc.
-Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport, fantoma, jobOverlay, stabOverlay, ui, mod: MOD_JOC, agentLayer, tintaLa, suprafata } })
+Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport, fantoma, jobOverlay, stabOverlay, ui, mod: MOD_JOC, agentLayer, tintaLa, suprafata, stratResurse } })

@@ -9,7 +9,8 @@ Starea completă e în [DEVLOG.md](DEVLOG.md); ăsta e doar capătul de listă.
 
 ## 1. D20 — așezarea liberă a clădirilor: e varianta asta ce voiai?
 
-**Ce te uiți.** Pornește viewerul (`Kinstead.cmd`), apasă **B**. Rotește cu `,` și `.`, schimbă forma
+**Ce te uiți.** Pornește viewerul (`Kinstead.cmd`), alege *Explorează demo-ul* (ecranul de titlu
+blochează tastele cât e deschis), apoi apasă **B**. Rotește cu `,` și `.`, schimbă forma
 cu **N**, pornește și oprește ancorarea cu **M**.
 
 - **conturul alb** e clădirea adevărată, ce s-ar desena în joc
@@ -213,7 +214,7 @@ reparat fiindcă reparația e o decizie de arhitectură (fereastră globală vs.
 
 ## 11. Ocluzia ambientală — cât de întunecate sunt colțurile?
 
-**Ce te uiți.** Pornește viewerul (`Kinstead.cmd`) și privește terenul săpat din jurul așezării de la
+**Ce te uiți.** Pornește viewerul (`Kinstead.cmd`), alege *Explorează demo-ul* și privește terenul săpat din jurul așezării de la
 20–40 m, din unghi, nu de sus: treptele de 1 m de lângă suprafețe plate, colțurile interioare ale unei
 gropi, piciorul unui perete.
 
@@ -245,6 +246,9 @@ dacă e greu de judecat fără o comparație, spune și pun o tastă care comut�
 *(Rescris după recenzia adversarială din 26.09: versiunea dinainte descria greșit regula pe
 verticală, dădea o cifră de piatră falsă, promitea un overlay de „4 ms pe cadru" și avea pași care
 nu se puteau urma în viewer.)*
+
+**Pornirea.** `npm run viewer`, apoi http://localhost:5175/?verificare=1 — modul de verificare, viewer-ul de
+azi, fără UI-ul de joc (fără parametri se deschide acum ecranul de titlu).
 
 **Ce te uiți — pașii, în viewer.** Pornește slice view-ul (**Q**/**E**) până când HUD-ul spune „activ" = nivelul
 podelei. **Cubul alb** din scenă arată celula pe care o ia click-ul (rândul „cursor" din HUD, în cifre).
@@ -398,3 +402,97 @@ pe ecran.
 **Pașii tăi:** `npm run viewer`, apoi
 http://localhost:5175/?cam=12391,4603&slice=48&piatra=4000&hrana=750&pauza=1 ; commit-urile:
 https://github.com/AndreiBesliu/BaseBuilder/compare/48d7115...main
+
+## 14. UI-ul de joc — se poate juca fără să citești taste?
+
+*(Nou, 27.09. Cerut de tine: „vreau să adaugi și un UI pentru joc". Asta aduce înainte o parte din
+S32-35 — „UI complet" — din PLAN.)*
+
+**Ce s-a schimbat pentru tine.** `npm run viewer` (sau dublu-click pe `Kinstead.cmd`) deschide acum un
+**ecran de titlu**: *Joc nou* · *Încarcă* · *Explorează demo-ul* · *Ajutor*. În joc:
+- **sus**: timpul de joc, resursele (piatră, hrană cu „cât mai ajunge", pământ), oamenii cu insigne
+  (flămânzi, obosiți, jefuitori), pauza și vitezele 1× 2× 3× — cu viteza REALĂ afișată când simularea
+  nu ține pasul;
+- **jos**: uneltele — **Selectează** (V), **Sapă** (D), **Construiește** (C; perete, podea, scară,
+  grindă, contur/plin, prioritatea 1–5), **Anulează** (A), **Zone** (K; depozit, loc de dormit,
+  șterge). Cu o unealtă, **tragi un dreptunghi**; cu nivelul oprit urmează solul, cu nivelul pornit
+  lucrează pe nivelul activ. Esc sau clic dreapta în timpul tragerii renunță; toastul are „Anulează";
+- **stânga**: nivelul (Q/E/R, sau rotița peste coloana Nivel), hărțile (Planul, Stabilitatea,
+  Regiunile) cu legenda pliată, și *Primii pași* la un joc nou;
+- **dreapta**: alertele (cu întârziere și răcire: nu clipesc) și sertarul **Inspector / Oameni**.
+  Clic cu *Selectează* pe o lucrare spune **de ce nu se face** și ce poți face; pe un om, ce face, de
+  ce stă, nevoile, gândurile și **ce muncă are voie să facă** (– niciodată · 1 · 2 preferat · Excl.);
+- **Esc**: meniul (salvează, descarcă salvarea ca fișier, încarcă, joc nou, ajutor, diagnostic,
+  mărimea interfeței). Ctrl+S salvează; se salvează și singur la ~5 minute de joc.
+
+Hrana **nu se poate produce încă** în versiunea asta, iar UI-ul o spune: prognoza din bară, alerta
+„hrana scade", iar la final cardul „Așezarea s-a golit". Jocul nou pornește cu 230 de hrană pe om
+(~2 ore de joc).
+
+**Pornirea.** `npm run viewer`, apoi http://localhost:5175/ → *Joc nou* → *Pornește*.
+
+**Pașii (10 minute).**
+1. Bara de sus: resursele, oamenii, viteza. Apasă **Spațiu** (pauză) și **3** (3×).
+2. *Primii pași* (stânga): **K**, trage un dreptunghi pe sol → un depozit. **D**, trage peste câteva
+   celule → săpături. **C**, trage un dreptunghi 7×7 → un contur de perete.
+3. **V**, clic pe un om: inspectorul lui. Pune-i *Sapă* pe **Excl.** și uită-te cum Cară și
+   Construiește se taie.
+4. **V**, clic pe un cub turcoaz sau roșu al planului: ce spune „De ce nu?".
+5. **O**: tabelul oamenilor. Sortează după Foame.
+6. **Ctrl+S**, apoi **Esc** → *Încarcă…* → salvarea: aceeași lume.
+7. **Esc** → mărimea interfeței 125%.
+
+**Cum arată bine:** găsești singur uneltele; un dreptunghi pune exact celulele pe care le arată
+fantomele; „De ce nu?" spune un lucru pe care îl poți face. **Cum arată rău:** un buton nu face nimic
+fără să spună de ce; un panou acoperă ce vrei să vezi la 1280×720; o alertă clipește fără să ai ce face.
+
+**Trei decizii — cu implicitul ÎN FAȚĂ** (nu trebuie să faci nimic dacă ești de acord):
+1. **Clicul simplu = Selectează** în joc (nu mai sapă din greșeală). Săpatul e unealta **D**. Modul
+   de verificare (URL-urile din OWNER_VERIFY 12 și 13) rulează viewer-ul de azi, fără UI-ul de joc:
+   HUD-ul și ajutorul lui s-ar fi suprapus cu panourile noi.
+2. **Hrana implicită = 230 × oameni** (~2 ore). Cu 600 pentru 12, colonia se golea singură la ~56 min.
+3. **Tastele**: D sapă, C construiește, A anulează, K zone, V selectează, O oameni; camera pe săgeți
+   (WASD nu: Q/E/S sunt deja luate). Remaparea e în registru.
+
+**De ce nu pot eu.** Harnașamentul `bench/ui-fum.mjs` a condus UI-ul cu mouse și taste reale (Electron,
+16/16): dreptunghiurile, Esc, conturul, depozitul, inspectorul, salvarea și reîncărcarea, câmpurile de
+text. Recenzia adversarială a codului a rămas la jumătate (oprită la cererea ta), deci pot ieși reparații.
+Dar dacă se înțelege fără să citești — asta se vede doar cu cineva care n-a scris codul.
+
+**Pașii tăi:** `npm run viewer`, apoi http://localhost:5175/ ; commit-urile:
+https://github.com/AndreiBesliu/BaseBuilder/compare/3613652...main
+
+## 15. Mormanele de resurse — arată cum voiai?
+
+*(Nou, 28.09. Cerut de tine: „haide să generăm și niște assets în Blender pentru resursele din joc".)*
+
+**Ce s-a schimbat pentru tine.** Mormanele de piatră, pământ, lemn și hrană se văd acum în lume ca obiecte
+— până acum apăreau doar cu Planul (J), ca niște cuburi de sârmă. Fiecare resursă are trei mărimi (după
+cât e în morman: 1–25, 26–50, 51–75): piatra — bucăți fațetate, pământul — o movilă cu bulgări, lemnul —
+bușteni stivuiți, hrana — saci legați la gură cu dovleci și rădăcini lângă ei. Bara de sus are iconițe
+în locul pătratelor colorate.
+
+**Cum sunt făcute.** Nu desenate de mână: `tools/assets/resurse.py` le generează în **Blender 4.3** din
+cod (același rezultat la fiecare rulare), low-poly, cu **culoarea pe vârf** din paleta terenului și un
+singur material — exact stilul din DESIGN §8 („costul artistic = numărul de materiale"). 60–428 de
+triunghiuri pe morman, 225 KiB tot fișierul.
+
+**Pornirea.** `npm run viewer`, apoi http://localhost:5175/?joc=nou&seed=7 → **J** (ascunde Planul), și
+apropie camera de inelul de mormane din jurul oamenilor.
+
+**Cum arată bine:** se vede de departe ce e fiecare morman, iar un morman plin se deosebește de unul
+aproape gol. **Cum arată rău:** se confundă piatra cu pământul; mormanele par lipite de altă lume decât
+terenul (altă lumină, alte culori); plutesc sau intră în pământ.
+
+**Trei decizii — cu implicitul ÎN FAȚĂ** (nu trebuie să faci nimic dacă ești de acord):
+1. **Stilul fațetat, cu culoare pe vârf** (ca terenul). Alternativa, texturi, cere un artist și ~20–40 de
+   materiale.
+2. **Trei mărimi pe resursă**, pe treimi din mormanul plin.
+3. **Hrana = saci + dovleci și rădăcini** (un trib, nu o fermă). Când va exista producția de hrană, fiecare
+   fel își poate primi forma lui.
+
+**De ce nu pot eu.** Numele, amprenta într-o celulă, bugetul de triunghiuri și culoarea pe vârf le
+verifică testul (`tests/resurse.test.ts`); dacă arată bine — doar pe ecran.
+
+**Pașii tăi:** `npm run viewer`, apoi http://localhost:5175/?joc=nou&seed=7 ; foaia cu toate cele 12 e în
+`tools/assets/resurse.py` → `--foaie`.

@@ -64,6 +64,14 @@ node src/harness/cli.ts --seed 12345 --ticks 100000 --agents 40
 
 **`npm test` NU face typecheck.** Testele pot fi verzi cu tipurile roșii. Poarta e `npm run check`.
 
+Mormanele de resurse (plasele 3D și iconițele UI-ului) se generează în **Blender 4.3**, fără interfață,
+din `tools/assets/resurse.py`, și se comit în `viewer/public/resurse/`; contractul lor (nume, culoare
+pe vârf, amprenta într-o celulă, bugetul de triunghiuri) îl verifică `tests/resurse.test.ts`, fără Blender:
+
+```bash
+"C:/Program Files/Blender Foundation/Blender 4.3/blender.exe" -b --factory-startup -P tools/assets/resurse.py -- --glb viewer/public/resurse/mormane.glb --icoane viewer/public/resurse/icoane
+```
+
 Pe Windows, `kinstead.bat` le adună pe toate: dublu-click deschide un meniu, iar cu un argument
 (`kinstead.bat check`) rulează o singură comandă și întoarce codul ei de ieșire.
 
@@ -71,7 +79,7 @@ Pe Windows, `kinstead.bat` le adună pe toate: dublu-click deschide un meniu, ia
 
 ```bash
 npm run mutatii -- --lista      # ce suite există
-npm run mutatii                 # toate cele 470, ~8 min local (27.09, cronometrat, vezi mai jos)
+npm run mutatii                 # toate cele 514, ~10 min local (27.09, cronometrat, vezi mai jos)
 npm run mutatii -- nevoi        # o singură suită
 npm run mutatii -- nevoi podeaua  # doar mutațiile al căror nume conține „podeaua"
 npm run mutatii -- --izolare    # fiecare test NUMIT de o probă, singur, pe cod nemutat (~2 min)
@@ -110,6 +118,9 @@ potrivește în două locuri editează altul decât cel gândit, rulează testel
 > După accesul vertical (26.09): **407 probe în 6 min 56 s** local — suita `acces` rulează teste de
 > acceptanță cu pioni reali (casa cu două etaje: ~5 s pe test).
 > După recenzia accesului (27.09): **470 de probe în 8 min 8 s** local (suita `acces`, 110, în ~2 min 35 s).
+> După UI-ul de joc (27.09): **510 probe în 10 min 4 s** local. **Oprește serverul Vite înainte**: el și Google
+> Drive țin fișierele deschise — o rulare a căzut cu `EUNKNOWN` la scriere, alta a găsit o mutație pusă la loc
+> după restaurare (garda de arbore murdar a prins-o).
 >
 > `tools/check-mutatii.mjs` a fost scris ca înlocuitor static și rămâne util, dar nu mai e o
 > compensație: el răspunde la „proba ARE ce să măsoare?", nu la „măsoară?". A doua întrebare

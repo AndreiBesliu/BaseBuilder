@@ -4429,3 +4429,98 @@ Hash-ul scenariului standard: **52b16ed2**, neschimbat; al casei cu etaj: **3550
   `detaliuFaraLoc` pe geometria diagonală — gărzi fără scenă (plasa 14, J12).
 - O poartă de cost pe oraș în suită (azi: casa în sim; casa și satul de 8 în previzualizare).
 - Planurile care își mută accesul; șablonul de scară și unealta linie/dreptunghi (din registrul de ieri).
+
+---
+
+## Task Started — 27.09.2026 — UI-ul de joc
+
+**Prompt:** „continua si fa tu push, vreau sa adaugi si un UI pentru joc"
+**Model:** Claude Opus 5.5 (claude-opus-5-5), Claude Code, Ultracode.
+
+Viewer-ul era o unealtă de măsură (gate-ul D1) peste care se pusese gameplay comandat din taste: un HUD de
+diagnostic, un zid de text cu tastele, și niciun loc în care să vezi cine e flămând sau de ce nu se face o
+lucrare fără să citești șiruri tehnice. Asta aduce înainte o parte din S32-35 („UI complet"). D1 rămâne
+deschis: partea pură (texte, modelul de date, alertele, uneltele) se portează, stratul DOM nu.
+
+## Task Completed — 28.09.2026 — UI-ul de joc (livrat; recenzia codului oprită la jumătate)
+
+**Designul a trecut întâi printr-un panou adversarial** — 5 lentile (jucătorul nou, contractul cu
+simularea, interacțiunea, costul și gate-ul, testabilitatea) + un verificator pe fiecare constatare
+CRITIC/MARE: 56 de constatări, 24 grele, **toate reale** după verificare, 12 rămase MARE. Cost: 4,72 M
+tokeni — anunțasem 1,8 M; verificatorii au fost 24, nu câțiva. Ce a schimbat (v2):
+- **hrana**: jocul nou cu implicitele din v1 (12 oameni, 600 de hrană) se golea singur în ~56 de minute,
+  fără producție de hrană — acum prognoza „~N min" în bară, 230 de hrană pe om, alerta „hrana scade",
+  cardul „Așezarea s-a golit", iar salvarea automată nu mai scrie o colonie goală;
+- **dreptunghiul**: pe panta locului de start, cota fixă a lui v1 dădea un depozit-fâșie (13 din 100) și
+  săpături îngropate; acum nivelul activ cu slice-ul pornit, solul pe coloană cu el oprit, colțul al
+  doilea din aceeași funcție ca fantoma;
+- **„De ce nu?"**: motivele memorate de sim nu se șterg când nu mai sunt adevărate, iar piesele fără
+  sprijin n-au niciun motiv — o ordine explicită (n-ar sta în picioare > în lucru > ultimul refuz > fără
+  acces > așteaptă > liberă), texte pe (sursă, cod, detaliu, parametri), FARA_SPRIJIN pe cazul grinzii;
+- **gate-ul**: un singur predicat pur pentru „rulare de măsură", UI-ul încărcat doar prin `import()`;
+- **tastele**: un singur dispecer pur; Ctrl+S comuta stabilitatea, „Kinstead" tastat pornea traversarea;
+- **prioritatea 3 e „exclusiv"**, nu o treaptă; alertele „nimeni nu sapă/cară" pe categoriile efective
+  (`categoriiActive` a primit `export` — singurul cuvânt atins în src/sim, hash neschimbat);
+- overlay-ul J pe geometrie prealocată (7,7 → 0,68 ms la 4096 de desemnări, măsurat de panou), iar
+  previzualizările scumpe ale lui S nu se mai refac la capătul fiecărei treceri.
+
+**Livrat** (`b1826e4`, `220fabf`): ecranul de titlu; joc nou pe un loc PLAT (`locJocNou`: dintre primii
+30 de candidați, cel cu cele mai multe ferestre 7×7 plate); bara de sus; uneltele Selectează / Sapă /
+Construiește / Anulează / Zone, cu dreptunghi tras; inspectorul; sertarul Oameni cu prioritățile;
+alertele (întârziere, răcire, jurnal); salvări în IndexedDB, automată, fișier; meniul și mărimea
+interfeței; mesh-urile refăcute din jurnalul terenului (și după prăbușiri). Modul de verificare
+(OWNER_VERIFY 12, 13) rulează viewer-ul de azi — cu panourile noi peste HUD-ul vechi ecranul nu se mai
+citea.
+
+**Probe:** 49 de teste noi, 40 de probe (`ui`); prima rulare a dat 508/510 — două găuri reale în TESTELE
+mele (răcirea alertelor nu era probată: întârzierea singură oprea reapariția; semnalul de foame n-avea
+test pe definiție), acum 40/40. `bench/ui-fum.mjs`: Electron offscreen, mouse și taste reale, 15/15, iar
+proba negativă iese roșie. A prins două defecte pe care testele pure nu le vedeau: Esc în timpul tragerii
+lăsa clicul să desemneze o celulă, și suprapunerea din modul de verificare. Alerta de foame: cu 10 s se
+aprindea lângă mâncare (4 flămânzi, 2 mâncători pe morman) — acum 30 s, peste reîncercarea de 25 s.
+
+**Recenzia adversarială a codului** (6 lentile) a fost **oprită la jumătate, la cererea owner-ului**; 4
+lentile terminate, necitite încă. Owner-ul a cerut apoi împingerea înainte de recenzie. CI verde
+(36377603572).
+
+**Capcane noi:** Google Drive (DriveFS) ține fișierele deschise — o rulare de mutații a căzut cu
+`EUNKNOWN`, alta a găsit la final o mutație pusă la loc după „restaurat: da" (garda de arbore murdar a
+prins-o); serverul Vite se oprește înainte de mutații. În Electron, `destroy()` pe o fereastră offscreen
+strică următorul `loadURL` — o singură fereastră pe tot scriptul.
+
+---
+
+## Task Started — 28.09.2026 — Mormanele de resurse, generate în Blender
+
+**Prompt:** „haide sa generam si niste assets in Blender pentru resursele din joc"
+**Model:** Claude Opus 5.5 (claude-opus-5-5), Claude Code.
+
+Mormanele de marfă existau în simulare, dar pe ecran doar cu overlay-ul J, ca un cub de sârmă înalt cât e
+de plin. Fără J, piatra, pământul și hrana din lume erau invizibile.
+
+## Task Completed — 28.09.2026 — Mormanele de resurse
+
+`tools/assets/resurse.py` le generează în **Blender 4.3**, fără interfață, din cod — determinist (o
+sămânță pe plasă): 4 feluri × 3 trepte (piatră: bucăți fațetate; pământ: movilă cu bulgări; lemn:
+bușteni în piramidă; hrană: saci legați, cu dovleci și rădăcini), low-poly, **culoare pe vârf** din
+paleta terenului, un singur material (DESIGN §8). 60–428 de triunghiuri pe plasă, 225 KiB; plus
+iconițele UI-ului (128×128, randate cu Workbench). Viewer-ul le desenează cu un `InstancedMesh` pe plasă
+(un draw call pe fel și treaptă), cu aceeași lumină Lambert ca terenul; nu există în gate.
+
+Două capcane, prinse pe ecran înainte de commit: stratul de culoare trebuie marcat ACTIV (altfel randarea
+iese neagră, iar exportorul nu scrie `COLOR_0`), iar exportorul scrie culoarea LINIARĂ (corect pentru
+glTF) în timp ce terenul pune paleta sRGB direct în vârfuri — fără conversie la încărcare, mormanele ar fi
+ieșit mai închise decât solul pe care stau.
+
+`tests/resurse.test.ts` citește fișierele fără Blender (rulează și în CI): cele 12 nume, culoarea pe vârf,
+baza pe y = 0, amprenta într-o celulă (±0,45 m), înălțimea crescătoare pe treaptă, ≤ 450 de triunghiuri,
+iconițele 128×128 cu alfa; plus partea pură (treapta, rotația, instanțele, conversia culorii) și 4 probe
+(`resurse`). `bench/ui-fum.mjs`: 16/16 (12 plase încărcate, 25 de mormane desenate, nimic în gate).
+**688/688** de teste, 514 probe statice; hash `52b16ed2` neschimbat. La owner: OWNER_VERIFY 15.
+
+### Registru
+
+- **Recenzia UI-ului**: 4 lentile terminate de citit, 2 de rulat (ecranul, costul), apoi reparațiile.
+- Marfa din mâinile oamenilor nu se vede (doar culoarea pionului).
+- Telemetria primei ore, remaparea tastelor, `setPrioritateDesemnare`, ștergerea zonei pe celulă,
+  scenariul de gate pentru UI-ul real (din panoul UI-ului).
