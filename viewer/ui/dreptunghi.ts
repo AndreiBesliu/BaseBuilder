@@ -154,8 +154,7 @@ export function planDreptunghi(d: Dreptunghi, o: Optiuni, lumea: Lumea): PlanDre
       // incaperea deschisa — panoul camerelor, JUC-6), fara dubluri; o coloana fara gol e „nepotrivita".
       const puse = new Set<string>()
       for (const c of coloane(d, false)) {
-        const z = o.zActiv ?? (() => { const s = lumea.suprafata(c.wx, c.wy); return s === null ? null : s + 1 })()
-        const u = z === null || !lumea.celuleUsii ? null : lumea.celuleUsii(c.wx, c.wy, z)
+        const u = o.zActiv !== null ? (lumea.celuleUsii?.(c.wx, c.wy, o.zActiv) ?? null) : golulColoanei(lumea, c.wx, c.wy)
         if (u === null) { nepotrivite++; continue }
         for (const g of u) {
           const k = `${g.x},${g.y},${g.z}`
@@ -226,6 +225,27 @@ export function planDreptunghi(d: Dreptunghi, o: Optiuni, lumea: Lumea): PlanDre
     }
   }
   return { comenzi, zone, celule, niveluri: cote.size, sarite: { deja, nepotrivite }, celuleInAfara, refuz: null, usa: o.unealta === Unealta.CONSTRUIESTE && o.piesa === Piesa.USA }
+}
+
+/** Cat coboara dreptunghiul Usa, fara nivel, printr-un acoperis (sau un buiandrug) ca sa ajunga la gol. */
+export const ACOPERIS_MAX_USA = 4
+
+/**
+ * Golul de usa de pe coloana, fara nivel: pe SUPRAFATA (aerul de deasupra solidului de sus — un zid doar
+ * desenat pe teren gol), altfel sub stratul de sus al coloanei: primul aer de sub acoperis sau buiandrug,
+ * cel mult `ACOPERIS_MAX_USA` niveluri mai jos. Numai cota suprafetei cadea deasupra acoperisului, unde nu
+ * e niciun gol: casele zidite — cazul obisnuit — nu primeau usi cu dreptunghiul (recenzia pe ecran, ECR-5).
+ * Nu cota coltului de start: pe o panta, casele unui dreptunghi stau pe cote diferite.
+ */
+export function golulColoanei(lumea: Lumea, wx: number, wy: number): readonly { x: number; y: number; z: number }[] | null {
+  if (!lumea.celuleUsii) return null
+  const s = lumea.suprafata(wx, wy)
+  if (s === null) return null
+  const pe = lumea.celuleUsii(wx, wy, s + 1)
+  if (pe !== null) return pe
+  let z = s
+  for (let k = 0; k < ACOPERIS_MAX_USA && lumea.solid(wx, wy, z); k++) z--
+  return lumea.solid(wx, wy, z) ? null : lumea.celuleUsii(wx, wy, z)
 }
 
 /** Piesele pe care dreptunghiul le deseneaza implicit pe contur (dreptunghi gol): peretele. */

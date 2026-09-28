@@ -63,7 +63,7 @@ import type { ContextUI, UI } from './ui/panouri.ts'
 import { previzInvechita } from './overlay-stabilitate.ts'
 import { actualizeazaStratResurse, creeazaStratResurse } from './strat-resurse.ts'
 import { actualizeazaStratUsi, creeazaStratUsi, impacturiUsi, plaseUsi } from './strat-usi.ts'
-import { celuleUsiiPlan, MESAJ_FARA_GOL } from './usi.ts'
+import { celuleUsiiInPlan, celuleUsiiPlan, golulTintit, grupUsa, MESAJ_FARA_GOL } from './usi.ts'
 import { createCamereOverlay, rebuildCamereOverlay } from './overlay-camere.ts'
 
 /** Lumea demo-ului, a modului de verificare si a gate-ului. Un joc nou isi alege seed-ul. */
@@ -929,7 +929,11 @@ interface Modificatori {
 }
 
 type TintaClick =
-  | { readonly ok: true; readonly wx: number; readonly wy: number; readonly z: number }
+  | {
+    readonly ok: true; readonly wx: number; readonly wy: number; readonly z: number
+    /** Unealta Usa: celulele golului tintit (`golulTintit`), null = nu e un gol sub cursor. */
+    readonly gol?: readonly { readonly x: number; readonly y: number; readonly z: number }[] | null
+  }
   | { readonly ok: false; readonly mesaj: string }
 
 /** Cuburile J DESENATE — deci nimic cand overlay-ul e oprit: ce nu se vede nu se tinteste. */
@@ -997,13 +1001,21 @@ function tintaLa(px: number, py: number, m: Modificatori): TintaClick {
     impacturi.sort((a, b) => a.t - b.t)
   }
   const zActiv = sliceLevel === null ? 0 : sliceLevel - 1
-  return alegeTinta({
-    mod: modTinta(m), raza, impacturi, slice: sliceLevel, cuburi: cuburiJ(), departeMax: DEPARTE_MAX_M,
+  const mod = modTinta(m)
+  const t = alegeTinta({
+    mod, raza, impacturi, slice: sliceLevel, cuburi: cuburiJ(), departeMax: DEPARTE_MAX_M,
     // Fara UI (verificare, gate): Z/X si Ctrl tintesc ca viewer-ul de la 3613652 (recenzia UI-ului, INT-10).
     caAzi: ui === null ? { cuPiesa: piesaCurenta() !== Piesa.NICIUNA } : undefined,
     desemnataPeNivel: (wx, wy) => desemnareLaCelula(world.desemnari, wx, wy, zActiv) !== -1,
     plinaPeNivel: (wx, wy) => { const r = materialAt(world.terrain, wx, wy, zActiv); return r.ok && isSolid(r.value) },
   })
+  if (mod !== 'piesa' || piesaCurenta() !== Piesa.USA) return t
+  // Unealta Usa: golul vazut PRIN raza, nu aerul din fata primei fete (podeaua camerei, dincolo de gol) —
+  // si cand raza n-a atins nimic (viewer/usi.ts, `golulTintit`; recenzia pe ecran, ECR-1). Tinta devine
+  // celula de jos a golului: fantoma, clicul si colturile dreptunghiului il iau pe acelasi.
+  const gol = golulTintit({ raza, impacturi, slice: sliceLevel, departeMax: DEPARTE_MAX_M, tinta: t.ok ? t : null, celuleUsii: celuleUsiiInPlan(world, DEFAULT_RULES) })
+  if (gol === null || gol.length === 0) return t.ok ? { ...t, gol: null } : t
+  return { ok: true, wx: gol[0]!.x, wy: gol[0]!.y, z: gol[0]!.z, gol }
 }
 
 // --- cursorul-fantoma: celula pe care o va tinti click-ul, INAINTE de click ----------------
@@ -1048,7 +1060,7 @@ function actualizeazaFantoma(): void {
   fantoma.scale.set(1, 1, 1)
   // Usa: fantoma cuprinde tot golul pe care il va desemna clicul (o usa intreaga, nu o jumatate).
   if (mod === 'piesa' && piesaCurenta() === Piesa.USA) {
-    const u = celuleUsiiPlan(world, DEFAULT_RULES, t.wx, t.wy, t.z)
+    const u = t.gol ?? null
     if (u !== null && u.length > 0) {
       const xs = u.map((c) => c.x), ys = u.map((c) => c.y), zs = u.map((c) => c.z)
       const x0 = Math.min(...xs), y0 = Math.min(...ys), z0 = Math.min(...zs)
@@ -1516,13 +1528,24 @@ renderer.domElement.addEventListener('click', (ev) => {
     dinTeren = true
   } else if (mod === 'retrage') {
     const ds = desemnareLaCelula(world.desemnari, wx, wy, z)
+    // O usa se retrage intreaga — toate desemnarile USA legate de cea atinsa —, nu un cub: jumatatea
+    // ramasa lasa incaperea deschisa (recenzia pe ecran, ECR-6).
+    const usa = (x: number, y: number, zz: number): number => {
+      const s = desemnareLaCelula(world.desemnari, x, y, zz)
+      return s !== -1 && world.desemnari.piesa[s] === Piesa.USA ? s : -1
+    }
+    const grup = ds !== -1 && usa(wx, wy, z) !== -1 ? grupUsa((x, y, zz) => usa(x, y, zz) !== -1, wx, wy, z) : []
     out = ds === -1
       ? applyCommand(world, { kind: 'anuleazaDesemnarea', id: -1 })
       : applyCommand(world, { kind: 'anuleazaDesemnarea', id: world.desemnari.id[ds]! })
+    for (const c of grup) {
+      const s = usa(c.x, c.y, c.z)
+      if (s !== -1) applyCommand(world, { kind: 'anuleazaDesemnarea', id: world.desemnari.id[s]! })
+    }
   } else if (mod === 'piesa' && piesaCurenta() === Piesa.USA) {
-    // Un clic, o usa intreaga: toate celulele golului (sau ale gaurii din placa). Cele deja desemnate
-    // se sar; restul se desemneaza impreuna.
-    const u = celuleUsiiPlan(world, DEFAULT_RULES, wx, wy, z)
+    // Un clic, o usa intreaga: toate celulele golului VAZUT (sau ale gaurii din placa). Cele deja
+    // desemnate sau zidite se sar; restul se desemneaza impreuna, cu un singur „Anulează" (ECR-6).
+    const u = t.gol ?? null
     if (u === null) {
       el('spot').textContent = `refuzat: ${MESAJ_FARA_GOL}`
       ui?.toast(MESAJ_FARA_GOL, true)
@@ -1530,14 +1553,30 @@ renderer.domElement.addEventListener('click', (ev) => {
     }
     const cmds: Command[] = u
       .filter((c) => desemnareLaCelula(world.desemnari, c.x, c.y, c.z) === -1)
+      .filter((c) => { const r = materialAt(world.terrain, c.x, c.y, c.z); return !(r.ok && r.value === Material.USA) })
       .map((c) => ({ kind: 'desemneaza', wx: c.x, wy: c.y, z: c.z, piesa: Piesa.USA, prioritate: ui?.prioritate }))
     let refuz: Refusal | null = null
+    const create: number[] = []
     for (const c of cmds) {
       const r = applyCommand(world, c)
-      if (!r.ok && refuz === null) refuz = r
+      if (r.ok) create.push(r.value as number)
+      else if (refuz === null) refuz = r
     }
-    if (refuz === null) { dupaComenzi(cmds); return }
-    out = refuz
+    if (cmds.length === 0) { ui?.toast('Golul are deja ușa: desemnată sau zidită.'); return }
+    if (create.length === 0) out = refuz!
+    else {
+      dupaComenzi(cmds)
+      const tx = refuz === null ? null : textMotiv('comanda', refuz.reason, 0, refuz.params, cifre).titlu
+      ui?.toast(`Ușă: ${create.length === 1 ? '1 celulă desemnată' : `${create.length} celule desemnate`}${tx === null ? '' : ` · ${cmds.length - create.length} refuzate: ${tx}`}`, false, {
+        eticheta: 'Anulează',
+        f: () => {
+          const inapoi: Command[] = create.map((id) => ({ kind: 'anuleazaDesemnarea', id }))
+          for (const c of inapoi) applyCommand(world, c)
+          dupaComenzi(inapoi)
+        },
+      })
+      return
+    }
   } else {
     const piesa = piesaCurenta()
     out = applyCommand(world, { kind: 'desemneaza', wx, wy, z, piesa: piesa === Piesa.NICIUNA ? undefined : piesa, prioritate: ui?.prioritate })

@@ -36,5 +36,6 @@ export const SUITE = [
   { nume: 'camere', despre: 'S24-27 t.1: incaperile — indexul pe bucati, apa, fantomele, colturile de chunk, punctele fixe', M: camere },
   { nume: 'usa', despre: 'S24-27 t.1: usa — mersul, privirea inainte, sigilarea, refugiul, previzualizarea, zonele, continutul', M: usa },
   { nume: 'explica', despre: 'recenzia incaperilor, B: explicatia (stalpul, acoperisul neterminat, cota gaurii, bugetul, chepengul, gropile, podeaua)', M: (await import('./explica.mjs')).MUTATII },
+  { nume: 'ecran-usa', despre: 'recenzia pe ecran a incaperilor: golul tintit prin raza, dreptunghiul sub acoperis, usa retrasa intreaga, panoul de sus, inspectorul pe zid si pe usa', M: (await import('./ecran-usa.mjs')).MUTATII },
   { nume: 'unelte', despre: 'instrumentele: harnasamentul de mutatii (doar testul numit)', M: unelte },
 ]

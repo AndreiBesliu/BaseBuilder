@@ -18,7 +18,8 @@ import type { World } from '../src/sim/state.ts'
 import { CHUNK_CELLS, ePodea, isSolid, Material, VOXEL_LEVELS } from '../src/sim/terrain/chunk.ts'
 import type { Terrain } from '../src/sim/terrain/terrain.ts'
 import { materialAt } from '../src/sim/terrain/terrain.ts'
-import type { Impact, V3 } from './tinta.ts'
+import { primulVizibil } from './tinta.ts'
+import type { Impact, Raza, V3 } from './tinta.ts'
 
 /**
  * Lumea PLANULUI pentru unealta Usa: terenul plus desemnarile. Un jucator isi deseneaza de obicei
@@ -59,7 +60,110 @@ export function celuleUsiiPlan(w: World, rules: Rules, x: number, y: number, z: 
   return celuleUsii(lumePlan(w, rules), x, y, z)
 }
 
+/**
+ * Aceeasi intrebare ca `celuleUsiiPlan`, cu lumea planului construita O DATA: parcurgerea razei si
+ * dreptunghiul intreaba sute de celule la rand.
+ */
+export function celuleUsiiInPlan(w: World, rules: Rules): (x: number, y: number, z: number) => readonly Celula[] | null {
+  const lume = lumePlan(w, rules)
+  return (x, y, z) => celuleUsii(lume, x, y, z)
+}
+
 export const MESAJ_FARA_GOL = 'O ușă se pune într-un gol de perete (lat de 1–2 m, înalt de 1–3 m) sau într-o gaură de podea.'
+
+// ---------------------------------------------------------------------------------------------
+// golul tintit de unealta Usa: ce se vede PRIN gol nu e tinta (recenzia pe ecran, ECR-1)
+// ---------------------------------------------------------------------------------------------
+
+export interface IntrebareGol {
+  readonly raza: Raza
+  /** Impacturile pe teren si pe panourile usilor, sortate dupa `t` — toate, si cele taiate de slice. */
+  readonly impacturi: readonly Impact[]
+  /** Cota planului de taiere (nivelul activ = slice − 1), sau null. */
+  readonly slice: number | null
+  /** Pana unde se cauta cand raza nu atinge nimic vizibil (m). */
+  readonly departeMax: number
+  /** Tinta generica a piesei (`alegeTinta`, modul `piesa`), sau null cand n-are (cer, crapatura). */
+  readonly tinta: { readonly wx: number; readonly wy: number; readonly z: number } | null
+  /** Celulele golului care contine celula, in lumea planului; null = nu e un gol de usa acolo. */
+  readonly celuleUsii: (x: number, y: number, z: number) => readonly Celula[] | null
+}
+
+/** Plafonul parcurgerii: `departeMax` = 150 m pe diagonala trece prin cel mult ~3 × 150 celule. */
+const PASI_MAX_RAZA = 1024
+
+/**
+ * Golul de usa pe care il tinteste raza, pentru unealta Usa.
+ *
+ * Tinta generica a piesei e aerul din FATA primei fete atinse. Pe un gol neumplut raza trece prin gol si
+ * atinge podeaua camerei sau zidul din spate: celula tintita e in camera, nu in gol, si clicul pe
+ * mijlocul golului era refuzat — 45–83 % din pixelii golului, privit din fata; pe un gol doar planificat
+ * se accepta 27 % (recenzia pe ecran, ECR-1). Acum: tinta generica, daca e intr-un gol; altfel prima
+ * celula de pe raza (Amanatides–Woo, celula cu celula, de la camera) care e intr-un gol, pana la primul
+ * impact VIZIBIL. Si cand raza nu atinge nimic (o crapatura intre podea si zid, cerul prin gol): atunci
+ * pana la `departeMax` (completarea verificatorului: 553 din 72.001 de pixeli ramaneau refuzati fara ea).
+ *
+ * Cu nivelul pornit, doar celulele de la nivelul activ in jos: deasupra planului de taiere nu se vede nimic.
+ * Pura: impacturile vin de la apelant (acelasi raycast ca tinta), golul il spune `celuleUsii`.
+ */
+export function golulTintit(q: IntrebareGol): readonly Celula[] | null {
+  if (q.tinta !== null) {
+    const u = q.celuleUsii(q.tinta.wx, q.tinta.wy, q.tinta.z)
+    if (u !== null) return u
+  }
+  const { o, d } = q.raza
+  const lung = Math.hypot(d.x, d.y, d.z)
+  if (lung === 0) return null
+  const zMax = q.slice === null ? Infinity : q.slice - 1
+  const v = primulVizibil(q.impacturi, q.slice)
+  const tMax = v !== null ? v.t : q.departeMax / lung
+  // Grila scenei: celula (floor x, floor y, floor z) = (wx, cota, wy).
+  let x = Math.floor(o.x)
+  let y = Math.floor(o.y)
+  let z = Math.floor(o.z)
+  const sx = Math.sign(d.x), sy = Math.sign(d.y), sz = Math.sign(d.z)
+  const primul = (p: number, s: number, dd: number): number => (dd === 0 ? Infinity : (s > 0 ? Math.floor(p) + 1 - p : p - Math.floor(p)) / Math.abs(dd))
+  let tx = primul(o.x, sx, d.x)
+  let ty = primul(o.y, sy, d.y)
+  let tz = primul(o.z, sz, d.z)
+  const px = d.x === 0 ? Infinity : 1 / Math.abs(d.x)
+  const py = d.y === 0 ? Infinity : 1 / Math.abs(d.y)
+  const pz = d.z === 0 ? Infinity : 1 / Math.abs(d.z)
+  let t = 0
+  for (let n = 0; t <= tMax && n < PASI_MAX_RAZA; n++) {
+    if (y <= zMax) {
+      const u = q.celuleUsii(x, z, y)
+      if (u !== null) return u
+    }
+    if (tx <= ty && tx <= tz) { t = tx; x += sx; tx += px } else if (ty <= tz) { t = ty; y += sy; ty += py } else { t = tz; z += sz; tz += pz }
+  }
+  return null
+}
+
+const VECINI_6: readonly (readonly [number, number, number])[] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]
+
+/**
+ * Usa din care face parte celula (x, y, z): grupul 6-conex de celule pentru care `esteUsa` spune da,
+ * sortat. „Anulează" pe un cub al usii retragea doar cubul acela: ramanea o jumatate de usa, iar incaperea
+ * ramanea deschisa (recenzia pe ecran, ECR-6; designul v2 §8 cere undo comun). Grupul, nu golul din lumea
+ * planului: golul se poate strica intre timp (un stalp sapat) si ar lasa iar jumatatea.
+ */
+export function grupUsa(esteUsa: (x: number, y: number, z: number) => boolean, x: number, y: number, z: number): Celula[] {
+  if (!esteUsa(x, y, z)) return []
+  const out: Celula[] = [{ x, y, z }]
+  const vazut = new Set<string>([`${x},${y},${z}`])
+  for (let i = 0; i < out.length; i++) {
+    const c = out[i]!
+    for (const [dx, dy, dz] of VECINI_6) {
+      const nx = c.x + dx, ny = c.y + dy, nz = c.z + dz
+      const k = `${nx},${ny},${nz}`
+      if (vazut.has(k)) continue
+      vazut.add(k)
+      if (esteUsa(nx, ny, nz)) out.push({ x: nx, y: ny, z: nz })
+    }
+  }
+  return out.sort((a, b) => a.z - b.z || a.y - b.y || a.x - b.x)
+}
 
 /**
  * Cum sta panoul unei usi zidite:
@@ -77,6 +181,17 @@ export function orientareUsa(t: Terrain, x: number, y: number, z: number): Orien
     return r.ok ? r.value : Material.ROCA
   }
   const vertical = m(x, y, z + 1) === Material.USA || m(x, y, z - 1) === Material.USA
+  // Intr-un zid, nu intr-o placa: vecinii opusi pe o axa sunt zid (plin care continua in jos — sau
+  // cealalta coloana a unei usi late de 2), iar pe axa cealalta e aer de ambele parti (se trece prin el).
+  // Jumatatea de sus zidita singura, fara buiandrug, iesea chepeng: o lespede la capatul golului, cat timp
+  // cea de jos nu era zidita — sau pentru totdeauna, dupa o jumatate retrasa (recenzia pe ecran, ECR-8).
+  // Aerul pe axa cealalta pastreaza chepengul peste un coridor de 1 (vecinii lui sunt placa), iar zidul
+  // care continua in jos, pe cel dintr-o pasarela lata de 1 (sub placa e aer).
+  const zid = (a: number, b: number): boolean => isSolid(m(a, b, z)) && (isSolid(m(a, b, z - 1)) || m(a, b, z) === Material.USA)
+  const inZid = (ax: number, ay: number): boolean => zid(x + ax, y + ay) && zid(x - ax, y - ay)
+    && !isSolid(m(x + ay, y + ax, z)) && !isSolid(m(x - ay, y - ax, z))
+  if (!vertical && inZid(1, 0)) return 'subtireY'
+  if (!vertical && inZid(0, 1)) return 'subtireX'
   if (!vertical && m(x, y, z + 1) === Material.AER) {
     // Chepeng: macar doua vecine laterale sunt placa (plin cu aer deasupra), nu zid.
     let placa = 0

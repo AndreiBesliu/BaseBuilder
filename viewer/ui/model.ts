@@ -563,16 +563,51 @@ export interface IncapereLa {
   readonly e: Explicatie
 }
 
+/** Normala fetei atinse, în coordonatele lumii (x = wx, y = wy, z = cota): un versor pe o axă. */
+export interface NormalaFetei {
+  readonly x: number
+  readonly y: number
+  readonly z: number
+}
+
+/** Cât coboară inspectorul printr-un acoperiș gros (sau trece printr-un zid) până la aerul acoperit. */
+export const GROSIME_MAX_INSPECTOR = 4
+
+/** Vecinii din plan ai unei celule: întâi cei 4 pe axe, apoi diagonalele (colțul unei case). */
+const VECINI_PLAN: readonly (readonly [number, number])[] = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]
+
 /**
- * Ce aer întreabă inspectorul despre încăpere: celula de deasupra celei atinse (unde s-ar sta), dacă e
- * aer acoperit; altfel celula de SUB ea, dacă cea atinsă e un acoperiș peste aer acoperit — un clic pe
- * acoperișul unei case răspundea altfel „sub cerul liber" pe toată casa (panoul camerelor, JUC-7).
- * `null` = nimic acoperit aici. Pură: citește terenul și indexul, la zi în afara tickului.
+ * Ce aer întreabă inspectorul despre încăpere, pentru un clic pe celula (wx, wy, z), în ordinea asta:
+ *  1. aerul din FAȚA feței atinse (`n`, normala ei), dacă e acoperit — peretele, panoul ușii, tavanul privit
+ *     de jos: tocmai obiectele care închid încăperea, pe care jucătorul dă clic, nu spuneau nimic despre ea
+ *     (48 din 48 de celule de zid și ușă, recenzia explicației, EXP-6);
+ *  2. celula de deasupra (unde s-ar sta), apoi celula însăși, dacă sunt aer acoperit;
+ *  3. prin solid: în spatele feței (−n), apoi în jos pe coloană — un acoperiș, și unul gros —, cel mult
+ *     `GROSIME_MAX_INSPECTOR` niveluri (fără normală, un clic pe acoperiș răspundea altfel „sub cerul liber"
+ *     pe toată casa: panoul camerelor, JUC-7; la 2 m de acoperiș, tot nimic);
+ *  4. vecinii din plan ai solidului: zidul și ușa întrebate fără normală (alertele, orice apelant care n-o
+ *     are), colțul casei (atins de încăpere doar în diagonală).
+ * `sub` = aerul întrebat e SUB celula atinsă. `null` = nimic acoperit aici. Pură: citește terenul și
+ * indexul, la zi în afara tickului.
  */
-export function incaperea(w: World, wx: number, wy: number, z: number): IncapereLa | null {
+export function incaperea(w: World, wx: number, wy: number, z: number, n: NormalaFetei | null = null): IncapereLa | null {
   const r = cititorCamere(w.terrain)
-  if (esteAerAcoperit(r, wx, wy, z + 1)) return { sub: false, celula: { x: wx, y: wy, z: z + 1 }, e: explicaCelula(w.terrain, w.camere, wx, wy, z + 1) }
-  if (!esteAer(r, wx, wy, z) && esteAerAcoperit(r, wx, wy, z - 1)) return { sub: true, celula: { x: wx, y: wy, z: z - 1 }, e: explicaCelula(w.terrain, w.camere, wx, wy, z - 1) }
+  const la = (x: number, y: number, zz: number): IncapereLa => ({ sub: zz < z && x === wx && y === wy, celula: { x, y, z: zz }, e: explicaCelula(w.terrain, w.camere, x, y, zz) })
+  if (n !== null && esteAerAcoperit(r, wx + n.x, wy + n.y, z + n.z)) return la(wx + n.x, wy + n.y, z + n.z)
+  if (esteAerAcoperit(r, wx, wy, z + 1)) return la(wx, wy, z + 1)
+  if (esteAer(r, wx, wy, z)) return esteAerAcoperit(r, wx, wy, z) ? la(wx, wy, z) : null
+  const prin = (dx: number, dy: number, dz: number): IncapereLa | null => {
+    for (let k = 1; k <= GROSIME_MAX_INSPECTOR; k++) {
+      const x = wx + k * dx, y = wy + k * dy, zz = z + k * dz
+      if (esteAer(r, x, y, zz)) return esteAerAcoperit(r, x, y, zz) ? la(x, y, zz) : null
+    }
+    return null
+  }
+  const inSpate = n === null ? null : prin(-n.x, -n.y, -n.z)
+  if (inSpate !== null) return inSpate
+  const dedesubt = prin(0, 0, -1)
+  if (dedesubt !== null) return dedesubt
+  for (const [dx, dy] of VECINI_PLAN) if (esteAerAcoperit(r, wx + dx, wy + dy, z)) return la(wx + dx, wy + dy, z)
   return null
 }
 

@@ -510,6 +510,89 @@ async function ruleaza() {
       await astepta(400)
       const h2 = await p.js(`document.querySelector('.ui-sertar h2')?.textContent ?? ''`)
       bifa('usa-tintita', pUsa !== null && h2 === 'Ușă', 'clic pe panoul unei usi zidite: inspectorul spune „Ușă"', JSON.stringify({ pUsa, h2 }))
+      // --- 6d. (recenzia pe ecran a incaperilor: EXP-6, ECR-1, ECR-6) inspectorul pe panoul usii; unealta Usa
+      // prin mijlocul unui gol acoperit; usa desemnata se anuleaza intreaga, din toast si cu unealta Anulează ---
+      {
+        const incUsa = await p.js(`document.querySelector('.ui-incapere')?.textContent ?? ''`)
+        bifa('usa-inspector-incapere', h2 === 'Ușă' && /Încăpere · 18 m³/.test(incUsa), 'clic pe panoul usii: inspectorul spune si incaperea din spatele lui („Încăpere · 18 m³")', JSON.stringify({ h2, incUsa }))
+        // Casa cu golul DESCHIS (1×2, sub acoperis), zidita prin comenzile simularii, departe de cea de mai sus.
+        const cg = await p.js(`(async () => {
+          const K = __kinstead, w = K.world
+          const C = await import('/@fs/${REPO}/src/sim/commands.ts')
+          const liber = (x0, y0) => {
+            const a = w.agents; for (let i = 0; i < a.count; i++) if (a.alive[i]) { const x = Math.floor(a.x[i] / 1000), y = Math.floor(a.y[i] / 1000); if (x >= x0 - 3 && x <= x0 + 7 && y >= y0 - 6 && y <= y0 + 7) return false }
+            const it = w.iteme; for (let i = 0; i < it.count; i++) if (it.alive[i] && it.wx[i] >= x0 - 3 && it.wx[i] <= x0 + 7 && it.wy[i] >= y0 - 6 && it.wy[i] <= y0 + 7) return false
+            const d = w.desemnari; for (let i = 0; i < d.count; i++) if (d.alive[i] && d.wx[i] >= x0 - 3 && d.wx[i] <= x0 + 7 && d.wy[i] >= y0 - 6 && d.wy[i] <= y0 + 7) return false
+            return true
+          }
+          for (let r = 10; r < 90; r++) for (let dx = -r; dx <= r; dx++) for (const dy of [-r, r]) {
+            const x0 = ${hx} + dx, y0 = ${hy} + dy, s = K.suprafata(x0, y0)
+            if (s === null || !liber(x0, y0)) continue
+            let plat = true
+            for (let a = -1; a <= 5 && plat; a++) for (let b = -5; b <= 5; b++) if (K.suprafata(x0 + a, y0 + b) !== s) { plat = false; break }
+            if (!plat) continue
+            const fill = (x, y, z, m) => C.applyCommand(w, { kind: 'fill', wx: x, wy: y, z, material: m }).ok
+            let ok = true
+            for (let z = s + 1; z <= s + 2; z++) for (let a = 0; a < 5; a++) for (let b = 0; b < 5; b++) {
+              if ((a !== 0 && a !== 4 && b !== 0 && b !== 4) || (a === 2 && b === 0)) continue
+              ok = fill(x0 + a, y0 + b, z, 6) && ok
+            }
+            for (let a = 0; a < 5; a++) for (let b = 0; b < 5; b++) ok = fill(x0 + a, y0 + b, s + 3, 6) && ok
+            return { x0, y0, s, ok }
+          }
+          return null
+        })()`)
+        if (cg === null || !cg.ok) bifa('usa-gol-mijloc', false, 'casa cu golul deschis', JSON.stringify(cg))
+        else {
+          const { x0: gx0, y0: gy0, s: gs } = cg
+          // Mesh-urile se refac din jurnal doar cu simularea pornita: cateva cadre fara pauza, apoi iar pauza.
+          if (await p.js('__kinstead.stare().pauza')) { await p.tasta(' '); await astepta(700); await p.tasta(' '); await astepta(300) }
+          await p.tasta('c')
+          const bU = await p.js(`(() => { const b = document.querySelector('button[title^="Ușă de piatră"]'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
+          if (bU) await p.click(bU.x, bU.y)
+          await p.js(`document.querySelectorAll('.ui-toast').forEach((t) => t.remove()); true`)
+          // Din fata, la 35° si 12 m: centrul proiectat al golului (raza trece prin gol pe podeaua camerei).
+          await p.js(`(() => { const K = __kinstead, e = 35 * Math.PI / 180; K.controls.target.set(${gx0 + 2.5}, ${gs + 2}, ${gy0}); K.camera.position.set(${gx0 + 2.5}, ${gs + 2} + 12 * Math.sin(e), ${gy0} - 12 * Math.cos(e)); K.controls.update(); return true })()`)
+          await astepta(300)
+          const usiGol = async () => (await p.js('__f.des()')).filter((d) => d.piesa === 5 && d.wx === gx0 + 2 && d.wy === gy0).map((d) => d.z - gs).sort()
+          const c = await p.js(`(() => { const q = __f.proj(${gx0 + 2.5}, ${gs + 2}, ${gy0}); const x = Math.round(q.x), y = Math.round(q.y); return { x, y, canvas: document.elementFromPoint(x, y) === __kinstead.renderer.domElement } })()`)
+          await p.muta(c.x - 3, c.y); await p.muta(c.x, c.y); await astepta(250)
+          const fant = await p.js(`({ vis: __kinstead.fantoma.visible, scale: __kinstead.fantoma.scale.toArray() })`)
+          if (c.canvas) await p.click(c.x, c.y)
+          const dupaClic = await usiGol()
+          const toastUsa = await p.js(`[...document.querySelectorAll('.ui-toast')].map((t) => t.textContent).join(' | ')`)
+          bifa('usa-gol-mijloc', c.canvas && JSON.stringify(dupaClic) === '[1,2]', 'Construiește ▸ Ușă, clic pe MIJLOCUL unui gol acoperit (vazut prin el: podeaua camerei): usa intreaga, 2 desemnari', JSON.stringify({ c, fant, dupaClic, toastUsa, casa: cg }))
+          // „Anulează" din toastul clicului retrage toata usa.
+          const bAn = await p.js(`(() => { const t = [...document.querySelectorAll('.ui-toast')].find((e) => /Ușă/.test(e.textContent) && e.querySelector('button')); if (!t) return null; const r = t.querySelector('button').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
+          if (bAn) await p.click(bAn.x, bAn.y)
+          const dupaToast = await usiGol()
+          bifa('usa-toast-anuleaza', dupaClic.length === 2 && bAn !== null && dupaToast.length === 0, 'clicul Usa are „Anulează" in toast, ca dreptunghiul: retrage toate celulele usii', JSON.stringify({ dupaClic, bAn, dupaToast, toastUsa }))
+          // Unealta Anulează pe cubul de SUS al usii (desemnata prin comenzi): nu ramane o jumatate de usa.
+          await p.js(`(async () => {
+            const C = await import('/@fs/${REPO}/src/sim/commands.ts')
+            for (const z of [${gs + 1}, ${gs + 2}]) C.applyCommand(__kinstead.world, { kind: 'desemneaza', wx: ${gx0 + 2}, wy: ${gy0}, z, piesa: 5 })
+            return true
+          })()`)
+          await p.js(`document.querySelectorAll('.ui-toast').forEach((t) => t.remove()); true`)
+          const inainteAn = await usiGol()
+          await p.tasta('a')
+          const sus = await p.js(`(() => {
+            const K = __kinstead, q = __f.proj(${gx0 + 2.5}, ${gs + 2.5}, ${gy0 + 0.5})
+            for (let r = 0; r <= 24; r++) for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
+              if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue
+              const x = Math.round(q.x) + dx, y = Math.round(q.y) + dy
+              if (document.elementFromPoint(x, y) !== K.renderer.domElement) continue
+              const t = K.tintaLa(x, y, { ctrl: true, shift: false, alt: false })
+              if (t.ok && t.wx === ${gx0 + 2} && t.wy === ${gy0} && t.z === ${gs + 2}) return { x, y }
+            }
+            return null
+          })()`)
+          if (sus !== null) await p.click(sus.x, sus.y)
+          const dupaAn = await usiGol()
+          bifa('usa-anuleaza-sus', inainteAn.length === 2 && sus !== null && dupaAn.length === 0, 'Anulează pe cubul de sus al usii: 0 desemnari USA (nu o jumatate de usa)', JSON.stringify({ inainteAn, sus, dupaAn }))
+          await p.tasta('v')
+        }
+      }
       await p.tasta('i')
     }
   }

@@ -283,8 +283,24 @@ export interface IntrebareTinta {
 }
 
 export type RaspunsTinta =
-  | { readonly ok: true; readonly wx: number; readonly wy: number; readonly z: number; readonly sursa: SursaColoanei | 'cub' }
+  | {
+    readonly ok: true; readonly wx: number; readonly wy: number; readonly z: number; readonly sursa: SursaColoanei | 'cub'
+    /** `inspecteaza` pe teren: normala fetei atinse, in coordonatele lumii (`normalaLumii`). */
+    readonly n?: V3
+  }
   | { readonly ok: false; readonly mesaj: string }
+
+/**
+ * Normala fetei atinse, in coordonatele LUMII (x = wx, y = wy, z = cota), rotunjita la axa dominanta:
+ * pe o fata de voxel e chiar normala ei, pe panta netezita e sus. Inspectorul intreaba aerul din fata
+ * fetei (recenzia explicatiei, EXP-6).
+ */
+export function normalaLumii(i: Impact): V3 {
+  const ax = Math.abs(i.n.x), ay = Math.abs(i.n.y), az = Math.abs(i.n.z)
+  if (ay >= ax && ay >= az) return { x: 0, y: 0, z: i.n.y < 0 ? -1 : 1 }
+  if (ax >= az) return { x: i.n.x < 0 ? -1 : 1, y: 0, z: 0 }
+  return { x: 0, y: i.n.z < 0 ? -1 : 1, z: 0 }
+}
 
 export function alegeTinta(q: IntrebareTinta): RaspunsTinta {
   const zMaxVazut = q.slice === null ? Infinity : q.slice - 1
@@ -303,7 +319,7 @@ export function alegeTinta(q: IntrebareTinta): RaspunsTinta {
     // Cubul se deseneaza peste tot (fara test de adancime), deci castiga si fata de terenul din fata lui.
     if (j !== null) return { ok: true, ...j.c, sursa: 'cub' }
     if (v === null) return faraTinta(q)
-    return { ok: true, ...celulaLangaFata(v, -1), sursa: 'teren' }
+    return { ok: true, ...celulaLangaFata(v, -1), sursa: 'teren', ...(q.mod === 'inspecteaza' ? { n: normalaLumii(v) } : {}) }
   }
   if ((q.mod === 'piesa' || q.mod === 'zona') && q.slice !== null) {
     const zActiv = q.slice - 1

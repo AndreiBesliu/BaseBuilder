@@ -238,8 +238,8 @@ export const MUTATII = [
   {
     n: 'JUC-7: clicul pe acoperis nu intreaba de incaperea de dedesubt',
     f: 'viewer/ui/model.ts',
-    a: '  if (!esteAer(r, wx, wy, z) && esteAerAcoperit(r, wx, wy, z - 1)) return { sub: true,',
-    b: '  if (false) return { sub: true,',
+    a: '  const dedesubt = prin(0, 0, -1)\n',
+    b: '  const dedesubt = null as IncapereLa | null\n',
     t: TV, e: 'viewer incaperi (JUC-7)',
   },
 ]
