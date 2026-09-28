@@ -4591,3 +4591,17 @@ fara versiune: o proba care „doar citeste" otravea profilul (acum `indexedDB.d
 - **Remesh-ul la promovarea unui apron:** 9–15 chunk-uri intr-un cadru, 41–71 ms (C2-4, preexistent), si
   vecinii promovati ai unui apron nou nerefacuti (INT-12, preexistent): ambele pe calea de gate.
 - **T-02 complet:** proba negativa pe FIECARE bifa (azi trei); **Esc intr-un camp de text** — pastrat.
+
+---
+
+## Task Started — 28.09.2026 — S24-27, tăietura 1: camerele (și ușa)
+
+**Prompt:** „si continua" (după închiderea recenziei UI-ului)
+**Model:** Claude Opus 5.5 (claude-opus-5-5), Claude Code, Ultracode.
+
+Recenzia UI-ului e închisă; următoarea felie din PLAN e S24-27 — camere, temperatură, hrană. Camera e
+sistemul-semnătură din DESIGN §5.1: un volum de aer închis, din care ies temperatura pe un graf mic,
+conservarea hranei sub 5 °C și, mai târziu, rolul camerei. Tăietura asta face camerele și piesa fără de
+care nicio cameră în care intră un om nu e închisă: ușa. Temperatura și hrana vin după, pe camerele
+măsurate. Metoda, ca la felia construcției: măsurători pe HEAD → design → panou adversarial pe design
+→ cod → probe → recenzie a codului.

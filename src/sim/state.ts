@@ -27,6 +27,7 @@ import type { ItemStore } from './iteme.ts'
 import type { ZoneStore } from './zone.ts'
 import type { MemorieSprijin } from './stabilitate.ts'
 import type { MemorieAcces } from './acces.ts'
+import type { IndexCamere } from './camere.ts'
 
 /**
  * Versiunea schemei de stare. Creste la ORICE camp nou. Vezi save.ts.
@@ -502,6 +503,13 @@ export interface World {
    * zero; o lume incarcata porneste goala. Vezi `siguraMemorat`.
    */
   acces: MemorieAcces
+  /**
+   * TRANSIENT — încăperile: componentele de aer acoperit, pe bucăți de 16×16 × z. O funcție de teren,
+   * ținută la zi DOAR în punctele fixe ale simulării (capătul tickului, capătul comenzilor de teren):
+   * în afara lor, `camere.vazute === terrain.editari`. Nu intră în hash și nu se salvează; `decode` o
+   * reconstruiește. Vezi `camere.ts`.
+   */
+  camere: IndexCamere
   /**
    * PERSISTED — cati pioni au PLECAT din asezare, de la inceputul lumii.
    *

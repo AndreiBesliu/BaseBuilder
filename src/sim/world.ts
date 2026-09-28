@@ -25,6 +25,7 @@ import { makeItemStore } from './iteme.ts'
 import { makeZoneStore } from './zone.ts'
 import { memorieSprijin } from './stabilitate.ts'
 import { memorieAcces } from './acces.ts'
+import { indexCamere, sincronizeazaCamere } from './camere.ts'
 
 /**
  * Creeaza o lume. NU incarca teren: `createTerrain` aloca doar structura goala,
@@ -36,6 +37,7 @@ import { memorieAcces } from './acces.ts'
 export function createWorld(seed: number, rules: Rules = DEFAULT_RULES): World {
   const rng = {} as Record<RngStreamName, RngState>
   for (const name of RNG_STREAMS) rng[name] = stream(seed, name)
+  const terrain = createTerrain(seed, rules.chunkResidentRadius)
 
   return {
     schema: SCHEMA_VERSION,
@@ -53,7 +55,7 @@ export function createWorld(seed: number, rules: Rules = DEFAULT_RULES): World {
     // au inceput sa se nasca pe sol: siturile de sapat sunt imprastiate pe toti
     // cei 16 km, iar `spawnAgent` le refuza pe toate cu IN_AFARA_LUMII.
     bounds: { w: WORLD_CELLS * MM_PER_CELL, h: WORLD_CELLS * MM_PER_CELL },
-    terrain: createTerrain(seed, rules.chunkResidentRadius),
+    terrain,
     regions: createRegions(),
     paths: makePathStore(rules.agentCapacity, rules.maxPathCells),
     desemnari: makeDesignationStore(rules.designationCapacity),
@@ -63,6 +65,8 @@ export function createWorld(seed: number, rules: Rules = DEFAULT_RULES): World {
     ratiune: makeRatiuneStore(rules.agentCapacity),
     sprijin: memorieSprijin(),
     acces: memorieAcces(),
+    // Gol și la zi: o lume nouă n-are aer acoperit (heightfield fără surplombe).
+    camere: indexCamere(terrain),
     plecatiTotal: 0,
   }
 }
@@ -75,6 +79,9 @@ export function tick(w: World, rules: Rules = DEFAULT_RULES): void {
   // stare INAINTE sa existe ceva de miscat — adica exact lucrurile care nu se
   // pot retrofita. Ramane ca stare Idle: un pion fara job hoinareste.
   stepAgents(w, rules)
+  // Încăperile, în punctul fix de la capătul tickului: lotul lor = editările unui tick (sau ale
+  // unei comenzi de teren). Nimeni altcineva nu le sincronizează — vezi antetul din camere.ts.
+  sincronizeazaCamere(w.camere, w.terrain)
   w.tick++
 }
 

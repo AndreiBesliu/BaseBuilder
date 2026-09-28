@@ -36,6 +36,7 @@ import { makeZoneStore, reindexeazaZone } from './zone.ts'
 import type { ZoneStore } from './zone.ts'
 import { memorieSprijin } from './stabilitate.ts'
 import { memorieAcces } from './acces.ts'
+import { construiesteCamere } from './camere.ts'
 
 /** Creste cand se schimba FORMATUL de fisier, independent de schema de stare. */
 export const SAVE_BUILD = 1
@@ -611,6 +612,9 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
     ratiune: makeRatiuneStore(capacity),
     sprijin: memorieSprijin(),
     acces: memorieAcces(),
+    // Reconstruit ACUM, nu la primul tick: lumea încărcată trebuie să aibă, înainte de orice,
+    // exact indexul lumii continue (care e la zi în afara tickului).
+    camere: construiesteCamere(terrain),
     plecatiTotal: (data.plecatiTotal as number | undefined) ?? 0,
   }
   const construit = valideazaJoburiDeConstruit(w, rules)

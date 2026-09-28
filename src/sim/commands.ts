@@ -21,6 +21,7 @@ import { cellOf, clearPath } from './drumuri.ts'
 import type { Rules } from './content.ts'
 import { DEFAULT_RULES } from './content.ts'
 import { isWalkable, rebuildDirty } from './regions.ts'
+import { sincronizeazaCamere } from './camere.ts'
 import { esteMaterialCunoscut, isSolid, MATERIAL_MAX, type MaterialId } from './terrain/chunk.ts'
 import { CHUNK_GRID, inWorld, materialAt, setFocus, voxelRangeM, WORLD_CELLS } from './terrain/terrain.ts'
 import { adaugaDesemnare, Desemnare, slotDesemnare } from './desemnari.ts'
@@ -233,6 +234,9 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       // reconstructie, nelegate. Un save luat in fereastra aia diverge (CONT-1).
       // Invariantul: in afara unui tick, `regions.dirty` e gol.
       rebuildDirty(w.terrain, w.regions, rules)
+      // La fel incaperile: lotul lor se inchide aici, nu la tickul urmator — o salvare luata intre
+      // comanda si tick ar fi scris altfel stare pusa pe ele (panoul camerelor, CTR-2).
+      sincronizeazaCamere(w.camere, w.terrain)
       return accept(0)
     }
 
@@ -270,6 +274,7 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       if (!out.ok) return out
       // Ca la `dig`: fara fereastra comanda -> tick cu blocuri murdare.
       rebuildDirty(w.terrain, w.regions, rules)
+      sincronizeazaCamere(w.camere, w.terrain)
       return accept(0)
     }
 
