@@ -79,6 +79,11 @@ export const Piesa = {
   SCARA: 3,
   /** Grinda de piatra: sprijin cu raza `suportRazaGrinda`, daca e ea insasi sprijinita de sol. */
   GRINDA: 4,
+  /**
+   * Usa de piatra (S24-27, t.1): o celula; un gol de 2 m cere doua, una peste alta. Comportamentul
+   * vine din MATERIAL (`Material.USA`), nu din id-ul piesei — `parsePiese` le leaga in ambele sensuri.
+   */
+  USA: 5,
 } as const
 export type PiesaId = (typeof Piesa)[keyof typeof Piesa]
 

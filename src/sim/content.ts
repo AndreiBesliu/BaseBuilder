@@ -419,6 +419,7 @@ const NUME_MATERIALE: readonly (readonly [string, number])[] = [
   ['PIATRA_CONSTRUITA', Material.PIATRA_CONSTRUITA],
   ['MOLOZ', Material.MOLOZ],
   ['GRINDA', Material.GRINDA],
+  ['USA', Material.USA],
 ]
 const NUME_ITEME: readonly (readonly [string, number])[] = [
   ['PIATRA', Item.PIATRA],
@@ -435,6 +436,7 @@ const NUME_PIESE: readonly (readonly [string, number])[] = [
   ['PODEA', Piesa.PODEA],
   ['SCARA', Piesa.SCARA],
   ['GRINDA', Piesa.GRINDA],
+  ['USA', Piesa.USA],
 ]
 const MAX_YIELD = 10000
 const MAX_LUCRU = 1000000
@@ -486,7 +488,7 @@ function parsePiese(raw: unknown): Outcome<SpecPiesa[]> {
     // vertical numara podeaua naturala ca sa deosebeasca „afara" de un acoperis fara scara,
     // iar sapatul lui ar fi sapat in roca, nu deconstructie (alta atingere).
     if (!esteMaterialDeStructura(mat[1])) {
-      return refuse(Reason.VALOARE_INVALIDA, { camp: `piese.${nume}.material`, valoare: mat[0], motiv: 'o piesa trebuie sa fie dintr-un material de structura (PIATRA_CONSTRUITA, GRINDA, LEMN_CONSTRUIT)' })
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `piese.${nume}.material`, valoare: mat[0], motiv: 'o piesa trebuie sa fie dintr-un material de structura (PIATRA_CONSTRUITA, GRINDA, LEMN_CONSTRUIT, USA)' })
     }
     const c = e.cantitate
     if (typeof c !== 'number' || !Number.isInteger(c) || c < 1 || c > MAX_YIELD) {
@@ -502,6 +504,12 @@ function parsePiese(raw: unknown): Outcome<SpecPiesa[]> {
     // CONT-2). O grinda de LEMN se face din `digYield.GRINDA` (felul si cantitatea), nu de aici.
     if (id === Piesa.GRINDA && mat[1] !== Material.GRINDA) {
       return refuse(Reason.VALOARE_INVALIDA, { camp: `piese.${nume}.material`, valoare: mat[0], motiv: 'grinda trebuie sa fie din materialul GRINDA; felul platit se schimba din digYield.GRINDA' })
+    }
+    // Usa e usa prin MATERIAL (mersul, previzualizarea, sigilarea se uita la el), iar unealta si
+    // UI-ul prin PIESA — deci garda merge in AMBELE sensuri: un PERETE din USA ar fi un zid prin
+    // care se trece, o USA din piatra un zid pus de butonul Usa (panoul camerelor, CTR-9 / USA-4).
+    if ((id === Piesa.USA) !== (mat[1] === Material.USA)) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `piese.${nume}.material`, valoare: mat[0], motiv: 'materialul USA e doar al piesei USA, iar piesa USA e doar din materialul USA' })
     }
     // `mat[1]` vine din `NUME_MATERIALE`, care e construit din `Material.*`: cheia
     // a fost deja cautata in tabelul ala, deci ingustarea e sigura.
@@ -1045,7 +1053,7 @@ export const DEFAULT_RULES: Rules = {
   zoneCellCapacity: 4096,
   zonePriorityLevels: 5,
   zonePriorityDefault: 3,
-  // Indexat cu MaterialId: AER, ROCA, PAMANT, IARBA, APA, LEMN_CONSTRUIT, PIATRA_CONSTRUITA.
+  // Indexat cu MaterialId: AER, ROCA, PAMANT, IARBA, APA, LEMN_CONSTRUIT, PIATRA_CONSTRUITA, MOLOZ, GRINDA, USA.
   digYield: [
     { fel: 0, cantitate: 0 },
     { fel: Item.PIATRA, cantitate: 20 },
@@ -1059,6 +1067,8 @@ export const DEFAULT_RULES: Rules = {
     { fel: Item.PIATRA, cantitate: 10 },
     // Grinda de piatra da inapoi cat a costat (invariantul piesa ↔ digYield).
     { fel: Item.PIATRA, cantitate: 20 },
+    // Usa de piatra, la fel.
+    { fel: Item.PIATRA, cantitate: 20 },
   ],
   // Kitul de constructie, indexat cu `PiesaId`. Intrarea 0 e santinela.
   // `cantitate` e legata de `digYield` printr-un invariant: vezi `parseRules`.
@@ -1071,6 +1081,8 @@ export const DEFAULT_RULES: Rules = {
     // jumatate). Scara de LEMN vine cu lemnul.
     { material: Material.PIATRA_CONSTRUITA, cantitate: 20, lucru: 300 },
     { material: Material.GRINDA, cantitate: 20, lucru: 500 },
+    // Usa: o celula, cat o podea. Un gol de 2 m cere doua.
+    { material: Material.USA, cantitate: 20, lucru: 300 },
   ],
   // Nevoile. La 20 Hz: FOAME scade 6 la 250 de tickuri, deci 1000/6 × 250 =
   // ~41.700 de tickuri ≈ 35 de minute de la satul la zero; prefera sa manance la

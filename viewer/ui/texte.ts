@@ -84,6 +84,7 @@ export const NUME_PIESA: Readonly<Record<number, string>> = {
   [Piesa.PODEA]: 'Podea',
   [Piesa.SCARA]: 'Scară',
   [Piesa.GRINDA]: 'Grindă',
+  [Piesa.USA]: 'Ușă',
 }
 
 /** Indexat 0..MATERIAL_MAX; testul trece prin toate. */
@@ -97,6 +98,7 @@ export const NUME_MATERIAL: Readonly<Record<number, string>> = {
   [Material.PIATRA_CONSTRUITA]: 'Piatră zidită',
   [Material.MOLOZ]: 'Moloz',
   [Material.GRINDA]: 'Grindă',
+  [Material.USA]: 'Ușă',
 }
 
 export const NUME_ZONA: Readonly<Record<number, string>> = {

@@ -213,8 +213,8 @@ export const MUTATII = [
   {
     n: 'refugiul doar COBOARA: un pion zidit primeste chiar cota lui',
     f: 'src/sim/joburi.ts',
-    a: '  while (solLa(t, wx, wy, z) === Sol.SOLID) z++',
-    b: '  void solLa',
+    a: '  while (blocheazaMersul(materialFast(t, wx, wy, z))) z++',
+    b: '  void blocheazaMersul',
     t: 'tests/stabilitate.test.ts', e: 'molozul nu zideste ce gaseste',
   },
   {

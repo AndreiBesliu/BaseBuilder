@@ -19,6 +19,7 @@ import { MUTATII as ui } from './ui.mjs'
 import { MUTATII as resurse } from './resurse.mjs'
 import { MUTATII as recenzieUi } from './recenzie-ui.mjs'
 import { MUTATII as camere } from './camere.mjs'
+import { MUTATII as usa } from './usa.mjs'
 
 export const SUITE = [
   { nume: 'carat', despre: 'taietura 2: iteme, carat, zone pictate', M: carat },
@@ -33,5 +34,6 @@ export const SUITE = [
   { nume: 'recenzie-ui', despre: 'recenzia de cod a UI-ului: depozitul, construitul, blocatele, dormitul, textele, salvarea automata, tintirea fara UI', M: recenzieUi },
   { nume: 'resurse', despre: 'mormanele de resurse pe ecran: treapta, rotatia, instantele, culoarea din fisier', M: resurse },
   { nume: 'camere', despre: 'S24-27 t.1: incaperile — indexul pe bucati, apa, fantomele, colturile de chunk, punctele fixe', M: camere },
+  { nume: 'usa', despre: 'S24-27 t.1: usa — mersul, privirea inainte, sigilarea, refugiul, previzualizarea, zonele, continutul', M: usa },
   { nume: 'unelte', despre: 'instrumentele: harnasamentul de mutatii (doar testul numit)', M: unelte },
 ]

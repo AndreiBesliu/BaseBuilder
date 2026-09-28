@@ -83,22 +83,22 @@ export const MUTATII = [
   {
     n: 'graful stabil uita santierul din CELULA (se sta pe o piesa planificata)',
     f: 'src/sim/acces.ts',
-    a: '      if (C.has(cellKey(x, y, z))) return false\n      if (!isSolid(materialCitit(r, x, y, z - 1))',
-    b: '      if (!isSolid(materialCitit(r, x, y, z - 1))',
+    a: '      if (C.has(cellKey(x, y, z))) return false\n      if (!ePodea(materialCitit(r, x, y, z - 1))) {',
+    b: '      if (!ePodea(materialCitit(r, x, y, z - 1))) {',
     t: 'tests/acces.test.ts', e: 'graful STABIL e exact',
   },
   {
     n: 'graful stabil uita santierul din CAP',
     f: 'src/sim/acces.ts',
-    a: '        if (isSolid(materialCitit(r, x, y, z + h)) || C.has(cellKey(x, y, z + h))) return false',
-    b: '        if (isSolid(materialCitit(r, x, y, z + h))) return false',
+    a: '        if (blocheazaMersul(materialCitit(r, x, y, z + h)) || C.has(cellKey(x, y, z + h))) return false',
+    b: '        if (blocheazaMersul(materialCitit(r, x, y, z + h))) return false',
     t: 'tests/acces.test.ts', e: 'graful STABIL e exact',
   },
   {
     n: 'graful stabil nu vede podeaua zidita IPOTETIC',
     f: 'src/sim/acces.ts',
-    a: '      if (!isSolid(materialCitit(r, x, y, z - 1)) && !ziditaIpotetic(Z, inPlus, cellKey(x, y, z - 1))) return false',
-    b: '      if (!isSolid(materialCitit(r, x, y, z - 1))) return false',
+    a: '        if (!ziditaIpotetic(Z, inPlus, jos) || (FP !== null && FP.has(jos))) return false',
+    b: '        return false',
     t: 'tests/acces.test.ts', e: 'graful STABIL e exact',
   },
   {
@@ -568,8 +568,8 @@ export const MUTATII = [
   {
     n: 'coborarea sare un nivel mai adanc decat coborareUrgentaM',
     f: 'src/sim/acces.ts',
-    a: '      while (lz > cz - D && !solid(nx, ny, lz - 1)) lz--',
-    b: '      while (lz > cz - D - 1 && !solid(nx, ny, lz - 1)) lz--',
+    a: '      while (lz > cz - D && !peCe(nx, ny, lz - 1)) lz--',
+    b: '      while (lz > cz - D - 1 && !peCe(nx, ny, lz - 1)) lz--',
     t: 'tests/acces-coborare.test.ts', e: 'COBORAREA: marginea cea mai apropiata',
   },
   {
@@ -582,8 +582,8 @@ export const MUTATII = [
   {
     n: 'coborarea trece pe sub o grinda la inaltimea capului',
     f: 'src/sim/acces.ts',
-    a: '      for (let h = 0; h < H && liber; h++) if (solid(nx, ny, cz + h)) liber = false',
-    b: '      for (let h = 0; h < 1 && liber; h++) if (solid(nx, ny, cz + h)) liber = false',
+    a: '      for (let h = 0; h < H && liber; h++) if (blocheaza(nx, ny, cz + h)) liber = false',
+    b: '      for (let h = 0; h < 1 && liber; h++) if (blocheaza(nx, ny, cz + h)) liber = false',
     t: 'tests/acces-coborare.test.ts', e: 'COBORAREA: o margine care da tot intr-o punga',
   },
   // --- recenzia din 27.09: plasa (codul mutatiei din recenzie in paranteza) ---
@@ -702,15 +702,15 @@ export const MUTATII = [
   {
     n: 'apa e calcabila in graful stabil (A02)',
     f: 'src/sim/acces.ts',
-    a: '      if (isSolid(m) || m === Material.APA) return false\n      // Afara din lume',
-    b: '      if (isSolid(m)) return false\n      // Afara din lume',
+    a: '      if (blocheazaMersul(m) || m === Material.APA) return false\n      // Afara din lume',
+    b: '      if (blocheazaMersul(m)) return false\n      // Afara din lume',
     t: 'tests/acces-plasa.test.ts', e: 'pe APA',
   },
   {
     n: 'apa e calcabila in graful W (A03: sigilarea, pungile planului, coborarea)',
     f: 'src/sim/acces.ts',
-    a: '      if (isSolid(m) || m === Material.APA) return false\n      if (extra !== null',
-    b: '      if (isSolid(m)) return false\n      if (extra !== null',
+    a: '      if (blocheazaMersul(m) || m === Material.APA) return false\n      if (extra !== null',
+    b: '      if (blocheazaMersul(m)) return false\n      if (extra !== null',
     t: 'tests/acces-plasa.test.ts', e: 'pe APA',
   },
   {

@@ -38,7 +38,7 @@
  */
 
 import type { Rules } from './content.ts'
-import { CHUNK_CELLS, isSolid, Material } from './terrain/chunk.ts'
+import { blocheazaMersul, CHUNK_CELLS, ePodea, Material } from './terrain/chunk.ts'
 import type { Terrain } from './terrain/terrain.ts'
 import { groundLevelM, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
 
@@ -79,10 +79,11 @@ export function materialFast(t: Terrain, wx: number, wy: number, z: number): num
  */
 export function isWalkable(t: Terrain, wx: number, wy: number, z: number, rules: Rules): boolean {
   const here = materialFast(t, wx, wy, z)
-  if (isSolid(here) || here === Material.APA) return false
-  if (!isSolid(materialFast(t, wx, wy, z - 1))) return false
+  // Usa: se trece prin ea (celula si capul), dar nu se sta pe ea — `blocheazaMersul` / `ePodea`.
+  if (blocheazaMersul(here) || here === Material.APA) return false
+  if (!ePodea(materialFast(t, wx, wy, z - 1))) return false
   for (let h = 1; h < rules.agentHeadroomM; h++) {
-    if (isSolid(materialFast(t, wx, wy, z + h))) return false
+    if (blocheazaMersul(materialFast(t, wx, wy, z + h))) return false
   }
   return true
 }

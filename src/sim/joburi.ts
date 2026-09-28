@@ -92,11 +92,11 @@ import { accept, codMotiv, refuse, Reason } from './result.ts'
 import type { FelJobId, World } from './state.ts'
 import { Categorie, CATEGORII, Faction, FelJob, Gand, GAND_PENTRU_NEVOIE, ITEME, Nevoie, NEVOI, PasCara, PasConstruieste, PasJob, pasDeMers, PasNevoie, puneGand } from './state.ts'
 import { cellOf, centerMm, clearPath } from './drumuri.ts'
-import { blockOfCell, ensureArea, find, isWalkable, markDirty, NO_REGION, regionAt, REGION_SIZE } from './regions.ts'
+import { blockOfCell, ensureArea, find, isWalkable, markDirty, materialFast, NO_REGION, regionAt, REGION_SIZE } from './regions.ts'
 import type { RegionStore } from './regions.ts'
 import type { Terrain } from './terrain/terrain.ts'
-import { dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
-import { Material } from './terrain/chunk.ts'
+import { bazaVoxeli, dig, fill, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
+import { blocheazaMersul, ePodea, Material } from './terrain/chunk.ts'
 import type { MaterialId } from './terrain/chunk.ts'
 import { areDeLucruInPunga, cauzaFaraAcces, componenteInchiseDeMemorat, dovedireMemorie, etichetare, FelLucru, felDesemnare, felSapa, iesireDinPunga, inchideriPlan, nodStabil, predicatAcces, pungaDin, siguraDupaZidire, siguraMemorat } from './acces.ts'
 import type { CauzaAccesId, FelLucruId, InchideriPlan } from './acces.ts'
@@ -2991,10 +2991,18 @@ export function constructiaPrevizualizata(w: World, rules: Rules): {
   // Grinzile PLANIFICATE: fara ele inchiderea promite mai putin decat se poate construi
   // (masurat de panou: 81 din 120 de planuri, 5.682 de celule).
   const grinzi: number[] = []
+  // Usile planului (prin MATERIAL): nu intra in C — raman trecere si in F —, iar in Z nu sunt podea.
+  // Trec insa prin inchidere ca orice piesa (sprijin + acces fara privire inainte), iar una fara
+  // acces ajunge in `faraAcces` (panoul camerelor: scoasa de acolo, o usa din groapa era invizibila).
+  const nuInC = new Set<number>()
+  const faraPodea = new Set<number>()
   for (let i = 0; i < d.count; i++) {
     if (d.alive[i] !== 1 || d.kind[i] !== Desemnare.CONSTRUIESTE) continue
     const k = cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!)
     celule.push(k)
+    const mat = rules.piese[d.piesa[i]!]!.material
+    if (!blocheazaMersul(mat)) nuInC.add(k)
+    if (!ePodea(mat)) faraPodea.add(k)
     // Grinda prin MATERIAL, ca fizica (`grindaInPicioare`), nu prin numele piesei: o piesa
     // „grinda" din alt material n-ar tine nimic, iar o alta piesa din materialul GRINDA ar
     // tine (recenzia, CONT-2: previzualizarea promitea 12 celule, pionii zideau 3).
@@ -3003,14 +3011,17 @@ export function constructiaPrevizualizata(w: World, rules: Rules): {
   const gol = { pioni: 0, mormane: 0, zone: 0 }
   if (celule.length === 0) return { construibile: [], imposibile: [], faraAcces: [], cauze: [], inchise: gol, inchideri: null, celuleInundate: 0 }
   const sprijin = constructiaPosibila(w.terrain, rules, celule, grinzi)
-  const plan = new Set(celule)
+  const plan = new Set(celule.filter((k) => !nuInC.has(k)))
   // Pionii care iau joburi: doar ei folosesc privirea inainte dintr-o punga.
   const { pioni, constructori, mormane, zone } = celuleDeInchis(w)
-  const predicat = predicatAcces(w.terrain, rules, plan, constructori)
+  const predicat = predicatAcces(w.terrain, rules, plan, constructori, faraPodea)
   const cuAcces = constructiaPosibila(w.terrain, rules, celule, grinzi, predicat)
-  const zidite = new Set(cuAcces.construibile)
-  const faraAcces = sprijin.construibile.filter((k) => !zidite.has(k))
-  const final = etichetare(nodStabil({ t: w.terrain, plan, zidite }, rules), predicat.dovedite())
+  const cuAccesSet = new Set(cuAcces.construibile)
+  const faraAcces = sprijin.construibile.filter((k) => !cuAccesSet.has(k))
+  // Lumea de la capatul planului, pentru etichete si pungi: usile nu blocheaza si nu sunt podea,
+  // deci nu intra in piesele zidite ale grafului (`nodW` le-ar face solide).
+  const zidite = new Set(cuAcces.construibile.filter((k) => !nuInC.has(k)))
+  const final = etichetare(nodStabil({ t: w.terrain, plan, zidite, faraPodea }, rules), predicat.dovedite())
   const cauze = faraAcces.map((k) => cauzaFaraAcces(final, rules, k))
   // Ce ar inchide planul dus pana la capat: pionii, mormanele si celulele de zona de ACUM.
   const inchideri = inchideriPlan(w.terrain, rules, zidite, predicat.dovedite())
@@ -3093,9 +3104,16 @@ export function prabusireaPrevizualizata(w: World, rules: Rules): number[] {
  * Bucla se termina singura: `solLa` raspunde AER deasupra ferestrei de voxeli.
  */
 function cotaDeRefugiu(t: Terrain, wx: number, wy: number, cota: number): number {
+  // Pe predicatele de MERS, nu pe `solLa`: o usa e solida pentru sprijin, dar nu blocheaza si nu
+  // e podea. Pe `solLa`, un pion din tocul unei usi a carei podea cadea era urcat prin usa si prin
+  // zidul de deasupra — 10 m, blocat (panoul camerelor, USA-3). Pentru orice alt material raspunsul
+  // e acelasi: sub fereastra ambele se opresc la baza, deasupra ei ambele vad aer.
+  if (wx < 0 || wy < 0 || wx >= WORLD_CELLS || wy >= WORLD_CELLS) return cota
   let z = cota
-  while (solLa(t, wx, wy, z) === Sol.SOLID) z++
-  return cotaDeAsezare(t, wx, wy, z)
+  while (blocheazaMersul(materialFast(t, wx, wy, z))) z++
+  const baza = bazaVoxeli(t, wx, wy)
+  while (z > baza && !ePodea(materialFast(t, wx, wy, z - 1))) z--
+  return z
 }
 
 export function prabuseste(w: World, rules: Rules, chei: readonly number[]): number {

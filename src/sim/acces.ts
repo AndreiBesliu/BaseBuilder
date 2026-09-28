@@ -29,6 +29,12 @@
  * poate deveni calcabila in W; celulele de sub p, in limita capului, nu erau calcabile in
  * F. Deci un pion pe o celula sigura ramane pe o celula sigura cat timp se executa planul.
  *
+ * **Usa** (S24-27, t.1) nu e in C: un santier de usa nu blocheaza mersul nici in F, iar usa zidita
+ * nu-l blocheaza nici in W (`blocheazaMersul`), si nu e podea nici inainte, nici dupa (`ePodea`).
+ * Zidirea unei usi nu schimba deci graful de mers — teorema ramane adevarata trivial. In ipoteze
+ * (Z, privirea inainte) o usa nu e podea (`faraPodea`): panoul camerelor a aratat ca altfel un pion
+ * dintr-o groapa isi zidea „scaparea" pe o usa si ramanea acolo (USA-1).
+ *
  * ## De ce doua praguri, si de ce e o proprietate a COMPONENTEI
  *
  * Flood-ul se opreste la primul prag atins: `naturale >= accesPlafonNatural` dovedeste
@@ -46,8 +52,10 @@ import type { Rules } from './content.ts'
 import type { Terrain } from './terrain/terrain.ts'
 import { ensureChunk, JURNAL_CAP, materialAt, WORLD_CELLS } from './terrain/terrain.ts'
 import {
+  blocheazaMersul,
   cellHeightCm,
   CHUNK_CELLS,
+  ePodea,
   esteMaterialDeStructura,
   groundLevelFromCm,
   isSolid,
@@ -87,6 +95,15 @@ export type FelLucruId = (typeof FelLucru)[keyof typeof FelLucru]
 export function felSapa(t: Terrain, wx: number, wy: number, z: number): FelLucruId {
   const m = materialAt(t, wx, wy, z)
   return m.ok && esteMaterialDeStructura(m.value) ? FelLucru.DECONSTRUIESTE : FelLucru.SAPA
+}
+
+/**
+ * Intra santierul piesei `piesa` in C (solid in F)? Doar daca materialul ei blocheaza mersul: un
+ * santier de usa ramane trecere si in F — altfel golul unei usi planificate arata zidit, iar
+ * previzualizarea casei cu usa spunea „INCINTA" pe 26 de piese (panoul camerelor).
+ */
+export function inC(rules: Rules, piesa: number): boolean {
+  return blocheazaMersul(rules.piese[piesa]!.material)
 }
 
 /** Felul muncii pe o desemnare vie: santier de zidit, sau sapat dupa material. */
@@ -216,6 +233,8 @@ export interface LumeAcces {
   readonly zidite: ReadonlySet<number> | null
   /** O piesa zidita in plus peste Z (privirea inainte), fara copia lui Z. */
   readonly inPlus?: number
+  /** Piesele din Z (sau `inPlus`) care NU sunt podea — usile. Solide pentru sprijin, dar nu se sta pe ele. */
+  readonly faraPodea?: ReadonlySet<number> | null
 }
 
 function ziditaIpotetic(Z: ReadonlySet<number> | null, inPlus: number, k: number): boolean {
@@ -240,15 +259,19 @@ export function nodStabil(l: LumeAcces, rules: Rules, r: Cititor = cititor(l.t))
   const C = l.plan
   const Z = l.zidite
   const inPlus = l.inPlus ?? -1
+  const FP = l.faraPodea ?? null
   return {
     calcabila(x, y, z) {
       const m = materialCitit(r, x, y, z)
-      if (isSolid(m) || m === Material.APA) return false
+      if (blocheazaMersul(m) || m === Material.APA) return false
       // Afara din lume materialul e ROCA, deci n-am ajuns aici: cheia e injectiva.
       if (C.has(cellKey(x, y, z))) return false
-      if (!isSolid(materialCitit(r, x, y, z - 1)) && !ziditaIpotetic(Z, inPlus, cellKey(x, y, z - 1))) return false
+      if (!ePodea(materialCitit(r, x, y, z - 1))) {
+        const jos = cellKey(x, y, z - 1)
+        if (!ziditaIpotetic(Z, inPlus, jos) || (FP !== null && FP.has(jos))) return false
+      }
       for (let h = 1; h < H; h++) {
-        if (isSolid(materialCitit(r, x, y, z + h)) || C.has(cellKey(x, y, z + h))) return false
+        if (blocheazaMersul(materialCitit(r, x, y, z + h)) || C.has(cellKey(x, y, z + h))) return false
       }
       return true
     },
@@ -267,15 +290,18 @@ export function nodStabil(l: LumeAcces, rules: Rules, r: Cititor = cititor(l.t))
  */
 export function nodW(t: Terrain, extra: ReadonlySet<number> | null, rules: Rules, r: Cititor = cititor(t)): Nod {
   const H = rules.agentHeadroomM
-  const solid = (x: number, y: number, z: number): boolean =>
-    isSolid(materialCitit(r, x, y, z)) || (extra !== null && extra.has(cellKey(x, y, z)))
+  // `extra` = piese care blocheaza mersul si sunt podea (usile nu intra niciodata aici).
+  const blocheaza = (x: number, y: number, z: number): boolean =>
+    blocheazaMersul(materialCitit(r, x, y, z)) || (extra !== null && extra.has(cellKey(x, y, z)))
+  const peCe = (x: number, y: number, z: number): boolean =>
+    ePodea(materialCitit(r, x, y, z)) || (extra !== null && extra.has(cellKey(x, y, z)))
   return {
     calcabila(x, y, z) {
       const m = materialCitit(r, x, y, z)
-      if (isSolid(m) || m === Material.APA) return false
+      if (blocheazaMersul(m) || m === Material.APA) return false
       if (extra !== null && extra.has(cellKey(x, y, z))) return false
-      if (!solid(x, y, z - 1)) return false
-      for (let h = 1; h < H; h++) if (solid(x, y, z + h)) return false
+      if (!peCe(x, y, z - 1)) return false
+      for (let h = 1; h < H; h++) if (blocheaza(x, y, z + h)) return false
       return true
     },
     naturala(x, y, z) {
@@ -498,7 +524,7 @@ function goleste(m: MemorieAcces, t: Terrain, d: DesignationStore, rules: Rules)
   m.vazuteDes = d.editariConstr
   m.plan.clear()
   for (let i = 0; i < d.count; i++) {
-    if (d.alive[i] === 1 && d.kind[i] === Desemnare.CONSTRUIESTE) m.plan.add(cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!))
+    if (d.alive[i] === 1 && d.kind[i] === Desemnare.CONSTRUIESTE && inC(rules, d.piesa[i]!)) m.plan.add(cellKey(d.wx[i]!, d.wy[i]!, d.z[i]!))
   }
   golesteFlooduri(m)
   // Cititorul e al terenului VECHI: o memorie refolosita pe alt teren cu acelasi `editari`
@@ -576,7 +602,7 @@ function sincronizeaza(m: MemorieAcces, t: Terrain, d: DesignationStore, rules: 
     const x = d.jurnalConstr[j]!, y = d.jurnalConstr[j + 1]!, z = d.jurnalConstr[j + 2]!
     const s = desemnareLaCelula(d, x, y, z)
     const k = cellKey(x, y, z)
-    if (s !== -1 && d.kind[s] === Desemnare.CONSTRUIESTE) {
+    if (s !== -1 && d.kind[s] === Desemnare.CONSTRUIESTE && inC(rules, d.piesa[s]!)) {
       // Un santier nou strange F: poate scoate celule din graful stabil.
       m.plan.add(k)
       invalideaza(m, x, y, z, false)
@@ -696,6 +722,9 @@ export function siguraDupaZidire(
   if (!nod.calcabila(x, y, z)) return false
   const ic = idMemorat(m, rules, nod, x, y, z)
   if (m.floods[ic]!.deschisa) return true
+  // O piesa care nu e podea (usa) nu scoate pe nimeni dintr-o punga (USA-1).
+  const sp = desemnareLaCelula(d, px, py, pz)
+  if (sp !== -1 && !ePodea(rules.piese[d.piesa[sp]!]!.material)) return false
   const sus = nodStabil({ t, plan: m.plan, zidite: null, inPlus: cellKey(px, py, pz) }, rules, r)
   if (!sus.calcabila(px, py, pz + 1)) return false
   const pas = Math.max(0, Math.min(4, rules.maxStepM))
@@ -750,7 +779,15 @@ export function componenteInchiseDe(
   r: Cititor = cititor(t),
   dovedita: ((k: number) => boolean) | null = null,
   stat: MemorieAcces['stat'] | null = null,
+  material: number = Material.PIATRA_CONSTRUITA,
 ): number[][] {
+  // O piesa care nici nu blocheaza mersul, nici nu e podea (usa) nu schimba graful: nu inchide
+  // nimic. Scris explicit — altfel `nodW` o facea solida si podea, si usa de sus a unui gol lua
+  // capul celulei de dedesubt: forma pura o refuza, cea memorata o accepta (panoul, USA-2).
+  if (!blocheazaMersul(material) && !ePodea(material)) {
+    if (stat !== null) stat.sigilariSarite++
+    return []
+  }
   const H = rules.agentHeadroomM
   const pas = Math.max(0, Math.min(4, rules.maxStepM))
   const cuP = nodW(t, new Set([cellKey(px, py, pz)]), rules, r)
@@ -830,7 +867,9 @@ export function componenteInchiseDeMemorat(
   pz: number,
 ): number[][] {
   const r = pregateste(m, t, d, rules)
-  return componenteInchiseDe(t, rules, px, py, pz, r, dovedireMemorie(m), m.stat)
+  const s = desemnareLaCelula(d, px, py, pz)
+  const material = s === -1 ? Material.PIATRA_CONSTRUITA : rules.piese[d.piesa[s]!]!.material
+  return componenteInchiseDe(t, rules, px, py, pz, r, dovedireMemorie(m), m.stat, material)
 }
 
 // ---------------------------------------------------------------------------
@@ -925,7 +964,13 @@ export interface PredicatAcces {
  * doar un pion deja inauntru. `constructori` = celulele pionilor care iau joburi (`null`: se
  * presupune unul peste tot — testele pe teren gol).
  */
-export function predicatAcces(t: Terrain, rules: Rules, plan: ReadonlySet<number>, constructori: readonly number[] | null = null): PredicatAcces {
+export function predicatAcces(
+  t: Terrain,
+  rules: Rules,
+  plan: ReadonlySet<number>,
+  constructori: readonly number[] | null = null,
+  faraPodea: ReadonlySet<number> | null = null,
+): PredicatAcces {
   const r = cititor(t)
   const pas = Math.max(0, Math.min(4, rules.maxStepM))
   const niveluri = niveluriDeLucru(FelLucru.CONSTRUIESTE, rules)
@@ -962,7 +1007,7 @@ export function predicatAcces(t: Terrain, rules: Rules, plan: ReadonlySet<number
     poate(cheie, zidite) {
       if (et === null || lumeaEt !== zidite) {
         if (et !== null) inundateInainte += et.inundate
-        et = etichetare(nodStabil({ t, plan, zidite }, rules, r), dovedite)
+        et = etichetare(nodStabil({ t, plan, zidite, faraPodea }, rules, r), dovedite)
         lumeaEt = zidite
         epoca.length = 0
       }
@@ -983,8 +1028,10 @@ export function predicatAcces(t: Terrain, rules: Rules, plan: ReadonlySet<number
         }
       }
       if (inchise.size === 0) return false
+      // Fara privire inainte pentru o piesa care nu e podea (usa): nu scoate pe nimeni.
+      if (faraPodea !== null && faraPodea.has(cheie)) return false
       // Privirea inainte: celula de deasupra lui p, stabila cu p zidita?
-      const sus = nodStabil({ t, plan, zidite, inPlus: cheie }, rules, r)
+      const sus = nodStabil({ t, plan, zidite, inPlus: cheie, faraPodea }, rules, r)
       if (!sus.calcabila(px, py, pz + 1)) return false
       vecine.clear()
       let deschisa = false
@@ -1175,7 +1222,9 @@ export function iesireDinPunga(
   const nod = nodW(t, null, rules, r)
   const deschise = new Set<number>()
   const opreste = (k: number): boolean => deschise.has(k) || (dovedita !== null && dovedita(k))
-  const solid = (a: number, b: number, c: number): boolean => isSolid(materialCitit(r, a, b, c))
+  // Capul trece prin usa; caderea trece si ea prin usa (nu e podea).
+  const blocheaza = (a: number, b: number, c: number): boolean => blocheazaMersul(materialCitit(r, a, b, c))
+  const peCe = (a: number, b: number, c: number): boolean => ePodea(materialCitit(r, a, b, c))
   for (const k of punga.celule) {
     const cx = k % WORLD_CELLS
     const rest = (k - cx) / WORLD_CELLS
@@ -1184,11 +1233,11 @@ export function iesireDinPunga(
     for (const [dx, dy] of DIR4) {
       const nx = cx + dx, ny = cy + dy
       let liber = true
-      for (let h = 0; h < H && liber; h++) if (solid(nx, ny, cz + h)) liber = false
+      for (let h = 0; h < H && liber; h++) if (blocheaza(nx, ny, cz + h)) liber = false
       if (!liber) continue
       // Caderea: prin aer, pana la prima podea — cel mult D niveluri.
       let lz = cz
-      while (lz > cz - D && !solid(nx, ny, lz - 1)) lz--
+      while (lz > cz - D && !peCe(nx, ny, lz - 1)) lz--
       // Un pas obisnuit ar fi fost o muchie a pungii; fara podea (mai adanc de D) nu e calcabila.
       if (cz - lz <= pas || !nod.calcabila(nx, ny, lz)) continue
       if (!opreste(cellKey(nx, ny, lz))) {

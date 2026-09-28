@@ -53,11 +53,35 @@ export const Material = {
    * schema noua, fiindca `fill` si decode refuza de acum un material necunoscut.
    */
   GRINDA: 8,
+  /**
+   * USA (S24-27, taietura 1): hotar pentru AER — inchide o incapere —, dar trecere pentru pioni.
+   * Solida pentru tot restul (`fill`, `dig`, desemnarea, sprijinul, prabusirea, tintirea), deci
+   * singurele locuri care o deosebesc sunt cele doua predicate de mai jos: `blocheazaMersul` (celula
+   * pionului si capul lui) si `ePodea` (pe ce se sta). O usa nu e podea nici la mers, nici la cadere:
+   * un chepeng in gaura unei placi se trece de jos, dar nu se calca de sus.
+   *
+   * De piatra, ca SCARA si GRINDA, pana cand exista lemn. Valoare noua intr-un `Uint8Array` deja
+   * persistat, ca MOLOZ si GRINDA: fara schema noua.
+   */
+  USA: 9,
 } as const
 export type MaterialId = (typeof Material)[keyof typeof Material]
 
 export function isSolid(m: number): boolean {
   return m !== Material.AER && m !== Material.APA
+}
+
+/**
+ * Nu poate sta un pion IN celula (sau capul lui in ea)? Orice solid, in afara de usa. Apa e alta
+ * intrebare (nu e solida, dar nici calcabila) si o pun apelantii, ca pana acum.
+ */
+export function blocheazaMersul(m: number): boolean {
+  return isSolid(m) && m !== Material.USA
+}
+
+/** Se poate sta PE `m` (e podeaua celulei de deasupra)? Orice solid, in afara de usa. */
+export function ePodea(m: number): boolean {
+  return isSolid(m) && m !== Material.USA
 }
 
 /**
@@ -71,14 +95,14 @@ export function isSolid(m: number): boolean {
  * zid sa arate ca teren — `parseRules` o refuza.
  */
 export function esteMaterialDeStructura(m: number): boolean {
-  return m === Material.PIATRA_CONSTRUITA || m === Material.GRINDA || m === Material.LEMN_CONSTRUIT
+  return m === Material.PIATRA_CONSTRUITA || m === Material.GRINDA || m === Material.LEMN_CONSTRUIT || m === Material.USA
 }
 
 /**
  * Cea mai mare valoare din `Material`. Se schimba odata cu tabelul — un test cere
  * egalitatea cu maximul valorilor, ca un material nou sa nu ramana in afara lui.
  */
-export const MATERIAL_MAX = Material.GRINDA
+export const MATERIAL_MAX = Material.USA
 
 /**
  * E `m` un material pe care jocul il CUNOASTE? `isSolid` raspunde „da" pentru orice

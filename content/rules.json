@@ -89,7 +89,8 @@
     "PERETE": { "material": "PIATRA_CONSTRUITA", "cantitate": 20, "lucru": 400 },
     "PODEA": { "material": "PIATRA_CONSTRUITA", "cantitate": 20, "lucru": 300 },
     "SCARA": { "material": "PIATRA_CONSTRUITA", "cantitate": 20, "lucru": 300 },
-    "GRINDA": { "material": "GRINDA", "cantitate": 20, "lucru": 500 }
+    "GRINDA": { "material": "GRINDA", "cantitate": 20, "lucru": 500 },
+    "USA": { "material": "USA", "cantitate": 20, "lucru": 300 }
   },
   "digYield": {
     "ROCA": { "fel": "PIATRA", "cantitate": 20 },
@@ -98,6 +99,7 @@
     "LEMN_CONSTRUIT": { "fel": "LEMN", "cantitate": 5 },
     "PIATRA_CONSTRUITA": { "fel": "PIATRA", "cantitate": 20 },
     "MOLOZ": { "fel": "PIATRA", "cantitate": 10 },
-    "GRINDA": { "fel": "PIATRA", "cantitate": 20 }
+    "GRINDA": { "fel": "PIATRA", "cantitate": 20 },
+    "USA": { "fel": "PIATRA", "cantitate": 20 }
   }
 }
