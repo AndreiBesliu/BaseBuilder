@@ -8,15 +8,20 @@
  * lumea din `__kinstead`. Fiecare pas e o bifa cu NUME si cu cifra ei.
  *
  * Proba negativa: `--proba-negativa[=<bifa>]` saboteaza pasul unei bife anume (sapa: oracolul cere
- * 26; pauza: Spatiu nu se apasa; salvare: Ctrl+S nu se apasa), iar rularea iese cu 0 DOAR daca exact
- * bifa aceea e rosie. Inainte, orice rosu trecea proba — si o bifa care nu putea iesi rosie (pauza)
- * nu se vedea (recenzia UI-ului, T-02).
+ * 26; pauza: Spatiu nu se apasa; salvare: Ctrl+S nu se apasa; desen: casa zidita din JS nu primeste
+ * clipa fara pauza in care se redeseneaza — „casa-desenata" rosie; exceptie: pasul „joc-nou" arunca —
+ * bifa pasului rosie SI rularea ajunge la „depozit"), iar rularea iese cu 0 DOAR daca exact bifa aceea
+ * e rosie. Inainte, orice rosu trecea proba — si o bifa care nu putea iesi rosie (pauza) nu se vedea
+ * (recenzia UI-ului, T-02).
+ *
+ * Fiecare pas ruleaza in `pas()`: o exceptie e o bifa ROSIE cu numele pasului, nu sfarsitul rularii
+ * (recenzia incaperilor, ECR-10).
  *
  * Profilul (IndexedDB) e NOU la fiecare rulare: pe un profil refolosit, salvarea din rularea trecuta
  * facea bifele Ctrl+S si incarcarea verzi si cu salvarea stricata (recenzia UI-ului, T-01).
  *
  *   npm run viewer            (in alt terminal; sau `npm run viewer:preview` pe build)
- *   node_modules/electron/dist/electron.exe bench/ui-fum.mjs http://localhost:5175/ [--proba-negativa[=sapa|pauza|salvare]] [--poze=<dosar>]
+ *   node_modules/electron/dist/electron.exe bench/ui-fum.mjs http://localhost:5175/ [--proba-negativa[=sapa|pauza|salvare|desen|exceptie]] [--poze=<dosar>]
  *
  * NU e o masuratoare de cadre si nu intra in gate: offscreen + fara throttling e exact ce protocolul
  * de gate interzice (bench/GATE.md §5b). E o proba de COMPORTAMENT.
@@ -33,7 +38,7 @@ const REPO = fileURLToPath(new URL('..', import.meta.url)).replaceAll('\\', '/')
 const BAZA = (argv.find((a) => /^https?:\/\//.test(a)) ?? 'http://localhost:5175/').replace(/\/?$/, '/')
 const NEG = argv.find((a) => a.startsWith('--proba-negativa'))
 const NEGATIVA = NEG === undefined ? null : NEG.includes('=') ? NEG.slice(NEG.indexOf('=') + 1) : 'sapa'
-if (NEGATIVA !== null && !['sapa', 'pauza', 'salvare'].includes(NEGATIVA)) { console.log(`proba negativa necunoscuta: ${NEGATIVA}`); process.exit(2) }
+if (NEGATIVA !== null && !['sapa', 'pauza', 'salvare', 'desen', 'exceptie'].includes(NEGATIVA)) { console.log(`proba negativa necunoscuta: ${NEGATIVA}`); process.exit(2) }
 const POZE = argv.find((a) => a.startsWith('--poze='))?.slice('--poze='.length) ?? null
 const W = 1280
 const H = 720
@@ -43,6 +48,19 @@ const bife = []
 function bifa(id, ok, ce, cifra = '') {
   bife.push({ id, ok, ce })
   console.log(`${ok ? 'OK  ' : 'ROSU'} [${id}] ${ce}${cifra !== '' ? ` — ${cifra}` : ''}`)
+}
+
+/**
+ * Un pas al probei, cu bifele lui. O exceptie intr-un pas e o bifa ROSIE cu numele pasului, iar proba merge
+ * mai departe: pe un server cu radacina gresita, „mormane-pe-sol" arunca si 31 de bife nu mai rulau,
+ * printre ele cele noi ale feliei (recenzia incaperilor, ECR-10). Bifele date inainte de exceptie raman.
+ */
+async function pas(id, f) {
+  try {
+    await f()
+  } catch (e) {
+    bifa(id, false, 'EXCEPTIE — pasul s-a oprit aici, proba merge mai departe', String(e?.stack ?? e?.message ?? e).split('\n').slice(0, 4).join(' | '))
+  }
 }
 
 // Profil nou la fiecare rulare; cele ramase de la rulari vechi se sterg (nu si al rularii de acum,
@@ -66,8 +84,10 @@ app.whenReady().then(async () => {
   if (cod === 0) {
     if (NEGATIVA === null) cod = rosii.length > 0 ? 1 : 0
     else {
-      const tinta = rosii.some((b) => b.id === NEGATIVA)
-      console.log(`proba negativa „${NEGATIVA}": bifa ei ${tinta ? 'E rosie (instrumentul poate produce rosu acolo)' : 'NU e rosie — instrumentul e orb acolo'}; rosii: ${rosii.map((b) => b.id).join(', ') || 'niciuna'}`)
+      // „exceptie": bifa pasului e rosie SI rularea a mers mai departe (a ajuns la „depozit").
+      const id = NEGATIVA === 'exceptie' ? 'joc-nou' : NEGATIVA === 'desen' ? 'casa-desenata' : NEGATIVA
+      const tinta = rosii.some((b) => b.id === id) && (NEGATIVA !== 'exceptie' || bife.some((b) => b.id === 'depozit'))
+      console.log(`proba negativa „${NEGATIVA}": bifa ei (${id}) ${tinta ? 'E rosie (instrumentul poate produce rosu acolo)' : 'NU e rosie — instrumentul e orb acolo'}; rosii: ${rosii.map((b) => b.id).join(', ') || 'niciuna'}`)
       cod = tinta ? 0 : 1
     }
   }
@@ -187,13 +207,13 @@ async function pagina(cautare) {
 
 async function ruleaza() {
   // --- 1. gate-ul: fara UI, fara stil ---
-  {
+  await pas('gate', async () => {
     const p = await pagina('?scenario=dig&ballast=1&warmup=0&frames=1000000')
     const r = await p.js(`({ ui: !!document.querySelector('[data-ui]'), stil: [...document.styleSheets].some((s) => { try { return [...s.cssRules].some((x) => x.cssText.includes('ui-sus')) } catch { return false } }), hud: !document.getElementById('hud').hidden, mormane: __kinstead.stratResurse !== null })`)
     bifa('gate', !r.ui && !r.stil && r.hud && !r.mormane, 'pagina de gate: niciun [data-ui], niciun stil al UI-ului, niciun strat de mormane, HUD-ul vizibil', JSON.stringify(r))
-  }
+  })
   // --- 2. ecranul de titlu; demo-ul de sub el nu scrie salvarea automata (INT-1) ---
-  {
+  await pas('titlu', async () => {
     const p = await pagina('')
     const r = await p.js(`({ titlu: !!document.querySelector('.ui-titlu'), butoane: document.querySelectorAll('.ui-titlu button').length, hud: document.getElementById('hud').hidden, mod: __kinstead.mod })`)
     bifa('titlu', r.titlu && r.butoane === 4 && r.hud, 'fara parametri: ecranul de titlu cu 4 butoane, HUD-ul ascuns', JSON.stringify(r))
@@ -215,14 +235,15 @@ async function ruleaza() {
     await astepta(1500)
     const auto = (await p.js('__f.salvari()')).filter((s) => s.id.startsWith('auto'))
     bifa('titlu-fara-automata', auto.length === 0, 'demo-ul de sub ecranul de titlu nu scrie nicio salvare automata', JSON.stringify(auto))
-  }
+  })
   // --- 3. jocul nou ---
   const p = await pagina('?joc=nou&seed=7&oameni=6&piatra=400&hrana=1380')
-  {
+  await pas('joc-nou', async () => {
     const r = await p.js(`({ pioni: __f.pioni(), piatra: __f.marfa(0), hrana: __f.marfa(3), pasi: !document.querySelector('.ui-pasi').hidden, planul: __kinstead.jobOverlay.visible, mod: __kinstead.mod })`)
     bifa('joc-nou-oameni', r.pioni.c === 6 && r.pioni.j === 0, 'joc nou: 6 colonisti, 0 jefuitori', JSON.stringify(r.pioni))
     bifa('joc-nou-marfa', r.piatra === 400 && r.hrana === 1380, 'joc nou: 400 de piatra si 1380 de hrana in mormane', `${r.piatra} / ${r.hrana}`)
     bifa('joc-nou-pasi', r.pasi && r.planul, 'joc nou: Primii pasi vizibili, Planul (J) aprins', JSON.stringify({ pasi: r.pasi, planul: r.planul }))
+    if (NEGATIVA === 'exceptie') throw new Error('proba negativa: o exceptie in pasul „joc-nou"')
     // Mormanele din Blender: 400 de piatra = 5×75 + 25, 1380 de hrana = 18×75 + 30 ⇒ 25 de mormane pe ecran.
     await astepta(1500)
     const m = await p.js(`({ plase: __kinstead.stratResurse?.plase?.size ?? 0, desenate: __kinstead.stratResurse?.desenate ?? -1, eroare: __kinstead.stratResurse?.eroare ?? null, icoane: [...document.querySelectorAll('.ui-res img')].filter((i) => i.naturalWidth === 128).length })`)
@@ -253,19 +274,19 @@ async function ruleaza() {
     if (sol.n === -1) console.log('(fara bifa „mormane-pe-sol": three nu se poate importa separat pe un build de productie)')
     else bifa('mormane-pe-sol', sol.n === 25 && sol.rele.length === 0, 'joc nou: fiecare morman sta pe fata desenata a terenului (cel mult 2 cm)', JSON.stringify(sol))
     await p.poza('2-joc-nou.png')
-  }
+  })
   // Pauza (Spatiu): pionii nu apuca sa termine sapaturi intre tragere si numarare. Bifa se uita la LUME
   // (tickul sta pe loc) si la butonul de pauza, nu la „vreun buton apasat" — J era deja apasat (T-02).
-  {
+  await pas('pauza', async () => {
     if (NEGATIVA !== 'pauza') await p.tasta(' ')
     const t0 = await p.js('__kinstead.world.tick')
     await astepta(1500)
     const r = await p.js(`({ t: __kinstead.world.tick, buton: document.querySelector('.ui-sus button[title^="Pornește"]') !== null, modal: __kinstead.ui.modalDeschis() })`)
     bifa('pauza', r.t === t0 && r.buton && !r.modal, 'Spatiu pune pauza: tickul sta pe loc 1,5 s, butonul spune „Pornește"', `${t0} → ${r.t}; ${JSON.stringify(r)}`)
     if (NEGATIVA === 'pauza') await p.tasta(' ')
-  }
+  })
   // Primul Q porneste nivelul la solul de sub camera (ECR-5), nu in varful ferestrei.
-  {
+  await pas('primul-q', async () => {
     await p.tasta('r')
     await p.tasta('q')
     await astepta(400)
@@ -277,7 +298,7 @@ async function ruleaza() {
     const marimi = await p.js(`[...document.querySelectorAll('.ui-fereastra button')].filter((b) => /^\\d+%$/.test(b.textContent)).map((b) => ({ t: b.textContent, off: b.disabled, ales: b.getAttribute('aria-pressed') }))`)
     await p.tasta('Escape')
     bifa('marimi', marimi.length === 3 && !marimi[0].off && marimi[0].ales === 'true' && marimi[1].off && marimi[2].off, 'la 1280×720: 100% ales, 125% si 150% dezactivate (nu incap)', JSON.stringify(marimi))
-  }
+  })
   // Un patrat plat langa oameni: locul ales de `locJocNou` are o fereastra 7×7 plata in centru.
   const loc = await p.js(`(() => { const a = __kinstead.world.agents; const x = Math.floor(a.x[0] / 1000), y = Math.floor(a.y[0] / 1000); return { x, y, z: a.z[0] } })()`)
   const sol = loc.z - 1
@@ -286,7 +307,7 @@ async function ruleaza() {
   await astepta(300)
   // --- tintirea, cu un oracol INDEPENDENT: centrul fetei de sus a celulelor plate, proiectat, fara
   // `tintaLa` in alegerea pixelului (T-11). O tinta decalata uniform ar fi compensata de `__f.pixel`.
-  {
+  await pas('tintire', async () => {
     const r = await p.js(`(() => {
       const K = __kinstead, cx = ${loc.x}, cy = ${loc.y}
       let bune = 0, total = 0, decalate = 0
@@ -306,9 +327,9 @@ async function ruleaza() {
       return { bune, total, decalate }
     })()`)
     bifa('tintire', r.total >= 10 && r.bune === r.total && r.decalate === 0, 'tintirea: centrul fiecarei celule plate, proiectat independent, e celula pe care o tinteste clicul', JSON.stringify(r))
-  }
+  })
   // --- 4. dreptunghiul de sapat, 5×5, cu nivelul oprit: solul fiecarei coloane ---
-  {
+  await pas('sapa', async () => {
     await p.tasta('d')
     const inainte = await p.js('__f.des().length')
     const x0 = loc.x + 10, y0 = loc.y - 14
@@ -318,16 +339,16 @@ async function ruleaza() {
     const afara = (await p.js('__f.des()')).filter((d) => !(d.wx >= x0 && d.wx <= x0 + 4 && d.wy >= y0 && d.wy <= y0 + 4))
     bifa('sapa', noi.length === astept && afara.length === inainte, `Sapa, dreptunghi 5×5 tras cu mouse-ul: ${astept} de sapaturi, nimic in afara lui`, `${noi.length}; in afara: ${JSON.stringify(afara.slice(0, 8))}; toast: ${await p.js('__f.toast()')}`)
     await p.poza('3-sapa.png')
-  }
+  })
   // --- 5. Esc in timpul tragerii: nimic aplicat ---
-  {
+  await pas('esc', async () => {
     const inainte = await p.js('__f.des().length')
     await p.trage([loc.x - 14, loc.y - 14], [loc.x - 10, loc.y - 10], sol + 1, [], async () => { await p.tasta('Escape') })
     const dupa = await p.js('__f.des().length')
     bifa('esc', dupa === inainte, 'Esc in timpul tragerii renunta: nicio desemnare noua', `${inainte} → ${dupa}`)
-  }
+  })
   // --- 5b. clic-dreapta in timpul tragerii, CU stangul tinut (acordul de butoane al unui mouse real) ---
-  {
+  await pas('dreapta', async () => {
     const inainte = await p.js('__f.des().length')
     await p.trage([loc.x - 14, loc.y - 14], [loc.x - 10, loc.y - 10], sol + 1, [], async (pb) => {
       await p.apasa(pb.x, pb.y, ['leftButtonDown'], 'right')
@@ -343,9 +364,9 @@ async function ruleaza() {
     const doi = await p.js('__f.des().length')
     const indiciu = await p.js(`document.querySelector('.ui-indiciu')?.textContent ?? ''`)
     bifa('dreapta', unu === inainte && doi === inainte && !/renunță/.test(indiciu), 'clic-dreapta in timpul tragerii renunta, in ambele ordini: nicio desemnare, niciun dreptunghi agatat', `${inainte} → ${unu} → ${doi}; indiciu: ${indiciu}`)
-  }
+  })
   // --- 5c. o tragere pornita pe CER, sau o panoramare cu Shift eliberat primul, nu lasa o lucrare (INT-3) ---
-  {
+  await pas('clic-scapat', async () => {
     const inainte = await p.js('__f.des().length')
     // O camera joasa, ca sus sa fie cer.
     await p.js(`(() => { const K = __kinstead; K.controls.target.set(${loc.x + 0.5}, ${sol + 1}, ${loc.y + 0.5}); K.camera.position.set(${loc.x + 0.5 - 22}, ${sol + 7}, ${loc.y + 0.5 + 22}); K.controls.update(); return true })()`)
@@ -369,9 +390,9 @@ async function ruleaza() {
     const dupaShift = await p.js('__f.des().length')
     bifa('clic-scapat', cer !== null && dupaCer === inainte && dupaShift === inainte, 'apasat pe cer si tras pe teren, sau Shift eliberat primul: nicio lucrare sub cursor', `${inainte} → ${dupaCer} → ${dupaShift}; cer ${JSON.stringify(cer)}`)
     await p.js(`(() => { const K = __kinstead; K.controls.target.set(${loc.x + 0.5}, ${sol + 1}, ${loc.y + 0.5}); K.camera.position.set(${loc.x + 0.5 - 14}, ${sol + 22}, ${loc.y + 0.5 + 14}); K.controls.update(); return true })()`)
-  }
+  })
   // --- 6. conturul de perete 7×7 ---
-  {
+  await pas('perete', async () => {
     await p.tasta('c')
     const x0 = loc.x + 10, y0 = loc.y + 10
     await p.trage([x0, y0], [x0 + 6, y0 + 6], sol + 1)
@@ -425,9 +446,11 @@ async function ruleaza() {
     const usi2 = (await p.js('__f.des()')).filter((d) => d.piesa === 5).length
     const toasturiUsa = await p.js(`[...document.querySelectorAll('.ui-toast')].map((t) => t.textContent).join(' | ')`)
     bifa('usa-fara-gol', usi2 === usi.length && /gol de perete/.test(toasturiUsa), 'Ușă pe teren deschis: refuzata, cu motivul (un gol de perete sau o gaura de podea)', `${usi.length} → ${usi2}; toasturi: ${toasturiUsa}; pixel ${JSON.stringify(pDeschis)}`)
-  }
+  })
   // --- 6c. incaperile: o casa zidita cu usa (prin comenzile simularii), overlay-ul I, inspectorul, panoul usii ---
-  {
+  /** Casa de la 6c, pentru ocluzia de la 6d. */
+  let casaI = null
+  await pas('incaperi', async () => {
     const casa = await p.js(`(async () => {
       const K = __kinstead, w = K.world
       const C = await import('/@fs/${REPO}/src/sim/commands.ts')
@@ -458,6 +481,14 @@ async function ruleaza() {
     if (casa === null || !casa.ok) bifa('incaperi', false, 'casa de proba pentru incaperi', JSON.stringify(casa))
     else {
       const { x0: hx, y0: hy, s: hs } = casa
+      casaI = casa
+      // Casa e zidita din JS, in pauza, iar `remeshDinJurnal` ruleaza doar cand jocul merge: zidurile nu
+      // erau desenate, deci ocluzia lor nu se proba (recenzia incaperilor, ECR-7). O clipa fara pauza.
+      if (NEGATIVA !== 'desen') { await p.tasta(' '); await astepta(500); await p.tasta(' '); await astepta(300) }
+      await p.js(`__f.centreaza(${hx + 2.5}, ${hy + 2.5}, ${hs + 1}, 9)`)
+      await astepta(250)
+      const acoperis = await p.js(`(() => { const q = __f.proj(${hx + 2.5}, ${hs + 4}, ${hy + 2.5}); const t = __kinstead.tintaLa(Math.round(q.x), Math.round(q.y), { ctrl: false, shift: false, alt: true }); return { t, pauza: __kinstead.stare().pauza } })()`)
+      bifa('casa-desenata', acoperis.t.ok && acoperis.t.wx === hx + 2 && acoperis.t.wy === hy + 2 && acoperis.t.z === hs + 3 && acoperis.pauza, 'casa zidita din JS e si DESENATA (o clipa fara pauza): clicul pe mijlocul acoperisului tinteste acoperisul, nu podeaua', JSON.stringify(acoperis))
       await p.tasta('v')
       await p.js(`__f.centreaza(${hx + 2.5}, ${hy + 2.5}, ${hs + 1}, 9)`)
       await astepta(250)
@@ -490,6 +521,9 @@ async function ruleaza() {
       const titlu = await p.js(`document.querySelector('.ui-sertar h2')?.textContent ?? ''`)
       bifa('incaperi', /1 încăpere/.test(cifre) && /Încăpere · 18 m³/.test(insp) && /1 ușă/.test(insp),
         'o casa 5×5 cu usa: overlay-ul I numara 1 incapere, inspectorul spune „Încăpere · 18 m³ … 1 ușă"', JSON.stringify({ cifre, insp, titlu, pPodea, casa }))
+      // Tenta chiar e in scena: bifa de mai sus citeste doar cifrele (lentila ECR-7, mutatia a: 39/39 verzi).
+      const tenta = await p.js(`(() => { const g = __kinstead.scene.getObjectByName('overlay-camere'); if (!g) return null; return { vizibil: g.visible, plase: g.children.map((c) => ({ tip: c.type, varfuri: c.geometry?.getAttribute('position')?.count ?? 0, culori: !!c.geometry?.getAttribute('color') })) } })()`)
+      bifa('incaperi-tenta', tenta !== null && tenta.vizibil && tenta.plase.some((c) => c.tip === 'Mesh' && c.culori && c.varfuri > 0), 'overlay-ul I: tenta incaperii e in scena (o plasa cu culori pe varf si varfuri > 0)', JSON.stringify(tenta))
       await p.poza('5-incaperi.png')
       // Panoul usii, fara nivel: clicul pe el inspecteaza USA, nu pragul sau zidul din spate (JUC-4).
       await p.tasta('r')
@@ -595,9 +629,145 @@ async function ruleaza() {
       }
       await p.tasta('i')
     }
-  }
+  })
+  // --- 6d. ocluzia: usa din SPATELE unui zid nu e tintita (recenzia incaperilor, ECR-7; scena s9 a lentilei) ---
+  await pas('usa-din-spate', async () => {
+    if (casaI === null) { bifa('usa-din-spate', false, 'fara casa de proba (6c)'); return }
+    const { x0: hx, y0: hy, s: hs } = casaI
+    await p.tasta('r')
+    await p.tasta('v')
+    // Camera la sud, usa in zidul de nord: pixelii fetei de sud a casei — oracolul e patrulaterul ei
+    // proiectat, cu 2 px de margine (dreptunghiul care il cuprinde prindea si pixeli de langa casa, care vad
+    // coltul zidului de nord: 3 din 6.223, citite drept „usa" de un oracol pe `wy`).
+    const o = await p.js(`(() => {
+      const K = __kinstead
+      K.controls.target.set(${hx + 2.5}, ${hs + 1.5}, ${hy + 2}); K.camera.position.set(${hx + 2.5}, ${hs + 3.5}, ${hy + 14}); K.controls.update(); K.camera.updateMatrixWorld()
+      const P = [[0, 1], [5, 1], [5, 3], [0, 3]].map(([dx, dz]) => __f.proj(${hx} + dx, ${hs} + dz, ${hy + 5}))
+      const inPatrulater = (x, y) => { let semn = 0; for (let i = 0; i < 4; i++) { const a = P[i], b = P[(i + 1) % 4], c = (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x); if (c === 0) return false; if (semn === 0) semn = Math.sign(c); else if (Math.sign(c) !== semn) return false } return true }
+      const peFata = (x, y) => inPatrulater(x - 2, y - 2) && inPatrulater(x + 2, y - 2) && inPatrulater(x - 2, y + 2) && inPatrulater(x + 2, y + 2)
+      const minx = Math.min(...P.map((q) => q.x)), maxx = Math.max(...P.map((q) => q.x)), miny = Math.min(...P.map((q) => q.y)), maxy = Math.max(...P.map((q) => q.y))
+      let zid = 0, peZid = 0, peUsa = 0
+      for (let y = Math.ceil(miny); y < maxy; y += 3) for (let x = Math.ceil(minx); x < maxx; x += 3) {
+        if (!peFata(x, y) || document.elementFromPoint(x, y) !== K.renderer.domElement) continue
+        zid++
+        const t = K.tintaLa(x, y, { ctrl: false, shift: false, alt: true })
+        if (t.ok && t.wy === ${hy + 4}) peZid++
+        if (t.ok && t.wx === ${hx + 2} && t.wy === ${hy}) peUsa++
+      }
+      return { zid, peZid, peUsa }
+    })()`)
+    bifa('usa-din-spate', o.zid >= 500 && o.peUsa === 0 && o.peZid >= o.zid * 0.99, 'usa din zidul de nord, privita prin zidul de sud al casei desenate: pixelii zidului de sud tintesc zidul, niciunul usa', JSON.stringify(o))
+  })
+  // --- 6e. un gol de usa ACOPERIT, nezidit: Contur/Plin, fantoma, „Pune ușa" din inspector (ECR-7, ECR-12) ---
+  await pas('usa-gol', async () => {
+    const casa = await p.js(`(async () => {
+      const K = __kinstead, w = K.world
+      const C = await import('/@fs/${REPO}/src/sim/commands.ts')
+      const tx = ${loc.x}, ty = ${loc.y}
+      const ocupat = (x0, y0) => {
+        const it = w.iteme; for (let i = 0; i < it.count; i++) if (it.alive[i] && it.wx[i] >= x0 - 2 && it.wx[i] <= x0 + 7 && it.wy[i] >= y0 - 2 && it.wy[i] <= y0 + 7) return true
+        const a = w.agents; for (let i = 0; i < a.count; i++) if (a.alive[i]) { const x = Math.floor(a.x[i] / 1000), y = Math.floor(a.y[i] / 1000); if (x >= x0 - 2 && x <= x0 + 7 && y >= y0 - 2 && y <= y0 + 7) return true }
+        const d = w.desemnari; for (let i = 0; i < d.count; i++) if (d.alive[i] && d.wx[i] >= x0 - 1 && d.wx[i] <= x0 + 6 && d.wy[i] >= y0 - 1 && d.wy[i] <= y0 + 6) return true
+        return false
+      }
+      for (let r = 8; r < 90; r++) for (let dx = -r; dx <= r; dx++) for (const dy of [-r, r]) {
+        const x0 = tx + dx, y0 = ty + dy, s = K.suprafata(x0, y0)
+        if (s === null || ocupat(x0, y0)) continue
+        let plat = true
+        for (let a = -1; a <= 5 && plat; a++) for (let b = -1; b <= 5; b++) if (K.suprafata(x0 + a, y0 + b) !== s) { plat = false; break }
+        // In fata golului (unde sta camera), nimic mai sus decat solul casei.
+        for (let a = 0; a <= 4 && plat; a++) for (let b = -8; b <= -2; b++) { const q = K.suprafata(x0 + a, y0 + b); if (q === null || q > s) { plat = false; break } }
+        if (!plat) continue
+        const fill = (x, y, z, m) => C.applyCommand(w, { kind: 'fill', wx: x, wy: y, z, material: m }).ok
+        let ok = true
+        for (let z = s + 1; z <= s + 2; z++) for (let a = 0; a < 5; a++) for (let b = 0; b < 5; b++) {
+          if ((a !== 0 && a !== 4 && b !== 0 && b !== 4) || (a === 2 && b === 0)) continue
+          ok = fill(x0 + a, y0 + b, z, 6) && ok
+        }
+        for (let inel = 0; inel < 3; inel++) for (let a = 0; a < 5; a++) for (let b = 0; b < 5; b++) if (Math.min(a, b, 4 - a, 4 - b) === inel) ok = fill(x0 + a, y0 + b, s + 3, 6) && ok
+        return { x0, y0, s, ok }
+      }
+      return null
+    })()`)
+    if (casa === null || !casa.ok) { bifa('usa-gol', false, 'casa cu golul deschis', JSON.stringify(casa)); return }
+    const gx = casa.x0 + 2, gy = casa.y0, gs = casa.s
+    // O clipa fara pauza: casa desenata (vezi „casa-desenata").
+    await p.tasta(' '); await astepta(500); await p.tasta(' '); await astepta(300)
+    await p.tasta('r')
+    await p.tasta('c')
+    // Contur/Plin: la Perete se vede (controlul), la Usa nu; indiciul Usii nu spune „(plin)".
+    const clicPiesa = async (titlu) => {
+      const b = await p.js(`(() => { const b = document.querySelector('button[title^="${titlu}"]'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
+      if (b) await p.click(b.x, b.y)
+      return b !== null
+    }
+    const contur = () => p.js(`({ butoane: [...document.querySelectorAll('.ui-sub button')].filter((b) => /^(Contur|Plin)$/.test(b.textContent) && b.offsetParent !== null).length, indiciu: document.querySelector('.ui-indiciu')?.textContent ?? '' })`)
+    await clicPiesa('Perete:')
+    const laPerete = await contur()
+    await clicPiesa('Ușă de piatră')
+    const laUsa = await contur()
+    bifa('usa-fara-contur', laPerete.butoane === 1 && laUsa.butoane === 0 && !/\((plin|contur)\)/.test(laUsa.indiciu) && /gol/.test(laUsa.indiciu), 'Construiește ▸ Ușă: fara Contur/Plin (planul usii il ignora), indiciul spune ce fac clicul si dreptunghiul; la Perete, Contur e acolo', JSON.stringify({ laPerete, laUsa }))
+    // Fantoma: cursorul pe pragul golului (fata de sus a pragului, vazuta prin gol) — ea cuprinde tot golul.
+    await p.js(`(() => { const K = __kinstead; K.controls.target.set(${gx + 0.5}, ${gs + 1.5}, ${gy + 0.5}); K.camera.position.set(${gx + 0.5}, ${gs + 5}, ${gy - 7}); K.controls.update(); return true })()`)
+    await astepta(300)
+    const prag = await p.js(`(() => {
+      const K = __kinstead, q = __f.proj(${gx + 0.5}, ${gs + 1}, ${gy + 0.3})
+      for (let r = 0; r <= 25; r++) for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue
+        const x = Math.round(q.x) + dx, y = Math.round(q.y) + dy
+        if (document.elementFromPoint(x, y) !== K.renderer.domElement) continue
+        const t = K.tintaLa(x, y, { ctrl: false, shift: false, alt: false })
+        if (t.ok && t.wx === ${gx} && t.wy === ${gy} && t.z === ${gs + 1}) return { x, y }
+      }
+      return null
+    })()`)
+    if (prag !== null) { await p.muta(prag.x, prag.y); await astepta(250) }
+    const f = await p.js(`(() => { const F = __kinstead.fantoma; return { vizibila: F.visible, poz: F.position.toArray(), scara: F.scale.toArray() } })()`)
+    bifa('fantoma-gol', prag !== null && f.vizibila && f.scara.join() === '1,2,1' && f.poz.join() === [gx, gs + 1, gy].join(), 'Ușă, cursorul pe pragul unui gol acoperit de 2 m: fantoma cuprinde tot golul (scale 1,2,1)', JSON.stringify({ prag, f }))
+    // „Pune ușa" din inspector: cu prioritatea barei de jos (5, nu cea implicita), apoi „Ușa e desemnată".
+    const b5 = await p.js(`(() => { const b = [...document.querySelectorAll('.ui-sub button')].find((x) => x.textContent === '5'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
+    if (b5) await p.click(b5.x, b5.y)
+    await p.tasta('v')
+    await p.js(`__kinstead.ui.inspecteazaCelula(${gx}, ${gy + 2}, ${gs}); true`)
+    await astepta(400)
+    const inainte = await p.js(`document.querySelector('.ui-incapere')?.textContent ?? ''`)
+    const bPune = await p.js(`(() => { const b = [...document.querySelectorAll('.ui-incapere button')].find((x) => /Pune ușa/.test(x.textContent)); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
+    if (bPune) await p.click(bPune.x, bPune.y)
+    await astepta(400)
+    const usi = await p.js(`(() => { const d = __kinstead.world.desemnari; const o = []; for (let i = 0; i < d.count; i++) if (d.alive[i] && d.piesa[i] === 5 && d.wx[i] === ${gx} && d.wy[i] === ${gy}) o.push({ z: d.z[i] - ${gs}, prioritate: d.prioritate[i] }); return o })()`)
+    const dupa = await p.js(`({ text: document.querySelector('.ui-incapere')?.textContent ?? '', pune: [...document.querySelectorAll('.ui-incapere button')].some((x) => /Pune ușa/.test(x.textContent)), arataUsa: [...document.querySelectorAll('.ui-incapere button')].some((x) => /Arată ușa/.test(x.textContent)) })`)
+    bifa('pune-usa', b5 !== null && bPune !== null && usi.length === 2 && usi.every((u) => u.prioritate === 5) && /Ușa e desemnată — o zidesc oamenii/.test(dupa.text) && !dupa.pune && dupa.arataUsa,
+      'inspectorul pe o casa cu golul deschis: „Pune ușa" pune usa intreaga cu prioritatea barei (5), apoi spune „Ușa e desemnată", fara buton', JSON.stringify({ inainte, usi, dupa }))
+  })
+  // --- 6f. zona moarta a barei de jos: cu trei toasturi, coloana .ui-jos nu prinde clicuri pe teren (ECR-4) ---
+  await pas('zona-moarta', async () => {
+    await p.tasta('d')
+    await p.js(`(() => { const K = __kinstead; K.controls.target.set(${loc.x + 0.5}, ${sol + 1}, ${loc.y + 0.5}); K.camera.position.set(${loc.x + 0.5 - 14}, ${sol + 22}, ${loc.y + 0.5 + 14}); K.controls.update(); return true })()`)
+    await p.js(`(() => { document.querySelectorAll('.ui-toast').forEach((t) => t.remove()); const lung = 'Niciun loc SIGUR de lucru: omul ar rămâne sus sau închis când se termină planul. Pune o scară sau o ușă — sau așteaptă piesa de care depinde accesul.'; __kinstead.ui.toast(lung, true); __kinstead.ui.toast('24 desemnate pe 2 niveluri · 3 sărite: nu e un gol de ușă', false, { eticheta: 'Anulează', f: () => {} }); __kinstead.ui.toast('O ușă se pune într-un gol de perete (lat de 1–2 m, înalt de 1–3 m) sau într-o gaură de podea.', true); return true })()`)
+    await astepta(400)
+    const m = await p.js(`(() => {
+      const K = __kinstead, jos = document.querySelector('.ui-jos'), r = jos.getBoundingClientRect()
+      const copii = [...jos.querySelectorAll('.ui-toast, .ui-sub, .ui-unelte, .ui-indiciu')].filter((e) => e.offsetParent !== null).map((e) => e.getBoundingClientRect())
+      let moarte = 0, puncte = 0, liber = null
+      for (let y = Math.ceil(r.top); y < r.bottom; y += 4) for (let x = Math.ceil(r.left); x < r.right; x += 4) {
+        puncte++
+        const e = document.elementFromPoint(x, y)
+        if (e === jos || (e && e.classList.contains('ui-toasturi'))) moarte++
+        if (liber === null && !copii.some((q) => x >= q.left - 3 && x <= q.right + 3 && y >= q.top - 3 && y <= q.bottom + 3)) {
+          const t = K.tintaLa(x, y, { ctrl: false, shift: false, alt: false })
+          if (t.ok && __f.des().every((d) => !(d.wx === t.wx && d.wy === t.wy))) liber = { x, y, t: [t.wx, t.wy, t.z] }
+        }
+      }
+      return { jos: [r.left, r.top, r.right, r.bottom].map(Math.round), puncte, moarte, liber, toasturi: document.querySelectorAll('.ui-toast').length }
+    })()`)
+    const n0 = (await p.js('__f.des()')).length
+    if (m.liber !== null) await p.click(m.liber.x, m.liber.y)
+    const n1 = (await p.js('__f.des()')).length
+    bifa('zona-moarta', m.toasturi === 3 && m.moarte === 0 && m.liber !== null && n1 === n0 + 1, 'trei toasturi peste bara de jos: coloana .ui-jos nu prinde nimic, iar un clic cu Sapă langa randurile ei sapa terenul de sub ea', `${JSON.stringify(m)}; desemnari ${n0} → ${n1}`)
+    await p.js(`document.querySelectorAll('.ui-toast').forEach((t) => t.remove()); true`)
+  })
   // --- 6b. doua dreptunghiuri, al doilea eliberat cat primul inca se aplica feliat (INT-4) ---
-  {
+  await pas('doua-dreptunghiuri', async () => {
     await p.tasta('d')
     // Toasturile de dinainte se stivuiesc jos, peste colturile celui de-al doilea dreptunghi.
     await p.js(`document.querySelectorAll('.ui-toast').forEach((t) => t.remove()); true`)
@@ -630,17 +800,17 @@ async function ruleaza() {
     }
     await p.js(`(() => { const K = __kinstead; K.controls.target.set(${loc.x + 0.5}, ${sol + 1}, ${loc.y + 0.5}); K.camera.position.set(${loc.x + 0.5 - 14}, ${sol + 22}, ${loc.y + 0.5 + 14}); K.controls.update(); return true })()`)
     await astepta(300)
-  }
+  })
   // --- 7. depozitul 4×4 ---
-  {
+  await pas('depozit', async () => {
     await p.tasta('k')
     const inainte = await p.js('__f.zone()')
     await p.trage([loc.x - 14, loc.y + 10], [loc.x - 11, loc.y + 13], sol + 1)
     const dupa = await p.js('__f.zone()')
     bifa('depozit', dupa - inainte === 16, 'Zone ▸ Depozit, dreptunghi 4×4: 16 celule de zona', `${inainte} → ${dupa}; toast: ${await p.js('__f.toast()')}; unealta ${await p.js('__kinstead.ui.unealta')}`)
-  }
+  })
   // --- 7b. Z+trage cu Z eliberat inaintea butonului: tot depozit, ca in previzualizare (INT-11) ---
-  {
+  await pas('z-eliberat', async () => {
     await p.js('__kinstead.ui.zonaFel = 1; true')
     await p.tasta('v')
     const inainte = (await p.js('__f.zoneFel()')).map((z) => z.id)
@@ -650,9 +820,9 @@ async function ruleaza() {
     const noi = (await p.js('__f.zoneFel()')).filter((z) => !inainte.includes(z.id))
     bifa('z-eliberat', noi.length === 1 && noi[0].fel === 0, 'Z+trage cu Z eliberat primul: un DEPOZIT, cum arata previzualizarea', JSON.stringify(noi))
     await p.js('__kinstead.ui.zonaFel = 0; true')
-  }
+  })
   // --- 8. Selecteaza un om: inspectorul are numele lui ---
-  {
+  await pas('inspector', async () => {
     await p.tasta('v')
     const pion = await p.js(`(() => { const L = __kinstead.agentLayer; const m = L.mesh; const e = new Float32Array(16); m.instanceMatrix.array.slice(0, 16).forEach((v, i) => { e[i] = v }); const a = __kinstead.world.agents; return { x: e[12], y: e[13] + 0.7, z: e[14], id: a.id[L.sloturi[0]] } })()`)
     const s = await p.js(`__f.proj(${pion.x}, ${pion.y}, ${pion.z})`)
@@ -678,10 +848,10 @@ async function ruleaza() {
     }
     bifa('du-ma', b !== null && r2 !== null && r2.d < 1.5 && r2.sel === b.id, 'cu un om urmarit, clic pe randul altuia: camera ramane la al doilea', JSON.stringify({ b, r2 }))
     await p.tasta('o')
-  }
+  })
   // --- 9. Ctrl+S: EXACT o salvare noua, a lumii de acum; viteza 3× si pauza se regasesc la incarcare ---
   let salvare = null
-  {
+  await pas('salvare', async () => {
     // Viteza 3× (porneste simularea), apoi pauza: salvarea poarta viteza, iar jocul e oprit la salvare.
     await p.tasta('3')
     await p.tasta(' ')
@@ -696,11 +866,11 @@ async function ruleaza() {
     const noi = dupa.filter((s) => !inainte.some((x) => x.id === s.id))
     salvare = noi.length === 1 && noi[0].tick === tick ? noi[0] : null
     bifa('salvare', s0 === s1 && salvare !== null, 'Ctrl+S: exact o salvare noua, cu tickul lumii de acum; stabilitatea nu se comuta', JSON.stringify({ s0, s1, inainte: inainte.length, noi, tick }))
-  }
+  })
   const desInainte = await p.js('__f.des().length')
   const pioniInainte = await p.js('__f.pioni()')
   // --- 9b. plecarea dintr-un joc nesalvat cere confirmare (INT-6): tick-ul inaintat dupa salvare ---
-  {
+  await pas('plecare', async () => {
     await p.tasta(' ')
     await astepta(800)
     await p.tasta(' ')
@@ -708,8 +878,8 @@ async function ruleaza() {
     const t = await pagina('?verificare=1&pauza=1')
     bifa('plecare', plecariOprite === inainte + 1, 'plecarea dintr-un joc cu tickuri nesalvate cere confirmare (beforeunload)', `${inainte} → ${plecariOprite}`)
     void t
-  }
-  if (salvare !== null) {
+  })
+  if (salvare !== null) await pas('incarcare', async () => {
     const q = await pagina(`?incarca=${encodeURIComponent(salvare.id)}`)
     const r = await q.js(`({ mod: __kinstead.mod, tick: __kinstead.world.tick, des: __f.des().length, pioni: __f.pioni() })`)
     bifa('incarca-lumea', r.mod === 'incarca' && r.tick === salvare.tick && r.pioni.c === pioniInainte.c, 'incarcarea: aceeasi lume (tick, oameni)', JSON.stringify({ r, salvat: salvare.tick, pioniInainte }))
@@ -759,6 +929,6 @@ async function ruleaza() {
     const auto = (await q.js('__f.salvari()')).filter((s) => s.id.startsWith('auto')).map((s) => s.id)
     bifa('automata-pe-lume', auto.length === 1 && auto[0] === 'auto-7', 'salvarea automata a jocului incarcat: slotul lumii lui (auto-7)', JSON.stringify(auto))
     if (q.erori.length) bifa('consola-incarcat', false, 'fara erori in consola (pagina incarcata)', q.erori.join(' | '))
-  }
+  })
   if (p.erori.length) bifa('consola-joc-nou', false, 'fara erori in consola (jocul nou)', p.erori.join(' | '))
 }
