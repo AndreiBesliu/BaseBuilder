@@ -124,15 +124,53 @@ function textPodea(podea: readonly (readonly [number, number])[]): string {
 }
 
 /**
+ * Câte goluri (uși) sunt în celulele propuse: grupuri 6-conexe. Explicația întoarce celulele tuturor
+ * ușilor la un loc; două goluri a câte două celule erau „o ușă (4 celule)" (recenzia încăperilor, EXP-7).
+ */
+export function goluriUsi(celule: readonly { x: number; y: number; z: number }[]): number {
+  const vazut = new Set<number>()
+  let goluri = 0
+  for (let i = 0; i < celule.length; i++) {
+    if (vazut.has(i)) continue
+    goluri++
+    const stiva = [i]
+    vazut.add(i)
+    while (stiva.length > 0) {
+      const a = celule[stiva.pop()!]!
+      for (let j = 0; j < celule.length; j++) {
+        if (vazut.has(j)) continue
+        const b = celule[j]!
+        if (Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs(a.z - b.z) !== 1) continue
+        vazut.add(j)
+        stiva.push(j)
+      }
+    }
+  }
+  return goluri
+}
+
+/** „o celulă", „două celule", „4 celule". */
+function textCelule(n: number): string {
+  return n === 1 ? 'o celulă' : n === 2 ? 'două celule' : cant(n, 'celule')
+}
+
+/**
  * Textul încăperii din inspector. În UI conceptul se numește „încăpere": „camera" e deja camera de
  * vedere în nouă texte (panoul, JUC-11).
+ *
+ * `usaDesemnata`: toate celulele ușilor propuse au deja desemnarea de ușă — inspectorul nu mai cere
+ * „Pune ușa" (un al doilea clic nu făcea nimic și nu spunea nimic: recenzia încăperilor, ECR-12).
+ *
+ * `CER` nu are text: `incaperea()` întoarce null pe aerul de sub cer, deci ramura nu se atingea niciodată
+ * (ECR-12); inspectorul arată secțiunea doar când titlul nu e gol.
  */
-export function textIncapere(i: { readonly sub: boolean; readonly celula: { x: number; y: number; z: number }; readonly e: import('../../src/sim/camere-explica.ts').Explicatie }): { titlu: string; actiune: string; bine: boolean } {
+export function textIncapere(i: { readonly sub: boolean; readonly celula: { x: number; y: number; z: number }; readonly e: import('../../src/sim/camere-explica.ts').Explicatie }, usaDesemnata = false): { titlu: string; actiune: string; bine: boolean } {
   const pre = i.sub ? 'Sub acoperișul ăsta: ' : ''
   const e = i.e
   switch (e.fel) {
-    case 'NU_E_AER': return { titlu: '', actiune: '', bine: true }
-    case 'CER': return { titlu: `${pre}sub cerul liber.`, actiune: '', bine: true }
+    case 'NU_E_AER':
+    case 'CER':
+      return { titlu: '', actiune: '', bine: true }
     case 'INCAPERE': {
       const usi = e.usi === 0 ? 'fără ușă' : e.usi === 1 ? '1 ușă' : `${e.usi} uși`
       return { titlu: `${pre}Încăpere · ${e.volum} m³ · ${textPodea(e.podea)} · ${usi}.`, actiune: '', bine: true }
@@ -141,12 +179,27 @@ export function textIncapere(i: { readonly sub: boolean; readonly celula: { x: n
     case 'DESCHISA': {
       const unde = textLoc(i.celula, e.gaura)
       const cum = e.directie === 'SUS' ? `printr-o gaură în acoperiș, ${unde}` : `printr-un gol în perete, ${unde}`
-      const actiune = e.volumCuUsi !== null
-        ? `Pune o ușă în gol (${e.usiPropuse.length === 2 ? 'două celule' : `${e.usiPropuse.length} celule`}): devine o încăpere de ${e.volumCuUsi} m³.`
-        : e.directie === 'SUS' ? 'Pune o podea peste gaură.' : 'Închide-l cu un perete sau cu o ușă.'
+      let actiune: string
+      if (e.volumCuUsi !== null) {
+        const n = goluriUsi(e.usiPropuse)
+        if (usaDesemnata) actiune = `${n === 1 ? 'Ușa e desemnată — o zidesc oamenii' : 'Ușile sunt desemnate — le zidesc oamenii'}. Apoi devine o încăpere de ${e.volumCuUsi} m³.`
+        else actiune = `${n === 1 ? 'Pune o ușă în gol' : `Pune ${n} uși`} (${textCelule(e.usiPropuse.length)}): devine o încăpere de ${e.volumCuUsi} m³.`
+      } else {
+        actiune = e.directie === 'SUS' ? 'Pune o podea peste gaură.' : 'Închide-l cu un perete sau cu o ușă.'
+      }
       return { titlu: `${pre}Nu e încăpere: aerul iese ${cum}.`, actiune, bine: false }
     }
   }
+}
+
+/**
+ * Indiciul uneltei Ușă. Planul ușii ignoră Contur/Plin (un gol se pune întreg), deci indiciul nu mai
+ * spune „(plin)" și butonul nu se arată (ECR-12); spune ce face clicul și ce face dreptunghiul. `cota`
+ * = nivelul activ (planul de tăiere), null = toate nivelurile.
+ */
+export function textIndiciuUsa(cota: number | null): string {
+  const unde = cota === null ? '' : ` pe nivelul activ (${cota - 1} m)`
+  return `<b>Ușă</b>${unde} · clic pe un gol de perete sau pe o gaură de podea: o pune întreagă · trage = o ușă în fiecare gol din dreptunghi · P = altă piesă · Esc`
 }
 
 export const NUME_ZONA: Readonly<Record<number, string>> = {

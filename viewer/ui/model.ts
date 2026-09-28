@@ -424,6 +424,9 @@ function textFaraLocDeZidit(w: World, wx: number, wy: number, z: number, cifre: 
   }
 }
 
+/** O ușă nu scoate pe nimeni dintr-o groapă: sfatul pentru o ușă fără loc SIGUR, în ambele ramuri. */
+const USA_NU_E_TREAPTA: TextMotiv = { titlu: 'o ușă nu e treaptă — nu scoate pe nimeni de acolo.', actiune: 'Pune o scară până la ea.' }
+
 /**
  * Starea unei desemnari, in ordinea precedentei (panoul, CS-2 / CS-3): o piesa care n-ar sta
  * in picioare nici dupa restul planului bate orice motiv memorat; o desemnare REZERVATA nu arata
@@ -444,9 +447,15 @@ export function stareDesemnare(w: World, rules: Rules, ds: number, previz: Previ
   if (cod !== null) {
     const piesa = d.piesa[ds]!
     const felMaterial = construieste && piesa !== Piesa.NICIUNA ? rules.digYield[rules.piese[piesa]!.material]?.fel ?? 0 : 0
+    const usa = construieste && piesa !== Piesa.NICIUNA && rules.piese[piesa]!.material === Material.USA
+    // FARA_LOC_SIGUR pe o ușă: scanerul scrie motivul din prima încercare, deci textul generic („Pune o
+    // scară sau o ușă") îi cerea jucătorului o ușă despre o ușă, chiar pe scena USA-1 (recenzia
+    // încăperilor, USA-4). Același sfat ca în ramura previzualizării, mai jos.
     const t = construieste && cod === Reason.INACCESIBIL && d.ultimulMotivDetaliu[ds] === DetaliuMotiv.FARA_LOC_DE_LUCRU
       ? textFaraLocDeZidit(w, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, cifre)
-      : textMotiv('desemnare', cod, d.ultimulMotivDetaliu[ds]!, undefined, cifre, felMaterial)
+      : usa && cod === Reason.INACCESIBIL && d.ultimulMotivDetaliu[ds] === DetaliuMotiv.FARA_LOC_SIGUR
+        ? { titlu: `Niciun loc SIGUR de lucru: ${USA_NU_E_TREAPTA.titlu}`, actiune: USA_NU_E_TREAPTA.actiune }
+        : textMotiv('desemnare', cod, d.ultimulMotivDetaliu[ds]!, undefined, cifre, felMaterial)
     const s = Math.ceil((d.reincercaLaTick[ds]! - w.tick) / rules.ticksPerSecond)
     return { fel: 'motiv', text: { titlu: s > 0 ? `${t.titlu} Reîncearcă în ${s} s.` : `Ultimul refuz memorat: ${t.titlu.replace(/^./, (c) => c.toLowerCase())} Se reverifică la următoarea scanare.`, actiune: t.actiune } }
   }
@@ -456,7 +465,7 @@ export function stareDesemnare(w: World, rules: Rules, ds: number, previz: Previ
       // O ușă nu scoate pe nimeni dintr-o groapă (nu e treaptă): sfatul „pune o ușă" despre o ușă ar fi
       // fost fals (panoul camerelor, USA-1).
       if (rules.piese[d.piesa[ds]!]!.material === Material.USA) {
-        return { fel: 'faraAcces', text: { titlu: 'Nu ajunge nimeni la ea: o ușă nu e treaptă — nu scoate pe nimeni de acolo.', actiune: 'Pune o scară până la ea.' } }
+        return { fel: 'faraAcces', text: { titlu: `Nu ajunge nimeni la ea: ${USA_NU_E_TREAPTA.titlu}`, actiune: USA_NU_E_TREAPTA.actiune } }
       }
       return { fel: 'faraAcces', text: cauza === CauzaAcces.INCINTA
         ? { titlu: 'Nu ajunge nimeni la ea: locurile de lucru sunt într-o încăpere fără ieșire.', actiune: 'Pune o ușă în perete (un gol de 1 × 2 m). Un gol fără ușă merge și el, dar încăperea nu mai e închisă.' }

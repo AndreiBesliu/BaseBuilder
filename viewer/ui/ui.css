@@ -97,7 +97,11 @@
 .ui-pasi .hrana { margin-top: 6px; font-size: 12px; color: var(--ui-warn); }
 
 /* ---- bara de unelte (jos) --------------------------------------------------------------- */
-.ui-jos { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: calc(100vw - 20px); }
+/* Coloana e cat cel mai lat copil (stiva de toasturi, pana la 760 px): partile ei goale, langa randuri si
+   intre toasturi, inghiteau clicurile pe teren — 41.900 px² de canvas mort la 1280×720, invizibil, cat
+   stateau toasturile (recenzia incaperilor, ECR-4). Coloana nu mai prinde nimic; randurile ei, da. */
+.ui-jos { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: calc(100vw - 20px); pointer-events: none; }
+.ui-jos > :not(.ui-toasturi) { pointer-events: auto; }
 .ui-unelte { display: flex; gap: 2px; padding: 4px; background: var(--ui-bg); border: 1px solid var(--ui-line); border-radius: 8px; }
 .ui-sep { width: 1px; align-self: stretch; background: var(--ui-line); margin: 4px 3px; }
 .ui-sub { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; padding: 3px; background: var(--ui-bg-2); border: 1px solid var(--ui-line); border-radius: 8px; align-items: center; }

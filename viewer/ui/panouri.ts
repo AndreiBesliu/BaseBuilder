@@ -19,12 +19,13 @@ import { CATEGORII, Faction, Item, Piesa } from '../../src/sim/state.ts'
 import { Zona } from '../../src/sim/zone.ts'
 import { ascuns, attr, clasa, h, text } from './dom.ts'
 import { ICON } from './iconite.ts'
-import { cauzaGolirii, creeazaPrevizualizare, golita, incaperea, inspecteazaCelula, refacePrevizualizarea, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte } from './model.ts'
+import { cauzaGolirii, creeazaPrevizualizare, golita, inspecteazaCelula, refacePrevizualizarea, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte } from './model.ts'
+import { creeazaMemorieIncapere, usilePropuse } from './memorie-incapere.ts'
+import type { UsilePropuse } from './memorie-incapere.ts'
 import type { Bara, IncapereLa, InspectieCelula, Previz, RandOm } from './model.ts'
-import { desemnareLaCelula } from '../../src/sim/desemnari.ts'
 import { actualizeaza, creeazaAlerte, eveniment, REGULI_ALERTE, Severitate } from './alerte.ts'
 import type { StareAlerta, Tinta } from './alerte.ts'
-import { cant, NUME_ITEM, NUME_MATERIAL, NUME_PIESA, NUME_ZONA, textIncapere, textMinute, textNumar, textPrioritatePersonala, textTimp } from './texte.ts'
+import { cant, NUME_ITEM, NUME_MATERIAL, NUME_PIESA, NUME_ZONA, textIncapere, textIndiciuUsa, textMinute, textNumar, textPrioritatePersonala, textTimp } from './texte.ts'
 import { conturImplicit, Unealta } from './dreptunghi.ts'
 import type { UnealtaId } from './dreptunghi.ts'
 import { eTimpulSalvariiAutomate, idAutomata, salvareAutomataPermisa } from './salvari-plic.ts'
@@ -455,7 +456,9 @@ export function monteazaUI(ctx: ContextUI): UI {
     const constr = ui.unealta === Unealta.CONSTRUIESTE
     const sapa = ui.unealta === Unealta.SAPA
     ascuns(subConstr, !constr && !sapa)
-    subConstr.replaceChildren(...(constr ? [...btnPiesa.values(), h('span', { class: 'ui-sep' }), btnContur] : [btnStrat]), h('span', { class: 'ui-sep' }), grupPrio)
+    // Planul usii ignora Contur/Plin (un gol se pune intreg): butonul nu se arata pentru ea (ECR-12).
+    const cuContur = constr && ui.piesa !== Piesa.USA
+    subConstr.replaceChildren(...(constr ? [...btnPiesa.values(), ...(cuContur ? [h('span', { class: 'ui-sep' }), btnContur] : [])] : [btnStrat]), h('span', { class: 'ui-sep' }), grupPrio)
     ascuns(subZona, ui.unealta !== Unealta.ZONA && ui.unealta !== Unealta.STERGE_ZONA)
     for (const [p, b] of btnPiesa) attr(b, 'aria-pressed', constr && ui.piesa === p ? 'true' : 'false')
     for (const [z, b] of btnZona) attr(b, 'aria-pressed', (z === -1 ? ui.unealta === Unealta.STERGE_ZONA : ui.unealta === Unealta.ZONA && ui.zonaFel === z) ? 'true' : 'false')
@@ -475,7 +478,7 @@ export function monteazaUI(ctx: ContextUI): UI {
     const s: Record<number, string> = {
       [Unealta.SELECTEAZA]: '<b>Selectează</b> · clic pe un om sau pe o celulă · trage = rotește camera',
       [Unealta.SAPA]: `<b>Sapă</b> ${unde} · clic = o celulă · trage = dreptunghi · Esc = Selectează`,
-      [Unealta.CONSTRUIESTE]: `<b>${NUME_PIESA[ui.piesa]}</b> ${unde} · trage = dreptunghi (${ui.contur ? 'contur' : 'plin'}) · P = altă piesă · Esc`,
+      [Unealta.CONSTRUIESTE]: ui.piesa === Piesa.USA ? textIndiciuUsa(n.cota) : `<b>${NUME_PIESA[ui.piesa]}</b> ${unde} · trage = dreptunghi (${ui.contur ? 'contur' : 'plin'}) · P = altă piesă · Esc`,
       [Unealta.ANULEAZA]: '<b>Anulează</b> · clic pe o lucrare sau trage peste ele (doar ce se vede) · Esc',
       [Unealta.ZONA]: `<b>${NUME_ZONA[ui.zonaFel]}</b> ${unde} · clic = o celulă · trage = dreptunghi · Esc`,
       [Unealta.STERGE_ZONA]: '<b>Șterge zona</b> · clic sau dreptunghi: zonele atinse se șterg ÎNTREGI · Esc',
@@ -540,8 +543,8 @@ export function monteazaUI(ctx: ContextUI): UI {
 
   // ---- inspectorul ---------------------------------------------------------------------------
   let inspectorCheie = ''
-  let incapereCheie = ''
-  let incapereMemorata: IncapereLa | null = null
+  /** Încăperea celulei selectate: memorată pe celulă + amprenta pe jurnal, cu frână (memorie-incapere.ts). */
+  const memorieIncapere = creeazaMemorieIncapere(() => performance.now())
   function scrieInspector(fortat = false): void {
     if (panouSertar.hidden || sertar !== 'inspector') return
     if (!selectie) {
@@ -583,14 +586,15 @@ export function monteazaUI(ctx: ContextUI): UI {
       return
     }
     const c = inspecteazaCelula(w, rules, selectie.wx, selectie.wy, selectie.z, previzRar(fortat))
-    // Încăperea, memorată pe (teren, index, celulă): explicația inundă până la scurgere, iar inspectorul
-    // se reface de 4 ori pe secundă (panoul camerelor, JUC-8).
-    const cheieInc = `${w.terrain.editari}|${w.camere.epoca}|${selectie.wx},${selectie.wy},${selectie.z}`
-    if (cheieInc !== incapereCheie) { incapereCheie = cheieInc; incapereMemorata = incaperea(w, selectie.wx, selectie.wy, selectie.z) }
-    const cheie = JSON.stringify(c) + cheieInc
+    // Explicația inundă până la scurgere, iar inspectorul se reface de 4 ori pe secundă (panoul camerelor,
+    // JUC-8): memoria ei nu se invalidează decât de o editare lângă componentă, iar frâna o ține sub 5%
+    // din timp cât minerii lucrează chiar acolo (recenzia încăperilor, EXP-4 / ECR-3). Un clic o sare.
+    const inc = memorieIncapere.ia(w, selectie.wx, selectie.wy, selectie.z, fortat)
+    const usi = usilePropuse(w, inc)
+    const cheie = `${JSON.stringify(c)}|${memorieIncapere.versiune()}|${usi.lipsa.length}|${usi.desemnata}`
     if (!fortat && cheie === inspectorCheie) return
     inspectorCheie = cheie
-    corpInspector.replaceChildren(...corpCelula(c, incapereMemorata))
+    corpInspector.replaceChildren(...corpCelula(c, inc, usi))
   }
 
   function butonPrioritate(id: number, c: number, v: number, activa: boolean): HTMLButtonElement {
@@ -611,13 +615,13 @@ export function monteazaUI(ctx: ContextUI): UI {
     return h('div', { class: `ui-motiv${fel === 'atentie' ? '' : ` ${fel}`}` }, h('div', {}, t.titlu), t.actiune ? h('div', { class: 'actiune' }, t.actiune) : null)
   }
 
-  function corpCelula(c: InspectieCelula, inc: IncapereLa | null): Node[] {
+  function corpCelula(c: InspectieCelula, inc: IncapereLa | null, usi: UsilePropuse): Node[] {
     const out: Node[] = [
       h('h2', {}, c.material === null ? 'Celulă' : NUME_MATERIAL[c.material] ?? 'Celulă'),
       h('div', { class: 'sub num' }, `${c.wx}, ${c.wy} · ${c.z} m`),
     ]
-    if (inc !== null && inc.e.fel !== 'NU_E_AER') {
-      const t = textIncapere(inc)
+    const t = inc === null ? null : textIncapere(inc, usi.desemnata)
+    if (inc !== null && t !== null && t.titlu !== '') {
       const s = h('section', { class: 'ui-incapere' }, motivEl({ titlu: t.titlu, actiune: t.actiune }, t.bine ? 'bine' : 'atentie'))
       const act = h('div', { class: 'ui-actiuni' })
       if (inc.e.fel === 'DESCHISA') {
@@ -625,11 +629,21 @@ export function monteazaUI(ctx: ContextUI): UI {
         const arata = iconBtn(ICON.nivel, inc.e.directie === 'SUS' ? 'Arată gaura' : 'Arată golul', '', 'Camera și nivelul acolo')
         arata.addEventListener('click', () => ctx.duLa(g.x, g.y, g.z, g.z + 1))
         act.append(arata)
-        const usi = inc.e.usiPropuse
-        if (usi.length > 0) {
+        const propuse = inc.e.usiPropuse
+        if (propuse.length > 0) {
+          // Ușa propusă poate fi departe de scurgere (e pe drumul aerului): „Arată" duce și la ea (EXP-7).
+          const u0 = propuse.reduce((a, b) => (b.z < a.z ? b : a))
+          const arataUsa = iconBtn(ICON.usa, 'Arată ușa', '', 'Camera și nivelul la ușa propusă')
+          arataUsa.addEventListener('click', () => ctx.duLa(u0.x, u0.y, u0.z, u0.z + 1))
+          act.append(arataUsa)
+        }
+        // Cu toate celulele ușii deja desemnate, textul spune „Ușa e desemnată" și butonul nu mai apare: un
+        // al doilea clic nu făcea nimic și nu spunea nimic (ECR-12). Prioritatea e a barei de jos, ca la
+        // orice desen.
+        if (usi.lipsa.length > 0 && !usi.desemnata) {
           const pune = iconBtn(ICON.usa, 'Pune ușa', '', 'Desemnează ușa în gol (oamenii o zidesc)')
           pune.addEventListener('click', () => {
-            ctx.aplica(usi.filter((u) => desemnareLaCelula(w.desemnari, u.x, u.y, u.z) === -1).map((u) => ({ kind: 'desemneaza', wx: u.x, wy: u.y, z: u.z, piesa: Piesa.USA })))
+            ctx.aplica(usi.lipsa.map((u) => ({ kind: 'desemneaza', wx: u.x, wy: u.y, z: u.z, piesa: Piesa.USA, prioritate: ui.prioritate })))
             scrieInspector(true)
           })
           act.append(pune)

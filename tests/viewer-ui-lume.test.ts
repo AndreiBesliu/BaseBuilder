@@ -270,7 +270,7 @@ test('model: alerta „nimeni-cara" pe categorii EFECTIVE (Sapa pe Exclusiv la t
 
 test('modulele pure nu trag three (si proba negativa: overlay-joburi.ts il trage)', () => {
   const rad = resolve(import.meta.dirname, '..')
-  const pure = ['viewer/ui/texte.ts', 'viewer/ui/nume.ts', 'viewer/ui/model.ts', 'viewer/ui/alerte.ts', 'viewer/ui/dreptunghi.ts', 'viewer/ui/salvari-plic.ts', 'viewer/ui/pornire.ts', 'viewer/ui/taste.ts', 'viewer/ui/loc.ts', 'viewer/tinta.ts']
+  const pure = ['viewer/ui/texte.ts', 'viewer/ui/nume.ts', 'viewer/ui/model.ts', 'viewer/ui/alerte.ts', 'viewer/ui/dreptunghi.ts', 'viewer/ui/salvari-plic.ts', 'viewer/ui/pornire.ts', 'viewer/ui/taste.ts', 'viewer/ui/loc.ts', 'viewer/ui/memorie-incapere.ts', 'viewer/tinta.ts']
   const cod = (f: string) => `import { registerHooks } from 'node:module'
 registerHooks({ resolve(s, c, next) { if (s === 'three' || s.startsWith('three/')) throw new Error('TRAGE_THREE'); return next(s, c) } })
 try { await import(${JSON.stringify(pathToFileURL(resolve(rad, f)).href)}); console.log('CURAT') } catch (e) { console.log(String(e.message).includes('TRAGE_THREE') ? 'THREE' : 'EROARE ' + e.message) }`

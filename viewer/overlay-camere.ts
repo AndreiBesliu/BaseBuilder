@@ -6,14 +6,32 @@
  * Panoul pe design (JUC-10): un overlay care colorează doar încăperile e gol tocmai unde jucătorul caută
  * — pe o casă cu golul ușii deschis nu arăta nimic, și nici de ce. Hașurile și stâlpii răspund la „de ce".
  *
- * Citește `w.camere` (la zi în afara tickului) și `scurgeriLaNivel`; se reface doar când se schimbă
- * indexul (`epoca`) sau nivelul. Fără nivel nu desenează nimic: legenda spune de ce.
+ * Citește `w.camere` (la zi în afara tickului) și `scurgeriLaNivel`. Fără nivel nu desenează nimic:
+ * legenda spune de ce.
+ *
+ * ## Când se reface (recenzia încăperilor, ECR-2)
+ *
+ * `epoca` indexului e GLOBALĂ: crește la orice săpătură sau zidire care atinge aer acoperit, oriunde în
+ * lume. Refăcut pe ea, overlay-ul se reconstruia la fiecare săpătură a pionilor dintr-o mină de la 60 m
+ * — și, cu materiale noi la fiecare reconstrucție, three.js re-lega 4 programe GL: pe un nivel mare,
+ * 32 din 52 de cadre peste 16,7 ms (verificatorul ECR-2, cu pioni reali). Acum:
+ * - materialele se creează O DATĂ, cu overlay-ul; `goleste` eliberează doar geometria (re-legările: 4 → 0);
+ * - o epocă nouă reface nivelul doar dacă AMPRENTA lui s-a schimbat: identitatea obiectelor felie de la
+ *   nivel, plus, pe bucățile lor, (id-ul componentei, e încăpere, ancora). Nu parcurge celulele: costul
+ *   e pe felii, 0,0–0,1 ms, față de 3,7–6,1 ms pentru o reconstrucție (semnătura FNV pe celule a lentilei
+ *   costa cât reconstrucția pe care o evita — verificatorul a măsurat-o și a respins-o).
+ *
+ * Amprenta se sprijină pe DOUĂ invariante ale indexului (src/sim/camere.ts, documentate și testate
+ * acolo): `refaFelie` pune un obiect felie NOU, iar obiectele vechi nu se modifică niciodată; și orice
+ * schimbare a unei celule de la nivel — aerul acoperit, cerul lateral al unei scurgeri — reface felia
+ * care o conține sau o atinge (lema jurnalului). Tot ce desenează overlay-ul e funcție de feliile
+ * nivelului și de componentele bucăților lor; restul componentei (alt nivel) intră prin triplet.
  */
 
 import * as THREE from 'three'
 import type { World } from '../src/sim/state.ts'
-import { celuleLaNivel, esteIncapere } from '../src/sim/camere.ts'
-import type { Componenta } from '../src/sim/camere.ts'
+import { celuleLaNivel, cheieFelie, esteIncapere } from '../src/sim/camere.ts'
+import type { Componenta, IndexCamere } from '../src/sim/camere.ts'
 import { scurgeriLaNivel } from '../src/sim/camere-explica.ts'
 import { WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 
@@ -21,6 +39,15 @@ import { WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 export const CULORI_INCAPERI: readonly number[] = [0x6fb3d9, 0xd9a86f, 0x8fcf73, 0xb98fe0, 0xe0d070, 0x6fd9b8, 0xe08fb0, 0x9aa0e8]
 export const CULOARE_DESCHISA = 0xe0503c
 export const CULOARE_SCURGERE = 0xff6a3d
+/** Numele grupului în scenă: proba de pe ecran (bench/ui-fum.mjs) îl caută după el. */
+export const NUME_GRUP = 'overlay-camere'
+
+/** Ce descrie desenul unui nivel, fără să parcurgă celulele. Vezi antetul. */
+export interface AmprentaNivel {
+  readonly felii: readonly object[]
+  /** Pe fiecare bucată a feliilor, în ordine: id-ul componentei, 1 = încăpere, ancora. */
+  readonly comp: readonly number[]
+}
 
 export interface OverlayCamere {
   readonly group: THREE.Group
@@ -31,13 +58,26 @@ export interface OverlayCamere {
   incaperi: number
   deschise: number
   scurgeri: number
+  /** Amprenta nivelului desenat; null = nimic desenat. */
+  amprenta: AmprentaNivel | null
+  /** Create o dată, cu overlay-ul: o reconstrucție nu re-leagă programe GL. */
+  readonly materiale: { readonly tenta: THREE.Material; readonly hasuri: THREE.Material; readonly stalpi: THREE.Material }
+  /** Contoare: reconstrucții făcute și epoci noi sărite (amprenta nivelului era aceeași). */
+  reconstructii: number
+  sarite: number
 }
 
 export function createCamereOverlay(): OverlayCamere {
   const group = new THREE.Group()
+  group.name = NUME_GRUP
   group.visible = false
   group.renderOrder = 6
-  return { group, visible: false, epoca: -1, nivel: null, incaperi: 0, deschise: 0, scurgeri: 0 }
+  const materiale = {
+    tenta: new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.45, depthTest: false, side: THREE.DoubleSide }),
+    hasuri: new THREE.LineBasicMaterial({ color: CULOARE_DESCHISA, transparent: true, opacity: 0.8, depthTest: false }),
+    stalpi: new THREE.LineBasicMaterial({ color: CULOARE_SCURGERE, depthTest: false }),
+  }
+  return { group, visible: false, epoca: -1, nivel: null, incaperi: 0, deschise: 0, scurgeri: 0, amprenta: null, materiale, reconstructii: 0, sarite: 0 }
 }
 
 /**
@@ -73,14 +113,50 @@ export function culoriIncaperi(celule: readonly { x: number; y: number; c: Compo
   return culoare
 }
 
+/** Prima poziție din `lista` (sortată) cu valoarea ≥ k. */
+function primaPozitie(lista: readonly number[], k: number): number {
+  let lo = 0
+  let hi = lista.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (lista[mid]! < k) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
+/**
+ * Amprenta nivelului z: feliile lui (cheile sunt sortate pe (z, by, bx), deci nivelul e un interval
+ * contiguu) și, pe bucățile lor, tripletul componentei. Proporțională cu feliile, nu cu celulele.
+ */
+export function amprentaNivel(idx: IndexCamere, z: number): AmprentaNivel {
+  const lo = primaPozitie(idx.chei, cheieFelie(0, 0, z))
+  const hi = primaPozitie(idx.chei, cheieFelie(0, 0, z + 1))
+  const felii: object[] = []
+  const comp: number[] = []
+  for (let i = lo; i < hi; i++) {
+    const f = idx.felii.get(idx.chei[i]!)!
+    felii.push(f)
+    for (const b of f.bucati) {
+      const c = idx.comp.get(idx.bComp[b]!)
+      comp.push(c ? c.id : -1, c && esteIncapere(c) ? 1 : 0, c ? c.ancora : -1)
+    }
+  }
+  return { felii, comp }
+}
+
+export function aceeasiAmprenta(a: AmprentaNivel, b: AmprentaNivel): boolean {
+  if (a.felii.length !== b.felii.length || a.comp.length !== b.comp.length) return false
+  for (let i = 0; i < a.felii.length; i++) if (a.felii[i] !== b.felii[i]) return false
+  for (let i = 0; i < a.comp.length; i++) if (a.comp[i] !== b.comp[i]) return false
+  return true
+}
+
+/** Scoate plasele din grup și le eliberează GEOMETRIA; materialele sunt ale overlay-ului și rămân. */
 function goleste(g: THREE.Group): void {
   for (const o of [...g.children]) {
     g.remove(o)
-    const m = o as THREE.Mesh
-    m.geometry?.dispose()
-    const mat = m.material as THREE.Material | THREE.Material[] | undefined
-    if (Array.isArray(mat)) mat.forEach((x) => x.dispose())
-    else mat?.dispose()
+    ;(o as THREE.Mesh).geometry?.dispose()
   }
 }
 
@@ -88,8 +164,16 @@ function goleste(g: THREE.Group): void {
 export function rebuildCamereOverlay(o: OverlayCamere, w: World, z: number | null): void {
   if (!o.visible) return
   if (o.epoca === w.camere.epoca && o.nivel === z) return
+  const acelasiNivel = o.nivel === z
   o.epoca = w.camere.epoca
   o.nivel = z
+  const amprenta = z === null ? null : amprentaNivel(w.camere, z)
+  if (acelasiNivel && amprenta !== null && o.amprenta !== null && aceeasiAmprenta(o.amprenta, amprenta)) {
+    o.sarite++
+    return
+  }
+  o.amprenta = amprenta
+  o.reconstructii++
   goleste(o.group)
   o.incaperi = 0
   o.deschise = 0
@@ -129,14 +213,14 @@ export function rebuildCamereOverlay(o: OverlayCamere, w: World, z: number | nul
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3))
-    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.45, depthTest: false, side: THREE.DoubleSide }))
+    const m = new THREE.Mesh(geo, o.materiale.tenta)
     m.renderOrder = 6
     o.group.add(m)
   }
   if (hasuri.length > 0) {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(hasuri), 3))
-    const l = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: CULOARE_DESCHISA, transparent: true, opacity: 0.8, depthTest: false }))
+    const l = new THREE.LineSegments(geo, o.materiale.hasuri)
     l.renderOrder = 6
     o.group.add(l)
   }
@@ -152,7 +236,7 @@ export function rebuildCamereOverlay(o: OverlayCamere, w: World, z: number | nul
     }
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(lin), 3))
-    const l = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: CULOARE_SCURGERE, depthTest: false }))
+    const l = new THREE.LineSegments(geo, o.materiale.stalpi)
     l.renderOrder = 7
     o.group.add(l)
   }
