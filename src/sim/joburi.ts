@@ -108,7 +108,7 @@ import type { DesignationStore } from './desemnari.ts'
 import type { Cerere } from './rezervari.ts'
 import { elibereaza, elibereazaTinta, elibereazaUna, poateRezerva, rezervaToate, rezervatPe, Strat, sumaRezervata } from './rezervari.ts'
 import { asazaItem, creeazaItem, DetaliuItem, iaDinItem, itemLaCelula, locPeCelula, slotItem, stergeItem } from './iteme.ts'
-import { celulaDeZonaLa, indexZone, marcheazaZoneMurdare, prioritateaLocului, slotCelulaDeZona, slotZona, stergeCelulaDeZona } from './zone.ts'
+import { celulaDeZonaLa, indexZone, marcheazaZoneMurdare, prioritateaLocului, slotCelulaDeZona, slotZona, stergeCelulaDeZona, subSantier } from './zone.ts'
 
 // ---------------------------------------------------------------------------
 // ratiunea — TRANSIENT
@@ -2449,6 +2449,14 @@ function zideste(w: World, rules: Rules, slot: number): void {
   if (blocheazaMersul(spec.material)) {
     const liber = celulaLibera(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!)
     if (!liber.ok) {
+      // Un MORMAN nu e trecator (recenzia incaperilor, USA-5): nimeni nu-l ia de pe un santier, iar
+      // asteptarea cu marfa in mana golea colonia. Refuz pe TINTA, cu racire, si marfa jos — ca la
+      // regula de sigilare. E plasa: radacina (nimeni nu mai cara pe un santier) e in `indexZone` si
+      // in `lasa`; aici raman mormanele ajunse altfel (o salvare veche, o cadere, un buiandrug).
+      if (liber.params.item !== undefined) {
+        terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.CELULA_OCUPATA, Racire.TINTA)
+        return
+      }
       raport.santierOcupat++
       return
     }
@@ -2640,6 +2648,13 @@ function lasa(w: World, rules: Rules, slot: number): void {
   }
   if (locPeCelula(w, rules, kind, cx, cy, cz) < cant) {
     terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.CAPACITATE_DEPASITA, Racire.TINTA)
+    return
+  }
+  // Un santier desemnat peste destinatie cat carausul era pe drum (recenzia incaperilor, USA-5):
+  // indexul nu mai ofera celula, dar rezervarea e dinainte. Marfa nu se pune pe santier — ar opri
+  // zidirea —, ci langa el (`lasaLaPicioare` → `asazaItem`, care sare santierul), fara racire.
+  if (subSantier(w, rules, cx, cy, cz)) {
+    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
     return
   }
   const it = itemLaCelula(w.iteme, cx, cy, cz)
@@ -3323,6 +3338,10 @@ export function anuleazaDesemnare(w: World, rules: Rules, ds: number): void {
     terminaJob(w, rules, i, Sfarsit.INTRERUPT)
   }
   elibereazaTinta(w.rezervari, id)
+  // Indexul de zone citeste santierele (`subSantier`): cel disparut elibereaza celulele de depozit
+  // de sub el. Fara marcare, lumea continua le tinea inchise pana la urmatoarea murdarire, iar cea
+  // incarcata le oferea imediat — alta lume (masurat de verificatorul USA-5).
+  if (w.desemnari.kind[ds] === Desemnare.CONSTRUIESTE) marcheazaZoneMurdare(w)
   stergeDesemnare(w.desemnari, ds)
 }
 

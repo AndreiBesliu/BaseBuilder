@@ -862,4 +862,64 @@ export const MUTATII = [
     b: '  suportRazaGrinda: { min: 1, max: 64 },',
     t: 'tests/content.test.ts', e: 'raza grinzii are un plafon de COST',
   },
+  // --- recenzia incaperilor, USA-5: depozitul peste santiere (pre-existent). Indexul nu ofera celula
+  // de sub un santier, cele doua marcari de murdarie il tin la zi, garda din `lasa` prinde carausul de
+  // pe drum, iar plasa din `zideste` refuza pe tinta un morman ajuns totusi acolo.
+  {
+    n: 'USA-5: indexul de zone ofera si celula de depozit de sub un santier viu',
+    f: 'src/sim/zone.ts',
+    a: '    if (subSantierScratch[cs] === 1) continue\n',
+    b: '',
+    t: 'tests/santier-depozit.test.ts', e: 'DEPOZIT PESTE SANTIER (USA-5): indexul nu ofera celula',
+  },
+  {
+    n: 'USA-5: indexul vede santierul doar la cota celulei, nu si la cap',
+    f: 'src/sim/zone.ts',
+    a: '      const cz = celulaDeZonaLa(s, d.wx[ds]!, d.wy[ds]!, d.z[ds]! - h)',
+    b: '      const cz = h > 0 ? -1 : celulaDeZonaLa(s, d.wx[ds]!, d.wy[ds]!, d.z[ds]! - h)',
+    t: 'tests/santier-depozit.test.ts', e: 'DEPOZIT PESTE SANTIER (USA-5): indexul nu ofera celula',
+  },
+  {
+    n: 'USA-5: desemnarea unui santier nu murdareste indexul de zone (continuu ≠ incarcat)',
+    f: 'src/sim/commands.ts',
+    a: '      if (fel === Desemnare.CONSTRUIESTE) marcheazaZoneMurdare(w)\n',
+    b: '',
+    t: 'tests/santier-depozit.test.ts', e: 'DEPOZIT PESTE SANTIER (USA-5): indexul continuu = indexul incarcat',
+  },
+  {
+    n: 'USA-5: anularea unui santier nu murdareste indexul de zone (continuu ≠ incarcat)',
+    f: 'src/sim/joburi.ts',
+    a: '  if (w.desemnari.kind[ds] === Desemnare.CONSTRUIESTE) marcheazaZoneMurdare(w)\n',
+    b: '',
+    t: 'tests/santier-depozit.test.ts', e: 'DEPOZIT PESTE SANTIER (USA-5): indexul continuu = indexul incarcat',
+  },
+  {
+    n: 'USA-5: carausul prins pe drum de un santier nou lasa marfa PE santier (fara garda in lasa)',
+    f: 'src/sim/joburi.ts',
+    a: '  if (subSantier(w, rules, cx, cy, cz)) {\n    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)',
+    b: '  if (false) {\n    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)',
+    t: 'tests/santier-depozit.test.ts', e: 'DEPOZIT PESTE SANTIER (USA-5): cursa',
+  },
+  {
+    n: 'USA-5: e063f40 — indexul ofera santierele SI lasa pune marfa pe ele (acceptanta zidului)',
+    f: 'src/sim/zone.ts',
+    a: '    if (subSantierScratch[cs] === 1) continue\n',
+    b: '',
+    e2: [{ f: 'src/sim/joburi.ts', a: '  if (subSantier(w, rules, cx, cy, cz)) {\n    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)', b: '  if (false) {\n    terminaJob(w, rules, slot, Sfarsit.INTRERUPT)' }],
+    t: 'tests/santier-depozit.test.ts', e: 'DEPOZIT PESTE SANTIER (USA-5): un zid drept',
+  },
+  {
+    n: 'USA-5 plasa: un morman pe santier e asteptat ca un om trecator (piatra in mana, pe veci)',
+    f: 'src/sim/joburi.ts',
+    a: '      if (liber.params.item !== undefined) {',
+    b: '      if (false) {',
+    t: 'tests/santier-depozit.test.ts', e: 'DEPOZIT PESTE SANTIER (USA-5): un morman deja sub santier',
+  },
+  {
+    n: 'USA-5: vederea UI-ului, cu indexul murdar, numara drept loc celula de sub un santier',
+    f: 'src/sim/zone.ts',
+    a: '      if (subSantier(w, rules, c.wx[cs]!, c.wy[cs]!, c.z[cs]!)) continue\n',
+    b: '',
+    t: 'tests/santier-depozit.test.ts', e: 'DEPOZIT PESTE SANTIER (USA-5): vederea UI-ului',
+  },
 ]

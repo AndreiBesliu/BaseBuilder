@@ -336,6 +336,10 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       const out = adaugaDesemnare(w.desemnari, w.nextId, fel, cmd.wx, cmd.wy, cmd.z, prioritate, piesa as PiesaId)
       if (!out.ok) return out
       const id = w.nextId++
+      // Indexul de zone citeste santierele: celulele de depozit de sub unul nou nu mai sunt
+      // destinatie (`subSantier`, recenzia incaperilor USA-5). Fara marcare, indexul continuu ramane
+      // curat si vechi, iar cel reconstruit la incarcare nu — alta lume.
+      if (fel === Desemnare.CONSTRUIESTE) marcheazaZoneMurdare(w)
       acoperaDesemnarea(w, rules, cmd.wx, cmd.wy, cmd.z)
       return accept(id)
     }

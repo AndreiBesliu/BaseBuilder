@@ -32,6 +32,24 @@ import { ITEME } from './state.ts'
 import { cellKey } from './path.ts'
 import { rezervariPentru, Strat } from './rezervari.ts'
 import { DetaliuItem } from './iteme.ts'
+import { Desemnare, desemnareLaCelula } from './desemnari.ts'
+import { DEFAULT_RULES } from './content.ts'
+
+/**
+ * Sta celula (wx, wy, z) sub un santier de CONSTRUIT viu — la cota ei sau in headroom-ul de
+ * deasupra (z+1 .. z+H−1)? Atunci un morman pus aici ar opri zidirea: `celulaLibera` il refuza la
+ * picioare si la cap. Recenzia incaperilor (USA-5): un depozit pictat peste amprenta unei
+ * constructii primea marfa pe santier, iar constructorul astepta cu piatra in mana pana pleca din
+ * asezare — 4/4 pioni plecati pe un zid de 7×2. O singura intrebare, citita de indexul de zone
+ * (celula nu se ofera ca destinatie), de `lasa` (carausul prins pe drum) si de vederea UI-ului.
+ */
+export function subSantier(w: World, rules: Rules, wx: number, wy: number, z: number): boolean {
+  for (let h = 0; h < rules.agentHeadroomM; h++) {
+    const ds = desemnareLaCelula(w.desemnari, wx, wy, z + h)
+    if (ds !== -1 && w.desemnari.kind[ds] === Desemnare.CONSTRUIESTE) return true
+  }
+  return false
+}
 
 /**
  * Felurile de zona.
@@ -227,7 +245,11 @@ export function prioritateaLocului(s: ZoneStore, wx: number, wy: number, z: numb
  * picteaza un depozit), doua reguli, masurate de verificator pe patru scenarii fara clipire si fara
  * fals pozitiv: o celula de DEPOZIT goala si nerezervata primeste orice drum (`haulCarryMax <=
  * itemStackMax`), deci atunci niciun morman nu e fara depozit; altfel ramane cauza scrisa de sim
- * pe morman la ultima reconstructie.
+ * pe morman la ultima reconstructie. O celula de sub un santier viu (`subSantier`) nu se numara:
+ * nici indexul nu o ofera.
+ *
+ * `rules` da headroom-ul pentru `subSantier`. Implicit `DEFAULT_RULES`, fiindca apelantii din
+ * viewer (model.ts, overlay-joburi.ts) nu-l trec inca; au `rules` la indemana si ar trebui sa-l dea.
  */
 export interface VedereFaraDepozit {
   /** Cate zone de DEPOZIT vii exista (0 ⇒ „niciun depozit", altfel „nu incap"). Dormitoarele nu conteaza. */
@@ -235,7 +257,7 @@ export interface VedereFaraDepozit {
   esteFaraDepozit(item: number): boolean
 }
 
-export function vedereFaraDepozit(w: World): VedereFaraDepozit {
+export function vedereFaraDepozit(w: World, rules: Rules = DEFAULT_RULES): VedereFaraDepozit {
   const s = w.zone
   const ix = s.index
   const it = w.iteme
@@ -251,6 +273,9 @@ export function vedereFaraDepozit(w: World): VedereFaraDepozit {
       if (zs === -1 || s.kind[zs] !== Zona.DEPOZIT) continue
       if (it.laCelula.has(cellKey(c.wx[cs]!, c.wy[cs]!, c.z[cs]!))) continue
       if (rezervariPentru(w.rezervari, c.id[cs]!, Strat.LUCRU).length > 0) continue
+      // Aceeasi regula ca indexul: o celula de sub un santier viu nu primeste nimic (USA-5). Fara ea,
+      // cu indexul murdar, vederea spunea „are depozit" exact cand simularea spunea FARA_DEPOZIT.
+      if (subSantier(w, rules, c.wx[cs]!, c.wy[cs]!, c.z[cs]!)) continue
       celulaGoala = true
     }
   }
@@ -403,6 +428,9 @@ function incapeUndeva(s: ZoneStore, ix: IndexZone, kind: number, cant: number, p
   return false
 }
 
+/** TRANSIENT, scratch al lui `indexZone`: 1 = celula de zona (pe slot) de sub un santier viu. Rescris la fiecare reconstructie. */
+let subSantierScratch = new Uint8Array(0)
+
 export function indexZone(w: World, rules: Rules): IndexZone {
   const s = w.zone
   const ix = s.index
@@ -428,6 +456,21 @@ export function indexZone(w: World, rules: Rules): IndexZone {
   const c = s.celule
   const it = w.iteme
   ix.paturiLibere.length = 0
+  // Celulele de zona de sub un santier de CONSTRUIT viu (`subSantier`), calculate INVERSAT: se
+  // parcurg desemnarile, nu celulele de zona — O(desemnari × headroom). Masurat de verificatorul
+  // USA-5 la 4096 de celule, 3000 de mormane si 2500 de desemnari: 438–506 µs pe reconstructie, in
+  // zgomot; varianta cu `subSantier` pe fiecare celula costa +45–55%. Indexul citeste acum si
+  // desemnarile, deci `desemneaza` (CONSTRUIESTE) si `anuleazaDesemnare` il murdaresc.
+  if (subSantierScratch.length < c.capacity) subSantierScratch = new Uint8Array(c.capacity)
+  else subSantierScratch.fill(0, 0, c.count)
+  const d = w.desemnari
+  for (let ds = 0; ds < d.count; ds++) {
+    if (d.alive[ds] === 0 || d.kind[ds] !== Desemnare.CONSTRUIESTE) continue
+    for (let h = 0; h < rules.agentHeadroomM; h++) {
+      const cz = celulaDeZonaLa(s, d.wx[ds]!, d.wy[ds]!, d.z[ds]! - h)
+      if (cz !== -1) subSantierScratch[cz] = 1
+    }
+  }
   for (let cs = 0; cs < c.count; cs++) {
     ix.pasi++
     if (c.alive[cs] === 0) continue
@@ -440,6 +483,8 @@ export function indexZone(w: World, rules: Rules): IndexZone {
       if (s.kind[zs] === Zona.DORMIT) ix.paturiLibere.push(cs)
       continue
     }
+    // O celula de depozit de sub un santier viu nu e destinatie: marfa de acolo ar opri zidirea.
+    if (subSantierScratch[cs] === 1) continue
     const item = it.laCelula.get(cellKey(c.wx[cs]!, c.wy[cs]!, c.z[cs]!))
     if (item === undefined) {
       ix.libere[zs]!.push(cs)
