@@ -26,6 +26,9 @@ import { motivDinCod, Reason } from '../../src/sim/result.ts'
 import { cellKey } from '../../src/sim/path.ts'
 import { materialAt } from '../../src/sim/terrain/terrain.ts'
 import { Material } from '../../src/sim/terrain/chunk.ts'
+import { cititorCamere, esteAer, esteAerAcoperit } from '../../src/sim/camere.ts'
+import { explicaCelula } from '../../src/sim/camere-explica.ts'
+import type { Celula, Explicatie } from '../../src/sim/camere-explica.ts'
 import { numePion } from './nume.ts'
 import { cant, NUME_GAND, NUME_ITEM_MIC, NUME_PIESA, textActivitate, textMinute, textMotiv, textRatiunePion } from './texte.ts'
 import type { Cifre, TextMotiv } from './texte.ts'
@@ -450,8 +453,13 @@ export function stareDesemnare(w: World, rules: Rules, ds: number, previz: Previ
   if (construieste && previz) {
     const cauza = previz.faraAcces.get(k)
     if (cauza !== undefined) {
+      // O ușă nu scoate pe nimeni dintr-o groapă (nu e treaptă): sfatul „pune o ușă" despre o ușă ar fi
+      // fost fals (panoul camerelor, USA-1).
+      if (rules.piese[d.piesa[ds]!]!.material === Material.USA) {
+        return { fel: 'faraAcces', text: { titlu: 'Nu ajunge nimeni la ea: o ușă nu e treaptă — nu scoate pe nimeni de acolo.', actiune: 'Pune o scară până la ea.' } }
+      }
       return { fel: 'faraAcces', text: cauza === CauzaAcces.INCINTA
-        ? { titlu: 'Nu ajunge nimeni la ea: locurile de lucru sunt într-o incintă fără ieșire.', actiune: 'Lasă o deschidere în perete (o coloană liberă de 2 niveluri).' }
+        ? { titlu: 'Nu ajunge nimeni la ea: locurile de lucru sunt într-o încăpere fără ieșire.', actiune: 'Pune o ușă în perete (un gol de 1 × 2 m). Un gol fără ușă merge și el, dar încăperea nu mai e închisă.' }
         : { titlu: 'Nu ajunge nimeni la ea: nimic pe care să stea un om la înălțimea ei.', actiune: textFaraLocDeZidit(w, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, cifre).actiune } }
     }
     if (previz.construibile.has(k) && !sustinutAcum(w.terrain, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, null)) {
@@ -542,6 +550,30 @@ export function inspecteazaCelula(w: World, rules: Rules, wx: number, wy: number
     if (zs !== -1) zona = { id: zid, fel: w.zone.kind[zs]!, prioritate: w.zone.prioritate[zs]! }
   }
   return { wx, wy, z, material: mat.ok ? mat.value : null, materialDeasupra: sus.ok ? sus.value : null, desemnari, morman, zona }
+}
+
+// ---------------------------------------------------------------------------------------------
+// încăperea de la celula inspectată
+// ---------------------------------------------------------------------------------------------
+
+export interface IncapereLa {
+  /** Aerul întrebat e SUB celula atinsă (s-a dat clic pe un acoperiș sau pe un tavan). */
+  readonly sub: boolean
+  readonly celula: Celula
+  readonly e: Explicatie
+}
+
+/**
+ * Ce aer întreabă inspectorul despre încăpere: celula de deasupra celei atinse (unde s-ar sta), dacă e
+ * aer acoperit; altfel celula de SUB ea, dacă cea atinsă e un acoperiș peste aer acoperit — un clic pe
+ * acoperișul unei case răspundea altfel „sub cerul liber" pe toată casa (panoul camerelor, JUC-7).
+ * `null` = nimic acoperit aici. Pură: citește terenul și indexul, la zi în afara tickului.
+ */
+export function incaperea(w: World, wx: number, wy: number, z: number): IncapereLa | null {
+  const r = cititorCamere(w.terrain)
+  if (esteAerAcoperit(r, wx, wy, z + 1)) return { sub: false, celula: { x: wx, y: wy, z: z + 1 }, e: explicaCelula(w.terrain, w.camere, wx, wy, z + 1) }
+  if (!esteAer(r, wx, wy, z) && esteAerAcoperit(r, wx, wy, z - 1)) return { sub: true, celula: { x: wx, y: wy, z: z - 1 }, e: explicaCelula(w.terrain, w.camere, wx, wy, z - 1) }
+  return null
 }
 
 // ---------------------------------------------------------------------------------------------

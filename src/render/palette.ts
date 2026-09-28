@@ -47,6 +47,9 @@ export const MATERIAL_COLOR: Record<number, Rgb> = {
   // (tine 9 pasi in jurul ei, daca e prinsa de ceva asezat), deci trebuie sa se
   // deosebeasca de zidul in care sta, nu sa se piarda in el.
   [Material.GRINDA]: rgb(0x7a6552),
+  // Usa de piatra: o lespede mai inchisa si mai calda decat zidul, ca golul sa se citeasca drept usa
+  // si de la distanta (panoul, desenat de viewer, nu de mesher).
+  [Material.USA]: rgb(0x5e4b3c),
 }
 
 const IMPLICIT: Rgb = rgb(0x999999)

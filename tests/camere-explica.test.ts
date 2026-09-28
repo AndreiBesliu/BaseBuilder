@@ -77,6 +77,20 @@ test('explica (JUC-1): golul unei usi iese LATERAL, iar usa propusa in gol inchi
   }
 })
 
+test('explica: golul unei usi spre o curte inchisa (cerul de la cota usii e marginit) ramane LATERAL, nu „gaura in acoperis"', () => {
+  const { w, wx, wy, g } = sitPlat(12345, 16)
+  // Casa 5x5 cu golul (2,0) spre o curte: un zid de 3 m in jurul ei, la 3 celule, fara acoperis.
+  casa(w, wx + 4, wy + 4, g, 5, 2, { goluri: [[2, 0]] })
+  for (let dx = 0; dx < 13; dx++) for (let dy = 0; dy < 13; dy++) {
+    if (dx !== 0 && dx !== 12 && dy !== 0 && dy !== 12) continue
+    for (let z = g + 1; z <= g + 3; z++) assert.ok(fill(w.terrain, wx + dx, wy + dy, z, P).ok)
+  }
+  sincronizeazaCamere(w.camere, w.terrain)
+  const e = deschisa(explicaCelula(w.terrain, w.camere, wx + 6, wy + 7, g + 1))
+  assert.equal(e.directie, 'LATERAL')
+  assert.equal(e.volumCuUsi, 18)
+})
+
 test('explica: un gol lat de 2 primeste patru celule de usa', () => {
   const { w, wx, wy, g } = sitPlat(4242, 9)
   casa(w, wx, wy, g, 6, 2, { goluri: [[2, 0], [3, 0]] })

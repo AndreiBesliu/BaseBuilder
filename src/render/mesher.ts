@@ -26,7 +26,16 @@
  */
 
 import type { Chunk } from '../sim/terrain/chunk.ts'
-import { cellHeightCm, CHUNK_CELLS, decodeColumn, groundLevelFromCm, isSolid, VERTS, VOXEL_LEVELS } from '../sim/terrain/chunk.ts'
+import { cellHeightCm, CHUNK_CELLS, decodeColumn, groundLevelFromCm, isSolid, Material, VERTS, VOXEL_LEVELS } from '../sim/terrain/chunk.ts'
+
+/**
+ * Se deseneaza ca BLOC? Orice solid, in afara de usa: usa e un panou subtire, desenat de viewer
+ * (`viewer/strat-usi.ts`), iar zidurile vecine isi desenează fata spre golul ei. Ocupanta (`occ`: AO,
+ * suprafata naturala) ramane pe `isSolid` — pragul de sub o usa e plat, ca in `render/cota.ts`.
+ */
+export function seDeseneazaCaBloc(m: number): boolean {
+  return isSolid(m) && m !== Material.USA
+}
 
 const SX = CHUNK_CELLS
 const SY = CHUNK_CELLS
@@ -252,10 +261,8 @@ function expand(chunk: Chunk): void {
       for (let level = 0; level < SZ; level++) {
         const m = column[level]!
         dense[denseIndex(lx, ly, level)] = m
-        if (isSolid(m)) {
-          solid[level * SY + ly]! |= bit
-          occ[occIndex(lx, ly, level)] = 1
-        }
+        if (seDeseneazaCaBloc(m)) solid[level * SY + ly]! |= bit
+        if (isSolid(m)) occ[occIndex(lx, ly, level)] = 1
       }
     }
   }
@@ -649,7 +656,7 @@ const borderMask = new Uint32Array(SZ)
 function neighbourSolidAt(column_: Uint8Array, level: number, dz: number): boolean {
   const nl = level + dz
   if (nl < 0 || nl >= SZ) return false
-  return isSolid(column_[nl]!)
+  return seDeseneazaCaBloc(column_[nl]!)
 }
 
 /** Taie fetele de pe axa X care sunt acoperite de chunk-ul vecin. */

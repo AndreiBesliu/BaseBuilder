@@ -4,6 +4,7 @@
  */
 
 const T = 'tests/usa.test.ts'
+const TV = 'tests/viewer-camere.test.ts'
 
 export const MUTATII = [
   {
@@ -103,5 +104,55 @@ export const MUTATII = [
     a: '    if ((id === Piesa.USA) !== (mat[1] === Material.USA)) {',
     b: '    if (mat[1] === Material.USA && id !== Piesa.USA) {',
     t: T, e: 'USA: continutul leaga piesa USA de materialul USA',
+  },
+  // --- viewer-ul usii si al incaperilor (partea pura)
+  {
+    n: 'unealta Usa nu vede zidurile planificate (golul unui zid doar desenat nu e gol)',
+    f: 'viewer/usi.ts',
+    a: '      return p === null || p === Material.USA',
+    b: '      return true',
+    t: TV, e: 'viewer usa: un clic pe golul unui zid DOAR planificat',
+  },
+  {
+    n: 'chepengul se deseneaza vertical',
+    f: 'viewer/usi.ts',
+    a: "    if (placa >= 2) return 'orizontala'",
+    b: "    if (placa >= 5) return 'orizontala'",
+    t: TV, e: 'viewer usa: in gaura unei placi',
+  },
+  {
+    n: 'JUC-4: impactul pe panou e mereu pe aceeasi fata (clicul din spate tinteste aerul gresit)',
+    f: 'viewer/usi.ts',
+    a: '    const spre = directie.z > 0 ? -1 : 1',
+    b: '    const spre = 1',
+    t: TV, e: 'viewer usa (JUC-4)',
+  },
+  {
+    n: 'mesher-ul deseneaza usa ca bloc',
+    f: 'src/render/mesher.ts',
+    a: '  return isSolid(m) && m !== Material.USA',
+    b: '  return isSolid(m)',
+    t: TV, e: 'viewer usa: mesher-ul nu deseneaza usa ca bloc',
+  },
+  {
+    n: 'dreptunghiul cu usa nu numara coloanele fara gol',
+    f: 'viewer/ui/dreptunghi.ts',
+    a: '        if (u === null) { nepotrivite++; continue }',
+    b: '        if (u === null) continue',
+    t: TV, e: 'viewer usa: dreptunghiul cu piesa Usa',
+  },
+  {
+    n: 'incaperile vecine primesc aceeasi culoare',
+    f: 'viewer/overlay-camere.ts',
+    a: '    while (folosite.has(c) && c < CULORI_INCAPERI.length - 1) c++',
+    b: '    void folosite',
+    t: TV, e: 'viewer incaperi: incaperile vecine',
+  },
+  {
+    n: 'JUC-7: clicul pe acoperis nu intreaba de incaperea de dedesubt',
+    f: 'viewer/ui/model.ts',
+    a: '  if (!esteAer(r, wx, wy, z) && esteAerAcoperit(r, wx, wy, z - 1)) return { sub: true,',
+    b: '  if (false) return { sub: true,',
+    t: TV, e: 'viewer incaperi (JUC-7)',
   },
 ]

@@ -101,6 +101,54 @@ export const NUME_MATERIAL: Readonly<Record<number, string>> = {
   [Material.USA]: 'Ușă',
 }
 
+/**
+ * Unde e `la` față de `de`, în vorbe: „aici", „la 5 m", „cu 2 m mai sus, la 4 m". Coordonatele absolute
+ * nu corespund la nimic din ce vede jucătorul (panoul camerelor, JUC-3).
+ */
+export function textLoc(de: { x: number; y: number; z: number }, la: { x: number; y: number; z: number }): string {
+  const d = Math.round(Math.hypot(la.x - de.x, la.y - de.y))
+  const dz = la.z - de.z
+  const bucati: string[] = []
+  if (dz > 0) bucati.push(`cu ${dz} m mai sus`)
+  if (dz < 0) bucati.push(`cu ${-dz} m mai jos`)
+  if (d > 1) bucati.push(`la ${d} m`)
+  return bucati.length === 0 ? 'chiar aici' : bucati.join(', ')
+}
+
+/** Podeaua pe niveluri: „9 m² de podea" sau „23 m² jos · 23 m² sus". */
+function textPodea(podea: readonly (readonly [number, number])[]): string {
+  if (podea.length === 0) return 'fără podea'
+  if (podea.length === 1) return `${podea[0]![1]} m² de podea`
+  if (podea.length === 2) return `${podea[0]![1]} m² jos · ${podea[1]![1]} m² sus`
+  return `podea pe ${podea.length} niveluri, ${podea.reduce((s, p) => s + p[1], 0)} m²`
+}
+
+/**
+ * Textul încăperii din inspector. În UI conceptul se numește „încăpere": „camera" e deja camera de
+ * vedere în nouă texte (panoul, JUC-11).
+ */
+export function textIncapere(i: { readonly sub: boolean; readonly celula: { x: number; y: number; z: number }; readonly e: import('../../src/sim/camere-explica.ts').Explicatie }): { titlu: string; actiune: string; bine: boolean } {
+  const pre = i.sub ? 'Sub acoperișul ăsta: ' : ''
+  const e = i.e
+  switch (e.fel) {
+    case 'NU_E_AER': return { titlu: '', actiune: '', bine: true }
+    case 'CER': return { titlu: `${pre}sub cerul liber.`, actiune: '', bine: true }
+    case 'INCAPERE': {
+      const usi = e.usi === 0 ? 'fără ușă' : e.usi === 1 ? '1 ușă' : `${e.usi} uși`
+      return { titlu: `${pre}Încăpere · ${e.volum} m³ · ${textPodea(e.podea)} · ${usi}.`, actiune: '', bine: true }
+    }
+    case 'DEPARTE': return { titlu: `${pre}Nu e încăpere: aerul iese undeva departe (acoperit, ${e.volum} m³ legați).`, actiune: 'Împarte spațiul cu pereți și uși.', bine: false }
+    case 'DESCHISA': {
+      const unde = textLoc(i.celula, e.gaura)
+      const cum = e.directie === 'SUS' ? `printr-o gaură în acoperiș, ${unde}` : `printr-un gol în perete, ${unde}`
+      const actiune = e.volumCuUsi !== null
+        ? `Pune o ușă în gol (${e.usiPropuse.length === 2 ? 'două celule' : `${e.usiPropuse.length} celule`}): devine o încăpere de ${e.volumCuUsi} m³.`
+        : e.directie === 'SUS' ? 'Pune o podea peste gaură.' : 'Închide-l cu un perete sau cu o ușă.'
+      return { titlu: `${pre}Nu e încăpere: aerul iese ${cum}.`, actiune, bine: false }
+    }
+  }
+}
+
 export const NUME_ZONA: Readonly<Record<number, string>> = {
   [Zona.DEPOZIT]: 'Depozit',
   [Zona.DORMIT]: 'Loc de dormit',
@@ -153,7 +201,7 @@ export function textMotiv(
   if (sursa === 'desemnare') {
     if (motiv === Reason.INACCESIBIL) {
       if (detaliu === DetaliuMotiv.FARA_LOC_DE_LUCRU) return { titlu: `Niciun loc lângă ea unde să stea un om: îi trebuie podea și ${cifre.agentHeadroomM} m liberi deasupra, la cel mult ${cifre.maxStepM} m diferență.`, actiune: 'Sapă de sus în jos: întâi ce e deasupra ei sau lângă ea.' }
-      if (detaliu === DetaliuMotiv.FARA_LOC_SIGUR) return { titlu: 'Niciun loc SIGUR de lucru: omul ar rămâne sus sau închis când se termină planul.', actiune: 'Pune o scară sau lasă o deschidere în perete (o coloană liberă de 2 niveluri) — sau așteaptă piesa de care depinde accesul.' }
+      if (detaliu === DetaliuMotiv.FARA_LOC_SIGUR) return { titlu: 'Niciun loc SIGUR de lucru: omul ar rămâne sus sau închis când se termină planul.', actiune: 'Pune o scară sau o ușă — sau așteaptă piesa de care depinde accesul.' }
       if (detaliu === DetaliuMotiv.COMPONENTE_DIFERITE) return { titlu: 'Nu se ajunge acolo din așezare.', actiune: 'Leagă locurile cu o scară sau un tunel.' }
     }
     if (motiv === Reason.LIPSA_MATERIAL) {
@@ -235,7 +283,7 @@ export function textGeneric(motiv: ReasonCode, cifre: Cifre = CIFRE_IMPLICITE): 
     case Reason.FARA_DEPOZIT: return { titlu: 'Marfa nu are unde fi dusă.', actiune: 'Pictează un depozit (Zone ▸ Depozit).' }
     case Reason.FARA_SPRIJIN: return { titlu: `N-ar sta în picioare: nimic așezat la mai puțin de ${cifre.suportMax} pași.`, actiune: 'Zidește mai aproape de ceva, sau pune o grindă prinsă de ceva așezat.' }
     case Reason.CELULA_PLINA: return { titlu: 'E deja ceva solid acolo.', actiune: 'Sapă întâi, sau alege o celulă de aer.' }
-    case Reason.AR_INCHIDE: return { titlu: 'Ar închide pe cineva sau ceva înăuntru.', actiune: 'Lasă o deschidere în perete (o coloană liberă de 2 niveluri), mută mormanul sau șterge zona.' }
+    case Reason.AR_INCHIDE: return { titlu: 'Ar închide pe cineva sau ceva înăuntru.', actiune: 'Pune o ușă în locul unui perete, mută mormanul sau șterge zona.' }
   }
 }
 

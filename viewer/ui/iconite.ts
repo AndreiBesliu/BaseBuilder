@@ -15,6 +15,8 @@ export const ICON = {
   podea: svg('<path d="M2.5 12l7.5-4 7.5 4-7.5 4z"/><path d="M2.5 12v2l7.5 4 7.5-4v-2"/>'),
   scara: svg('<path d="M3 17h4v-4h4V9h4V5h2"/><path d="M3 17h14"/>'),
   grinda: svg('<path d="M3 6h14M3 14h14M10 6v8"/><path d="M5 6v0M15 6v0"/>'),
+  usa: svg('<path d="M3 17h14"/><path d="M5 17V4h10v13"/><rect x="7.5" y="6.5" width="5" height="10.5"/><path d="M11 12v.01"/>'),
+  incaperi: svg('<path d="M3 16V5h14v11z"/><path d="M10 5v11M3 10.5h7"/><path d="M13 16v-3h2v3"/>'),
   anuleaza: svg('<circle cx="10" cy="10" r="7"/><path d="M7 7l6 6M13 7l-6 6"/>'),
   zona: svg('<rect x="3" y="3" width="14" height="14" rx="1" stroke-dasharray="2.5 2"/>'),
   depozit: svg('<path d="M3 7l7-3.5L17 7v8.5H3z"/><path d="M3 7h14M7 10.5h6"/>'),

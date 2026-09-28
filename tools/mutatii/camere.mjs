@@ -133,9 +133,23 @@ export const MUTATII = [
   {
     n: 'JUC-1: orice scurgere e LATERAL (gaura din acoperis devine „deschidere in perete")',
     f: E,
-    a: "  if (!inchisa) return { directie: 'LATERAL', gaura: L }",
+    a: "  if (acoperite < 2 && cer > 0) return { directie: 'LATERAL', gaura: L }",
     b: "  return { directie: 'LATERAL', gaura: L }",
     t: TE, e: 'explica (JUC-1): o gaura in acoperis iese SUS',
+  },
+  {
+    n: 'putul (niciun vecin de cer) iese LATERAL, „gol in perete" la capatul coridorului',
+    f: E,
+    a: "  if (acoperite < 2 && cer > 0) return { directie: 'LATERAL', gaura: L }",
+    b: "  if (acoperite < 2) return { directie: 'LATERAL', gaura: L }",
+    t: TE, e: 'explica (JUC-2): pivnitele legate de un coridor',
+  },
+  {
+    n: 'golul unei usi (un singur vecin acoperit) iese SUS, „gaura in acoperis"',
+    f: E,
+    a: "  if (acoperite < 2 && cer > 0) return { directie: 'LATERAL', gaura: L }",
+    b: "  if (acoperite < 1 && cer > 0) return { directie: 'LATERAL', gaura: L }",
+    t: TE, e: 'explica: golul unei usi spre o curte inchisa',
   },
   {
     n: 'gaura din acoperis raportata la cota podelei, nu a acoperisului',

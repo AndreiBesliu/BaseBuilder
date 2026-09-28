@@ -27,6 +27,7 @@ import {
   cheieCelula,
   cititorCamere,
   componentaLa,
+  esteAerAcoperit,
   varfLa,
   decodeazaCelula,
   esteAcoperita,
@@ -132,28 +133,25 @@ function esteAcoperitaCuHotar(r: CititorCamere, x: number, y: number, z: number,
 }
 
 /**
- * SUS sau LATERAL, după coloana scurgerii L: se umple ORIZONTAL cerul de la cota lui L (hotar = solid
- * sau aer acoperit). Închis în cel mult 4.096 de celule ⇒ gaură în acoperiș; altfel deschidere în perete.
- * Gaura din acoperiș: celula lui L de la cea mai înaltă cotă la care un vecin orizontal mai e acoperit
- * (planul acoperișului din jur).
+ * SUS sau LATERAL, după VECINII coloanei scurgerii L, la cota ei: e o gaură deasupra dacă L stă în
+ * amprenta aerului acoperit (cel puțin doi vecini laterali acoperiți — gaura din acoperișul unei
+ * încăperi, DEF-4) sau dacă n-are niciun vecin de cer (un puț: de jur împrejur doar plin și aerul
+ * de unde vine). Altfel aerul iese lateral, printr-un gol.
+ *
+ * Prima formă (a verificatorului JUC-1) umplea orizontal cerul de la cota lui L și numea „gaură în
+ * acoperiș" orice cer închis în 4.096 de celule. Pe ecran, o casă cu golul ușii deschis într-o
+ * căldare (platoul unui joc nou, închis de dealuri) primea „gaură în acoperiș, cu 2 m mai sus" —
+ * cerul de la cota ușii era mărginit de relief.
+ * Gaura de SUS: celula lui L la cea mai înaltă cotă a coloanelor vecine (acoperișul din jur, gura puțului).
  */
 function clasifica(r: CititorCamere, L: Celula): { directie: 'SUS' | 'LATERAL'; gaura: Celula } {
-  const vazut = new Set<number>([cheieCelula(L.x, L.y, L.z)])
-  const coada: Celula[] = [L]
-  let inchisa = true
-  for (let i = 0; i < coada.length; i++) {
-    if (coada.length > 4096) { inchisa = false; break }
-    const c = coada[i]!
-    for (const [dx, dy] of LAT) {
-      const nx = c.x + dx, ny = c.y + dy
-      if (!esteCer(r, nx, ny, L.z)) continue
-      const k = cheieCelula(nx, ny, L.z)
-      if (vazut.has(k)) continue
-      vazut.add(k)
-      coada.push({ x: nx, y: ny, z: L.z })
-    }
+  let acoperite = 0
+  let cer = 0
+  for (const [dx, dy] of LAT) {
+    if (esteAerAcoperit(r, L.x + dx, L.y + dy, L.z)) acoperite++
+    else if (esteCer(r, L.x + dx, L.y + dy, L.z)) cer++
   }
-  if (!inchisa) return { directie: 'LATERAL', gaura: L }
+  if (acoperite < 2 && cer > 0) return { directie: 'LATERAL', gaura: L }
   // Planul găurii: cel mai înalt vârf al coloanelor vecine cu L (acoperișul din jur, gura unui puț).
   // Căutat printre celulele ACOPERITE ieșea podeaua: hotarul însuși nu e acoperit.
   let h = L.z
@@ -165,24 +163,41 @@ function clasifica(r: CititorCamere, L: Celula): { directie: 'SUS' | 'LATERAL'; 
 }
 
 /**
+ * Ce stie cautarea unui gol despre lume: ce e aer (unde s-ar pune usa) si pe ce se sta. Pe terenul de
+ * acum pentru explicatie; pe „lumea planului" (teren + piesele desemnate) pentru unealta Usa — un
+ * jucator isi deseneaza de obicei toata casa, cu golul usii, inainte sa se zideasca ceva.
+ */
+export interface LumeGol {
+  aer(x: number, y: number, z: number): boolean
+  podea(x: number, y: number, z: number): boolean
+}
+
+/** Lumea golului pe terenul de acum. */
+function lumeTeren(r: CititorCamere): LumeGol {
+  return {
+    aer: (x, y, z) => esteAer(r, x, y, z),
+    podea: (x, y, z) => { const m = materialAt(r.t, x, y, z); return m.ok && ePodea(m.value) },
+  }
+}
+
+/**
  * Golul de ușă la celula c, pe direcția de trecere (dx, dy): coloana de aer de la podea în sus cât
  * timp ambii vecini perpendiculari sunt pline (zidul), de 1–3 niveluri, lată de 1 sau 2 coloane,
  * cu podea dedesubt. Întoarce celulele golului, sau null.
  */
-function golDeUsa(r: CititorCamere, c: Celula, dx: number, dy: number): Celula[] | null {
-  if (!esteAer(r, c.x, c.y, c.z)) return null
+export function golDeUsa(q: LumeGol, c: Celula, dx: number, dy: number): Celula[] | null {
+  if (!q.aer(c.x, c.y, c.z)) return null
   const px = dy, py = dx // perpendicular pe trecere
-  const plin = (x: number, y: number, z: number): boolean => !esteAer(r, x, y, z)
+  const plin = (x: number, y: number, z: number): boolean => !q.aer(x, y, z)
   // coborî până la podea, cât timp e aer
   let zlo = c.z
-  while (esteAer(r, c.x, c.y, zlo - 1) && c.z - zlo < 3) zlo--
-  const sub = materialAt(r.t, c.x, c.y, zlo - 1)
-  if (!sub.ok || !ePodea(sub.value)) return null
+  while (q.aer(c.x, c.y, zlo - 1) && c.z - zlo < 3) zlo--
+  if (!q.podea(c.x, c.y, zlo - 1)) return null
   const coloana = (x: number, y: number, maLatura: number): number => {
     // câte niveluri de la zlo în sus: aer, cu zid pe latura `maLatura` (1 = +perp, -1 = -perp, 0 = ambele)
     let h = 0
     for (let z = zlo; z < zlo + 4; z++) {
-      if (!esteAer(r, x, y, z)) break
+      if (!q.aer(x, y, z)) break
       const a = plin(x + px, y + py, z)
       const b = plin(x - px, y - py, z)
       if (maLatura === 0 ? !(a && b) : maLatura === 1 ? !a : !b) break
@@ -210,6 +225,41 @@ function golDeUsa(r: CititorCamere, c: Celula, dx: number, dy: number): Celula[]
     }
   }
   return null
+}
+
+/**
+ * Unde se pune o ușă, pentru un clic pe celula (x, y, z): golul de perete care o conține (toate
+ * celulele lui, de la podea în sus: un clic, o ușă întreagă — o jumătate de ușă lasă încăperea
+ * deschisă, JUC-6), sau gaura dintr-o placă (chepengul: fiecare celulă a găurii, cel mult 4 —
+ * gaura unei scări desparte altfel etajele în aceeași încăpere, JUC-5). Altfel null.
+ */
+export function celuleUsii(q: LumeGol, x: number, y: number, z: number): Celula[] | null {
+  if (!q.aer(x, y, z)) return null
+  for (const [dx, dy] of [[0, 1], [1, 0]] as const) {
+    const g = golDeUsa(q, { x, y, z }, dx, dy)
+    if (g) return g
+  }
+  // Gaura dintr-o placă: aerul de la cota z, închis lateral de plin în cel mult 4 celule, cu aer
+  // deasupra plinului din jur (e o placă, nu un zid gros) și aer deasupra găurii.
+  const gaura: Celula[] = [{ x, y, z }]
+  const vazut = new Set<number>([cheieCelula(x, y, z)])
+  for (let i = 0; i < gaura.length; i++) {
+    const c = gaura[i]!
+    if (!q.aer(c.x, c.y, c.z + 1)) return null
+    for (const [dx, dy] of LAT) {
+      const nx = c.x + dx, ny = c.y + dy
+      if (q.aer(nx, ny, z)) {
+        const k = cheieCelula(nx, ny, z)
+        if (vazut.has(k)) continue
+        vazut.add(k)
+        gaura.push({ x: nx, y: ny, z })
+        if (gaura.length > 4) return null
+      } else if (!q.aer(nx, ny, z + 1)) {
+        return null
+      }
+    }
+  }
+  return gaura.sort((a, b) => a.y - b.y || a.x - b.x)
 }
 
 /** Câte coloane are un gol (1 sau 2). */
@@ -287,6 +337,7 @@ export function explicaCelula(t: Terrain, idx: IndexCamere, x: number, y: number
   let curenta = prima
   let volumCuUsi: number | null = null
   const start = cheieCelula(x, y, z)
+  const lume = lumeTeren(r)
   // Și când scurgerea e SUS: o pivniță legată de un coridor cu puț are golul ei pe drum înaintea
   // puțului. O gaură în acoperișul încăperii întrebate n-are nicio îngustare pe drum: nicio ușă.
   {
@@ -303,9 +354,9 @@ export function explicaCelula(t: Terrain, idx: IndexCamere, x: number, y: number
         const b = drum[i]!
         if (a.z !== b.z) continue
         const dx = b.x - a.x, dy = b.y - a.y
-        const g = golDeUsa(r, b, dx, dy)
+        const g = golDeUsa(lume, b, dx, dy)
         if (!g) continue
-        const inainte = golDeUsa(r, a, dx, dy)
+        const inainte = golDeUsa(lume, a, dx, dy)
         if (inainte !== null && latimeGol(inainte) <= latimeGol(g)) continue
         if (g.some((c) => cheieCelula(c.x, c.y, c.z) === start || hotar.has(cheieCelula(c.x, c.y, c.z)))) continue
         gol = g

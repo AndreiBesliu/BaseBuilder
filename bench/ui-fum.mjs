@@ -25,8 +25,11 @@ import { app, BrowserWindow, session } from 'electron'
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const argv = process.argv.slice(process.defaultApp ? 2 : 1)
+/** Radacina repo-ului, pentru importurile din pagina (serverul Vite le da pe `/@fs/`). */
+const REPO = fileURLToPath(new URL('..', import.meta.url)).replaceAll('\\', '/').replace(/\/$/, '')
 const BAZA = (argv.find((a) => /^https?:\/\//.test(a)) ?? 'http://localhost:5175/').replace(/\/?$/, '/')
 const NEG = argv.find((a) => a.startsWith('--proba-negativa'))
 const NEGATIVA = NEG === undefined ? null : NEG.includes('=') ? NEG.slice(NEG.indexOf('=') + 1) : 'sapa'
@@ -383,6 +386,132 @@ async function ruleaza() {
     await p.trage([x0, y0], [x0 + 6, y0 + 6], sol + 1)
     const r = await p.js(`({ n: __f.des().length, j: __kinstead.jobOverlay.visible })`)
     bifa('anuleaza-plan-stins', r.n === inainte && r.j, 'Anulează cu Planul stins: aprinde Planul, nu retrage nimic nevazut', `${inainte} → ${r.n}; J ${r.j}`)
+
+    // --- 6a. usa pe un zid DOAR planificat: Anulează o piesa din conturul 7×7, apoi unealta Usa in gol ---
+    await p.tasta('r')
+    // Golul: o piesa a conturului ai carei vecini de pe latura sunt la aceeasi cota, cota solului ei + 1
+    // (conturul 7×7 sta pe doua niveluri de relief).
+    const alegere = await p.js(`(() => {
+      const d = __f.des(), la = (x, y) => d.find((e) => e.wx === x && e.wy === y && e.piesa === 1)
+      for (const [x, y] of [[${x0} + 3, ${y0}], [${x0} + 2, ${y0}], [${x0} + 4, ${y0}], [${x0} + 3, ${y0} + 6], [${x0}, ${y0} + 3], [${x0} + 6, ${y0} + 3]]) {
+        const e = la(x, y); if (!e) continue
+        const ax = x === ${x0} || x === ${x0} + 6
+        const a = ax ? la(x, y - 1) : la(x - 1, y), b = ax ? la(x, y + 1) : la(x + 1, y)
+        if (a && b && a.z === e.z && b.z === e.z && __kinstead.suprafata(x, y) + 1 === e.z) return { x, y, z: e.z }
+      }
+      return null
+    })()`)
+    const gx = alegere?.x ?? x0 + 3, gy = alegere?.y ?? y0, gz = alegere?.z ?? sol + 1
+    await p.js(`__f.centreaza(${gx + 0.5}, ${gy + 0.5}, ${gz}, 10)`)
+    await astepta(250)
+    const pAn = await p.js(`__f.pixel(${gx}, ${gy}, ${gz})`)
+    if (pAn !== null) await p.click(pAn.x, pAn.y)
+    const faraPiesa = (await p.js('__f.des()')).every((d) => !(d.wx === gx && d.wy === gy))
+    await p.tasta('c')
+    const bUsa = await p.js(`(() => { const b = document.querySelector('button[title^="Ușă de piatră"]'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
+    if (bUsa) await p.click(bUsa.x, bUsa.y)
+    const unealta = await p.js(`({ u: __kinstead.ui.unealta, piesa: __kinstead.ui.piesa })`)
+    const pUsa = await p.js(`__f.pixel(${gx}, ${gy}, ${gz})`)
+    const tUsa = pUsa === null ? null : await p.js(`__kinstead.tintaLa(${pUsa.x}, ${pUsa.y}, { ctrl: false, shift: false, alt: false })`)
+    if (pUsa !== null) await p.click(pUsa.x, pUsa.y)
+    const usi = (await p.js('__f.des()')).filter((d) => d.piesa === 5)
+    const inGol = (await p.js('__f.des()')).filter((d) => d.wx === gx && d.wy === gy)
+    bifa('usa-unealta', alegere !== null && faraPiesa && usi.length === 1 && usi[0].wx === gx && usi[0].wy === gy && usi[0].z === gz,
+      'Construiește ▸ Ușă, clic pe golul unui zid DOAR planificat: usa se pune in gol (lumea planului)', JSON.stringify({ alegere, faraPiesa, bUsa, unealta, pUsa, tUsa, usi, inGol, toast: await p.js(`[...document.querySelectorAll('.ui-toast')].map((t) => t.textContent).join(' | ')`) }))
+    // Un clic pe teren deschis: refuz cu motiv, nicio usa.
+    await p.js(`document.querySelectorAll('.ui-toast').forEach((t) => t.remove()); true`)
+    const pDeschis = await p.js(`__f.pixel(${gx + (gy === y0 ? 0 : 4)}, ${gy === y0 ? gy - 4 : gy}, ${gz})`)
+    if (pDeschis !== null) await p.click(pDeschis.x, pDeschis.y)
+    const usi2 = (await p.js('__f.des()')).filter((d) => d.piesa === 5).length
+    const toasturiUsa = await p.js(`[...document.querySelectorAll('.ui-toast')].map((t) => t.textContent).join(' | ')`)
+    bifa('usa-fara-gol', usi2 === usi.length && /gol de perete/.test(toasturiUsa), 'Ușă pe teren deschis: refuzata, cu motivul (un gol de perete sau o gaura de podea)', `${usi.length} → ${usi2}; toasturi: ${toasturiUsa}; pixel ${JSON.stringify(pDeschis)}`)
+  }
+  // --- 6c. incaperile: o casa zidita cu usa (prin comenzile simularii), overlay-ul I, inspectorul, panoul usii ---
+  {
+    const casa = await p.js(`(async () => {
+      const K = __kinstead, w = K.world
+      const C = await import('/@fs/${REPO}/src/sim/commands.ts')
+      const tx = ${loc.x}, ty = ${loc.y}
+      const ocupat = (x0, y0) => {
+        const it = w.iteme; for (let i = 0; i < it.count; i++) if (it.alive[i] && it.wx[i] >= x0 - 2 && it.wx[i] <= x0 + 7 && it.wy[i] >= y0 - 2 && it.wy[i] <= y0 + 7) return true
+        const a = w.agents; for (let i = 0; i < a.count; i++) if (a.alive[i]) { const x = Math.floor(a.x[i] / 1000), y = Math.floor(a.y[i] / 1000); if (x >= x0 - 2 && x <= x0 + 7 && y >= y0 - 2 && y <= y0 + 7) return true }
+        const d = w.desemnari; for (let i = 0; i < d.count; i++) if (d.alive[i] && d.wx[i] >= x0 - 1 && d.wx[i] <= x0 + 6 && d.wy[i] >= y0 - 1 && d.wy[i] <= y0 + 6) return true
+        return false
+      }
+      for (let r = 8; r < 60; r++) for (let dx = -r; dx <= r; dx++) for (const dy of [-r, r]) {
+        const x0 = tx + dx, y0 = ty + dy, s = K.suprafata(x0, y0)
+        if (s === null || ocupat(x0, y0)) continue
+        let plat = true
+        for (let a = -1; a <= 5 && plat; a++) for (let b = -1; b <= 5; b++) if (K.suprafata(x0 + a, y0 + b) !== s) { plat = false; break }
+        if (!plat) continue
+        const fill = (x, y, z, m) => C.applyCommand(w, { kind: 'fill', wx: x, wy: y, z, material: m }).ok
+        let ok = true
+        for (let z = s + 1; z <= s + 2; z++) for (let a = 0; a < 5; a++) for (let b = 0; b < 5; b++) {
+          if (a !== 0 && a !== 4 && b !== 0 && b !== 4) continue
+          ok = fill(x0 + a, y0 + b, z, a === 2 && b === 0 ? 9 : 6) && ok
+        }
+        for (let inel = 0; inel < 3; inel++) for (let a = 0; a < 5; a++) for (let b = 0; b < 5; b++) if (Math.min(a, b, 4 - a, 4 - b) === inel) ok = fill(x0 + a, y0 + b, s + 3, 6) && ok
+        return { x0, y0, s, ok }
+      }
+      return null
+    })()`)
+    if (casa === null || !casa.ok) bifa('incaperi', false, 'casa de proba pentru incaperi', JSON.stringify(casa))
+    else {
+      const { x0: hx, y0: hy, s: hs } = casa
+      await p.tasta('v')
+      await p.js(`__f.centreaza(${hx + 2.5}, ${hy + 2.5}, ${hs + 1}, 9)`)
+      await astepta(250)
+      // Nivelul: aerul casei (sol +1 fata de solul de sub camera).
+      await p.tasta('q')
+      for (let i = 0; i < 4; i++) {
+        const rel = await p.js(`document.querySelector('.ui-nivel .rel')?.textContent ?? ''`)
+        if (rel === 'sol +1') break
+        await p.tasta(/sol \+[2-9]/.test(rel) ? 'q' : 'e')
+      }
+      await p.tasta('i')
+      await astepta(400)
+      const cifre = await p.js(`document.querySelector('.ui-legenda .cifre')?.textContent ?? ''`)
+      // Podeaua de sub nivel, proiectata direct: `__f.pixel` porneste de la varful coloanei (acoperisul),
+      // cu 3 m mai sus decat ce se vede sub planul de taiere.
+      const pPodea = await p.js(`(() => {
+        const K = __kinstead, q = __f.proj(${hx + 2.5}, ${hs + 1}, ${hy + 2.5})
+        for (let r = 0; r <= 20; r++) for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue
+          const x = Math.round(q.x) + dx, y = Math.round(q.y) + dy
+          if (document.elementFromPoint(x, y) !== K.renderer.domElement) continue
+          const t = K.tintaLa(x, y, { ctrl: false, shift: false, alt: false })
+          if (t.ok && t.wx === ${hx + 2} && t.wy === ${hy + 2}) return { x, y, z: t.z }
+        }
+        return null
+      })()`)
+      if (pPodea !== null) await p.click(pPodea.x, pPodea.y)
+      await astepta(400)
+      const insp = await p.js(`document.querySelector('.ui-incapere')?.textContent ?? ''`)
+      const titlu = await p.js(`document.querySelector('.ui-sertar h2')?.textContent ?? ''`)
+      bifa('incaperi', /1 încăpere/.test(cifre) && /Încăpere · 18 m³/.test(insp) && /1 ușă/.test(insp),
+        'o casa 5×5 cu usa: overlay-ul I numara 1 incapere, inspectorul spune „Încăpere · 18 m³ … 1 ușă"', JSON.stringify({ cifre, insp, titlu, pPodea, casa }))
+      await p.poza('5-incaperi.png')
+      // Panoul usii, fara nivel: clicul pe el inspecteaza USA, nu pragul sau zidul din spate (JUC-4).
+      await p.tasta('r')
+      await p.js(`(() => { const K = __kinstead; K.controls.target.set(${hx + 2.5}, ${hs + 2}, ${hy + 0.5}); K.camera.position.set(${hx + 3.5}, ${hs + 6}, ${hy - 9}); K.controls.update(); return true })()`)
+      await astepta(300)
+      const pUsa = await p.js(`(() => {
+        const K = __kinstead, q = __f.proj(${hx + 2.5}, ${hs + 1.5}, ${hy + 0.4})
+        for (let r = 0; r <= 12; r++) for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue
+          const x = Math.round(q.x) + dx, y = Math.round(q.y) + dy
+          if (document.elementFromPoint(x, y) !== K.renderer.domElement) continue
+          const t = K.tintaLa(x, y, { ctrl: false, shift: false, alt: false })
+          if (t.ok && t.wx === ${hx + 2} && t.wy === ${hy} && (t.z === ${hs + 1} || t.z === ${hs + 2})) return { x, y }
+        }
+        return null
+      })()`)
+      if (pUsa !== null) await p.click(pUsa.x, pUsa.y)
+      await astepta(400)
+      const h2 = await p.js(`document.querySelector('.ui-sertar h2')?.textContent ?? ''`)
+      bifa('usa-tintita', pUsa !== null && h2 === 'Ușă', 'clic pe panoul unei usi zidite: inspectorul spune „Ușă"', JSON.stringify({ pUsa, h2 }))
+      await p.tasta('i')
+    }
   }
   // --- 6b. doua dreptunghiuri, al doilea eliberat cat primul inca se aplica feliat (INT-4) ---
   {

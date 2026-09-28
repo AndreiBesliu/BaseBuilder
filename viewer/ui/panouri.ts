@@ -19,11 +19,12 @@ import { CATEGORII, Faction, Item, Piesa } from '../../src/sim/state.ts'
 import { Zona } from '../../src/sim/zone.ts'
 import { ascuns, attr, clasa, h, text } from './dom.ts'
 import { ICON } from './iconite.ts'
-import { cauzaGolirii, creeazaPrevizualizare, golita, inspecteazaCelula, refacePrevizualizarea, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte } from './model.ts'
-import type { Bara, InspectieCelula, Previz, RandOm } from './model.ts'
+import { cauzaGolirii, creeazaPrevizualizare, golita, incaperea, inspecteazaCelula, refacePrevizualizarea, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte } from './model.ts'
+import type { Bara, IncapereLa, InspectieCelula, Previz, RandOm } from './model.ts'
+import { desemnareLaCelula } from '../../src/sim/desemnari.ts'
 import { actualizeaza, creeazaAlerte, eveniment, REGULI_ALERTE, Severitate } from './alerte.ts'
 import type { StareAlerta, Tinta } from './alerte.ts'
-import { cant, NUME_ITEM, NUME_MATERIAL, NUME_PIESA, NUME_ZONA, textMinute, textNumar, textPrioritatePersonala, textTimp } from './texte.ts'
+import { cant, NUME_ITEM, NUME_MATERIAL, NUME_PIESA, NUME_ZONA, textIncapere, textMinute, textNumar, textPrioritatePersonala, textTimp } from './texte.ts'
 import { conturImplicit, Unealta } from './dreptunghi.ts'
 import type { UnealtaId } from './dreptunghi.ts'
 import { eTimpulSalvariiAutomate, idAutomata, salvareAutomataPermisa } from './salvari-plic.ts'
@@ -31,7 +32,7 @@ import type { RezumatSalvare } from './salvari-plic.ts'
 import { HRANA_PE_OM } from './pornire.ts'
 import { FEL_RESURSA } from '../resurse.ts'
 
-export type Overlay = 'J' | 'S' | 'G'
+export type Overlay = 'J' | 'S' | 'G' | 'I'
 export type ModJoc = 'titlu' | 'joc-nou' | 'incarca' | 'verificare'
 
 /** Ce ii da main.ts UI-ului. Singura cale prin care UI-ul schimba ceva. */
@@ -109,7 +110,7 @@ export interface UI {
   previz(): Previz
 }
 
-const PIESE_P: readonly number[] = [Piesa.NICIUNA, Piesa.PERETE, Piesa.PODEA, Piesa.SCARA, Piesa.GRINDA]
+const PIESE_P: readonly number[] = [Piesa.NICIUNA, Piesa.PERETE, Piesa.PODEA, Piesa.SCARA, Piesa.GRINDA, Piesa.USA]
 const CULOARE_ITEM: Readonly<Record<number, string>> = {
   [Item.PIATRA]: 'var(--res-piatra)', [Item.HRANA]: 'var(--res-hrana)', [Item.PAMANT]: 'var(--res-pamant)', [Item.LEMN]: 'var(--res-lemn)',
 }
@@ -124,7 +125,7 @@ const LEGENDE: Readonly<Record<Overlay, { titlu: string; randuri: readonly { c: 
       { c: '#d9a441', t: 'Cub: lucrare liberă — vine cineva când poate' },
       { c: '#63aec0', t: 'Cub albastru: cineva a luat-o — e pe drum sau lucrează' },
       { c: '#b1553f', t: 'Cub roșu (lucrare): niciun loc de unde să se lucreze' },
-      { c: '#3fb8b0', diag: true, t: 'Cub turcoaz CU DIAGONALE: niciun loc SIGUR (scară, deschidere, sau așteaptă o piesă)' },
+      { c: '#3fb8b0', diag: true, t: 'Cub turcoaz CU DIAGONALE: niciun loc SIGUR (scară, ușă, sau așteaptă o piesă)' },
       { c: '#d9708f', t: 'Cub roz: ar închide pe cineva sau ceva înăuntru' },
       { c: '#9b6bb5', t: 'Cub violet: nu se ajunge acolo' },
       { c: '#e08a3c', t: 'Cub portocaliu: un om a renunțat (drum blocat, prea scump)' },
@@ -142,9 +143,18 @@ const LEGENDE: Readonly<Record<Overlay, { titlu: string; randuri: readonly { c: 
       { c: '#d05040', t: 'Roșu: cade acum' },
       { c: '#ff8030', t: 'Portocaliu, înăuntru: lucrările desenate ar prăbuși asta' },
       { c: '#b060d0', t: 'Violet: piesa n-ar sta în picioare' },
-      { c: '#3fb8b0', t: 'Turcoaz: ar sta, dar nu ajunge nimeni la ea (scară / deschidere)' },
+      { c: '#3fb8b0', t: 'Turcoaz: ar sta, dar nu ajunge nimeni la ea (scară / ușă)' },
     ],
     fara: 'Stabilitatea se judecă pe un nivel.',
+  },
+  I: {
+    titlu: 'Încăperi (I)',
+    randuri: [
+      { c: '#6fb3d9', t: 'Tentă: o încăpere închisă — o culoare pe încăpere' },
+      { c: '#e0503c', diag: true, t: 'Hașuri roșii: acoperit, dar aerul iese — nu e încăpere' },
+      { c: '#ff6a3d', t: 'Stâlp roșu: pe aici iese aerul (o gaură, un gol fără ușă)' },
+    ],
+    fara: 'Încăperile se văd pe un nivel.',
   },
   G: {
     titlu: 'Regiuni (G)',
@@ -360,8 +370,9 @@ export function monteazaUI(ctx: ContextUI): UI {
     J: iconBtn(ICON.joburi, 'Planul', 'J', 'Planul: lucrările cerute, cine vine, ce e blocat (J)'),
     S: iconBtn(ICON.stabilitate, 'Stabilitate', 'S', 'Ce ține și ce cade, pe nivelul ales (S)'),
     G: iconBtn(ICON.regiuni, 'Regiuni', 'G', 'Pe unde se poate ajunge (G)'),
+    I: iconBtn(ICON.incaperi, 'Încăperi', 'I', 'Încăperile închise și pe unde iese aerul, pe nivelul ales (I)'),
   }
-  for (const o of ['J', 'S', 'G'] as const) btnOv[o].addEventListener('click', () => ctx.comutaOverlay(o))
+  for (const o of ['J', 'S', 'I', 'G'] as const) btnOv[o].addEventListener('click', () => ctx.comutaOverlay(o))
   const listaPasi = h('ol')
   const hranaPasi = h('div', { class: 'hrana' })
   const btnInchidePasi = iconBtn(ICON.inchide, '', '', 'Ascunde')
@@ -369,7 +380,7 @@ export function monteazaUI(ctx: ContextUI): UI {
     h('div', { style: 'display:flex;justify-content:space-between;align-items:center' }, h('span', { class: 'eticheta' }, 'Primii pași'), btnInchidePasi), listaPasi, hranaPasi)
   let pasiInchise = ctx.mod !== 'joc-nou'
   btnInchidePasi.addEventListener('click', () => { pasiInchise = true; ascuns(cardPasi, true) })
-  radacina.append(h('div', { class: 'ui-stanga' }, nivel, h('div', { class: 'ui-insula ui-overlay' }, h('div', { class: 'eticheta' }, 'Hărți'), btnOv.J, btnOv.S, btnOv.G)), cardPasi)
+  radacina.append(h('div', { class: 'ui-stanga' }, nivel, h('div', { class: 'ui-insula ui-overlay' }, h('div', { class: 'eticheta' }, 'Hărți'), btnOv.J, btnOv.S, btnOv.I, btnOv.G)), cardPasi)
   const legenda = h('div', { class: 'ui-insula ui-legenda', hidden: true })
   radacina.append(legenda)
   let legendaScrisa = ''
@@ -384,7 +395,7 @@ export function monteazaUI(ctx: ContextUI): UI {
   const btnU = new Map<UnealtaId, HTMLButtonElement>([
     [Unealta.SELECTEAZA, iconBtn(ICON.selecteaza, 'Selectează', 'V', 'Selectează: vezi ce e acolo și de ce nu merge (V, Esc)')],
     [Unealta.SAPA, iconBtn(ICON.sapa, 'Sapă', 'D', 'Sapă: clic = o celulă, trage = dreptunghi (D)')],
-    [Unealta.CONSTRUIESTE, iconBtn(ICON.construieste, 'Construiește', 'C', 'Construiește: perete, podea, scară, grindă (C, P)')],
+    [Unealta.CONSTRUIESTE, iconBtn(ICON.construieste, 'Construiește', 'C', 'Construiește: perete, podea, scară, grindă, ușă (C, P)')],
     [Unealta.ANULEAZA, iconBtn(ICON.anuleaza, 'Anulează', 'A', 'Anulează lucrări: clic sau dreptunghi (A)')],
     [Unealta.ZONA, iconBtn(ICON.zona, 'Zone', 'K', 'Zone: depozit, loc de dormit (K)')],
   ])
@@ -394,6 +405,7 @@ export function monteazaUI(ctx: ContextUI): UI {
     [Piesa.PODEA, iconBtn(ICON.podea, 'Podea', '', `Podea: ${rules.piese[Piesa.PODEA]?.cantitate ?? 20} piatră`)],
     [Piesa.SCARA, iconBtn(ICON.scara, 'Scară', '', `Scară de piatră: ${rules.piese[Piesa.SCARA]?.cantitate ?? 20} piatră — urcă un nivel`)],
     [Piesa.GRINDA, iconBtn(ICON.grinda, 'Grindă', '', `Grindă: ține până la ${rules.suportRazaGrinda - 1} pași în jur, dacă e prinsă de ceva așezat`)],
+    [Piesa.USA, iconBtn(ICON.usa, 'Ușă', '', `Ușă de piatră: ${rules.piese[Piesa.USA]?.cantitate ?? 20} piatră pe celulă — clic pe un gol de perete (o pune întreagă) sau pe o gaură de podea; oamenii trec, aerul nu`)],
   ])
   const btnContur = butonText('Contur', () => { ui.contur = !ui.contur; scrieUnelte() }, 'Dreptunghiul pune doar marginea (ziduri) sau tot (podele)')
   const btnStrat = butonText('Înălțime de om', () => { ui.unStrat = !ui.unStrat; scrieUnelte() }, `Cu nivelul pornit: sapă nivelul și ${rules.agentHeadroomM - 1} deasupra, cât să treacă un om — sau doar un strat`)
@@ -412,7 +424,11 @@ export function monteazaUI(ctx: ContextUI): UI {
   ])
   const subZona = h('div', { class: 'ui-sub', hidden: true }, ...btnZona.values())
   const indiciu = h('div', { class: 'ui-indiciu' })
-  radacina.append(h('div', { class: 'ui-jos' }, subConstr, subZona, unelte, indiciu))
+  // Toasturile stau in coloana barei de jos, DEASUPRA randurilor de piese: fixate la 132 px de jos,
+  // acopereau butoanele Construiește (Perete … Ușă) cat erau pe ecran — clicul pe „Ușă" nimerea
+  // toastul „24 desemnate … Anulează" (ui-fum, bifa usa-unealta).
+  const toasturi = h('div', { class: 'ui-toasturi' })
+  radacina.append(h('div', { class: 'ui-jos' }, toasturi, subConstr, subZona, unelte, indiciu))
   for (const [u, b] of btnU) b.addEventListener('click', () => alegeUnealta(u))
   for (const [p, b] of btnPiesa) b.addEventListener('click', () => { ui.piesa = p; ui.contur = conturImplicit(p); alegeUnealta(Unealta.CONSTRUIESTE) })
   for (const [z, b] of btnZona) b.addEventListener('click', () => { if (z === -1) alegeUnealta(Unealta.STERGE_ZONA); else { ui.zonaFel = z; alegeUnealta(Unealta.ZONA) } })
@@ -524,6 +540,8 @@ export function monteazaUI(ctx: ContextUI): UI {
 
   // ---- inspectorul ---------------------------------------------------------------------------
   let inspectorCheie = ''
+  let incapereCheie = ''
+  let incapereMemorata: IncapereLa | null = null
   function scrieInspector(fortat = false): void {
     if (panouSertar.hidden || sertar !== 'inspector') return
     if (!selectie) {
@@ -565,10 +583,14 @@ export function monteazaUI(ctx: ContextUI): UI {
       return
     }
     const c = inspecteazaCelula(w, rules, selectie.wx, selectie.wy, selectie.z, previzRar(fortat))
-    const cheie = JSON.stringify(c)
+    // Încăperea, memorată pe (teren, index, celulă): explicația inundă până la scurgere, iar inspectorul
+    // se reface de 4 ori pe secundă (panoul camerelor, JUC-8).
+    const cheieInc = `${w.terrain.editari}|${w.camere.epoca}|${selectie.wx},${selectie.wy},${selectie.z}`
+    if (cheieInc !== incapereCheie) { incapereCheie = cheieInc; incapereMemorata = incaperea(w, selectie.wx, selectie.wy, selectie.z) }
+    const cheie = JSON.stringify(c) + cheieInc
     if (!fortat && cheie === inspectorCheie) return
     inspectorCheie = cheie
-    corpInspector.replaceChildren(...corpCelula(c))
+    corpInspector.replaceChildren(...corpCelula(c, incapereMemorata))
   }
 
   function butonPrioritate(id: number, c: number, v: number, activa: boolean): HTMLButtonElement {
@@ -589,11 +611,33 @@ export function monteazaUI(ctx: ContextUI): UI {
     return h('div', { class: `ui-motiv${fel === 'atentie' ? '' : ` ${fel}`}` }, h('div', {}, t.titlu), t.actiune ? h('div', { class: 'actiune' }, t.actiune) : null)
   }
 
-  function corpCelula(c: InspectieCelula): Node[] {
+  function corpCelula(c: InspectieCelula, inc: IncapereLa | null): Node[] {
     const out: Node[] = [
       h('h2', {}, c.material === null ? 'Celulă' : NUME_MATERIAL[c.material] ?? 'Celulă'),
       h('div', { class: 'sub num' }, `${c.wx}, ${c.wy} · ${c.z} m`),
     ]
+    if (inc !== null && inc.e.fel !== 'NU_E_AER') {
+      const t = textIncapere(inc)
+      const s = h('section', { class: 'ui-incapere' }, motivEl({ titlu: t.titlu, actiune: t.actiune }, t.bine ? 'bine' : 'atentie'))
+      const act = h('div', { class: 'ui-actiuni' })
+      if (inc.e.fel === 'DESCHISA') {
+        const g = inc.e.gaura
+        const arata = iconBtn(ICON.nivel, inc.e.directie === 'SUS' ? 'Arată gaura' : 'Arată golul', '', 'Camera și nivelul acolo')
+        arata.addEventListener('click', () => ctx.duLa(g.x, g.y, g.z, g.z + 1))
+        act.append(arata)
+        const usi = inc.e.usiPropuse
+        if (usi.length > 0) {
+          const pune = iconBtn(ICON.usa, 'Pune ușa', '', 'Desemnează ușa în gol (oamenii o zidesc)')
+          pune.addEventListener('click', () => {
+            ctx.aplica(usi.filter((u) => desemnareLaCelula(w.desemnari, u.x, u.y, u.z) === -1).map((u) => ({ kind: 'desemneaza', wx: u.x, wy: u.y, z: u.z, piesa: Piesa.USA })))
+            scrieInspector(true)
+          })
+          act.append(pune)
+        }
+      }
+      if (act.childNodes.length > 0) s.append(act)
+      out.push(s)
+    }
     for (const d of c.desemnari) {
       const fel = d.stare.fel === 'lucru' || d.stare.fel === 'libera' ? 'bine' : d.stare.fel === 'imposibila' ? 'critic' : 'atentie'
       const s = h('section', {},
@@ -751,8 +795,6 @@ export function monteazaUI(ctx: ContextUI): UI {
    * primul, cu butonul lui cu tot (recenzia UI-ului, INT-4).
    */
   const TOASTURI_MAX = 3
-  const toasturi = h('div', { class: 'ui-toasturi' })
-  radacina.append(toasturi)
   function toast(mesaj: string, refuz = false, actiune?: { eticheta: string; f: () => void }): void {
     let timer = 0
     const scoate = () => { window.clearTimeout(timer); t.remove() }
@@ -1035,7 +1077,7 @@ export function monteazaUI(ctx: ContextUI): UI {
     const n = ctx.nivel()
     text(cota, n.cota === null ? '—' : `${n.cota - 1} m`)
     text(rel, n.cota === null ? 'toate nivelurile' : n.sol === null ? 'nivel activ' : n.cota - 1 - n.sol === 0 ? 'la sol' : `sol ${n.cota - 1 - n.sol > 0 ? '+' : '−'}${Math.abs(n.cota - 1 - n.sol)}`)
-    for (const o of ['J', 'S', 'G'] as const) attr(btnOv[o], 'aria-pressed', ctx.overlayPornit(o) ? 'true' : 'false')
+    for (const o of ['J', 'S', 'I', 'G'] as const) attr(btnOv[o], 'aria-pressed', ctx.overlayPornit(o) ? 'true' : 'false')
     scrieLegenda(n.cota === null)
     scrieInspector()
     scrieOameni()
@@ -1044,7 +1086,7 @@ export function monteazaUI(ctx: ContextUI): UI {
   }
 
   function scrieLegenda(faraNivel: boolean): void {
-    const pornit = (['S', 'J', 'G'] as const).find((o) => ctx.overlayPornit(o)) ?? null
+    const pornit = (['S', 'I', 'J', 'G'] as const).find((o) => ctx.overlayPornit(o)) ?? null
     if (!pornit) { ascuns(legenda, true); legendaScrisa = ''; return }
     ascuns(legenda, false)
     const L = LEGENDE[pornit]
@@ -1061,9 +1103,10 @@ export function monteazaUI(ctx: ContextUI): UI {
     comuta.style.height = '22px'
     comuta.style.fontSize = '11px'
     const copii: Node[] = [h('h3', {}, h('span', {}, L.titlu), comuta)]
-    if (!legendaDeschisa && !(pornit === 'S' && faraNivel)) {
+    const peNivel = pornit === 'S' || pornit === 'I'
+    if (!legendaDeschisa && !(peNivel && faraNivel)) {
       // pliata: doar cifrele
-    } else if (pornit === 'S' && faraNivel && L.fara) {
+    } else if (peNivel && faraNivel && L.fara) {
       const b = butonText('Alege nivelul de sub cameră', () => { const n = ctx.nivel(); ctx.seteazaNivel(n.sol === null ? n.hi : n.sol + 2) })
       copii.push(h('div', { class: 'sub' }, L.fara), h('div', { class: 'ui-actiuni' }, b))
     } else {

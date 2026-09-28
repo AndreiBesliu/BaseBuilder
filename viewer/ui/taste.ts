@@ -18,7 +18,7 @@
 export type Actiune =
   // ale viewer-ului de azi
   | 'amprenta' | 'amprentaStanga' | 'amprentaDreapta' | 'amprentaForma' | 'amprentaAncora'
-  | 'piesa' | 'pauza' | 'ciclulH' | 'overlayG' | 'overlayJ' | 'overlayS'
+  | 'piesa' | 'pauza' | 'ciclulH' | 'overlayG' | 'overlayJ' | 'overlayS' | 'overlayI'
   | 'traversare' | 'traversareSens' | 'ceas' | 'nivelJos' | 'nivelSus' | 'nivelOprit'
   // ale UI-ului de joc
   | 'selecteaza' | 'sapa' | 'construieste' | 'anuleaza' | 'zona' | 'oameni'
@@ -80,6 +80,8 @@ export function actiuneTasta(t: IntrareTasta): IesireTasta {
     case 'g': return fa('overlayG')
     case 'j': return fa('overlayJ')
     case 's': return fa('overlayS')
+    // I = Încăperi. C era deja Construiește (panoul camerelor, JUC-10).
+    case 'i': return fa('overlayI')
     case 't': return fa(t.shift ? 'traversareSens' : 'traversare')
     case 'f': return fa('ceas')
     case 'q': return fa('nivelJos')

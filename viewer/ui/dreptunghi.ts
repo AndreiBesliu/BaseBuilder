@@ -81,6 +81,11 @@ export interface Lumea {
   desemnariIn(d: Dreptunghi, zMax: number): readonly { id: number; wx: number; wy: number; z: number }[]
   /** Zonele cu macar o celula in dreptunghi la z <= zMax: id-ul si cate celule are zona IN TOTAL. */
   zoneIn(d: Dreptunghi, zMax: number): readonly { id: number; celule: number; celuleInDreptunghi: number }[]
+  /**
+   * Usa: celulele golului (sau ale gaurii din placa) care contine celula, in lumea planului; null = nu e
+   * un gol de usa. Fara ea, piesa Usa nu se pune cu dreptunghiul.
+   */
+  celuleUsii?(wx: number, wy: number, z: number): readonly { x: number; y: number; z: number }[] | null
 }
 
 export interface Optiuni {
@@ -128,6 +133,8 @@ export interface PlanDreptunghi {
   readonly celuleInAfara: number
   /** Nu se aplica deloc: motivul pentru jucator. */
   readonly refuz: string | null
+  /** Planul pune usi (textul „sarite" spune altceva). */
+  readonly usa?: boolean
 }
 
 export function planDreptunghi(d: Dreptunghi, o: Optiuni, lumea: Lumea): PlanDreptunghi {
@@ -142,7 +149,25 @@ export function planDreptunghi(d: Dreptunghi, o: Optiuni, lumea: Lumea): PlanDre
 
   if (o.unealta === Unealta.SAPA || o.unealta === Unealta.CONSTRUIESTE) {
     const construieste = o.unealta === Unealta.CONSTRUIESTE
-    for (const c of coloane(d, construieste && o.contur)) {
+    if (construieste && o.piesa === Piesa.USA) {
+      // Usa: pe fiecare coloana a dreptunghiului, golul intreg care o contine (o jumatate de usa lasa
+      // incaperea deschisa — panoul camerelor, JUC-6), fara dubluri; o coloana fara gol e „nepotrivita".
+      const puse = new Set<string>()
+      for (const c of coloane(d, false)) {
+        const z = o.zActiv ?? (() => { const s = lumea.suprafata(c.wx, c.wy); return s === null ? null : s + 1 })()
+        const u = z === null || !lumea.celuleUsii ? null : lumea.celuleUsii(c.wx, c.wy, z)
+        if (u === null) { nepotrivite++; continue }
+        for (const g of u) {
+          const k = `${g.x},${g.y},${g.z}`
+          if (puse.has(k)) continue
+          puse.add(k)
+          if (lumea.desemnare(g.x, g.y, g.z) !== -1) { deja++; continue }
+          comenzi.push({ kind: 'desemneaza', wx: g.x, wy: g.y, z: g.z, prioritate: o.prioritate, piesa: Piesa.USA })
+          celule.push({ wx: g.x, wy: g.y, z: g.z })
+          cote.add(g.z)
+        }
+      }
+    } else for (const c of coloane(d, construieste && o.contur)) {
       let zs: number[]
       if (o.zActiv !== null) {
         zs = [o.zActiv]
@@ -200,7 +225,7 @@ export function planDreptunghi(d: Dreptunghi, o: Optiuni, lumea: Lumea): PlanDre
       celuleInAfara += z.celule - z.celuleInDreptunghi
     }
   }
-  return { comenzi, zone, celule, niveluri: cote.size, sarite: { deja, nepotrivite }, celuleInAfara, refuz: null }
+  return { comenzi, zone, celule, niveluri: cote.size, sarite: { deja, nepotrivite }, celuleInAfara, refuz: null, usa: o.unealta === Unealta.CONSTRUIESTE && o.piesa === Piesa.USA }
 }
 
 /** Piesele pe care dreptunghiul le deseneaza implicit pe contur (dreptunghi gol): peretele. */
@@ -219,7 +244,7 @@ export function textPlan(p: PlanDreptunghi, unealta: UnealtaId): string {
   const bucati = [`${cati}${p.niveluri > 1 ? ` pe ${p.niveluri} niveluri` : ''}`]
   if (p.sarite.deja > 0) bucati.push(`${p.sarite.deja} aveau deja`)
   if (p.sarite.nepotrivite > 0) {
-    const cum = unealta === Unealta.SAPA ? 'aer' : unealta === Unealta.CONSTRUIESTE ? 'plin' : 'nu se poate sta'
+    const cum = unealta === Unealta.SAPA ? 'aer' : unealta === Unealta.CONSTRUIESTE ? (p.usa ? 'nu e un gol de ușă' : 'plin') : 'nu se poate sta'
     bucati.push(`${p.sarite.nepotrivite} sărite: ${cum}`)
   }
   if (p.celuleInAfara > 0) bucati.push(`${cant(p.celuleInAfara, 'celule')} în afara dreptunghiului`)
