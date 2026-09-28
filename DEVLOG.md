@@ -4524,3 +4524,70 @@ iconițele 128×128 cu alfa; plus partea pură (treapta, rotația, instanțele, 
 - Marfa din mâinile oamenilor nu se vede (doar culoarea pionului).
 - Telemetria primei ore, remaparea tastelor, `setPrioritateDesemnare`, ștergerea zonei pe celulă,
   scenariul de gate pentru UI-ul real (din panoul UI-ului).
+
+---
+
+## Task Started — 28.09.2026 — Recenzia de cod a UI-ului: reluarea si reparatiile
+
+**Prompt:** „Continua"
+**Model:** Claude Opus 5.5 (claude-opus-5-5), Claude Code, Ultracode.
+
+Recenzia adversariala a codului UI-ului ramasese oprita la 4 din 6 lentile. Cele patru terminate
+(model, integrare, teste, verificare) erau in jurnal, necitite: 40 de constatari, 1 CRITIC neverificat,
+3 MARE confirmate de verificatori. Lentilele „pe ecran" si „cost" au rulat pe un INSTANTANEU al lui
+db08ea2 (`git archive`, servit de alt Vite pe :5176), ca repararea sa mearga in paralel in repo.
+
+## Task Completed — 28.09.2026 — Recenzia de cod a UI-ului
+
+**Cost:** lentilele ramase 835 k tokeni (anuntat 1,3 M); fara tranșa de verificatori — singura MARE noua
+(ECR-1) am verificat-o prin reparare. Total: 57 de constatari (dupa verificare: 1 CRITIC, 4 MARE, 27 MEDIU, 25 MIC).
+
+**Trei commit-uri de reparatii** (`e0ce330`, `7112900`, `10df8fc`):
+- **CRITIC (INT-1):** demo-ul de sub ecranul de titlu scria salvarea automata peste jocul jucatorului
+  dupa 6 minute. Acum demo-ul nu se salveaza singur, iar slotul automat e pe lume (`auto-<seed>`).
+- **MARE:** alerta „fara-depozit" nu aparea niciodata si inspectorul promitea un caraus care nu venea —
+  o singura functie, `vedereFaraDepozit` (src/sim/zone.ts, citire pura, nefolosita de sim; hash
+  neschimbat), pentru inspector, alerta si Plan (MOD-1); „De ce nu?" cerea sa sapi sub o piesa de etaj,
+  unde trebuie o treapta (MOD-2); clic-dreapta in timpul tragerii APLICA dreptunghiul (INT-2, acordul
+  de butoane nu da `pointerdown`); mormanele pluteau sau intrau in pamant cu pana la 0,5 m (ECR-1).
+- **MEDIU/MIC:** blocatele, dormitul pe jos, locul de dormit numarat drept depozit, textele pionului,
+  acordul numeralelor („20 de"), cauza golirii, clicul „scapat" dupa o tragere, al doilea dreptunghi
+  care il taia pe primul, urmarirea care fura camera, plecarea fara confirmare, viteza efectiva care
+  mintea 2 s, incarcarea care pornea singura, tintirea din modul de verificare, S invechit, B peste J,
+  sertarul Oameni, marimile interfetei, toastul peste bara, primul Q la 37 m, iconitele, legenda,
+  Ajutorul de pe titlu, campurile goale, inspectorul dublu, Anulează cu Planul stins, culling-ul
+  mormanelor, previzualizarea scumpa refacuta la 10 s cat se zideste.
+
+**Ce a prins verificarea, nu recenzia:** reparatia lentilei pentru ECR-1 folosea diagonala b–c a
+heightfield-ului peste tot; pe un chunk promovat, fata netezita se imparte pe a–d (winding.ts). Formula
+lentilei, masurata doar pe teren nepromovat, ar fi lasat mormanele deplasate dupa prima sapatura din
+chunk. `src/render/cota.ts` le urmeaza pe amandoua, iar testul le compara cu geometria REALA
+(meshHeightfield, meshChunk + writeQuadIndices, o raza verticala in node). La MOD-1, forma de reparatie
+a lentilei („index murdar ⇒ 0") clipea; am luat-o pe cea masurata de verificator.
+
+**Probe.** 732 de teste (+44); **541/541 de probe prinse** (12 min 13 s, arbore curat). Pe tranșa a doua,
+535/536: sonda ratata (ramura „index la zi" a lui `vedereFaraDepozit`, pe care scenariile cu pioni nu o ating: cat se
+cara, indexul sta murdar) a primit un test direct. `bench/ui-fum.mjs`: profil NOU la fiecare rulare
+(pe profilul refolosit, bifele salvarii treceau si cu Ctrl+S stricat), bife cu nume, proba negativa pe
+bifa (sapa / pauza / salvare — fiecare inroseste exact bifa ei), un oracol de tintire independent
+(41/41) si 19 bife noi: **35/35 pe codul nou, iar pe codul vechi (db08ea2) fiecare bifa noua e rosie pe
+defectul ei** (de exemplu 25 → 50 de desemnari la clic-dreapta, 1.536 din 1.600, „auto" scris de demo,
+mormane la ±0,5 m, primul Q la sol +37). Scripturile lentilelor, rulate din nou pe codul reparat: INT-8
+(niciun „≈N×" fals), V3 (HUD = adevarul dupa Shift/Alt+clic), INT-10 (paritatea verificarii).
+
+**Capcane noi:** (1) DriveFS a lasat a doua oara o mutatie in arbore dupa „restaurat: da"
+(`src/render/mesher.ts`) — garda de arbore murdar a prins-o; (2) `indexedDB.open(nume)` CREEAZA baza si
+fara versiune: o proba care „doar citeste" otravea profilul (acum `indexedDB.databases()` intai);
+(3) heredoc-ul a transformat `\\n` din sirurile unei probe in randuri noi reale.
+
+### Registru
+
+- **Pionii** stau si ei la cota intreaga a celulei (preexistent, ECR-1): `cotaVizuala` merge si cu
+  fractie, dar stratul pionilor e in bucla masurata de gate — o decizie, nu o reparatie in treacat.
+- **Gate-ul** modeleaza props-urile ca apeluri CPU, iar mormanele sunt triunghiuri instantiate (0,8–1,6 M
+  la 4.096 pline): GATE.md §4 ar trebui sa le aiba (C2-1).
+- **Lista de salvari** citeste lumile intregi (`getAll`): la 20 de salvari M10, 114 ms si +270 MB (C2-3) —
+  doua magazii cu migrare; merita un pas separat, cu salvarile existente in grija.
+- **Remesh-ul la promovarea unui apron:** 9–15 chunk-uri intr-un cadru, 41–71 ms (C2-4, preexistent), si
+  vecinii promovati ai unui apron nou nerefacuti (INT-12, preexistent): ambele pe calea de gate.
+- **T-02 complet:** proba negativa pe FIECARE bifa (azi trei); **Esc intr-un camp de text** — pastrat.

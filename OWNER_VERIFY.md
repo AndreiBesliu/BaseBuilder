@@ -9,8 +9,8 @@ Starea completă e în [DEVLOG.md](DEVLOG.md); ăsta e doar capătul de listă.
 
 ## 1. D20 — așezarea liberă a clădirilor: e varianta asta ce voiai?
 
-**Ce te uiți.** Pornește viewerul (`Kinstead.cmd`), alege *Explorează demo-ul* (ecranul de titlu
-blochează tastele cât e deschis), apoi apasă **B**. Rotește cu `,` și `.`, schimbă forma
+**Ce te uiți.** `npm run viewer`, apoi http://localhost:5175/?verificare=1 (modul de verificare: în
+demo, HUD-ul cu coloana CENTRU e ascuns), apoi apasă **B**. Rotește cu `,` și `.`, schimbă forma
 cu **N**, pornește și oprește ancorarea cu **M**.
 
 - **conturul alb** e clădirea adevărată, ce s-ar desena în joc
@@ -111,7 +111,8 @@ Research-ul spune că genul se câștigă în lizibilitatea a 200 de stări simu
 
 ## 7. Mormane și depozite — se vede unde se duce marfa?
 
-**Ce te uiți.** Viewerul, tasta **J**. Dă click pe teren de câteva ori (cereri de săpat), apoi ține
+**Ce te uiți.** `npm run viewer`, apoi http://localhost:5175/?verificare=1 (acolo clicul sapă, ca
+înainte; în joc, clicul selectează), tasta **J**. Dă click pe teren de câteva ori (cereri de săpat), apoi ține
 **Z** apăsat și dă click de două ori, pe două colțuri ale unui dreptunghi de teren plat: ăla e
 depozitul (pătrate verzi pe podea). Fiecare voxel săpat lasă un morman (un cub mic; cu cât e mai
 înalt, cu atât e mai plin). Pionii arămii cară ceva; linia albă arată spre morman sau spre celula
@@ -361,7 +362,8 @@ http://localhost:5175/?cam=12391,4603&slice=48&piatra=4000&hrana=750&pauza=1
    închide pe cineva. Casa se ridică toată în ~4 minute de joc.
 7. **O cameră care ar închide un morman.** **P** până la „sapa", click pe o celulă de iarbă la câțiva
    pași de casă, de ex. (12389,4613). Un pion o sapă (~20 s) și lasă o groapă cu un morman de pământ.
-   Lasă-l să plece de lângă ea, apoi **Spațiu** (pauză), **S**, **Q/E** până la „activ 47", **P** până
+   Lasă-l să plece de lângă ea, apoi **Spațiu** (pauză), **S** doar dacă nu e deja pornit (din pasul 5
+   e — a doua apăsare îl stinge), **Q/E** până la „activ 47", **P** până
    la „perete": click pe cele 8 celule de sol din jurul gropii. HUD-ul spune „**PLANUL INCHIDE 1
    morman**". Încă un rând pe capace (**E**), apoi **Spațiu**: pionii zidesc aproape tot, dar ultimele
    piese care ar închide groapa rămân nezidite cât timp mormanul e înăuntru.
@@ -459,6 +461,15 @@ fără să spună de ce; un panou acoperă ce vrei să vezi la 1280×720; o aler
 text. Recenzia adversarială a codului a rămas la jumătate (oprită la cererea ta), deci pot ieși reparații.
 Dar dacă se înțelege fără să citești — asta se vede doar cu cineva care n-a scris codul.
 
+**După recenzia codului (28.09).** Recenzia adversarială (6 lentile, 57 de constatări) a schimbat
+câteva lucruri pe care le vei simți — cu implicitul ÎN FAȚĂ (nu trebuie să faci nimic dacă ești de acord):
+4. **Un joc încărcat pornește în pauză**, cu viteza lui (1×/2×/3×). Pornea singur, la 1×.
+5. **Salvarea automată: un slot pe lume** (`auto-<sămânța>`), iar demo-ul de sub ecranul de titlu nu se
+   mai salvează singur. Demo-ul lăsat 6 minute scria peste jocul tău; un joc nou, peste cel de dinainte.
+6. **Mărimea interfeței:** se pot alege doar mărimile care încap în fereastră (la 1280×720, doar 100%).
+7. **Plecarea din pagină** (Înapoi, F5, închiderea tabului) cu ceva nesalvat cere confirmare.
+8. **Esc într-un câmp de text nu face nimic** (ca să nu închidă fereastra cât scrii); clic în afară, apoi Esc.
+
 **Pașii tăi:** `npm run viewer`, apoi http://localhost:5175/ ; commit-urile:
 https://github.com/AndreiBesliu/BaseBuilder/compare/3613652...main
 
@@ -491,8 +502,17 @@ terenul (altă lumină, alte culori); plutesc sau intră în pământ.
 3. **Hrana = saci + dovleci și rădăcini** (un trib, nu o fermă). Când va exista producția de hrană, fiecare
    fel își poate primi forma lui.
 
-**De ce nu pot eu.** Numele, amprenta într-o celulă, bugetul de triunghiuri și culoarea pe vârf le
-verifică testul (`tests/resurse.test.ts`); dacă arată bine — doar pe ecran.
+4. **Bugetul de triunghiuri: rămâne 60–428 pe morman**, cu mormanele din afara ecranului nedesenate
+   (culling). Recenzia a măsurat 4.096 de mormane pline: pe un GPU integrat, +5 ms pe cadru față de
+   terenul întreg (tot sub 16,7 ms); cu ~100 de triunghiuri pe morman, +1,6 ms — dar forme mai simple.
+   Alternativa (≤ 100, sau o treaptă mai simplă de departe) o faci doar dacă ți se pare că merită.
+
+*(Reparat după recenzie, 28.09: mormanele stăteau la cota întreagă a celulei, deci pe terenul natural,
+netezit, pluteau sau intrau în pământ cu până la 0,5 m — 22 din 25 pe jocul nou; acum stau pe fața
+desenată a solului. Iconițele din bara de sus erau pete întunecate — contrast 1,3–2,1:1 — acum 3,1–6,2:1.)*
+
+**De ce nu pot eu.** Numele, amprenta într-o celulă, bugetul de triunghiuri, culoarea pe vârf, cota pe
+sol și contrastul iconițelor le verifică testul (`tests/resurse.test.ts`); dacă arată bine — doar pe ecran.
 
 **Pașii tăi:** `npm run viewer`, apoi http://localhost:5175/?joc=nou&seed=7 ; foaia cu toate cele 12 e în
 `tools/assets/resurse.py` → `--foaie`.
