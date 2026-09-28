@@ -89,7 +89,7 @@ Pe Windows, `kinstead.bat` le adună pe toate: dublu-click deschide un meniu, ia
 
 ```bash
 npm run mutatii -- --lista      # ce suite există
-npm run mutatii                 # toate cele 541, ~12 min local (28.09, cronometrat, vezi mai jos)
+npm run mutatii                 # toate cele 690, ~12 min local (28.09, cronometrat, vezi mai jos)
 npm run mutatii -- nevoi        # o singură suită
 npm run mutatii -- nevoi podeaua  # doar mutațiile al căror nume conține „podeaua"
 npm run mutatii -- --izolare    # fiecare test NUMIT de o probă, singur, pe cod nemutat (~2 min)
@@ -134,6 +134,9 @@ potrivește în două locuri editează altul decât cel gândit, rulează testel
 > După recenzia UI-ului (28.09): **536 de probe în 8 min 16 s**, apoi **541 în 12 min 13 s**; a doua oară, DriveFS a lăsat o mutație în
 > arbore după „restaurat: da" (`src/render/mesher.ts`) — la final, `git status` și `git diff`, apoi
 > `git checkout --` pe fișier dacă garda iese roșie.
+> După încăperi și recenzia lor (28.09): **690 de probe în ~12 min** local, arbore curat la final. Cinci agenți
+> au rulat suita completă în paralel, fiecare în worktree-ul lui (12 min 30 s sub încărcare): un worktree în
+> afara dosarului sincronizat de Drive nu are problema restaurării; `git -c gc.auto=0 commit` acolo.
 >
 > `tools/check-mutatii.mjs` a fost scris ca înlocuitor static și rămâne util, dar nu mai e o
 > compensație: el răspunde la „proba ARE ce să măsoare?", nu la „măsoară?". A doua întrebare

@@ -516,3 +516,62 @@ sol și contrastul iconițelor le verifică testul (`tests/resurse.test.ts`); da
 
 **Pașii tăi:** `npm run viewer`, apoi http://localhost:5175/?joc=nou&seed=7 ; foaia cu toate cele 12 e în
 `tools/assets/resurse.py` → `--foaie`.
+
+---
+
+## 16. Încăperile și ușa — se citește ce e închis și de ce nu?
+
+*(Nou, 28.09. Următoarea felie din plan, S24-27: camerele. Pe ele vor sta temperatura și conservarea
+hranei sub 5 °C — tăieturile următoare. Codul a trecut printr-o recenzie adversarială; ce era greșit pe
+ecran e reparat — mai jos, ce se vede.)*
+
+**Ce s-a schimbat pentru tine.**
+- **Ușa** (Construiește ▸ Ușă, sau P): oamenii trec prin ea, aerul nu. Un clic oriunde pe golul unui
+  perete — și pe mijlocul lui, unde vezi camera prin gol — pune ușa întreagă (un gol de 2 m = două celule
+  de ușă); un clic pe gaura unei plăci (gaura scării, și lângă un perete) pune un chepeng. Merge și pe un
+  perete doar desenat, încă nezidit, și cu dreptunghiul (o ușă în fiecare gol din el). **Anulează** pe un
+  cub al ușii, sau butonul din mesajul de jos, o scoate întreagă.
+- **Încăperile** (tasta **I**, „Încăperi" sub Hărți): pe nivelul ales, o încăpere închisă are o tentă (o
+  culoare pe încăpere), un spațiu acoperit prin care aerul iese are hașuri roșii, iar pe unde iese aerul
+  e un stâlp roșu.
+- **Inspectorul** (Selectează, clic pe podea, pe un perete, pe ușă sau pe acoperiș): „Încăpere · 50 m³ ·
+  25 m² de podea · 1 ușă", sau de ce nu: „aerul iese printr-un gol în perete, la 4 m — Pune o ușă în gol:
+  devine o încăpere de 50 m³", cu butoanele **Arată golul**, **Arată ușa** și **Pune ușa**; după clic,
+  „Ușa e desemnată — o zidesc oamenii".
+
+**Pornirea.** `npm run viewer`, apoi http://localhost:5175/?joc=nou&seed=7 . Construiește ▸ Perete,
+trage un dreptunghi 7×7 (conturul); Anulează o piesă din mijlocul unei laturi (golul); Construiește ▸ Ușă,
+clic în gol; Construiește ▸ Podea, trage peste casă un nivel mai sus (acoperișul). Lasă oamenii să
+zidească, apoi **I** și Q/E până la nivelul de deasupra podelei casei.
+
+**Cum arată bine:** casa cu ușa zidită e o singură culoare, cu cifra ei; fără ușă (sapă ușa, Sapă pe
+panou) devine hașurată, cu un stâlp roșu în gol, iar inspectorul propune ușa și volumul. **Cum arată rău:**
+o casă închisă nu e încăpere; stâlpul roșu stă departe de gaura adevărată; inspectorul propune ușa în alt
+loc decât golul casei (de exemplu lângă un stâlp); un clic pe gol spune „nu e un gol de ușă"; jocul
+sacadează cu I pornit cât sapă oamenii.
+
+**Decizii — cu implicitul ÎN FAȚĂ** (nu trebuie să faci nimic dacă ești de acord):
+1. **Ușa e de piatră** (20 de piatră, 300 de muncă), ca scara, până când există lemn.
+2. **O singură gaură ⇒ nu e încăpere.** (Alternativa RimWorld, „sub 25% neacoperit", există acolo fiindcă
+   acoperișul e un strat separat; aici o gaură e chiar drumul aerului.) Pentru temperatură, un spațiu
+   acoperit cu gaură nu va fi „afară": va schimba căldură cu afară proporțional cu golurile.
+3. **Fără plafon de volum.** 20 de pivnițe legate de un coridor fără uși sunt O încăpere; inspectorul
+   propune ușa pivniței pe care o întrebi. (Un plafon de 4.096 m³ făcea ca a 20-a pivniță să le „stingă"
+   pe toate deodată.)
+4. **Etajele legate prin gaura scării sunt o încăpere**; un chepeng le desparte (fizic cinstit: căldura
+   urcă pe scară).
+5. **Tasta I și cuvântul „încăpere"** („camera" e deja camera de vedere în UI).
+6. **Pe ușă nu se pictează zone**; un morman lăsat în prag rămâne voie — cui aparține (pentru stricarea
+   hranei) se decide în tăietura hranei.
+7. **Pe o mină uriașă, inspectorul spune „departe" în loc să caute ușa** (peste ~65.000 de celule de drum
+   până la ieșire): altfel un clic costa până la 1,6 s și îngheța jocul. Căutarea ușilor „la cerere", cu un
+   buton, e în registru — spune dacă o vrei.
+8. **Un depozit pictat peste un șantier nu primește marfă pe șantier.** Înainte, o zonă pictată peste
+   amprenta unei case golea colonia (constructorii așteptau cu piatra în mână până plecau); acum marfa
+   merge în restul depozitului, iar un morman deja pe șantier apare ca „celula e ocupată" pe piesă.
+
+**De ce nu pot eu.** Index = recalcul, ușa în simulare, explicația și țintirea le verifică testele și
+harnașamentul pe ecran (`bench/ui-fum.mjs`: clicul pe mijlocul golului, ușa din spatele unui zid
+care nu se țintește, tenta chiar desenată, „Anulează" pe o jumătate de ușă); dacă se citește — doar pe ecran.
+
+**Pașii tăi:** `npm run viewer`, apoi http://localhost:5175/?joc=nou&seed=7 .

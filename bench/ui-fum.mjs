@@ -832,7 +832,13 @@ async function ruleaza() {
   // --- 8. Selecteaza un om: inspectorul are numele lui ---
   await pas('inspector', async () => {
     await p.tasta('v')
-    const pion = await p.js(`(() => { const L = __kinstead.agentLayer; const m = L.mesh; const e = new Float32Array(16); m.instanceMatrix.array.slice(0, 16).forEach((v, i) => { e[i] = v }); const a = __kinstead.world.agents; return { x: e[12], y: e[13] + 0.7, z: e[14], id: a.id[L.sloturi[0]] } })()`)
+    const citestePion = () => p.js(`(() => { const L = __kinstead.agentLayer; const m = L.mesh; const e = new Float32Array(16); m.instanceMatrix.array.slice(0, 16).forEach((v, i) => { e[i] = v }); const a = __kinstead.world.agents; return { x: e[12], y: e[13] + 0.7, z: e[14], id: a.id[L.sloturi[0]] } })()`)
+    // Camera pe om: pasii dinainte (casele incaperilor, zona moarta) o lasa altundeva, iar omul ajungea
+    // sub bara de sus (y = 24 px) — clicul nimerea bara, nu omul.
+    const p0 = await citestePion()
+    await p.js(`__f.centreaza(${p0.x}, ${p0.z}, ${p0.y - 0.7}, 12)`)
+    await astepta(300)
+    const pion = await citestePion()
     const s = await p.js(`__f.proj(${pion.x}, ${pion.y}, ${pion.z})`)
     await p.click(s.x, s.y)
     await astepta(400)

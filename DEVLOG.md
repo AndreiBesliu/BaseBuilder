@@ -4605,3 +4605,115 @@ conservarea hranei sub 5 °C și, mai târziu, rolul camerei. Tăietura asta fac
 care nicio cameră în care intră un om nu e închisă: ușa. Temperatura și hrana vin după, pe camerele
 măsurate. Metoda, ca la felia construcției: măsurători pe HEAD → design → panou adversarial pe design
 → cod → probe → recenzie a codului.
+
+## Task Completed — 28.09.2026 — S24-27, tăietura 1: încăperile și ușa
+
+**Livrat** (`de49afb`, `66ff57f`, `5477b7a`, `e063f40`, apoi remedierea recenziei): indexul încăperilor —
+componentele 6-conexe de aer ACOPERIT, pe bucăți de 16×16×z, ținute la zi DOAR de simulare (capătul
+tickului, după dig/fill; `decode` reface complet); ușa (materialul și piesa USA: hotar pentru aer, trecere
+pentru oameni, nu podea); „De ce nu e încăpere?" ca funcție pură (scurgerea cea mai apropiată, direcția,
+ușile care ar închide spațiul, verificate prin inundare); viewer-ul — panoul ușii, unealta Ușă (golul
+întreg dintr-un clic, chepengul în gaura unei plăci), overlay-ul Încăperi (tasta I), inspectorul. Simularea
+nu citește încăperile: hash `52b16ed2` și `3550c897` neschimbate pe toată felia.
+
+**Cost:** panoul pe design 3,87 M (5 lentile + 14 verificatori, 50 de constatări, toate cele grele
+confirmate); recenzia codului 3,68 M (5 lentile care reproduc + 10 verificatori pe MARE); remedierea
+2,38 M (5 agenți, fiecare pe ramura și worktree-ul lui, 76 min). Total ≈ 9,9 M.
+
+**Recenzia codului: 40 de constatări** (index 5, ușa în simulare 5, explicația 8, ecranul 12, contractul
+10). După verificare, 7 MARE: USA-1, USA-5 (preexistent), EXP-1, EXP-4, EXP-5, ECR-1, ECR-2; EXP-2 și CTR-2
+coborâte la MEDIU, CTR-1 la MIC. **Verificatorii au corectat remedierea lentilei de patru ori:** EXP-2
+(regula sfertului, singură, strica 72% din răspunsuri pe casa zidită cu totul deodată — `uniune2`: umplerea
+doar când regula locală zice LATERAL și nu s-a găsit niciun gol pe drum), EXP-5 (fără ordinea inversă,
+clicul pe celula de deasupra ultimei trepte punea tăcut o JUMĂTATE de chepeng — chiar scena prin care
+designul proba JUC-5 nu se putea obține din interfață), ECR-2 (costul nu era `number[].push`, ci
+re-legarea programelor GL la fiecare reconstrucție; semnătura FNV a lentilei nu câștiga nimic — detectorul
+pe identitatea feliilor), EXP-4 (cheia pe epocă nu ajută când minerii sapă chiar în mina întrebată —
+frâna).
+
+**Reparat** (14 commit-uri de pe cele cinci ramuri + unul de îmbinare):
+- **USA-1:** `celulaLibera` doar pentru piesele care blochează mersul — un morman sau un om în tocul
+  ușii de jos oprea ușa de sus pe veci, iar constructorul, neîntreruptibil cu piatra în mână, pleca din
+  așezare (2/3 plecați pe scena cu depozitul pictat peste casă).
+- **USA-5 (preexistent, catastrofal):** un depozit pictat peste amprenta unei construcții golea colonia
+  (4/4 plecați pe un zid drept; identic pe `2621d05`). Indexul de zone nu mai oferă celula de sub un
+  șantier (calculat inversat, pe desemnări), `lasa` are gardă pentru cursa cărăușului, iar un morman deja
+  pe șantier e un refuz pe țintă (CELULA_OCUPATA), nu o așteptare. Un singur predicat, `subSantier`, citit
+  de index, `lasa`, `asazaItem` și UI.
+- **USA-2/3:** zona pictată înainte de ușă iese la zidire (un predicat cu pictarea); piatra ușii de sus
+  desfăcute cade prin ușă, nu pe creasta zidului.
+- **EXP-1:** un stâlp la 1–2 celule de zid făcea din trecere „gol de ușă" și promitea un colț de 2–4 m³
+  (92/1200 de întrebări; pe o sală cu grilă de stâlpi, 18/113 bune) → 0/1200, 113/113; golul se acceptă
+  doar între ZIDURI (≥ 3 celule în plan), cu excepția montantului dintre două goluri.
+- **EXP-2/3:** acoperișul neterminat nu mai e „gol în perete" (10/17 → 0; 1579/13680 → 0); cota găurii
+  de pe drum, nu de pe cel mai înalt vecin (lângă un turn: „cu 7 m mai sus" → „cu 2 m").
+- **EXP-4 + ECR-3:** explicația are un buget TOTAL (2^16 celule): la 101k m³, 308–428 → 48–62 ms pe apel;
+  memoria inspectorului e pe celulă + amprenta pe jurnal (blocurile componentei ±1), nu pe `terrain.editari`
+  — pionii care sapă la 50 m nu mai refac nimic; frâna: cel mult o dată la max(250 ms, 20 × cost) —
+  minerii în mina întrebată, 101k m³: 12,6 s blocați din 10 s → 0,3 s.
+- **EXP-5:** chepengul lângă un zid care urcă peste placă (scara de lângă perete) — acum întâi gaura
+  plăcii, apoi golul de perete; oricare clic dă tot chepengul.
+- **EXP-6:** inspectorul întreabă aerul din fața feței atinse: 0/48 → 48/48 celule de zid și ușă; același
+  zid între două încăperi răspunde pe fața atinsă.
+- **EXP-7/8, ECR-9:** textele numără golurile („Pune 2 uși"), podeaua doar pe ePodea și pe niveluri reale
+  („23 m² jos · 23 m² sus", nu 4 niveluri); o groapă nu mai e gol de ușă (pe teren natural 9 → 0 acceptări
+  la 160.000 de clicuri), golul unei pivnițe desenate dar nesăpate e acceptat.
+- **ECR-1:** unealta Ușă țintește golul, nu ce se vede prin el (DDA pe rază, `golulTintit`): pixeli
+  acceptați 67% → 100% pe golul acoperit, 30% → 100% pe cel planificat, 68% → 100% cu nivelul pornit;
+  clicul pe mijlocul golului pune ușa întreagă.
+- **ECR-2:** overlay-ul I — materiale create o dată (fără re-legarea a 4 programe GL la fiecare săpătură)
+  și un detector pe nivel (identitatea feliilor + tripletul id/încăpere/ancoră): o săpătură pe alt nivel
+  costă 0,024 ms în loc de o reconstrucție.
+- **ECR-4…12:** zona moartă de sub toasturi (≈50.000 px² → 0), dreptunghiul Ușă fără nivel, „Anulează"
+  comun (o singură anulare lăsa o jumătate de ușă), ușa de sus desenată ca chepeng, ui-fum care murea la
+  prima excepție, stratul ușilor refăcut doar pe chunk-urile din jurnal (0,9 → 0,02 ms pe editare),
+  butonul „Pune ușa" cu prioritate și cu „Ușa e desemnată" după clic.
+- **Indexul:** jurnalul de 4.096 → 65.536 (o prăbușire de 5.585 de editări nu mai reface lumea întreagă;
+  786 KB pe teren); recalculul bloc-cu-bloc (coloane decodate 780.197 → 181.708, 283–298 → 116–120 ms);
+  M10 construit direct în teren sincronizat pe lume (`buildM10PeLume`); `encode` refuză un index
+  nesincronizat; **calea rapidă** a sincronizării (IDX-1): pe o mină de 104k m³ cu 20 de pioni,
+  183–197 → 89 µs/tick, 813 din 1014 sincronizări fără BFS.
+- **Porți care nu legau:** K05 n-avea prag pe bucăți vizitate — o sincronizare O(lume) trecea toate cele
+  783 de teste (acum ≤ 16 bucăți într-o pivniță dintre 576); ancora, fețele deschise, cheile sortate și
+  `celuleLaNivel` erau autoconsistente în oracol — acum pe hârtie; 10 din 18 mutații pe locurile ușii
+  treceau suita; bifele noi din ui-fum treceau cu patru mutații aplicate deodată; fixturile golden n-aveau
+  nicio încăpere (acum una de schema 7 cu ușă, chepeng, pion în toc și șantier de ușă).
+
+**Ce a prins îmbinarea, nu agenții** (fiecare pe ramura lui era verde): (1) normala feței pentru EXP-6 se
+oprea la granița dintre ramuri (D1 o scotea din țintire, D2 memora doar celula); (2) `subSantier` alunga
+mormanul din tocul ușii de sub ușa de sus — dar după USA-1 o ușă nu cere celula liberă; predicatul numără
+acum doar piesele care blochează mersul; (3) un test al memoriei se sprijinea pe defectul EXP-3 reparat pe
+altă ramură; (4) în ui-fum, bifele noi ale celor două ramuri, rulate împreună, lăsau camera astfel încât
+omul bifei [inspector] ajungea sub bara de sus (y = 24 px) — bifa își centrează acum camera pe om. Plus
+bifa „incaperi", instabilă și pe codul de bază (eticheta nivelului citită la 80 ms, sub încărcare cea
+veche).
+
+**Probe.** 857 de teste (+74); **690/690 de probe prinse** (~12 min local, arbore curat la final; +104); ui-fum **50/50** (39 → 50 de bife), iar probele negative ale harnașamentului (sapa, pauza, salvare,
+desen, excepție) înroșesc fiecare exact bifa ei. Fiecare test nou e roșu pe `e063f40` sau e o
+poartă de regresie cu proba ei prinsă; fiecare bifă nouă din ui-fum iese roșie pe codul vechi.
+
+**Capcane noi:** (1) `git gc --auto` rulat de un commit dintr-un worktree încearcă să curețe metadatele
+altui worktree (`.git/worktrees/agent-…`) — „Permission denied", fără efect; `git -c gc.auto=0 commit`;
+(2) `sed -i` din Git Bash transformă CRLF în LF pe tot fișierul; (3) heredoc-ul a colapsat din nou `\\n`
+din tiparele unei probe — scriptul cu `chr(92)`; (4) DriveFS a lăsat a treia oară o mutație după
+„restaurat: da" (`src/harness/sdig.ts`, la tranșa dinainte de recenzie); (5) un test care se sprijină pe
+un defect reparat pe ALTĂ ramură e verde pe ambele ramuri și roșu la îmbinare.
+
+### Registru
+
+- **Contractul tăieturii 2 (temperatura):** sincronizarea nu întoarce ce a aruncat/creat/modificat pe loc
+  (CTR-1; calea rapidă păstrează id-ul unei componente care și-a schimbat volumul — deci și o mulțime
+  „modificate pe loc"); regula feliilor murdare acoperă apartenența și fețele deschise, NU fețele pe fel și
+  grosimea (CTR-2: varianta D a verificatorului sau derivarea la 1 Hz); 55–72% din componentele aruncate se
+  recreează identic cu alt id (CTR-3); la depășirea jurnalului (> ~32.000 de voxeli prăbușiți într-un lot)
+  proveniența se pierde.
+- **Explicația:** bugetul de 2^16 face o mină de 101k m³ cu o ieșire „departe" (înainte propunea ușa) —
+  căutarea ușilor la cerere (EXP-4 (3)); fereastra 1×1 primește „Pune o ușă" (cere înălțimea omului în
+  explicație); stâlpul 2×2 lipit (1/45) și peretele liber 1×3 (7/46); gropile de ≤ 4 celule primesc chepeng.
+- **Ușa:** un morman deja pe un șantier rămâne acolo (vizibil, CELULA_OCUPATA; nimeni nu-l cară);
+  celulele de DORMIT de sub un șantier; garda de margine a refugiului (U13) fără probă; piatra de pe creasta
+  porții la PERETE (preexistent).
+- **Ecranul:** Anulează cu nivel retrage doar cuburile de sub nivel; o altă încăpere în blocul vecin
+  invalidează memoria inspectorului (proiectat); textele toasturilor ușii stau în main.ts.
+- **Indexul:** extinderea căii rapide (despărțirile rămân pe BFS: p99 ~800 µs pe mină); M08 fără probă;
+  suita a crescut cu ~10 s (testele care depășesc jurnalul, ~0,9 s fiecare).
