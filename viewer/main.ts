@@ -39,7 +39,7 @@ import { isWalkable, rebuildDirty } from '../src/sim/regions.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
 import { meshHeightfield } from '../src/render/heightfield.ts'
 import { createAgentLayer, spawnNear, stepSim, updateAgentLayer } from './agenti.ts'
-import { buildM10 } from '../src/harness/fixture-m10.ts'
+import { buildM10PeLume } from '../src/harness/fixture-m10.ts'
 import { SDIG_MAX_INCERCARI, SDIG_OFFSET_INCALZIRE, SDIG_SPAN_INCALZIRE, sapaturaUrmatoare } from '../src/harness/sdig.ts'
 import { decode, encode } from '../src/sim/save.ts'
 import type { Command } from '../src/sim/commands.ts'
@@ -255,7 +255,7 @@ const AGENTI_ACTIVI = SCENARIO === null
 // mica trece cu ORICE stiva si nu spune nimic; e fals pozitiv prin constructie.
 // De asta scenariile de gate incarca mereu M10, si niciodata fortareata.
 if (SCENARIO !== null) {
-  buildM10(world.terrain, FOCUS_CX, FOCUS_CY)
+  buildM10PeLume(world, FOCUS_CX, FOCUS_CY)
 } else if (lumeIncarcata === null && JOC_NOU === null) {
   // Demo, verificare si bisectie: fortareata, ca inainte. Un joc nou porneste pe un loc neatins.
   buildFortress()

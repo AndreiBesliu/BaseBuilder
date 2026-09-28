@@ -52,6 +52,27 @@
  * filtra semințele la „cele care sunt aer" și lăsa încăperi-fantomă pe piatră după o umplere
  * completă (DEF-1, 30/30 runde de fuzz).
  *
+ * **Ce acoperă regula, și ce NU** (recenzia încăperilor, CTR-2). Acoperă APARTENENȚA (ce celulă e în
+ * ce bucată și componentă) și fețele DESCHISE — exact ce citește `formaCanonica`, deci oracolul.
+ * NU acoperă fețele pe fel (podea / tavan / ușă ale unei bucăți) și nici grosimea hotarului: felia
+ * (bloc, z+1) de DEASUPRA unei editări nu se reface, deși podeaua bucății de acolo s-a schimbat
+ * (o gaură în placa etajului, apoi un chepeng în ea). Măsurat de verificator: un cache de fețe pe
+ * bucată iese vechi la 752 din 1.140 de comparații, cu oracolul verde. Codul se abate aici de la
+ * v2 §4 („felia ei și feliile celor 6 vecini"), pe care panoul a măsurat „0 din 1.589". Tăietura 2
+ * NU pune stare pe fețe peste regula asta: alege între varianta D a verificatorului (pe lângă
+ * regula de azi, felia (bloc, z+1) dacă e aer acoperit, plus drumul din e în cele 6 direcții prin
+ * hotar până la prima celulă de aer, plafon 8 — 0 roșii din 3.240, +25–36% felii) și derivarea
+ * fețelor la 1 Hz; în ambele cazuri `formaCanonica` se extinde cu fețele, pe fel și cu grosime.
+ *
+ * ## Obiectele `Felie` nu se modifică niciodată
+ *
+ * `refaFelie` creează un obiect `Felie` NOU, cu un `cel` nou; obiectele vechi rămân exact cum erau
+ * (nici `cel`, nici `bucati`). Identitatea obiectului e deci versiunea feliei. Pe asta se sprijină
+ * un detector de schimbare pe felii (overlay-ul I) și captura provenienței din afară, cerută de
+ * tăietura 2 (CTR-1: `new Map(felii)`, `bComp.slice()` și `new Map(comp)` luate înainte de
+ * sincronizare dau proveniența exactă, în O(index)). Testul: „CONTRACT: o sincronizare nu modifica
+ * obiectele Felie vechi" din tests/camere-contract.test.ts.
+ *
  * ## Cine sincronizează
  *
  * DOAR simularea, în puncte fixe: la sfârșitul tickului și la sfârșitul comenzilor `dig` / `fill`
@@ -378,8 +399,10 @@ const coadaFelie = new Int32Array(FELIE_CELULE)
  * deschise și se leagă de bucățile existente din feliile vecine (lateral la același z, vertical la z±1).
  * O felie vecină refăcută MAI TÂRZIU în aceeași sincronizare își scoate bucățile vechi (și muchiile
  * spre cele de aici) și se leagă din nou — deci ordinea refacerii nu contează.
+ *
+ * `inChei` = fals doar în recalculul complet, care reface lista `chei` o singură dată, la final.
  */
-function refaFelie(idx: IndexCamere, r: CititorCamere, cheie: number, noi: number[], atinse: Set<number>, moarte: Set<number>): void {
+function refaFelie(idx: IndexCamere, r: CititorCamere, cheie: number, noi: number[], atinse: Set<number>, moarte: Set<number>, inChei = true): void {
   idx.stat.feliiRefacute++
   const veche = idx.felii.get(cheie)
   if (veche) {
@@ -440,7 +463,7 @@ function refaFelie(idx: IndexCamere, r: CititorCamere, cheie: number, noi: numbe
     noi.push(id)
   }
   idx.felii.set(cheie, f)
-  idx.chei.splice(pozitie(idx.chei, cheie), 0, cheie)
+  if (inChei) idx.chei.splice(pozitie(idx.chei, cheie), 0, cheie)
 
   // Muchiile spre bucățile existente: vertical în aceeași coloană, lateral peste marginea blocului.
   const jos = idx.felii.get(cheieFelie(bx, by, z - 1))
@@ -511,7 +534,7 @@ function componente(idx: IndexCamere, seminte: readonly number[], moarte: Set<nu
 
 /**
  * Recalculul complet: aerul acoperit se enumeră pe coloanele chunk-urilor promovate (un chunk
- * nepromovat n-are), apoi se refac feliile care îl conțin, în ordinea cheilor, apoi componentele.
+ * nepromovat n-are), apoi se refac feliile care îl conțin, bloc cu bloc, apoi componentele.
  */
 export function reconstruiesteCamere(idx: IndexCamere, t: Terrain): void {
   golesteIndex(idx, t)
@@ -543,12 +566,19 @@ export function reconstruiesteCamere(idx: IndexCamere, t: Terrain): void {
   const noi: number[] = []
   const atinse = new Set<number>()
   const moarte = new Set<number>()
-  for (const cheie of [...felii].sort((a, b) => a - b)) {
-    refaFelie(idx, r, cheie, noi, atinse, moarte)
+  // Blocul întâi, apoi z (recenzia încăperilor, IDX-4). În ordinea cheii (z, by, bx), un nivel întreg
+  // al unei așezări nu încăpea în cititor, deci coloanele fiecărui bloc se decodau din nou la fiecare
+  // nivel: 780.197 de coloane citite pe fortăreața de pivnițe (3169 de felii), față de 181.708 așa.
+  const BB = BLOCURI * BLOCURI
+  for (const cheie of [...felii].sort((a, b) => (a % BB) - (b % BB) || a - b)) {
+    refaFelie(idx, r, cheie, noi, atinse, moarte, false)
     // Terenul nu se schimbă în recalcul: cititorul se poate goli oricând, ca memoria să rămână
     // mărginită pe o așezare mare (107.307 de coloane pe fortăreața panoului).
     if (r.col.size > 8192) r.col.clear()
   }
+  // Lista cheilor, o singură dată, sortată: în ordinea de mai sus, o inserare pe felie ar cădea la
+  // mijlocul listei.
+  for (const k of [...idx.felii.keys()].sort((a, b) => a - b)) idx.chei.push(k)
   componente(idx, noi, moarte)
   idx.stat.coloaneCitite += r.citite
   idx.stat.coloaneNepromovate += r.nepromovate

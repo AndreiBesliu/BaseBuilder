@@ -5,6 +5,7 @@
  */
 
 const T = 'tests/camere.test.ts'
+const TC = 'tests/camere-contract.test.ts'
 const C = 'src/sim/camere.ts'
 const TE = 'tests/camere-explica.test.ts'
 const E = 'src/sim/camere-explica.ts'
@@ -128,6 +129,151 @@ export const MUTATII = [
     a: '      rebuildDirty(w.terrain, w.regions, rules)\n      sincronizeazaCamere(w.camere, w.terrain)\n      return accept(0)',
     b: '      rebuildDirty(w.terrain, w.regions, rules)\n      return accept(0)',
     t: T, e: 'PUNCTELE FIXE',
+  },
+  // --- recenzia incaperilor: costul (IDX-2, IDX-3 / CTR-5)
+  {
+    n: 'IDX-2: jurnalul terenului inapoi la 4096 (o prabusire mare reconstruieste lumea in mijlocul comenzii)',
+    f: 'src/sim/terrain/terrain.ts',
+    a: 'export const JURNAL_CAP = 65536',
+    b: 'export const JURNAL_CAP = 4096',
+    t: T, e: 'K05 (IDX-2): o prabusire de peste 4096 de editari',
+  },
+  {
+    n: 'K01: sincronizarea reparcurge TOATE bucatile vii (fiecare componenta moare la fiecare editare; oracolul e orb)',
+    f: C,
+    a: '  const seminte = [...noi, ...[...atinse].sort((a, b) => a - b)]',
+    b: '  const seminte = [...noi, ...[...atinse].sort((a, b) => a - b)]\n  for (let b = 0; b < idx.bUrmator; b++) if (idx.bVecini[b] !== undefined) { seminte.push(b); if (idx.bComp[b]! >= 0) moarte.add(idx.bComp[b]!) }',
+    t: T, e: 'K05: o sapatura intr-o pivnita izolata dintre 576',
+  },
+  {
+    n: 'IDX-3: componentele atinse se reparcurg de doua ori pe sincronizare (acelasi index, costul dublu; oracolul e orb)',
+    f: C,
+    a: '  componente(idx, seminte, moarte)',
+    b: '  componente(idx, seminte, moarte)\n  componente(idx, seminte, moarte)',
+    t: T, e: 'K05: o galerie lunga, acoperita si deschisa la gura',
+  },
+  {
+    // Loturile fuzz-ului au cel mult 4 editari, iar tickul cu pioni face una: fara scena prabusirii,
+    // o sincronizare care citeste doar coada lotului trecea (recenzia incaperilor, CTR-9).
+    n: 'CTR-9: sincronizarea citeste doar ultimele 4 editari ale lotului (prabusirea lasa indexul vechi)',
+    f: C,
+    a: '  for (let i = idx.vazute; i < t.editari; i++) {',
+    b: '  for (let i = Math.max(idx.vazute, t.editari - 4); i < t.editari; i++) {',
+    t: T, e: 'PRABUSIRE: placa 5x5 pe un stalp',
+  },
+  {
+    n: 'IDX-4: recalculul reface feliile in ordinea cheii (z intai): coloanele unui bloc se decodeaza din nou la fiecare nivel',
+    f: C,
+    a: '  for (const cheie of [...felii].sort((a, b) => (a % BB) - (b % BB) || a - b)) {',
+    b: '  for (const cheie of [...felii].sort((a, b) => a - b)) {',
+    t: T, e: 'K05 (IDX-4): recalculul complet decodeaza fiecare coloana',
+  },
+  {
+    n: 'IDX-4: recalculul pune cheile feliilor in ordinea refacerii (bloc intai), nesortate',
+    f: C,
+    a: '  for (const k of [...idx.felii.keys()].sort((a, b) => a - b)) idx.chei.push(k)',
+    b: '  for (const k of idx.felii.keys()) idx.chei.push(k)',
+    t: T, e: 'K05 (IDX-4): recalculul complet decodeaza fiecare coloana',
+  },
+  // --- recenzia incaperilor: a treia cale de editare, M10 zidita direct pe lumea gate-ului (IDX-5)
+  {
+    n: 'IDX-5: M10 zidita pe o lume fara punctul de sincronizare (vazute = 0, 0 incaperi, prima sapatura reconstruieste tot)',
+    f: 'src/harness/fixture-m10.ts',
+    a: '  reconstruiesteCamere(w.camere, w.terrain)\n  return stats',
+    b: '  return stats',
+    t: 'tests/fixture.test.ts', e: 'M10 pe o LUME (gate-ul viewer-ului, IDX-5)',
+  },
+  {
+    n: 'IDX-5: gate-ul viewer-ului zideste M10 direct pe terenul lumii',
+    f: 'viewer/main.ts',
+    a: '  buildM10PeLume(world, FOCUS_CX, FOCUS_CY)',
+    b: '  buildM10(world.terrain, FOCUS_CX, FOCUS_CY)',
+    t: 'tests/fixture.test.ts', e: 'nimeni in afara fixturii nu zideste M10 direct',
+  },
+  // --- recenzia incaperilor: garda de la salvare (CTR-10)
+  {
+    n: 'CTR-10: encode nu mai cere indexul incaperilor la zi (o editare care ocoleste punctele fixe se salveaza tacut)',
+    f: 'src/sim/save.ts',
+    a: '  cerIndexLaZi(w)\n  const a = w.agents',
+    b: '  const a = w.agents',
+    t: T, e: 'SALVARE (CTR-10): encode refuza',
+  },
+  {
+    n: 'CTR-10: garda de la encode compara doar numarul de editari, nu si terenul indexului',
+    f: 'src/sim/save.ts',
+    a: '  if (c.teren !== w.terrain || c.vazute !== w.terrain.editari) {',
+    b: '  if (c.vazute !== w.terrain.editari) {',
+    t: T, e: 'SALVARE (CTR-10): encode refuza',
+  },
+  // --- recenzia incaperilor: fixtura golden cu incaperi si usi (CTR-8)
+  {
+    n: 'CTR-8: decode refuza materialul USA ca build-ul de dinainte de usa (o salvare cu usi nu se mai incarca)',
+    f: 'src/sim/save.ts',
+    a: '      if (!esteMaterialCunoscut(m)) {',
+    b: '      if (!esteMaterialCunoscut(m) || m > 8) {',
+    t: 'tests/migrare-incaperi.test.ts', e: 'fixtura de schema 7 cu incaperi se incarca',
+  },
+  // --- recenzia incaperilor: contractul pe hartie (CTR-4). Oracolul incremental == complet e orb la
+  // toate: ambele parti calculeaza ancora, fetele, cheile si nivelul cu aceeasi functie.
+  {
+    n: 'N01: fata deschisa spre vest numarata de doua ori',
+    f: C,
+    a: '      if (esteCer(r, x - 1, y, z)) deschise++',
+    b: '      if (esteCer(r, x - 1, y, z)) deschise += 2',
+    t: TC, e: 'CONTRACT: fetele deschise pe hartie',
+  },
+  {
+    n: 'N03: ancora componentei = MAXIMUL ancorelor de bucata',
+    f: C,
+    a: '      if (idx.bAncora[p]! < ancora) ancora = idx.bAncora[p]!',
+    b: '      if (ancora === Number.POSITIVE_INFINITY || idx.bAncora[p]! > ancora) ancora = idx.bAncora[p]!',
+    t: TC, e: 'CONTRACT: ancora e cea mai mica celula',
+  },
+  {
+    n: 'M15: ancora bucatii e ultima celula a randului ei, nu prima',
+    f: C,
+    a: '    idx.bAncora[id] = cheieCelula(x0 + (s % FELIE), y0 + ((s / FELIE) | 0), z)',
+    b: '    idx.bAncora[id] = cheieCelula(x0 + (s % FELIE), y0 + ((s / FELIE) | 0), z) + (FELIE - 1)',
+    t: TC, e: 'CONTRACT: ancora e cea mai mica celula',
+  },
+  {
+    n: 'N06: cheile feliilor adaugate la coada, nesortate',
+    f: C,
+    a: '  if (inChei) idx.chei.splice(pozitie(idx.chei, cheie), 0, cheie)',
+    b: '  if (inChei) idx.chei.push(cheie)',
+    t: TC, e: 'CONTRACT: cheile feliilor sunt MEREU sortate',
+  },
+  {
+    n: 'N07: celuleLaNivel ia si nivelul de deasupra',
+    f: C,
+    a: '  const hi = pozitie(idx.chei, cheieFelie(0, 0, z + 1))',
+    b: '  const hi = pozitie(idx.chei, cheieFelie(0, 0, z + 2))',
+    t: TC, e: 'CONTRACT: celuleLaNivel da exact',
+  },
+  {
+    n: 'M09: varful coloanei ignora ultimul nivel al ferestrei (un acoperis acolo nu acopera)',
+    f: C,
+    a: '  for (let l = VOXEL_LEVELS - 1; l >= 0; l--) {\n    if (mat[l] !== Material.AER) {',
+    b: '  for (let l = VOXEL_LEVELS - 2; l >= 0; l--) {\n    if (mat[l] !== Material.AER) {',
+    t: TC, e: 'CONTRACT: un acoperis pe ultimul nivel',
+  },
+  {
+    // Acelasi index (oracolul e verde), dar captura din afara — provenienta taieturii 2, un detector pe
+    // identitatea feliei — vede celulele NOI in obiectul vechi (recenzia incaperilor, CTR-2).
+    n: 'CTR-2: refaFelie refoloseste tabloul `cel` al feliei vechi (obiectul vechi se modifica pe loc)',
+    f: C,
+    a: '  const cel = new Int32Array(FELIE_CELULE).fill(-1)',
+    b: '  const cel = veche ? veche.cel.fill(-1) : new Int32Array(FELIE_CELULE).fill(-1)',
+    t: TC, e: 'CONTRACT: o sincronizare nu modifica obiectele Felie vechi',
+  },
+  {
+    // Proba pe FIXTURA, nu pe cod: garda e chiar numaratoarea din test. Cu `comparatii > 50`, un iaz
+    // mutat deasupra apei trecea — oracolul devenea o cutie uscata, oarba la DEF-2.
+    n: 'CTR-4: cutia fuzz-ului de pe iaz ridicata deasupra apei (oracolul pe iaz devine vid, tacut)',
+    f: T,
+    a: "  const r = fuzz(w, { x0: x - 3, y0: y - 3, z0: g - 2, X: 7, Y: 7, Z: 6 }, 400, 17, 'iaz', true)",
+    b: "  const r = fuzz(w, { x0: x - 3, y0: y - 3, z0: g + 3, X: 7, Y: 7, Z: 6 }, 400, 17, 'iaz', true)",
+    t: T, e: 'ORACOL: pe un iaz',
   },
   // --- explicatia inspectorului (camere-explica.ts)
   {

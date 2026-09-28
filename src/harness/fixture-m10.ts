@@ -22,6 +22,8 @@
  * separat si invalideaza seriile de masuratori existente.
  */
 
+import { reconstruiesteCamere } from '../sim/camere.ts'
+import type { World } from '../sim/state.ts'
 import { CHUNK_CELLS, Material } from '../sim/terrain/chunk.ts'
 import type { Terrain } from '../sim/terrain/terrain.ts'
 import { createTerrain, dig, fill, groundLevelM, promotedCount, setFocus } from '../sim/terrain/terrain.ts'
@@ -137,6 +139,21 @@ export function buildM10(t: Terrain, cx: number, cy: number): FixtureStats {
     promotedChunks: promotedCount(t),
     residentChunks: t.keys.length,
   }
+}
+
+/**
+ * Asezarea zidita pe o LUME, nu doar pe un teren (gate-ul viewer-ului, `?scenario=…`).
+ *
+ * `buildM10` scrie direct in teren, in afara tickului si a comenzilor: e o a treia cale de editare,
+ * deci trebuie urmata de un punct de sincronizare explicit, ca in `decode`. Fara el (recenzia
+ * incaperilor, IDX-5), invariantul `camere.vazute === terrain.editari` cadea (0 fata de 218.230),
+ * overlay-ul I si inspectorul vedeau 0 incaperi in loc de 677, iar prima comanda `dig` din S-DIG
+ * platea recalculul intregii fixturi (~420 ms), in bucla masurata a gate-ului.
+ */
+export function buildM10PeLume(w: World, cx: number, cy: number): FixtureStats {
+  const stats = buildM10(w.terrain, cx, cy)
+  reconstruiesteCamere(w.camere, w.terrain)
+  return stats
 }
 
 /** Terenul + asezarea, gata de masurat. `radius` e raza discului rezident. */

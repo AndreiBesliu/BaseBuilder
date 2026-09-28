@@ -14,12 +14,15 @@ import {
   cititorCamere,
   componentaLa,
   construiesteCamere,
+  decodeazaCelula,
+  decodeazaFelie,
   esteAcoperita,
   esteAer,
   esteIncapere,
   formaCanonica,
   listaComponente,
   sincronizeazaCamere,
+  varfLa,
 } from '../src/sim/camere.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { decode, encode } from '../src/sim/save.ts'
@@ -184,10 +187,11 @@ interface Cutie { x0: number; y0: number; z0: number; X: number; Y: number; Z: n
  * recalculul complet. Umplerile cad si pe aer acoperit izolat (celula unica a unei incaperi) — fara
  * ele fuzz-ul nu vede fantomele (panoul: 0/30 fara umpleri complete, 30/30 cu).
  */
-function fuzz(w: World, c: Cutie, pasi: number, seed: number, eticheta: string): { comparatii: number; incaperiVazute: number } {
+function fuzz(w: World, c: Cutie, pasi: number, seed: number, eticheta: string, numaraApa = false): { comparatii: number; incaperiVazute: number; celuleSubApa: number } {
   const rnd = lcg(seed)
   let comparatii = 0
   let incaperiVazute = 0
+  let celuleSubApa = 0
   for (let p = 0; p < pasi; ) {
     const lot = 1 + Math.floor(rnd() * 4)
     for (let i = 0; i < lot; i++, p++) {
@@ -203,9 +207,19 @@ function fuzz(w: World, c: Cutie, pasi: number, seed: number, eticheta: string):
     sincronizeazaCamere(w.camere, w.terrain)
     egalCuRecalculul(w, `${eticheta}: pasul ${p}`)
     comparatii++
-    for (const k of listaComponente(w.camere)) if (esteIncapere(k)) incaperiVazute++
+    const r = numaraApa ? cititorCamere(w.terrain) : null
+    for (const k of listaComponente(w.camere)) {
+      if (esteIncapere(k)) incaperiVazute++
+      if (r === null) continue
+      // Celulele acoperite de APA: varful coloanei lor e apa (DEF-2).
+      for (const cheie of celuleComponentei(w.camere, k)) {
+        const { x, y } = decodeazaCelula(cheie)
+        const m = materialAt(w.terrain, x, y, varfLa(r, x, y))
+        if (m.ok && m.value === Material.APA) celuleSubApa++
+      }
+    }
   }
-  return { comparatii, incaperiVazute }
+  return { comparatii, incaperiVazute, celuleSubApa }
 }
 
 test('ORACOL: incremental == recalcul complet, fuzz pe uscat cu umpleri complete (3 seminte)', () => {
@@ -251,8 +265,10 @@ test('ORACOL: la baza ferestrei (sub ea e stanca, nu aer)', () => {
 test('ORACOL: pe un iaz (apa acopera; o cutie uscata e oarba la asta)', () => {
   const w = createWorld(12345)
   const { x, y, g } = gasesteIaz(w)
-  const r = fuzz(w, { x0: x - 3, y0: y - 3, z0: g - 2, X: 7, Y: 7, Z: 6 }, 400, 17, 'iaz')
-  assert.ok(r.comparatii > 50)
+  const r = fuzz(w, { x0: x - 3, y0: y - 3, z0: g - 2, X: 7, Y: 7, Z: 6 }, 400, 17, 'iaz', true)
+  // Recenzia incaperilor, CTR-4: `comparatii > 50` trecea si pe un iaz mutat sau secat — oracolul ar fi
+  // devenit o cutie uscata, vida pentru DEF-2, fara sa se inroseasca. Masurat: 645 de celule.
+  assert.ok(r.celuleSubApa > 200, `oracol vid pe iaz: doar ${r.celuleSubApa} celule acoperite de apa`)
 })
 
 test('umplerea completa a unei incaperi de o celula nu lasa fantoma (DEF-1)', () => {
@@ -319,14 +335,55 @@ test('PUNCTELE FIXE: dupa orice comanda de teren si orice tick, indexul e la zi 
   const edInainte = w.terrain.editari
   sincronizeazaCamere(w.camere, w.terrain)
   const epocaInainte = w.camere.epoca
+  // Oracolul dupa FIECARE tick care a editat terenul, nu doar la final (recenzia incaperilor, CTR-9): o
+  // abatere care se vindeca la o editare ulterioara din aceeasi felie nu se mai vede la capat. Tickurile
+  // fara editari nu pot schimba indexul, deci comparatia pe ele n-ar proba nimic (masurat: 8 editari).
+  let prec = w.terrain.editari
+  let comparatii = 0
   for (let t = 0; t < 3000; t++) {
     tick(w, R)
     assert.equal(w.camere.vazute, w.terrain.editari, `dupa tickul ${t}`)
+    if (w.terrain.editari !== prec) {
+      egalCuRecalculul(w, `dupa tickul ${t}`)
+      comparatii++
+      prec = w.terrain.editari
+    }
   }
+  assert.ok(comparatii >= 4, `doar ${comparatii} tickuri cu editari: oracolul pe tick e aproape vid`)
   assert.ok(w.terrain.editari > edInainte, 'pionii n-au sapat nimic — proba nu exerseaza tickul')
   assert.ok(w.camere.epoca > epocaInainte, 'sapatul pionilor n-a schimbat nicio componenta — proba nu exerseaza sincronizarea din tick')
   egalCuRecalculul(w, 'dupa pioni')
   assert.ok(listaComponente(w.camere).length > 0)
+})
+
+test('PRABUSIRE: placa 5x5 pe un stalp, peste o pivnita acoperita — stalpul sapat prin comanda o darama intr-un singur lot, iar indexul e la zi si egal cu recalculul', () => {
+  // Recenzia incaperilor, CTR-9: niciun test nu trecea incaperile printr-o prabusire, iar lotul de mai
+  // multe editari pe aceeasi coloana (dig sus, fill cu MOLOZ jos) era exersat doar de fuzz-ul direct pe
+  // teren, cu loturi de cel mult 4. Masurat: 53 de editari intr-un lot, 26 de voxeli de MOLOZ.
+  const { w, wx, wy, g } = sitPlat(777, 14)
+  const t = w.terrain
+  // Pivnita 4x4x2 sub un strat de sol; stalpul la (1,1), placa 5x5 la g+3, peste pivnita.
+  for (let dx = 2; dx <= 5; dx++) for (let dy = 2; dy <= 5; dy++) for (const z of [g - 2, g - 1]) assert.ok(dig(t, wx + dx, wy + dy, z).ok)
+  for (let z = g + 1; z <= g + 2; z++) assert.ok(fill(t, wx + 1, wy + 1, z, P).ok)
+  for (let dx = 1; dx <= 5; dx++) for (let dy = 1; dy <= 5; dy++) assert.ok(fill(t, wx + dx, wy + dy, g + 3, P).ok)
+  sincronizeazaCamere(w.camere, t)
+  const subPlaca = componentaLa(w.camere, wx + 3, wy + 3, g + 1)
+  assert.ok(subPlaca && !esteIncapere(subPlaca), 'fixtura: aerul de sub placa e acoperit si deschis')
+  const e0 = t.editari
+  assert.ok(applyCommand(w, { kind: 'dig', wx: wx + 1, wy: wy + 1, z: g + 1 }, R).ok)
+  const lot = t.editari - e0
+  let moloz = 0
+  for (let dx = 0; dx < 8; dx++) for (let dy = 0; dy < 8; dy++) for (let z = g - 3; z < g + 5; z++) {
+    const m = materialAt(t, wx + dx, wy + dy, z)
+    if (m.ok && m.value === Material.MOLOZ) moloz++
+  }
+  assert.ok(lot > 40 && moloz >= 20, `fixtura: placa n-a cazut (${lot} editari in lot, ${moloz} de MOLOZ)`)
+  assert.equal(w.camere.vazute, t.editari, 'dupa comanda care a prabusit placa')
+  egalCuRecalculul(w, 'dupa prabusire')
+  assert.equal(componentaLa(w.camere, wx + 3, wy + 3, g + 1), null, 'placa a cazut: sub ea nu mai e aer acoperit')
+  const pivnita = componentaLa(w.camere, wx + 3, wy + 3, g - 1)
+  assert.ok(pivnita && esteIncapere(pivnita), 'pivnita ramane incapere')
+  assert.equal(pivnita!.volum, 32)
 })
 
 test('SALVARE: lumea incarcata are exact indexul lumii continue, reconstruit in decode', () => {
@@ -342,6 +399,27 @@ test('SALVARE: lumea incarcata are exact indexul lumii continue, reconstruit in 
   assert.equal(w2.camere.stat.recalculari, 1)
   assert.deepEqual(formaCanonica(w2.camere), formaCanonica(w.camere))
   assert.ok(listaComponente(w2.camere).some(esteIncapere))
+})
+
+test('SALVARE (CTR-10): encode refuza o lume cu indexul incaperilor in urma terenului — o editare care a ocolit punctele fixe', () => {
+  // Recenzia incaperilor, CTR-10: invariantul `vazute === editari` nu era verificat nicaieri la sursa;
+  // prima cale noua de editare (M10 pe lumea gate-ului, IDX-5) l-a stricat tacut.
+  const { w, wx, wy, g } = sitPlat(4242, 8)
+  casa(w.terrain, wx, wy, g, 5, 2) // direct in teren: in afara tickului si a comenzilor
+  assert.notEqual(w.camere.vazute, w.terrain.editari, 'fixtura: indexul e in urma')
+  assert.throws(() => encode(w), /indexul incaperilor nu e la zi/)
+  sincronizeazaCamere(w.camere, w.terrain)
+  const inc = decode(encode(w), R)
+  assert.ok(inc.ok, 'dupa sincronizare, salvarea merge')
+  // Si un index al ALTUI teren, cu acelasi numar de editari.
+  const teren = w.camere.teren
+  w.camere.teren = createWorld(4242).terrain
+  try {
+    assert.throws(() => encode(w), /alt teren/)
+  } finally {
+    w.camere.teren = teren
+  }
+  assert.doesNotThrow(() => encode(w))
 })
 
 test('scenariul standard n-are aer acoperit: hash-ul de referinta e orb la incaperi (de-aia au scene proprii)', () => {
@@ -379,6 +457,7 @@ test('K05: o galerie lunga, acoperita si deschisa la gura — fiecare sapatura l
   let celule = 0
   let felii = 0
   let sapaturi = 0
+  let bucatiGaleriei = 0
   let prec = g
   for (let dx = 2; dx <= 65; dx++) {
     const gg = groundLevelM(t, wx + dx, wy + 5)
@@ -389,10 +468,19 @@ test('K05: o galerie lunga, acoperita si deschisa la gura — fiecare sapatura l
       assert.ok(applyCommand(w, { kind: 'dig', wx: wx + dx, wy: wy + 5, z }, R).ok)
       celule += w.camere.stat.celuleScanate - a.celuleScanate
       felii += w.camere.stat.feliiRefacute - a.feliiRefacute
+      // Bucatile vizitate (recenzia incaperilor, IDX-3): partea care domina costul. Sapatura la fata
+      // reparcurge galeria — o singura componenta — dar O DATA, nu o data pe saminta.
+      const galeria = componentaLa(w.camere, wx + dx, wy + 5, z)
+      assert.ok(galeria, `sapatura ${sapaturi}: celula sapata nu e in galerie`)
+      const vizitate = w.camere.stat.bucatiVizitate - a.bucatiVizitate
+      assert.ok(vizitate <= galeria!.bucati.length + 8, `sapatura ${sapaturi}: ${vizitate} bucati vizitate, galeria are ${galeria!.bucati.length}`)
+      bucatiGaleriei = Math.max(bucatiGaleriei, galeria!.bucati.length)
       sapaturi++
     }
   }
   assert.ok(sapaturi >= 60, `galeria s-a oprit dupa ${sapaturi} de sapaturi (relief)`)
+  // Garda pe bucati musca doar daca galeria are mai mult de 8 bucati (masurat: 12).
+  assert.ok(bucatiGaleriei > 8, `galeria are doar ${bucatiGaleriei} bucati: garda pe bucati vizitate e vida`)
   egalCuRecalculul(w, 'galeria')
   const c = componentaLa(w.camere, wx + 20, wy + 5, groundLevelM(t, wx + 20, wy + 5).ok ? (groundLevelM(t, wx + 20, wy + 5) as { value: number }).value - 2 : 0)
   assert.ok(c && !esteIncapere(c) && c.volum >= 60, 'galeria e o componenta deschisa, mare')
@@ -413,4 +501,91 @@ test('K05: o lume incarcata reconstruieste o data, iar in regim niciodata', () =
   for (let i = 0; i < 50; i++) tick(w2, R)
   assert.equal(w2.camere.stat.recalculari, 1)
   assert.equal(w2.camere.stat.coloaneNepromovate, 0, 'nicio coloana nepromovata citita (lema apronului)')
+})
+
+test('K05: o sapatura intr-o pivnita izolata dintre 576 viziteaza doar bucatile ei, iar celelalte 575 de componente isi pastreaza id-ul', () => {
+  // Recenzia incaperilor, IDX-3 / CTR-5: o sincronizare care reparcurge TOATE bucatile vii (K01) da
+  // acelasi index, deci oracolul e orb la ea; costul insa e O(lume), iar fiecare componenta moare.
+  // Masurat pe cod: 3 bucati vizitate si 1 felie; cu K01, 1568 de bucati si 576 de componente aruncate.
+  const { w, wx, wy } = sitPlat(12345, 8)
+  const t = w.terrain
+  let pivnite = 0
+  for (let i = 0; i < 24; i++) for (let j = 0; j < 24; j++) {
+    const x = wx + i * 5, y = wy + j * 5
+    const gg = groundLevelM(t, x + 1, y + 1)
+    if (!gg.ok) continue
+    let ok = true
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) for (const z of [gg.value - 3, gg.value - 2]) ok = dig(t, x + dx, y + dy, z).ok && ok
+    if (ok) pivnite++
+  }
+  sincronizeazaCamere(w.camere, t)
+  assert.equal(pivnite, 576)
+  const inainte = new Map([...w.camere.comp.values()].map((c) => [c.id, c.ancora]))
+  assert.equal(inainte.size, 576, 'fixtura: fiecare pivnita e o componenta')
+  const tinta = componentaLa(w.camere, wx + 1, wy + 1, (groundLevelM(t, wx + 1, wy + 1) as { value: number }).value - 2)!
+  const a = { ...w.camere.stat }
+  // O groapa in podeaua primei pivnite.
+  assert.ok(applyCommand(w, { kind: 'dig', wx: wx + 1, wy: wy + 1, z: (groundLevelM(t, wx + 1, wy + 1) as { value: number }).value - 4 }, R).ok)
+  const vizitate = w.camere.stat.bucatiVizitate - a.bucatiVizitate
+  assert.ok(vizitate > 0, 'sapatura n-a reparcurs nimic: proba nu exerseaza componentele')
+  assert.ok(vizitate <= 16, `bucati vizitate: ${vizitate} (bucati vii: ${w.camere.bUrmator - w.camere.bLibere.length})`)
+  let pastrate = 0
+  for (const [id, ancora] of inainte) if (id !== tinta.id && w.camere.comp.get(id)?.ancora === ancora) pastrate++
+  assert.equal(pastrate, 575, 'componentele neatinse isi pastreaza id-ul')
+  egalCuRecalculul(w, 'pivnitele')
+})
+
+test('K05 (IDX-4): recalculul complet decodeaza fiecare coloana o singura data — blocul intai, apoi z', () => {
+  // Recenzia incaperilor, IDX-4: in ordinea cheii (z, by, bx), un nivel intreg nu incapea in cele 8192
+  // de coloane ale cititorului, deci coloanele fiecarui bloc se decodau din nou la fiecare nivel. Pe
+  // locul fortaretei din viewer: 144 de blocuri cu cate o pivnita 3x3 pe 3 niveluri, in interiorul
+  // blocului — pe hartie, 256 de coloane pe bloc. Masurat: 87.296 de coloane citite in ordinea veche
+  // (2,37x), 37.888 in cea noua (fortareata de pivnite: 780.197 -> 181.708, 283 -> 116 ms).
+  const w = createWorld(4242)
+  const t = w.terrain
+  const bx0 = 244 * CHUNK_CELLS, by0 = 244 * CHUNK_CELLS
+  for (let i = 0; i < 12; i++) for (let j = 0; j < 12; j++) {
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) {
+      const x = bx0 + i * 16 + 6 + dx, y = by0 + j * 16 + 6 + dy
+      const gg = groundLevelM(t, x, y)
+      assert.ok(gg.ok)
+      for (let d = 2; d <= 4; d++) assert.ok(dig(t, x, y, gg.value - d).ok)
+    }
+  }
+  sincronizeazaCamere(w.camere, t)
+  const idx = construiesteCamere(t)
+  const blocuri = new Set(idx.chei.map((k) => { const f = decodeazaFelie(k); return f.by * 100000 + f.bx }))
+  assert.equal(blocuri.size, 144, 'fixtura: o pivnita in fiecare bloc')
+  assert.ok(idx.felii.size >= 3 * 144, `fixtura: ${idx.felii.size} felii, sub 3 niveluri pe bloc`)
+  assert.ok(idx.stat.coloaneCitite <= 256 * 144 * 1.1, `coloane citite: ${idx.stat.coloaneCitite}, pe hartie ${256 * 144}`)
+  // Lista cheilor, refacuta o data la final: sortata si completa.
+  assert.deepEqual(idx.chei, [...idx.felii.keys()].sort((a, b) => a - b))
+  assert.deepEqual(formaCanonica(idx), formaCanonica(w.camere), 'recalculul in ordinea noua == indexul incremental')
+})
+
+test('K05 (IDX-2): o prabusire de peste 4096 de editari intr-o singura comanda se sincronizeaza incremental, fara recalculul lumii', () => {
+  // Recenzia incaperilor, IDX-2: cu jurnalul de 4096, lotul unei prabusiri mari trecea de el si
+  // indexul se reconstruia complet (tot terenul promovat) in mijlocul comenzii. O cavitate de 60×60
+  // sub un singur strat de sol, pe un stalp de 2×2; stalpul sapat prin comanda darama tavanul, iar
+  // un voxel cazut costa doua editari (dig + fill cu MOLOZ), toate in lotul comenzii. Masurat: 5585.
+  const { w, wx, wy } = sitPlat(4242, 10)
+  const t = w.terrain
+  const x0 = wx + 2, y0 = wy + 2, L = 60, c = L >> 1
+  for (let y = 0; y < L; y++) for (let x = 0; x < L; x++) {
+    if ((x === c || x === c - 1) && (y === c || y === c - 1)) continue
+    const gg = groundLevelM(t, x0 + x, y0 + y)
+    assert.ok(gg.ok)
+    for (const z of [gg.value - 2, gg.value - 1]) assert.ok(dig(t, x0 + x, y0 + y, z).ok)
+  }
+  sincronizeazaCamere(w.camere, t)
+  const r0 = w.camere.stat.recalculari
+  const e0 = t.editari
+  const gs = groundLevelM(t, x0 + c, y0 + c)
+  assert.ok(gs.ok)
+  assert.ok(applyCommand(w, { kind: 'dig', wx: x0 + c, wy: y0 + c, z: gs.value - 1 }, R).ok)
+  const lot = t.editari - e0
+  assert.ok(lot > 4096, `fixtura: lotul prabusirii are ${lot} editari, sub jurnalul vechi`)
+  assert.equal(w.camere.vazute, t.editari)
+  assert.equal(w.camere.stat.recalculari, r0, `prabusirea (${lot} de editari) a reconstruit indexul lumii`)
+  egalCuRecalculul(w, 'dupa prabusirea mare')
 })

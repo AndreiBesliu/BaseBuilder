@@ -49,7 +49,25 @@ interface Envelope {
   data: unknown
 }
 
+/**
+ * Refuza o lume al carei index de incaperi nu e la zi cu terenul (recenzia incaperilor, CTR-10).
+ *
+ * Indexul e TRANSIENT si nu intra in fisier, dar invariantul lui — in afara unui tick si a unei
+ * comenzi, `camere.vazute === terrain.editari` — e exact ce va citi starea PERSISTED a taieturii 2
+ * (temperatura pe incapere). O cale de editare noua care uita punctul de sincronizare (cum a fost
+ * M10 zidita direct pe lumea gate-ului, IDX-5) il strica tacut; aici se vede la prima salvare.
+ * Arunca, nu intoarce `Outcome`: e o eroare de program, nu un „nu" al jocului (ca `voxelAt` pe un
+ * chunk nepromovat), iar UI-ul arata mesajul in toastul salvarii.
+ */
+function cerIndexLaZi(w: World): void {
+  const c = w.camere
+  if (c.teren !== w.terrain || c.vazute !== w.terrain.editari) {
+    throw new Error(`encode: indexul incaperilor nu e la zi cu terenul (vazute ${c.vazute}, editari ${w.terrain.editari}${c.teren !== w.terrain ? ', alt teren' : ''}) — o editare a ocolit punctele fixe`)
+  }
+}
+
 export function encode(w: World): string {
+  cerIndexLaZi(w)
   const a = w.agents
   const rng: Record<string, RngState> = {}
   for (const name of RNG_STREAMS) rng[name] = w.rng[name]

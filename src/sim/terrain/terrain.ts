@@ -61,8 +61,16 @@ export interface Terrain {
   readonly jurnal: Int32Array
 }
 
-/** Cate editari tine jurnalul terenului. Peste atatea nevazute, o memorie se goleste. */
-export const JURNAL_CAP = 4096
+/**
+ * Cate editari tine jurnalul terenului. Peste atatea nevazute, o memorie se goleste.
+ *
+ * 65.536 (786 KB pe teren), nu 4096: o singura sapatura care darama un tavan mare trecea de
+ * 4096 in ACELASI lot (un voxel cazut = dig + fill cu MOLOZ, deci 2 editari), iar indexul
+ * incaperilor facea atunci recalculul complet al LUMII in mijlocul comenzii — recenzia
+ * incaperilor, IDX-2: cavitatea de 60×60 pe un stalp de 2×2 = 5585 de editari, 121 ms pe
+ * 276 de chunk-uri promovate (7,3 ms cu jurnalul mare, fara recalcul).
+ */
+export const JURNAL_CAP = 65536
 
 /**
  * Un index de grinzi: chunkKey → chei LOCALE sortate (`cheieLocala`). Acelasi tip
