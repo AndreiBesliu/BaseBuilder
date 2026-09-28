@@ -41,9 +41,27 @@ export interface Cifre {
   readonly cantitatePiesa: number
   /** Sub atat, un morman nu se ridica pentru construit. */
   readonly pragRidicare: number
+  /** Cat de sus zideste un pion fata de celula pe care sta. */
+  readonly atingereSusM: number
+  /** Cat de departe cauta un pion lucrari. */
+  readonly razaLucru: number
+  /** Cat de departe cauta un pion mancare sau pat. */
+  readonly razaNevoi: number
 }
 
-export const CIFRE_IMPLICITE: Cifre = { suportMax: 4, suportRazaGrinda: 10, agentHeadroomM: 2, maxStepM: 1, cantitatePiesa: 20, pragRidicare: 10 }
+export const CIFRE_IMPLICITE: Cifre = { suportMax: 4, suportRazaGrinda: 10, agentHeadroomM: 2, maxStepM: 1, cantitatePiesa: 20, pragRidicare: 10, atingereSusM: 2, razaLucru: 96, razaNevoi: 96 }
+
+/**
+ * Un numar urmat de substantiv, cu „de" unde il cere romana: dupa 20 si peste, cu exceptia celor
+ * terminate in 01–19 („101 oameni", dar „120 de oameni", „1.000 de piatră"). Numarul trece prin
+ * `textNumar` („2.000"). `unu` e forma de singular, daca difera de „1 + plural".
+ */
+export function cant(n: number, plural: string, unu?: string): string {
+  if (n === 1 && unu !== undefined) return unu
+  const r = Math.abs(Math.trunc(n)) % 100
+  const de = Math.abs(Math.trunc(n)) >= 20 && (r === 0 || r >= 20)
+  return `${textNumar(n)} ${de ? 'de ' : ''}${plural}`
+}
 
 export const NUME_ITEM: Readonly<Record<number, string>> = {
   [Item.PIATRA]: 'Piatră',
@@ -207,15 +225,37 @@ export function textGeneric(motiv: ReasonCode, cifre: Cifre = CIFRE_IMPLICITE): 
     case Reason.BUGET_DEPASIT: return { titlu: 'Drumul e prea lung sau prea încâlcit acum.', actiune: 'Se reîncearcă singur; un drum mai scurt ajută.' }
     case Reason.CAPACITATE_DEPASITA: return { titlu: 'S-a atins o limită.', actiune: '' }
     case Reason.LOC_NECALCABIL: return { titlu: 'Acolo nu se poate sta.', actiune: 'Alege o celulă cu podea dedesubt.' }
-    case Reason.CELULA_OCUPATA: return { titlu: 'Cineva stă chiar acolo.', actiune: 'Se face după ce pleacă.' }
+    case Reason.CELULA_OCUPATA: return { titlu: 'Cineva stă chiar acolo.', actiune: 'Încearcă din nou după ce pleacă.' }
     case Reason.VALOARE_INVALIDA: return { titlu: 'Valoare nepotrivită.', actiune: '' }
     case Reason.PREA_DEPARTE: return { titlu: 'Prea departe de oameni.', actiune: 'Apropie lucrarea de așezare.' }
     case Reason.DEJA_DESEMNATA: return { titlu: 'Are deja o lucrare.', actiune: 'Anuleaz-o întâi, dacă vrei alta.' }
     case Reason.INVARIANT_INCALCAT: return { titlu: 'Eroare internă (invariant).', actiune: 'Spune-i dezvoltatorului (Diagnostic, F3).' }
-    case Reason.FARA_DEPOZIT: return { titlu: 'Nu are unde fi dus.', actiune: 'Pictează un depozit (Zone ▸ Depozit).' }
+    case Reason.FARA_DEPOZIT: return { titlu: 'Marfa nu are unde fi dusă.', actiune: 'Pictează un depozit (Zone ▸ Depozit).' }
     case Reason.FARA_SPRIJIN: return { titlu: `N-ar sta în picioare: nimic așezat la mai puțin de ${cifre.suportMax} pași.`, actiune: 'Zidește mai aproape de ceva, sau pune o grindă prinsă de ceva așezat.' }
     case Reason.CELULA_PLINA: return { titlu: 'E deja ceva solid acolo.', actiune: 'Sapă întâi, sau alege o celulă de aer.' }
     case Reason.AR_INCHIDE: return { titlu: 'Ar închide pe cineva sau ceva înăuntru.', actiune: 'Lasă o deschidere în perete (o coloană liberă de 2 niveluri), mută mormanul sau șterge zona.' }
+  }
+}
+
+/**
+ * De ce STA un pion, din punctul LUI de vedere. Textul generic e scris pentru o lucrare sau un
+ * morman („nu are unde fi dus", „prea departe de oameni") si, lipit dupa „Stă:", facea din om
+ * subiectul propozitiei gresite (recenzia UI-ului, MOD-6: „Stă: nu are unde fi dus" 91% din timpul
+ * unui incepator fara depozit, fara nicio actiune).
+ */
+export function textRatiunePion(motiv: ReasonCode, cifre: Cifre = CIFRE_IMPLICITE): string {
+  switch (motiv) {
+    case Reason.FARA_DEPOZIT: return 'Stă: marfa de cărat n-are unde fi dusă — pictează sau mărește un depozit'
+    case Reason.FARA_MUNCITOR: return 'Stă: n-are voie la munca rămasă (prioritate 0, sau Exclusiv pe alta)'
+    case Reason.PREA_DEPARTE: return `Stă: lucrările rămase sunt la peste ${cant(cifre.razaLucru, 'celule')} de el`
+    case Reason.REZERVAT: return 'Stă: lucrările rămase sunt luate de alții'
+    case Reason.LIPSA_MATERIAL: return 'Stă: lipsește materialul pentru construit'
+    case Reason.INACCESIBIL: return 'Stă: nu ajunge la nicio lucrare rămasă'
+    case Reason.AR_INCHIDE: return 'Stă: lucrarea rămasă ar închide pe cineva sau ceva înăuntru'
+    case Reason.FARA_SPRIJIN: return 'Stă: piesele rămase n-ar sta încă în picioare'
+    case Reason.BUGET_DEPASIT: return 'Stă: drumul e prea lung acum, reîncearcă'
+    case Reason.OCUPAT_DE_OSTIL: return 'Stă: un jefuitor e în drum'
+    default: return `Stă: ${textGeneric(motiv, cifre).titlu.replace(/\.$/, '').replace(/^./, (c) => c.toLowerCase())}`
   }
 }
 
@@ -232,6 +272,7 @@ export function textActivitate(felJob: number, pas: number, ce = ''): string {
     case FelJob.NICIUNUL: return 'Stă'
     case FelJob.SAPA: return pas === PasJob.LUCREAZA ? 'Sapă' : 'Merge să sape'
     case FelJob.CARA:
+      // `ce` vine cu cantitatea si acordul deja facut (`cant`): „50 de piatră".
       if (pas === PasCara.MERGE_SURSA) return `Merge după ${ce || 'marfă'}`
       if (pas === PasCara.RIDICA) return `Ridică ${ce || 'marfă'}`
       if (pas === PasCara.MERGE_DEST) return `Cară ${ce || 'marfă'} spre depozit`

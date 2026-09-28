@@ -229,7 +229,7 @@ async function ruleaza() {
     await p.tasta('s', ['control'])
     await astepta(1200)
     const s1 = await p.js('__kinstead.stabOverlay.visible')
-    salvare = await p.js(`(async () => { const r = indexedDB.open('kinstead', 1); const db = await new Promise((ok, no) => { r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error) }); const t = db.transaction('salvari'); const q = t.objectStore('salvari').getAll(); const toate = await new Promise((ok) => { q.onsuccess = () => ok(q.result) }); db.close(); const s = toate.filter((x) => x.id !== 'auto').sort((a, b) => (a.salvatLa < b.salvatLa ? 1 : -1))[0]; return s ? { id: s.id, tick: s.tick, des: JSON.parse(s.lume).data.designations?.count ?? null } : null })()`)
+    salvare = await p.js(`(async () => { const r = indexedDB.open('kinstead', 1); const db = await new Promise((ok, no) => { r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error) }); const t = db.transaction('salvari'); const q = t.objectStore('salvari').getAll(); const toate = await new Promise((ok) => { q.onsuccess = () => ok(q.result) }); db.close(); const s = toate.filter((x) => !x.id.startsWith('auto')).sort((a, b) => (a.salvatLa < b.salvatLa ? 1 : -1))[0]; return s ? { id: s.id, tick: s.tick, des: JSON.parse(s.lume).data.designations?.count ?? null } : null })()`)
     bifa(s0 === s1 && salvare !== null, 'Ctrl+S salveaza si nu comuta stabilitatea', JSON.stringify({ s0, s1, salvare: salvare?.id ?? null }))
   }
   const desInainte = await p.js('__f.des().length')

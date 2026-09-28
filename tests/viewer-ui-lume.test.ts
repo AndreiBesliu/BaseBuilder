@@ -18,11 +18,15 @@ import { Categorie, CATEGORII, Faction, FelJob, Item, NEVOI, Nevoie, Piesa } fro
 import { codMotiv, Reason } from '../src/sim/result.ts'
 import { DetaliuMotiv } from '../src/sim/desemnari.ts'
 import { tick } from '../src/sim/world.ts'
-import { creeazaPrevizualizare, golita, inspecteazaCelula, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte, stareDesemnare } from '../viewer/ui/model.ts'
+import type { World } from '../src/sim/state.ts'
+import { Zona } from '../src/sim/zone.ts'
+import { Material } from '../src/sim/terrain/chunk.ts'
+import { cauzaGolirii, creeazaPrevizualizare, golita, inspecteazaCelula, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte, stareDesemnare } from '../viewer/ui/model.ts'
 import { locDemo, locJocNou } from '../viewer/ui/loc.ts'
 import { planDreptunghi, normalizeaza, Unealta } from '../viewer/ui/dreptunghi.ts'
 import { actualizeaza, creeazaAlerte, REGULI_ALERTE } from '../viewer/ui/alerte.ts'
-import { laSit, lasaItem, lumeBogata, picteaza, R, ruleaza, solid } from './fixturi.ts'
+import type { Semnal } from '../viewer/ui/alerte.ts'
+import { laSit, lasaItem, lumeBogata, patratPlat, picteaza, R, ruleaza, solid } from './fixturi.ts'
 
 test('model: resursele se conserva cat se cara (120 de piatra la FIECARE tick)', () => {
   const { w, sit } = laSit(12345, 6)
@@ -68,13 +72,8 @@ function instantaneu(x: unknown, cale = 'w', vazut = new Set<unknown>()): string
   return Object.keys(x).sort().flatMap((k) => instantaneu((x as Record<string, unknown>)[k], `${cale}.${k}`, vazut))
 }
 
-test('model: nu scrie in World (instantaneu complet inainte si dupa o trecere a tot UI-ului)', () => {
-  const w = lumeBogata(12345)
-  ruleaza(w, 150)
-  // Fixtura nu e vida: exista desemnari, mormane, zone, pioni cu ganduri.
-  assert.ok(w.desemnari.vii > 0 && w.iteme.vii > 0 && w.zone.vii > 0)
-  assert.ok(w.agents.gandFel.some((g) => g !== 0), 'niciun gand: inspectorul n-ar citi nimic')
-  const inainte = instantaneu(w)
+/** O trecere a TOT UI-ului peste lume: fiecare cititor, pe fiecare desemnare, morman si celula de zona. */
+function trecereUI(w: World): Map<string, Semnal> {
   const previz = creeazaPrevizualizare().ia(w, R)
   rezumatColonie(w, R)
   randuriOameni(w, R)
@@ -84,19 +83,76 @@ test('model: nu scrie in World (instantaneu complet inainte si dupa o trecere a 
   for (let i = 0; i < w.iteme.count; i++) if (w.iteme.alive[i]) inspecteazaCelula(w, R, w.iteme.wx[i]!, w.iteme.wy[i]!, w.iteme.z[i]! - 1, previz)
   const zc = w.zone.celule
   for (let i = 0; i < zc.count; i++) if (zc.alive[i]) inspecteazaCelula(w, R, zc.wx[i]!, zc.wy[i]!, zc.z[i]! - 1, previz)
-  semnaleAlerte(w, R, previz)
+  const semnale = semnaleAlerte(w, R, previz)
   prognozaHrana(w, R)
   golita(w)
+  cauzaGolirii(w, R)
   const s = { wx: w.agents.x[0]! / 1000 | 0, wy: w.agents.y[0]! / 1000 | 0 }
   const lumea = {
     solid: () => true, suprafata: () => 1, calcabil: () => true, desemnare: () => -1, inZona: () => false,
     desemnariIn: () => [], zoneIn: () => [],
   }
   planDreptunghi(normalizeaza(s.wx, s.wy, s.wx + 5, s.wy + 5), { unealta: Unealta.SAPA, piesa: 0, zonaFel: 0, contur: false, unStrat: false, prioritate: 3, zActiv: null, inaltimeOm: 2, locDesemnari: 10, locZone: 10 }, lumea)
+  return semnale
+}
+
+function faraScriere(w: World, ce: string): Map<string, Semnal> {
+  const inainte = instantaneu(w)
+  const semnale = trecereUI(w)
   const dupa = instantaneu(w)
-  assert.equal(dupa.length, inainte.length)
+  assert.equal(dupa.length, inainte.length, ce)
   const diferite = inainte.filter((v, i) => v !== dupa[i])
-  assert.deepEqual(diferite.map((v) => v.split('=')[0]), [], 'campuri scrise de model')
+  assert.deepEqual(diferite.map((v) => v.split('=')[0]), [], `campuri scrise de model (${ce})`)
+  return semnale
+}
+
+test('model: nu scrie in World (instantaneu complet inainte si dupa o trecere a tot UI-ului)', () => {
+  const w = lumeBogata(12345)
+  ruleaza(w, 150)
+  // Fixtura nu e vida: exista desemnari, mormane, zone, pioni cu ganduri.
+  assert.ok(w.desemnari.vii > 0 && w.iteme.vii > 0 && w.zone.vii > 0)
+  assert.ok(w.agents.gandFel.some((g) => g !== 0), 'niciun gand: inspectorul n-ar citi nimic')
+  // Si fiecare RAMURA a „De ce nu?" (recenzia UI-ului, T-04: garda nu vedea tocmai ramurile cu tentatia
+  // cea mai mare — previzualizarea, sprijinul de acum, blocatele): o podea imposibila, un perete peste
+  // alt perete nezidit, o podea fara acces langa un stalp zidit, un refuz proaspat departe de orice.
+  const sit = { wx: w.agents.x[0]! / 1000 | 0, wy: w.agents.y[0]! / 1000 | 0, g: 0 }
+  const p = patratPlat(w, sit, 3, 14, 60)!
+  assert.ok(applyCommand(w, { kind: 'desemneaza', wx: p.x0, wy: p.y0, z: p.g + 5, piesa: Piesa.PODEA }, R).ok)
+  const q = patratPlat(w, sit, 3, 20, 70)!
+  assert.ok(applyCommand(w, { kind: 'desemneaza', wx: q.x0, wy: q.y0, z: q.g + 1, piesa: Piesa.PERETE }, R).ok)
+  assert.ok(applyCommand(w, { kind: 'desemneaza', wx: q.x0, wy: q.y0, z: q.g + 2, piesa: Piesa.PERETE }, R).ok)
+  for (let h = 1; h <= 4; h++) assert.ok(applyCommand(w, { kind: 'fill', wx: q.x0 + 2, wy: q.y0 + 2, z: q.g + h, material: Material.PIATRA_CONSTRUITA }, R).ok)
+  assert.ok(applyCommand(w, { kind: 'desemneaza', wx: q.x0 + 2, wy: q.y0 + 1, z: q.g + 4, piesa: Piesa.PODEA }, R).ok)
+  const r = patratPlat(w, sit, 1, 30, 90)!
+  const refuz = applyCommand(w, { kind: 'desemneaza', wx: r.x0, wy: r.y0, z: r.g }, R)
+  assert.ok(refuz.ok)
+  const dr = w.desemnari.laId.get(refuz.value as number)!
+  w.desemnari.ultimulMotiv[dr] = codMotiv(Reason.INACCESIBIL)
+  w.desemnari.ultimulMotivDetaliu[dr] = DetaliuMotiv.FARA_LOC_DE_LUCRU
+  w.desemnari.reincercaLaTick[dr] = w.tick + 100
+  const previz = creeazaPrevizualizare().ia(w, R)
+  const d = w.desemnari
+  const feluri = new Set<string>()
+  for (let i = 0; i < d.count; i++) if (d.alive[i]) feluri.add(stareDesemnare(w, R, i, previz).fel)
+  assert.deepEqual([...feluri].sort(), ['asteapta', 'faraAcces', 'imposibila', 'libera', 'lucru', 'motiv'], 'fixtura nu atinge fiecare ramura')
+  const semnale = faraScriere(w, 'lumea bogata')
+  for (const id of ['imposibile', 'blocate']) assert.equal(semnale.get(id)?.activ, true, id)
+
+  // Mormane fara depozit, cu indexul zonelor MURDAR (tocmai pictat) si apoi la zi: ambele ramuri ale
+  // lui `vedereFaraDepozit`, fara ca vreuna sa-l reconstruiasca.
+  const f = laSit(4242, 2)
+  for (let i = 0; i < 4; i++) lasaItem(f.w, Item.PIATRA, 50, f.sit.wx + i, f.sit.wy + 6)
+  const pat = patratPlat(f.w, f.sit, 2, 10, 60)!
+  picteaza(f.w, pat.x0, pat.y0, 2, undefined, R, Zona.DORMIT)
+  // Un depozit de o celula (75) pentru 200 de piatra: pionii il folosesc, deci indexul se reconstruieste.
+  const dep = patratPlat(f.w, f.sit, 1, 14, 70)!
+  picteaza(f.w, dep.x0, dep.y0, 1)
+  assert.equal(f.w.zone.index.murdar, true)
+  faraScriere(f.w, 'index murdar')
+  let t = 0
+  do { ruleaza(f.w, 1) } while ((f.w.zone.index.murdar || f.w.tick < 40) && t++ < 400)
+  assert.equal(f.w.zone.index.murdar, false, 'indexul n-a ajuns la zi')
+  assert.equal(faraScriere(f.w, 'index la zi').get('fara-depozit')?.activ, true)
 })
 
 test('model: prognoza hranei pe puncte de nutritie (12 oameni, 600 de hrana ⇒ 26,0 min)', () => {

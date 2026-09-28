@@ -19,14 +19,14 @@ import { CATEGORII, Faction, Item, Piesa } from '../../src/sim/state.ts'
 import { Zona } from '../../src/sim/zone.ts'
 import { ascuns, attr, clasa, h, text } from './dom.ts'
 import { ICON } from './iconite.ts'
-import { creeazaPrevizualizare, golita, inspecteazaCelula, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte } from './model.ts'
+import { cauzaGolirii, creeazaPrevizualizare, golita, inspecteazaCelula, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte } from './model.ts'
 import type { Bara, InspectieCelula, Previz, RandOm } from './model.ts'
 import { actualizeaza, creeazaAlerte, eveniment, REGULI_ALERTE, Severitate } from './alerte.ts'
 import type { StareAlerta, Tinta } from './alerte.ts'
-import { NUME_ITEM, NUME_MATERIAL, NUME_PIESA, NUME_ZONA, textMinute, textNumar, textPrioritatePersonala, textTimp } from './texte.ts'
+import { cant, NUME_ITEM, NUME_MATERIAL, NUME_PIESA, NUME_ZONA, textMinute, textNumar, textPrioritatePersonala, textTimp } from './texte.ts'
 import { conturImplicit, Unealta } from './dreptunghi.ts'
 import type { UnealtaId } from './dreptunghi.ts'
-import { eTimpulSalvariiAutomate, ID_AUTOMATA } from './salvari-plic.ts'
+import { eTimpulSalvariiAutomate, idAutomata, salvareAutomataPermisa } from './salvari-plic.ts'
 import type { RezumatSalvare } from './salvari-plic.ts'
 import { HRANA_PE_OM } from './pornire.ts'
 import { FEL_RESURSA } from '../resurse.ts'
@@ -581,7 +581,7 @@ export function monteazaUI(ctx: ContextUI): UI {
     }
     if (c.morman) {
       const m = c.morman
-      const s = h('section', {}, h('div', { class: 'ui-kv' }, h('span', {}, 'Morman'), h('span', { class: 'num' }, `${m.cantitate} ${NUME_ITEM[m.fel]?.toLowerCase() ?? ''}`)))
+      const s = h('section', {}, h('div', { class: 'ui-kv' }, h('span', {}, 'Morman'), h('span', { class: 'num' }, cant(m.cantitate, NUME_ITEM[m.fel]?.toLowerCase() ?? ''))))
       if (m.rezervat > 0) s.append(h('div', { class: 'ui-kv' }, h('span', {}, 'Promis cuiva'), h('span', { class: 'num' }, String(m.rezervat))))
       s.append(motivEl(m.stare, m.stare.actiune ? 'atentie' : 'bine'))
       out.push(s)
@@ -789,10 +789,13 @@ export function monteazaUI(ctx: ContextUI): UI {
   let tickUltimaAutomata = w.tick
   let encodeMs = 0
   function salvareAutomata(linistit: boolean): void {
-    if (ctx.mod === 'verificare') return
+    // Demo-ul (ecranul de titlu, „Explorează demo-ul", o incarcare esuata) nu e jocul nimanui: sub
+    // titlul lasat deschis 6 minute, el scria salvarea automata peste jocul jucatorului (recenzia
+    // UI-ului, INT-1). Ctrl+S il salveaza, daca vrea cineva.
+    if (!salvareAutomataPermisa(ctx.mod)) return
     if (!eTimpulSalvariiAutomate({ tick: w.tick, tickUltima: tickUltimaAutomata, ticksPerSecond: rules.ticksPerSecond, encodeMs, linistit, tragere: ctx.tragere(), golita: golita(w) })) return
     tickUltimaAutomata = w.tick
-    ctx.salveaza(ID_AUTOMATA, `Salvare automată · ${textTimp(w.tick, rules.ticksPerSecond)} de joc`, primiPasi())
+    ctx.salveaza(idAutomata(w.seed), `Salvare automată · ${textTimp(w.tick, rules.ticksPerSecond)} de joc`, primiPasi())
       .then((ms) => { encodeMs = ms })
       .catch((e: unknown) => toast(`Salvarea automată n-a mers: ${e instanceof Error ? e.message : String(e)}`, true))
   }
@@ -898,7 +901,7 @@ export function monteazaUI(ctx: ContextUI): UI {
   function arataGolita(): void {
     golitaArataa = true
     ctx.seteazaPauza(true)
-    const cauza = alerte.jurnal.some((x) => x.id === 'fara-hrana') ? 'S-a terminat hrana, iar în versiunea asta ea nu se poate produce.' : 'Au plecat toți.'
+    const cauza = cauzaGolirii(w, rules) === 'hrana' ? 'S-a terminat hrana, iar în versiunea asta ea nu se poate produce.' : 'Au plecat toți.'
     deschideFereastra(
       h('div', { class: 'ui-golita' },
         h('h2', {}, 'Așezarea s-a golit'),
@@ -918,7 +921,7 @@ export function monteazaUI(ctx: ContextUI): UI {
       accAlerte = 0
       if (w.plecatiTotal > plecatiVazuti) {
         const n = w.plecatiTotal - plecatiVazuti
-        const t = n === 1 ? 'Un om a plecat din așezare.' : `${n} oameni au plecat din așezare.`
+        const t = n === 1 ? 'Un om a plecat din așezare.' : `${cant(n, 'oameni')} au plecat din așezare.`
         eveniment(alerte, 'a-plecat', t, w.tick)
         toast(t, true)
         plecatiVazuti = w.plecatiTotal
@@ -952,11 +955,11 @@ export function monteazaUI(ctx: ContextUI): UI {
     clasa(prognoza, 'critic', min < 10)
     text(oameniVal, String(r.colonisti))
     const ins: string[] = []
-    if (r.flamanzi) ins.push(`atentie|${r.flamanzi} flămânzi`)
-    if (r.obositi) ins.push(`atentie|${r.obositi} obosiți`)
+    if (r.flamanzi) ins.push(`atentie|${cant(r.flamanzi, 'flămânzi')}`)
+    if (r.obositi) ins.push(`atentie|${cant(r.obositi, 'obosiți')}`)
     if (r.nefericiti) ins.push(`critic|${r.nefericiti} refuză munca`)
-    if (r.plecati) ins.push(`critic|${r.plecati} plecați`)
-    if (r.jefuitori) ins.push(`atentie|${r.jefuitori} jefuitori`)
+    if (r.plecati) ins.push(`critic|${cant(r.plecati, 'plecați')}`)
+    if (r.jefuitori) ins.push(`atentie|${cant(r.jefuitori, 'jefuitori')}`)
     const cheie = ins.join(',')
     if (insigne.dataset.cheie !== cheie) {
       insigne.dataset.cheie = cheie

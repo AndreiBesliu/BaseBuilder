@@ -22,6 +22,7 @@
 
 import type { Command } from '../../src/sim/commands.ts'
 import { Piesa } from '../../src/sim/state.ts'
+import { cant } from './texte.ts'
 
 export const Unealta = {
   SELECTEAZA: 0,
@@ -211,13 +212,16 @@ export function conturImplicit(piesa: number): boolean {
 export function textPlan(p: PlanDreptunghi, unealta: UnealtaId): string {
   if (p.refuz) return p.refuz
   const n = unealta === Unealta.ZONA ? p.celule.length : p.comenzi.length
-  const ce = unealta === Unealta.ANULEAZA ? 'retrase' : unealta === Unealta.STERGE_ZONA ? (n === 1 ? 'zonă ștearsă' : 'zone șterse') : unealta === Unealta.ZONA ? 'celule de zonă' : 'desemnate'
-  const bucati = [`${n} ${ce}${p.niveluri > 1 ? ` pe ${p.niveluri} niveluri` : ''}`]
+  // Substantivele primesc „de" de la 20 in sus (`cant`); participiile eliptice („96 desemnate") nu.
+  const cati = unealta === Unealta.ANULEAZA ? `${n} retrase`
+    : unealta === Unealta.STERGE_ZONA ? (n === 1 ? '1 zonă ștearsă' : cant(n, 'zone șterse'))
+    : unealta === Unealta.ZONA ? cant(n, 'celule de zonă') : `${n} desemnate`
+  const bucati = [`${cati}${p.niveluri > 1 ? ` pe ${p.niveluri} niveluri` : ''}`]
   if (p.sarite.deja > 0) bucati.push(`${p.sarite.deja} aveau deja`)
   if (p.sarite.nepotrivite > 0) {
     const cum = unealta === Unealta.SAPA ? 'aer' : unealta === Unealta.CONSTRUIESTE ? 'plin' : 'nu se poate sta'
     bucati.push(`${p.sarite.nepotrivite} sărite: ${cum}`)
   }
-  if (p.celuleInAfara > 0) bucati.push(`${p.celuleInAfara} celule în afara dreptunghiului`)
+  if (p.celuleInAfara > 0) bucati.push(`${cant(p.celuleInAfara, 'celule')} în afara dreptunghiului`)
   return bucati.join(' · ')
 }

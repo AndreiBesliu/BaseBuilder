@@ -216,6 +216,56 @@ export function prioritateaLocului(s: ZoneStore, wx: number, wy: number, z: numb
   return s.prioritate[zs]!
 }
 
+/**
+ * Care mormane zac FARA un depozit care sa le primeasca — pentru UI (inspector, alerta, Planul).
+ * O singura functie, ca sa nu spuna trei locuri trei lucruri (recenzia UI-ului, MOD-1: alerta cerea
+ * o racire pe care `indexZone` nu o scrie, iar inspectorul promitea un caraus care nu venea).
+ *
+ * CITIRE PURA: nu reconstruieste indexul (`indexZone` scrie, iar UI-ul n-are voie). Cu indexul la
+ * zi, raspunsul e al lui: pe jos (`prioritateaLocului` 0) si nu in `deMutat`. Cu indexul murdar
+ * (intre o schimbare si urmatoarea citire a sim-ului; masurat: continuu cat se cara dupa ce se
+ * picteaza un depozit), doua reguli, masurate de verificator pe patru scenarii fara clipire si fara
+ * fals pozitiv: o celula de DEPOZIT goala si nerezervata primeste orice drum (`haulCarryMax <=
+ * itemStackMax`), deci atunci niciun morman nu e fara depozit; altfel ramane cauza scrisa de sim
+ * pe morman la ultima reconstructie.
+ */
+export interface VedereFaraDepozit {
+  /** Cate zone de DEPOZIT vii exista (0 ⇒ „niciun depozit", altfel „nu incap"). Dormitoarele nu conteaza. */
+  readonly depozite: number
+  esteFaraDepozit(item: number): boolean
+}
+
+export function vedereFaraDepozit(w: World): VedereFaraDepozit {
+  const s = w.zone
+  const ix = s.index
+  const it = w.iteme
+  let depozite = 0
+  for (let i = 0; i < s.count; i++) if (s.alive[i] === 1 && s.kind[i] === Zona.DEPOZIT) depozite++
+  const deMutat = ix.murdar ? null : new Set(ix.deMutat)
+  let celulaGoala = false
+  if (ix.murdar) {
+    const c = s.celule
+    for (let cs = 0; cs < c.count && !celulaGoala; cs++) {
+      if (c.alive[cs] === 0) continue
+      const zs = slotZona(s, c.zonaId[cs]!)
+      if (zs === -1 || s.kind[zs] !== Zona.DEPOZIT) continue
+      if (it.laCelula.has(cellKey(c.wx[cs]!, c.wy[cs]!, c.z[cs]!))) continue
+      if (rezervariPentru(w.rezervari, c.id[cs]!, Strat.LUCRU).length > 0) continue
+      celulaGoala = true
+    }
+  }
+  return {
+    depozite,
+    esteFaraDepozit(i) {
+      if (it.alive[i] !== 1) return false
+      if (prioritateaLocului(s, it.wx[i]!, it.wy[i]!, it.z[i]!) !== 0) return false
+      if (rezervariPentru(w.rezervari, it.id[i]!, Strat.CARAT).length > 0) return false
+      if (deMutat !== null) return !deMutat.has(i)
+      return !celulaGoala && it.ultimulMotiv[i] === codMotiv(Reason.FARA_DEPOZIT)
+    },
+  }
+}
+
 export function marcheazaZoneMurdare(w: World): void {
   w.zone.index.murdar = true
 }

@@ -15,16 +15,16 @@ import { DetaliuMotiv } from '../src/sim/desemnari.ts'
 import { DetaliuItem } from '../src/sim/iteme.ts'
 import { FelJob, Item, PasCara, Piesa } from '../src/sim/state.ts'
 import { MATERIAL_MAX } from '../src/sim/terrain/chunk.ts'
-import { NUME_MATERIAL, textActivitate, textGeneric, textMotiv, textNumar, textPrioritatePersonala, textSprijin, textTimp } from '../viewer/ui/texte.ts'
+import { cant, CIFRE_IMPLICITE, NUME_MATERIAL, textActivitate, textGeneric, textMinute, textMotiv, textNumar, textPrioritatePersonala, textRatiunePion, textSprijin, textTimp } from '../viewer/ui/texte.ts'
 import type { SursaMotiv } from '../viewer/ui/texte.ts'
 import { FAMILII, numePion, PRENUME } from '../viewer/ui/nume.ts'
-import { coloane, normalizeaza, planDreptunghi, Unealta } from '../viewer/ui/dreptunghi.ts'
+import { coloane, conturImplicit, normalizeaza, planDreptunghi, textPlan, Unealta } from '../viewer/ui/dreptunghi.ts'
 import type { Dreptunghi, Lumea, Optiuni } from '../viewer/ui/dreptunghi.ts'
-import { actualizeaza, creeazaAlerte, eveniment, JURNAL_MAX, Severitate } from '../viewer/ui/alerte.ts'
+import { actualizeaza, creeazaAlerte, eveniment, JURNAL_MAX, REGULI_ALERTE, Severitate } from '../viewer/ui/alerte.ts'
 import type { RegulaAlerta, Semnal } from '../viewer/ui/alerte.ts'
-import { eTimpulSalvariiAutomate, FORMAT_SALVARE, numeFisier, valideazaSalvare } from '../viewer/ui/salvari-plic.ts'
+import { eTimpulSalvariiAutomate, FORMAT_SALVARE, idAutomata, numeFisier, salvareAutomataPermisa, valideazaSalvare } from '../viewer/ui/salvari-plic.ts'
 import { HRANA_PE_OM, modPornire, parametriJocNou } from '../viewer/ui/pornire.ts'
-import { actiuneTasta } from '../viewer/ui/taste.ts'
+import { actiuneTasta, tintaEditabila } from '../viewer/ui/taste.ts'
 import type { IntrareTasta } from '../viewer/ui/taste.ts'
 import { alegeTinta, slotDeInstanta } from '../viewer/tinta.ts'
 import type { CelulaJ, Impact, Raza } from '../viewer/tinta.ts'
@@ -133,7 +133,7 @@ test('nume: 2304 id-uri consecutive dau 2304 nume distincte, iar numele e functi
 // ---------------------------------------------------------------------------------------------
 
 /** O lume de test: solul are cota `sol(x, y)`; solid la z <= sol; calcabil la sol+1; desemnari date. */
-function lume(o: { sol?: (x: number, y: number) => number; desemnate?: readonly { id: number; wx: number; wy: number; z: number }[]; zone?: readonly { id: number; celule: number; celuleInDreptunghi: number }[]; inZona?: (x: number, y: number, z: number) => boolean } = {}): Lumea {
+function lume(o: { sol?: (x: number, y: number) => number; desemnate?: readonly { id: number; wx: number; wy: number; z: number }[]; zone?: readonly { id: number; celule: number; celuleInDreptunghi: number; z?: number }[]; inZona?: (x: number, y: number, z: number) => boolean } = {}): Lumea {
   const sol = o.sol ?? (() => 9)
   const des = o.desemnate ?? []
   return {
@@ -143,7 +143,8 @@ function lume(o: { sol?: (x: number, y: number) => number; desemnate?: readonly 
     desemnare: (x, y, z) => des.find((d) => d.wx === x && d.wy === y && d.z === z)?.id ?? -1,
     inZona: o.inZona ?? (() => false),
     desemnariIn: (d: Dreptunghi, zMax: number) => des.filter((x) => x.wx >= d.x0 && x.wx <= d.x1 && x.wy >= d.y0 && x.wy <= d.y1 && x.z <= zMax),
-    zoneIn: () => o.zone ?? [],
+    // Ca adaptorul din main.ts: doar zonele cu o celula la z <= zMax (fara `z`, zona e pe sol, sub orice nivel).
+    zoneIn: (_d: Dreptunghi, zMax: number) => (o.zone ?? []).filter((z) => (z.z ?? -Infinity) <= zMax).map(({ id, celule, celuleInDreptunghi }) => ({ id, celule, celuleInDreptunghi })),
   }
 }
 
@@ -513,4 +514,146 @@ test('tinta: zona cu nivelul pornit e celula de la nivelul activ (apelantul adau
   assert.ok(t.ok && t.wx === 50 && t.wy === 60 && t.z === 46, JSON.stringify(t))
   const piesa = alegeTinta({ mod: 'piesa', raza, impacturi: peSol(raza, 47), slice: 48, cuburi: [], departeMax: 150, desemnataPeNivel: () => false, plinaPeNivel: () => false })
   assert.ok(piesa.ok && piesa.z === 47)
+})
+
+// ---------------------------------------------------------------------------------------------
+// recenzia codului UI-ului (28.09): textele, alertele, dreptunghiul, salvarile, tastele, pornirea
+// ---------------------------------------------------------------------------------------------
+
+test('texte: acordul numeralelor — „de" de la 20 in sus, dar nu la 101–119', () => {
+  // Pe hartie, gramatica: 19 oameni, 20 de oameni, 101 oameni, 119 oameni, 120 de oameni, 100 de oameni.
+  assert.equal(cant(1, 'oameni', 'un om'), 'un om')
+  assert.equal(cant(1, 'oameni'), '1 oameni', 'fara forma de singular, apelantul o scrie singur')
+  assert.equal(cant(19, 'oameni'), '19 oameni')
+  assert.equal(cant(20, 'oameni'), '20 de oameni')
+  assert.equal(cant(100, 'oameni'), '100 de oameni')
+  assert.equal(cant(101, 'oameni'), '101 oameni')
+  assert.equal(cant(119, 'oameni'), '119 oameni')
+  assert.equal(cant(120, 'oameni'), '120 de oameni')
+  assert.equal(cant(2000, 'lucrări'), '2.000 de lucrări', 'si numarul ca in romana')
+  assert.equal(cant(2001, 'lucrări'), '2.001 lucrări')
+})
+
+test('texte: de ce STA un pion, din punctul LUI de vedere (niciun motiv nu face din om lucrarea)', () => {
+  const coduri = Object.values(Reason) as ReasonCode[]
+  for (const c of coduri) {
+    const t = textRatiunePion(c)
+    assert.match(t, /^Stă: \S/, String(c))
+    // Frazele scrise pentru lucrare sau morman, lipite dupa „Stă:" (recenzia UI-ului, MOD-6).
+    assert.doesNotMatch(t, /nu are unde fi dus|prea departe de oameni|nimeni/, String(c))
+  }
+  assert.match(textRatiunePion(Reason.FARA_DEPOZIT), /depozit/)
+  assert.match(textRatiunePion(Reason.PREA_DEPARTE, { ...CIFRE_IMPLICITE, razaLucru: 96 }), /peste 96 de celule/)
+  assert.match(textRatiunePion(Reason.FARA_MUNCITOR), /n-are voie/)
+})
+
+test('texte: CELULA_OCUPATA nu promite o reincercare pe care n-o face nimeni', () => {
+  const t = textMotiv('comanda', Reason.CELULA_OCUPATA, 0, { id: 3 })
+  assert.equal(t.actiune, 'Încearcă din nou după ce pleacă.')
+  assert.doesNotMatch(`${t.titlu} ${t.actiune}`, /Se face/)
+})
+
+test('texte: minutele peste o ora, si nicio prognoza cand nu consuma nimeni', () => {
+  assert.equal(textMinute(125), '~2 h 5 min')
+  assert.equal(textMinute(119.8), '~2 h 0 min')
+  assert.equal(textMinute(59.4), '~59 min')
+  assert.equal(textMinute(Infinity), '—')
+})
+
+test('alerte: textul si tinta vin din semnalul de ACUM, si in jurnal (starea creata pe un semnal stins)', () => {
+  const a = creeazaAlerte()
+  actualizeaza(a, R, new Map(), 0, TPS)
+  const v = actualizeaza(a, R, new Map([['c', da('C')]]), 1, TPS)
+  assert.equal(v[0]!.semnal.text, 'C')
+  assert.equal(a.jurnal.at(-1)!.text, 'C')
+  assert.equal(a.jurnal.at(-1)!.tip, 'apare')
+})
+
+test('alerte: exact trei reguli critice, cele care pierd oameni', () => {
+  assert.deepEqual(REGULI_ALERTE.filter((r) => r.severitate === Severitate.CRITIC).map((r) => r.id), ['fara-hrana', 'infometati', 'pleaca'])
+  assert.equal(new Set(REGULI_ALERTE.map((r) => r.id)).size, REGULI_ALERTE.length, 'id-uri unice')
+})
+
+test('dreptunghi: peretele se trage pe contur, restul pline; Sapa nu asculta de contur', () => {
+  assert.deepEqual([Piesa.PERETE, Piesa.PODEA, Piesa.SCARA, Piesa.GRINDA].map(conturImplicit), [true, false, false, false])
+  assert.equal(planDreptunghi(normalizeaza(0, 0, 4, 4), { ...OPT, contur: true }, lume()).comenzi.length, 25)
+})
+
+test('dreptunghi: zona cu nivelul pornit e pe nivelul activ; plafonul zonelor primeste cat incape EXACT', () => {
+  const p = planDreptunghi(normalizeaza(0, 0, 2, 2), { ...OPT, unealta: Unealta.ZONA, zActiv: 12 }, lume({ sol: () => 11 }))
+  assert.equal(p.celule.length, 9)
+  for (const c of p.celule) assert.equal(c.z, 12)
+  assert.equal(planDreptunghi(normalizeaza(0, 0, 9, 9), { ...OPT, unealta: Unealta.ZONA, locZone: 100 }, lume()).refuz, null)
+})
+
+test('dreptunghi: Sterge zona nu atinge zonele de deasupra nivelului activ', () => {
+  const zone = [{ id: 7, celule: 9, celuleInDreptunghi: 4, z: 10 }, { id: 8, celule: 4, celuleInDreptunghi: 4, z: 14 }]
+  assert.deepEqual(planDreptunghi(normalizeaza(0, 0, 2, 2), { ...OPT, unealta: Unealta.STERGE_ZONA, zActiv: 12 }, lume({ zone })).comenzi, [{ kind: 'stergeZona', id: 7 }])
+  assert.equal(planDreptunghi(normalizeaza(0, 0, 2, 2), { ...OPT, unealta: Unealta.STERGE_ZONA }, lume({ zone })).comenzi.length, 2)
+})
+
+test('dreptunghi: textul toastului (sirurile scrise pe hartie)', () => {
+  const panta = planDreptunghi(normalizeaza(0, 0, 3, 1), { ...OPT, unealta: Unealta.ZONA }, lume({ sol: (x) => 10 + x }))
+  assert.equal(textPlan(panta, Unealta.ZONA), '8 celule de zonă pe 4 niveluri')
+  const sus = planDreptunghi(normalizeaza(0, 0, 2, 2), { ...OPT, zActiv: 20 }, lume({ sol: () => 20 }))
+  assert.equal(textPlan(sus, Unealta.SAPA), '9 desemnate · 9 sărite: aer')
+  const plin = planDreptunghi(normalizeaza(0, 0, 4, 4), { ...OPT, unealta: Unealta.CONSTRUIESTE, piesa: Piesa.PODEA, zActiv: 9 }, lume())
+  assert.equal(textPlan(plin, Unealta.CONSTRUIESTE), '0 desemnate · 25 sărite: plin')
+  const sterge = planDreptunghi(normalizeaza(0, 0, 2, 2), { ...OPT, unealta: Unealta.STERGE_ZONA }, lume({ zone: [{ id: 7, celule: 71, celuleInDreptunghi: 4 }] }))
+  assert.equal(textPlan(sterge, Unealta.STERGE_ZONA), '1 zonă ștearsă · 67 de celule în afara dreptunghiului')
+  const mare = planDreptunghi(normalizeaza(0, 0, 23, 23), { ...OPT, unealta: Unealta.ZONA }, lume())
+  assert.equal(textPlan(mare, Unealta.ZONA), '576 de celule de zonă')
+})
+
+test('salvari: drumul „encode lent" (coloniile mari) salveaza la 10 minute, nu niciodata', () => {
+  const m = { tick: 0, tickUltima: 0, ticksPerSecond: 20, encodeMs: 70, linistit: true, tragere: false, golita: false }
+  const zece = 10 * 60 * 20
+  assert.equal(eTimpulSalvariiAutomate({ ...m, tick: zece - 1 }), false)
+  assert.equal(eTimpulSalvariiAutomate({ ...m, tick: zece }), true)
+  assert.equal(eTimpulSalvariiAutomate({ ...m, tick: zece + 60 * 20, linistit: false }), true, 'nelinistit: dupa inca un minut')
+})
+
+test('salvari: fiecare camp al plicului se valideaza (viteza, nume, data, seed, oameni, tinta camerei)', () => {
+  const strica: [string, (s: Record<string, unknown>) => void, RegExp][] = [
+    ['viteza', (s) => { (s.meta as { viteza: unknown }).viteza = 'x' }, /Viteza/],
+    ['nume', (s) => { s.nume = 3 }, /nume/],
+    ['data', (s) => { s.salvatLa = null }, /data/],
+    ['seed', (s) => { s.seed = 'x' }, /numerice/],
+    ['oameni', (s) => { s.oameni = Infinity }, /numerice/],
+    ['tinta', (s) => { (s.meta as { camera: { tinta: unknown } }).camera.tinta = [1, 2, 'x'] }, /camerei/],
+  ]
+  for (const [ce, f, re] of strica) {
+    const s = salvareBuna()
+    f(s)
+    const v = valideazaSalvare(s)
+    assert.ok(!v.ok && re.test(v.motiv), `${ce}: ${JSON.stringify(v)}`)
+  }
+})
+
+test('salvari: doar jocul jucatorului se salveaza singur, si fiecare lume in slotul ei', () => {
+  // Demo-ul de sub ecranul de titlu scria peste jocul jucatorului dupa 6 minute (recenzia UI-ului, INT-1).
+  assert.deepEqual((['gate', 'titlu', 'joc-nou', 'incarca', 'verificare'] as const).map(salvareAutomataPermisa), [false, false, true, true, false])
+  assert.equal(idAutomata(7), 'auto-7')
+  assert.notEqual(idAutomata(7), idAutomata(8))
+})
+
+test('taste: fiecare tasta a jocului, si ce se consuma', () => {
+  const tabel = [
+    ['v', 'selecteaza', false], ['d', 'sapa', false], ['c', 'construieste', false], ['a', 'anuleaza', false], ['k', 'zona', false], ['o', 'oameni', false],
+    ['1', 'viteza1', false], ['2', 'viteza2', false], ['3', 'viteza3', false],
+    ['PageUp', 'nivelSus', true], ['PageDown', 'nivelJos', true],
+    ['ArrowLeft', 'cameraVest', true], ['ArrowRight', 'cameraEst', true], ['ArrowUp', 'cameraNord', true], ['ArrowDown', 'cameraSud', true],
+  ] as const
+  for (const [k, a, c] of tabel) assert.deepEqual(actiuneTasta(T(k)), { actiune: a, consuma: c }, k)
+})
+
+test('taste: ce element e un camp de text (tagName vine cu majuscule)', () => {
+  assert.deepEqual(['INPUT', 'TEXTAREA', 'SELECT', 'DIV', 'CANVAS', undefined].map((t) => tintaEditabila(t, false)), [true, true, true, false, false, false])
+  assert.equal(tintaEditabila('DIV', true), true)
+})
+
+test('pornire: fiecare parametru de verificare, singur, deschide verificarea; fiecare de masura, gate-ul', () => {
+  // Listele sunt scrise aici, pe hartie — nu constantele testate, care s-ar scurta odata cu codul.
+  for (const n of ['cam', 'slice', 'piatra', 'hrana', 'pauza', 'verificare']) assert.equal(modPornire(P(`?${n}=1`)).mod, 'verificare', n)
+  for (const n of ['scenario', 'bisect', 'd1b', 'probe', 'ballast']) assert.equal(modPornire(P(`?${n}=1`)).mod, 'gate', n)
 })

@@ -7,6 +7,8 @@
  * `encode` 3,6 ms; M10 (luna 10) 5,4 MiB, `encode` 61–72 ms.
  */
 
+import type { ModPornire } from './pornire.ts'
+
 export const FORMAT_SALVARE = 1
 
 export interface MetaVizualizare {
@@ -35,8 +37,25 @@ export interface Salvare {
 /** Rezumatul din lista de incarcare, fara textul lumii (sute de KiB). */
 export type RezumatSalvare = Omit<Salvare, 'lume'>
 
-/** Slotul salvarii automate: unul singur, suprascris. */
+/** Prefixul sloturilor de salvare automata. */
 export const ID_AUTOMATA = 'auto'
+
+/**
+ * Slotul salvarii automate a unei LUMI: unul pe seed, suprascris. Cu un singur slot pentru tot,
+ * un joc nou isi scria salvarea automata peste cea a jocului de dinainte (recenzia UI-ului, INT-1).
+ */
+export function idAutomata(seed: number): string {
+  return `${ID_AUTOMATA}-${seed}`
+}
+
+/**
+ * Doar un joc al jucatorului se salveaza singur: un joc nou sau unul incarcat. NU demo-ul de sub
+ * ecranul de titlu (si dupa „Explorează demo-ul" sau o incarcare esuata, tot `titlu`), NU modul de
+ * verificare, NU gate-ul.
+ */
+export function salvareAutomataPermisa(mod: ModPornire): boolean {
+  return mod === 'joc-nou' || mod === 'incarca'
+}
 
 const esteNumar = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 const esteTriplet = (v: unknown): boolean => Array.isArray(v) && v.length === 3 && v.every(esteNumar)

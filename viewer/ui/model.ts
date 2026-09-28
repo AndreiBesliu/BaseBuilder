@@ -14,9 +14,10 @@
 import type { Rules } from '../../src/sim/content.ts'
 import { CATEGORII, Faction, FelJob, Gand, GAND_PENTRU_NEVOIE, ITEME, NEVOI, Nevoie, pasDeMers, Piesa, slotOf } from '../../src/sim/state.ts'
 import type { World } from '../../src/sim/state.ts'
-import { Desemnare, desemnareLaCelula } from '../../src/sim/desemnari.ts'
-import { itemLaCelula } from '../../src/sim/iteme.ts'
-import { celulaDeZonaLa, slotZona, Zona } from '../../src/sim/zone.ts'
+import { Desemnare, desemnareLaCelula, DetaliuMotiv } from '../../src/sim/desemnari.ts'
+import { DetaliuItem, itemLaCelula } from '../../src/sim/iteme.ts'
+import { celulaDeZonaLa, prioritateaLocului, slotZona, vedereFaraDepozit, Zona } from '../../src/sim/zone.ts'
+import type { VedereFaraDepozit } from '../../src/sim/zone.ts'
 import { rezervariPentru, Strat } from '../../src/sim/rezervari.ts'
 import { categoriiActive, constructiaPrevizualizata, StareRatiune, tintaDispozitiei } from '../../src/sim/joburi.ts'
 import { CauzaAcces } from '../../src/sim/acces.ts'
@@ -24,8 +25,9 @@ import { sustinutAcum } from '../../src/sim/stabilitate.ts'
 import { motivDinCod, Reason } from '../../src/sim/result.ts'
 import { cellKey } from '../../src/sim/path.ts'
 import { materialAt } from '../../src/sim/terrain/terrain.ts'
+import { Material } from '../../src/sim/terrain/chunk.ts'
 import { numePion } from './nume.ts'
-import { NUME_GAND, NUME_ITEM_MIC, NUME_PIESA, textActivitate, textGeneric, textMinute, textMotiv } from './texte.ts'
+import { cant, NUME_GAND, NUME_ITEM_MIC, NUME_PIESA, textActivitate, textMinute, textMotiv, textRatiunePion } from './texte.ts'
 import type { Cifre, TextMotiv } from './texte.ts'
 import type { Semnal, Tinta } from './alerte.ts'
 
@@ -37,8 +39,14 @@ export function cifreDinReguli(rules: Rules): Cifre {
     maxStepM: rules.maxStepM,
     cantitatePiesa: rules.piese[Piesa.PERETE]?.cantitate ?? 20,
     pragRidicare: rules.constructPickupMinUnits,
+    atingereSusM: rules.atingereSusM,
+    razaLucru: rules.jobScanRadiusCells,
+    razaNevoi: rules.nevoieScanRadiusCells,
   }
 }
+
+/** Marfa din mana sau dintr-un morman, in cuvinte: „50 de piatră". */
+const textMarfa = (n: number, fel: number): string => cant(n, NUME_ITEM_MIC[fel] ?? 'marfă')
 
 const esteColonist = (w: World, i: number): boolean => w.agents.alive[i] === 1 && w.agents.faction[i] === Faction.ASEZARE
 
@@ -47,9 +55,9 @@ const esteColonist = (w: World, i: number): boolean => w.agents.alive[i] === 1 &
 // ---------------------------------------------------------------------------------------------
 
 export interface Marfa {
-  /** Mormanele din celule de zona. */
+  /** Mormanele din celule de DEPOZIT (`prioritateaLocului` > 0; un loc de dormit nu e depozit). */
   readonly inDepozit: number
-  /** Mormanele din afara zonelor. */
+  /** Mormanele din afara depozitelor. */
   readonly peJos: number
   /** Ce cara oamenii vii. */
   readonly inMaini: number
@@ -112,7 +120,7 @@ export function rezumatColonie(w: World, rules: Rules): RezumatColonie {
     if (it.alive[i] !== 1) continue
     const m = acc[it.kind[i]!]
     if (!m) continue
-    if (celulaDeZonaLa(w.zone, it.wx[i]!, it.wy[i]!, it.z[i]!) !== -1) m.inDepozit += it.cantitate[i]!
+    if (prioritateaLocului(w.zone, it.wx[i]!, it.wy[i]!, it.z[i]!) > 0) m.inDepozit += it.cantitate[i]!
     else m.peJos += it.cantitate[i]!
   }
   const a = w.agents
@@ -123,8 +131,10 @@ export function rezumatColonie(w: World, rules: Rules): RezumatColonie {
     if (a.faction[i] !== Faction.ASEZARE) continue
     colonisti++
     if (a.caraCantitate[i]! > 0) { const m = acc[a.caraKind[i]!]; if (m) m.inMaini += a.caraCantitate[i]! }
-    if (a.nevoi[i * NEVOI + Nevoie.FOAME]! < rules.nevoi[Nevoie.FOAME]!.prag) flamanzi++
-    if (a.nevoi[i * NEVOI + Nevoie.ODIHNA]! < rules.nevoi[Nevoie.ODIHNA]!.prag) obositi++
+    // Insignele: cine mananca sau doarme deja nu e o problema de semnalat (aceeasi definitie ca alerta;
+    // numarati si ei, insigna portocalie statea aprinsa 8–14% din timp pe o colonie sanatoasa).
+    if (a.jobKind[i] !== FelJob.MANANCA && a.nevoi[i * NEVOI + Nevoie.FOAME]! < rules.nevoi[Nevoie.FOAME]!.prag) flamanzi++
+    if (a.jobKind[i] !== FelJob.DOARME && a.nevoi[i * NEVOI + Nevoie.ODIHNA]! < rules.nevoi[Nevoie.ODIHNA]!.prag) obositi++
     if (a.dispozitie[i]! < rules.dispozitiePragRefuz) nefericiti++
     if (tintaDispozitiei(w, rules, i) < rules.dispozitiePragAvertisment) pleacaCurand++
   }
@@ -137,6 +147,15 @@ export function golita(w: World): boolean {
   if (w.plecatiTotal <= 0) return false
   for (let i = 0; i < w.agents.count; i++) if (esteColonist(w, i)) return false
   return true
+}
+
+/**
+ * De ce s-a golit, din LUME: fara nicio hrana ramasa, foamea. Cauza se citea din jurnalul alertelor,
+ * taiat la 50 de intrari; la o colonie de peste ~50 de oameni, plecarile impingeau „Nu mai e hrana"
+ * afara din jurnal si cardul spunea „Au plecat toti." (recenzia UI-ului, MOD-8 / T-03).
+ */
+export function cauzaGolirii(w: World, rules: Rules): 'hrana' | 'plecati' {
+  return prognozaHrana(w, rules).puncte <= 0 ? 'hrana' : 'plecati'
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -190,10 +209,10 @@ export function activitatePion(w: World, rules: Rules, slot: number): string {
     let ce = ''
     const mana = a.caraCantitate[slot]!
     if (fel === FelJob.CARA) {
-      const cant = mana > 0 ? mana : a.jobCantitate[slot]!
+      const n = mana > 0 ? mana : a.jobCantitate[slot]!
       const is = w.iteme.laId.get(a.jobTarget[slot]!)
       const felItem = mana > 0 ? a.caraKind[slot]! : is !== undefined ? w.iteme.kind[is]! : -1
-      ce = `${cant > 0 ? `${cant} ` : ''}${NUME_ITEM_MIC[felItem] ?? 'marfă'}`
+      ce = n > 0 ? textMarfa(n, felItem) : NUME_ITEM_MIC[felItem] ?? 'marfă'
     }
     if (fel === FelJob.CONSTRUIESTE) {
       const ds = w.desemnari.laId.get(a.jobDest[slot]!)
@@ -213,7 +232,7 @@ export function activitatePion(w: World, rules: Rules, slot: number): string {
     case StareRatiune.RESPINS:
     case StareRatiune.ASTEAPTA_DRUM: {
       const m = motivDinCod(r.motivFinal[slot]!)
-      return m === null ? 'Stă' : `Stă: ${textGeneric(m, cifreDinReguli(rules)).titlu.replace(/\.$/, '').replace(/^./, (c) => c.toLowerCase())}`
+      return m === null ? 'Stă' : textRatiunePion(m, cifreDinReguli(rules))
     }
     default: return 'Stă'
   }
@@ -282,13 +301,16 @@ export function inspecteazaPion(w: World, rules: Rules, id: number): InspectiePi
     if (fel === Gand.NICIUNUL || a.gandPanaLa[slot * k + j]! <= w.tick) continue
     ganduri.push({ nume: NUME_GAND[fel] ?? '', valoare: rules.ganduri[fel]!.valoare })
   }
-  const mana = a.caraCantitate[slot]! > 0 ? `${a.caraCantitate[slot]} ${NUME_ITEM_MIC[a.caraKind[slot]!] ?? ''}`.trim() : ''
+  const mana = a.caraCantitate[slot]! > 0 ? textMarfa(a.caraCantitate[slot]!, a.caraKind[slot]!) : ''
   let faraVoie = ''
   if (a.faction[slot] === Faction.ASEZARE) {
     const d = w.desemnari
     const sapat = d.vii - d.viiConstruieste > 0
     const construit = d.viiConstruieste > 0
-    const carat = w.iteme.vii > 0 && w.zone.vii > 0
+    // Carat e de facut doar cu un DEPOZIT: `zone.vii` numara si locurile de dormit.
+    let depozite = 0
+    for (let i = 0; i < w.zone.count; i++) if (w.zone.alive[i] === 1 && w.zone.kind[i] === Zona.DEPOZIT) depozite++
+    const carat = w.iteme.vii > 0 && depozite > 0
     const oprite: string[] = []
     const p = rand.prioritati
     if (sapat && !p[0]!.activa) oprite.push('Sapă')
@@ -360,6 +382,31 @@ export interface InspectieDesemnare {
   readonly stare: StareDesemnare
 }
 
+/** Teren natural (se sapa). Zidul construit NU: vecinii deja ziditi ai unei piese de etaj nu sunt o groapa. */
+const esteNatural = (m: number): boolean => m === Material.ROCA || m === Material.PAMANT || m === Material.IARBA || m === Material.MOLOZ
+
+const VECINI8: readonly (readonly [number, number])[] = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]
+
+/**
+ * FARA_LOC_DE_LUCRU pe o piesa de CONSTRUIT. Textul de sapat („Sapă de sus în jos") e al sapaturii;
+ * pe o piesa de etaj el trimitea jucatorul sa sape solul de langa un stalp — masurat: 4 sapaturi,
+ * zero progres, iar o singura treapta rezolva (recenzia UI-ului, MOD-2). Raspunsul depinde de loc:
+ * cu teren NATURAL langa piesa, la nivelul ei, piesa e intr-o groapa si se sapa langa ea (verificat:
+ * un perete intr-o groapa 1×1 se zideste dupa o sapatura); altfel n-are pe ce sta nimeni si trebuie
+ * o treapta. Cauza INALTIME a previzualizarii nu le desparte: apare in ambele.
+ */
+function textFaraLocDeZidit(w: World, wx: number, wy: number, z: number, cifre: Cifre): TextMotiv {
+  let groapa = false
+  for (const [dx, dy] of VECINI8) {
+    const m = materialAt(w.terrain, wx + dx, wy + dy, z)
+    if (m.ok && esteNatural(m.value)) { groapa = true; break }
+  }
+  return {
+    titlu: `Niciun loc de stat lângă ea: omul zidește stând pe o celulă vecină, cu podea și ${cifre.agentHeadroomM} m liberi deasupra, cel mult ${cifre.maxStepM} m mai sus sau ${cifre.atingereSusM} m mai jos decât piesa.`,
+    actiune: groapa ? 'Sapă lângă ea, de sus în jos.' : `Pune o treaptă sau o scară lângă ea, cel mult ${cifre.atingereSusM} m sub ea.`,
+  }
+}
+
 /**
  * Starea unei desemnari, in ordinea precedentei (panoul, CS-2 / CS-3): o piesa care n-ar sta
  * in picioare nici dupa restul planului bate orice motiv memorat; o desemnare REZERVATA nu arata
@@ -380,7 +427,9 @@ export function stareDesemnare(w: World, rules: Rules, ds: number, previz: Previ
   if (cod !== null) {
     const piesa = d.piesa[ds]!
     const felMaterial = construieste && piesa !== Piesa.NICIUNA ? rules.digYield[rules.piese[piesa]!.material]?.fel ?? 0 : 0
-    const t = textMotiv('desemnare', cod, d.ultimulMotivDetaliu[ds]!, undefined, cifre, felMaterial)
+    const t = construieste && cod === Reason.INACCESIBIL && d.ultimulMotivDetaliu[ds] === DetaliuMotiv.FARA_LOC_DE_LUCRU
+      ? textFaraLocDeZidit(w, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, cifre)
+      : textMotiv('desemnare', cod, d.ultimulMotivDetaliu[ds]!, undefined, cifre, felMaterial)
     const s = Math.ceil((d.reincercaLaTick[ds]! - w.tick) / rules.ticksPerSecond)
     return { fel: 'motiv', text: { titlu: s > 0 ? `${t.titlu} Reîncearcă în ${s} s.` : `Ultimul refuz memorat: ${t.titlu.replace(/^./, (c) => c.toLowerCase())} Se reverifică la următoarea scanare.`, actiune: t.actiune } }
   }
@@ -389,7 +438,7 @@ export function stareDesemnare(w: World, rules: Rules, ds: number, previz: Previ
     if (cauza !== undefined) {
       return { fel: 'faraAcces', text: cauza === CauzaAcces.INCINTA
         ? { titlu: 'Nu ajunge nimeni la ea: locurile de lucru sunt într-o incintă fără ieșire.', actiune: 'Lasă o deschidere în perete (o coloană liberă de 2 niveluri).' }
-        : { titlu: 'Nu ajunge nimeni la ea: nimic pe care să stea un om la înălțimea ei.', actiune: 'Pune o scară până acolo.' } }
+        : { titlu: 'Nu ajunge nimeni la ea: nimic pe care să stea un om la înălțimea ei.', actiune: textFaraLocDeZidit(w, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, cifre).actiune } }
     }
     if (previz.construibile.has(k) && !sustinutAcum(w.terrain, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!, null)) {
       return { fel: 'asteapta', text: { titlu: 'Așteaptă piesa de dedesubt sau de alături: acum n-ar sta.', actiune: '' } }
@@ -418,17 +467,30 @@ export interface InspectieCelula {
   readonly zona: { readonly id: number; readonly fel: number; readonly prioritate: number } | null
 }
 
-function stareMorman(w: World, rules: Rules, is: number): TextMotiv {
+/**
+ * Starea unui morman. Ordinea: rezervat (de cine: un constructor il ia pentru zidit, nu spre depozit —
+ * stratul CARAT e comun, MOD-9) > intr-un DEPOZIT (un loc de dormit nu e depozit, MOD-5) > un motiv cu
+ * racire > fara depozit, din `vedereFaraDepozit` (MOD-1: inainte, „Pe jos: așteaptă un cărăuș" si la
+ * mormanele pe care nu le va cara nimeni) > abia apoi „așteaptă un cărăuș".
+ */
+function stareMorman(w: World, rules: Rules, is: number, vedere: VedereFaraDepozit): TextMotiv {
   const it = w.iteme
-  if (rezervariPentru(w.rezervari, it.id[is]!, Strat.CARAT).length > 0) return { titlu: 'În drum spre depozit.', actiune: '' }
-  if (celulaDeZonaLa(w.zone, it.wx[is]!, it.wy[is]!, it.z[is]!) !== -1) return { titlu: 'În depozit.', actiune: '' }
+  const cifre = cifreDinReguli(rules)
+  const rez = rezervariPentru(w.rezervari, it.id[is]!, Strat.CARAT)
+  if (rez.length > 0) {
+    const constructor = rez.find((r) => { const s = slotOf(w.agents, r.claimant); return s !== -1 && w.agents.jobKind[s] === FelJob.CONSTRUIESTE })
+    return { titlu: constructor ? `Luat pentru construit — ${numePion(constructor.claimant)}.` : 'În drum spre depozit.', actiune: '' }
+  }
+  if (prioritateaLocului(w.zone, it.wx[is]!, it.wy[is]!, it.z[is]!) > 0) return { titlu: 'În depozit.', actiune: '' }
   const cod = motivDinCod(it.ultimulMotiv[is]!)
   const s = Math.ceil((it.reincercaLaTick[is]! - w.tick) / rules.ticksPerSecond)
   if (cod !== null && s > 0) {
-    const t = textMotiv('morman', cod, it.ultimulMotivDetaliu[is]!, undefined, cifreDinReguli(rules), it.kind[is]!)
+    const t = textMotiv('morman', cod, it.ultimulMotivDetaliu[is]!, undefined, cifre, it.kind[is]!)
     return { titlu: `${t.titlu} Reîncearcă în ${s} s.`, actiune: t.actiune }
   }
-  if (w.zone.vii === 0) return textMotiv('morman', Reason.FARA_DEPOZIT, 0, undefined, cifreDinReguli(rules), it.kind[is]!)
+  if (vedere.esteFaraDepozit(is)) {
+    return textMotiv('morman', Reason.FARA_DEPOZIT, vedere.depozite === 0 ? DetaliuItem.NICIO_ZONA : DetaliuItem.DEPOZITE_PLINE, undefined, cifre, it.kind[is]!)
+  }
   return { titlu: 'Pe jos: așteaptă un cărăuș.', actiune: '' }
 }
 
@@ -453,7 +515,7 @@ export function inspecteazaCelula(w: World, rules: Rules, wx: number, wy: number
     let rezervat = 0
     for (const r of rezervariPentru(w.rezervari, it.id[is]!, Strat.CARAT)) rezervat += r.count
     for (const r of rezervariPentru(w.rezervari, it.id[is]!, Strat.MANCAT)) rezervat += r.count
-    morman = { id: it.id[is]!, fel: it.kind[is]!, cantitate: it.cantitate[is]!, rezervat, stare: stareMorman(w, rules, is) }
+    morman = { id: it.id[is]!, fel: it.kind[is]!, cantitate: it.cantitate[is]!, rezervat, stare: stareMorman(w, rules, is, vedereFaraDepozit(w)) }
   }
   let zona: InspectieCelula['zona'] = null
   const cs = celulaDeZonaLa(w.zone, wx, wy, z + 1)
@@ -499,39 +561,63 @@ export function semnaleAlerte(w: World, rules: Rules, previz: Previz | null): Ma
   // minute (panoul, JN-5).
   let flamanzi = 0, primulFlamand = -1, infometati = 0, primulInfometat = -1, peJos = 0, primulPeJos = -1, pleaca = 0, primulPleaca = -1
   const pe = { sapa: false, cara: false, construieste: false }
-  const k = a.ganduriSloturi
   for (let i = 0; i < a.count; i++) {
     if (!esteColonist(w, i)) continue
     const v = a.nevoi[i * NEVOI + Nevoie.FOAME]!
     const mananca = a.jobKind[i] === FelJob.MANANCA
     if (!mananca && v < fo.pragCritic) { infometati++; if (primulInfometat < 0) primulInfometat = i }
     else if (!mananca && v < fo.prag && a.nevoieReincercaLaTick[i * NEVOI + Nevoie.FOAME]! > w.tick) { flamanzi++; if (primulFlamand < 0) primulFlamand = i }
-    for (let j = 0; j < k; j++) {
-      if (a.gandFel[i * k + j] === Gand.DORMIT_PE_JOS && a.gandPanaLa[i * k + j]! > w.tick) { peJos++; if (primulPeJos < 0) primulPeJos = i; break }
-    }
+    // Doarme pe jos ACUM (nu gandul DORMIT_PE_JOS, care tine 5 minute: alerta cerea „Pictează un loc
+    // de dormit" si dupa ce se pictase, si cand paturile erau libere — recenzia UI-ului, MOD-4).
+    if (a.jobKind[i] === FelJob.DOARME && !pasDeMers(a.jobStep[i]!) && a.jobDest[i] === 0) { peJos++; if (primulPeJos < 0) primulPeJos = i }
     if (tintaDispozitiei(w, rules, i) < rules.dispozitiePragAvertisment) { pleaca++; if (primulPleaca < 0) primulPleaca = i }
     const act = categoriiActive(w, rules, i)
     pe.sapa ||= act.sapa
     pe.cara ||= act.cara
     pe.construieste ||= act.construieste
   }
-  m.set('infometati', infometati > 0 ? { activ: true, text: infometati === 1 ? 'Un om e înfometat și n-are ce mânca.' : `${infometati} oameni înfometați.`, tinta: pion(primulInfometat) } : inactiv)
+  m.set('infometati', infometati > 0 ? { activ: true, text: infometati === 1 ? 'Un om e înfometat și n-are ce mânca.' : `${cant(infometati, 'oameni')} înfometați.`, tinta: pion(primulInfometat) } : inactiv)
   // Fara nicio hrana, „fara-hrana" spune tot; „flamanzi" e pentru mancarea la care nu se AJUNGE.
-  m.set('flamanzi', flamanzi > 0 && hrana.puncte > 0 ? { activ: true, text: `${flamanzi === 1 ? 'Un om flămând n-a găsit' : `${flamanzi} oameni flămânzi n-au găsit`} mâncare la îndemână.`, tinta: pion(primulFlamand) } : inactiv)
-  m.set('pleaca', pleaca > 0 ? { activ: true, text: `${pleaca === 1 ? 'Un om e' : `${pleaca} oameni sunt`} pe cale să plece: ${pleaca === 1 ? 'e' : 'sunt'} prea nefericiți.`, tinta: pion(primulPleaca) } : inactiv)
-  m.set('dorm-pe-jos', peJos > 0 ? { activ: true, text: `${peJos === 1 ? 'Un om a dormit' : `${peJos} oameni au dormit`} pe jos. Pictează un loc de dormit (Zone ▸ Loc de dormit).`, tinta: pion(primulPeJos) } : inactiv)
+  m.set('flamanzi', flamanzi > 0 && hrana.puncte > 0 ? { activ: true, text: `${flamanzi === 1 ? 'Un om flămând n-a găsit' : `${cant(flamanzi, 'oameni')} flămânzi n-au găsit`} mâncare la îndemână.`, tinta: pion(primulFlamand) } : inactiv)
+  m.set('pleaca', pleaca > 0 ? { activ: true, text: pleaca === 1 ? 'Un om e pe cale să plece: e prea nefericit.' : `${cant(pleaca, 'oameni')} sunt pe cale să plece: sunt prea nefericiți.`, tinta: pion(primulPleaca) } : inactiv)
+  if (peJos > 0) {
+    // Cauza, dupa paturi: niciunul, prea putine, sau destule dar departe (masurat: pionii fara treaba
+    // hoinaresc si la 89–126 de celule de paturi, peste raza in care cauta un pat).
+    let paturi = 0
+    const c = w.zone.celule
+    for (let cs = 0; cs < c.count; cs++) {
+      if (c.alive[cs] === 0) continue
+      const zs = slotZona(w.zone, c.zonaId[cs]!)
+      if (zs !== -1 && w.zone.kind[zs] === Zona.DORMIT) paturi++
+    }
+    const cine = peJos === 1 ? 'Un om doarme' : `${cant(peJos, 'oameni')} dorm`
+    const cifre = cifreDinReguli(rules)
+    const text = paturi === 0
+      ? `${cine} pe jos: niciun loc de dormit. Pictează unul (Zone ▸ Loc de dormit).`
+      : paturi < r.colonisti
+        ? `${cine} pe jos: ${cant(paturi, 'paturi', 'un pat')} pentru ${cant(r.colonisti, 'oameni')}. Mărește locul de dormit.`
+        : `${cine} pe jos, departe de paturi: le caută doar pe ${cant(cifre.razaNevoi, 'celule')} în jur. Pictează un loc de dormit lângă locul de muncă.`
+    m.set('dorm-pe-jos', { activ: true, text, tinta: pion(primulPeJos) })
+  } else m.set('dorm-pe-jos', inactiv)
 
   const d = w.desemnari
   const deSapat = d.vii - d.viiConstruieste
   m.set('nimeni-sapa', deSapat > 0 && !pe.sapa ? { activ: true, text: 'Nimeni n-are voie să sape (prioritate 0 sau Exclusiv pe altceva).', tinta: null } : inactiv)
   m.set('nimeni-construieste', d.viiConstruieste > 0 && !pe.construieste ? { activ: true, text: 'Nimeni n-are voie să construiască (prioritate 0 sau Exclusiv pe altceva).', tinta: null } : inactiv)
+  // Pe jos = in afara unui DEPOZIT (un loc de dormit nu e depozit: MOD-5).
+  const vedere = vedereFaraDepozit(w)
+  const it = w.iteme
   let peJosIteme = 0
-  for (let i = 0; i < w.iteme.count; i++) if (w.iteme.alive[i] === 1 && celulaDeZonaLa(w.zone, w.iteme.wx[i]!, w.iteme.wy[i]!, w.iteme.z[i]!) === -1) peJosIteme++
-  let depozite = 0
-  for (let i = 0; i < w.zone.count; i++) if (w.zone.alive[i] === 1 && w.zone.kind[i] === Zona.DEPOZIT) depozite++
-  m.set('nimeni-cara', peJosIteme > 0 && depozite > 0 && !pe.cara ? { activ: true, text: 'Nimeni n-are voie să care (prioritate 0 sau Exclusiv pe altceva).', tinta: null } : inactiv)
+  for (let i = 0; i < it.count; i++) if (it.alive[i] === 1 && prioritateaLocului(w.zone, it.wx[i]!, it.wy[i]!, it.z[i]!) === 0) peJosIteme++
+  m.set('nimeni-cara', peJosIteme > 0 && vedere.depozite > 0 && !pe.cara ? { activ: true, text: 'Nimeni n-are voie să care (prioritate 0 sau Exclusiv pe altceva).', tinta: null } : inactiv)
 
   // Blocate: nerezervate, cu motiv de blocaj, fara nicio lucrare IN CURS la cel mult 8 celule.
+  //  - LIPSA_MATERIAL se scrie FARA racire (materialul poate aparea oricand) si se sterge la rescanare
+  //    cand apare: cat e scris, e adevarat. Cerut cu racire, planul fara piatra nu aprindea niciodata
+  //    alerta (recenzia UI-ului, MOD-3).
+  //  - Celelalte au racirea lor, iar dupa ce expira raman valabile pana la urmatoarea scanare: inca
+  //    doua ferestre de rescanare. Fara ele, o singura lucrare de neatins (racire 100 de tickuri <
+  //    intarzierea de 15 s) stingea semnalul intre doua scanari si alerta nu aparea niciodata.
   const inLucru: number[] = []
   for (let i = 0; i < d.count; i++) {
     if (d.alive[i] === 1 && rezervariPentru(w.rezervari, d.id[i]!, Strat.LUCRU).length > 0) inLucru.push(i)
@@ -546,33 +632,32 @@ export function semnaleAlerte(w: World, rules: Rules, previz: Previz | null): Ma
       continue
     }
     const cod = motivDinCod(d.ultimulMotiv[i]!)
-    if (cod === null || d.reincercaLaTick[i]! <= w.tick) continue
+    if (cod === null) continue
+    if (cod !== Reason.LIPSA_MATERIAL && d.reincercaLaTick[i]! + 2 * rules.jobRescanTicks <= w.tick) continue
     if (rezervariPentru(w.rezervari, d.id[i]!, Strat.LUCRU).length > 0) continue
     if (inLucru.some((j) => Math.max(Math.abs(d.wx[j]! - d.wx[i]!), Math.abs(d.wy[j]! - d.wy[i]!)) <= RAZA_BLOCATE)) continue
     blocate++
     if (primaBlocata < 0) primaBlocata = i
-    const t = stareDesemnare(w, rules, i, previz).text.titlu.replace(/ (Reîncearcă|Se reverifică).*$/, '')
+    const t = stareDesemnare(w, rules, i, previz).text.titlu.replace(/ (Reîncearcă|Se reverifică).*$/, '').replace(/^Ultimul refuz memorat: (.)/, (_, c: string) => c.toUpperCase())
     blocaj.set(t, (blocaj.get(t) ?? 0) + 1)
   }
   const celula = (i: number): Tinta => ({ fel: 'celula', wx: d.wx[i]!, wy: d.wy[i]!, z: d.z[i]! })
   let frecvent = ''
   let maxim = 0
   for (const [t, n] of [...blocaj].sort((x, y) => (x[0] < y[0] ? -1 : 1))) if (n > maxim) { maxim = n; frecvent = t }
-  m.set('blocate', blocate > 0 ? { activ: true, text: `${blocate === 1 ? 'O lucrare stă' : `${blocate} lucrări stau`}, fără nicio lucrare în curs lângă: ${frecvent}`, tinta: celula(primaBlocata) } : inactiv)
-  m.set('imposibile', imposibile > 0 ? { activ: true, text: `${imposibile === 1 ? 'O piesă n-ar sta' : `${imposibile} piese n-ar sta`} în picioare nici după restul planului.`, tinta: celula(primaImposibila) } : inactiv)
+  m.set('blocate', blocate > 0 ? { activ: true, text: `${blocate === 1 ? 'O lucrare stă' : `${cant(blocate, 'lucrări')} stau`}, fără nicio lucrare în curs lângă: ${frecvent}`, tinta: celula(primaBlocata) } : inactiv)
+  m.set('imposibile', imposibile > 0 ? { activ: true, text: `${imposibile === 1 ? 'O piesă n-ar sta' : `${cant(imposibile, 'piese')} n-ar sta`} în picioare nici după restul planului.`, tinta: celula(primaImposibila) } : inactiv)
 
-  // Mormane fara depozit: pe jos, nerezervate, cu FARA_DEPOZIT proaspat (in fereastra de reincercare).
+  // Mormane fara depozit: din `vedereFaraDepozit`, aceeasi functie ca inspectorul si Planul (MOD-1:
+  // cerea o racire pe care sim-ul nu o scrie, deci alerta nu aparea niciodata).
   let faraDepozit = 0, primulMorman = -1
-  const it = w.iteme
   for (let i = 0; i < it.count; i++) {
-    if (it.alive[i] !== 1 || motivDinCod(it.ultimulMotiv[i]!) !== Reason.FARA_DEPOZIT || it.reincercaLaTick[i]! <= w.tick) continue
-    if (celulaDeZonaLa(w.zone, it.wx[i]!, it.wy[i]!, it.z[i]!) !== -1) continue
-    if (rezervariPentru(w.rezervari, it.id[i]!, Strat.CARAT).length > 0) continue
+    if (!vedere.esteFaraDepozit(i)) continue
     faraDepozit++
     if (primulMorman < 0) primulMorman = i
   }
   m.set('fara-depozit', faraDepozit > 0
-    ? { activ: true, text: depozite === 0 ? `${faraDepozit === 1 ? 'Un morman n-are' : `${faraDepozit} mormane n-au`} unde fi dus: niciun depozit. Pictează unul (Zone ▸ Depozit).` : `${faraDepozit === 1 ? 'Un morman nu încape' : `${faraDepozit} mormane nu încap`} în depozite. Mărește-le.`, tinta: { fel: 'celula', wx: it.wx[primulMorman]!, wy: it.wy[primulMorman]!, z: it.z[primulMorman]! - 1 } }
+    ? { activ: true, text: vedere.depozite === 0 ? `${faraDepozit === 1 ? 'Un morman n-are unde fi dus' : `${cant(faraDepozit, 'mormane')} n-au unde fi duse`}: niciun depozit. Pictează unul (Zone ▸ Depozit).` : `${faraDepozit === 1 ? 'Un morman nu încape' : `${cant(faraDepozit, 'mormane')} nu încap`} în depozite. Mărește-le.`, tinta: { fel: 'celula', wx: it.wx[primulMorman]!, wy: it.wy[primulMorman]!, z: it.z[primulMorman]! - 1 } }
     : inactiv)
   return m
 }

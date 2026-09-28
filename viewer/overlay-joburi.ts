@@ -35,6 +35,7 @@ import { DetaliuMotiv } from '../src/sim/desemnari.ts'
 import { motivDinCod, Reason } from '../src/sim/result.ts'
 import { rezervariPentru, Strat } from '../src/sim/rezervari.ts'
 import { DetaliuItem, itemLaCelula } from '../src/sim/iteme.ts'
+import { vedereFaraDepozit } from '../src/sim/zone.ts'
 import { categoriiActive, tintaDispozitiei } from '../src/sim/joburi.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
 import type { Rules } from '../src/sim/content.ts'
@@ -257,9 +258,12 @@ function scrieOverlay(o: JobOverlay, s: Scriere, w: World, rules: Rules): void {
     culoare(s, de, c)
   }
 
-  // Itemele: cuburi mai mici, cu inaltimea dupa cantitate, colorate pe cauza.
+  // Itemele: cuburi mai mici, cu inaltimea dupa cantitate, colorate pe cauza. „Fara depozit" din
+  // aceeasi functie ca inspectorul si alerta (recenzia UI-ului, MOD-1): `ultimulMotiv` singur ramane
+  // vechi dupa ce se picteaza un depozit, pana se cara mormanul, iar Planul il tinea rosu.
   const it = w.iteme
   const stackMax = rules.itemStackMax
+  const vedere = vedereFaraDepozit(w)
   for (let i = 0; i < it.count; i++) {
     if (it.alive[i] === 0) continue
     o.iteme++
@@ -269,9 +273,9 @@ function scrieOverlay(o: JobOverlay, s: Scriere, w: World, rules: Rules): void {
       o.itemeRezervate++
     } else {
       const motiv = motivDinCod(it.ultimulMotiv[i]!)
-      if (motiv === Reason.FARA_DEPOZIT) { c = ROSU; o.itemeFaraDepozit++ }
-      else if (motiv === Reason.INACCESIBIL || it.ultimulMotivDetaliu[i] === DetaliuItem.COMPONENTE_DIFERITE) { c = VIOLET; o.itemeInaccesibile++ }
-      else if (motiv !== null) c = PORTOCALIU
+      if (vedere.esteFaraDepozit(i)) { c = ROSU; o.itemeFaraDepozit++ }
+      else if (motiv === Reason.INACCESIBIL || (motiv !== Reason.FARA_DEPOZIT && it.ultimulMotivDetaliu[i] === DetaliuItem.COMPONENTE_DIFERITE)) { c = VIOLET; o.itemeInaccesibile++ }
+      else if (motiv !== null && motiv !== Reason.FARA_DEPOZIT) c = PORTOCALIU
     }
     const de = s.n
     cub(s, it.wx[i]!, it.wy[i]!, it.z[i]!, 0.3, it.cantitate[i]! / stackMax)
