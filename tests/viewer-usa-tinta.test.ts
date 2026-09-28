@@ -21,7 +21,7 @@ import type { Impact, Raza } from '../viewer/tinta.ts'
 import { actualizeazaUsiPeChunk, celuleUsiiInPlan, celuleUsiiPlan, golulTintit, grupUsa, orientareUsa, toateUsile, usiDinTeren, usiPeChunkNoi } from '../viewer/usi.ts'
 import { golulColoanei, planDreptunghi, Unealta } from '../viewer/ui/dreptunghi.ts'
 import type { Lumea } from '../viewer/ui/dreptunghi.ts'
-import { incaperea } from '../viewer/ui/model.ts'
+import { aerulIntrebat, incaperea } from '../viewer/ui/model.ts'
 import { textIncapere } from '../viewer/ui/texte.ts'
 import { R, sitPlat } from './fixturi.ts'
 
@@ -302,6 +302,8 @@ test('inspector (EXP-6): un zid intre doua incaperi raspunde despre cea din FATA
   const spreB = incaperea(w, wx + 2, wy + 3, g + 1, { x: 1, y: 0, z: 0 })
   assert.ok(spreA?.e.fel === 'INCAPERE' && spreA.e.volum === 10, JSON.stringify(spreA))
   assert.ok(spreB?.e.fel === 'INCAPERE' && spreB.e.volum === 30, JSON.stringify(spreB))
+  // Aerul intrebat, fara explicatie (cheia unei memorari): celula din fata fetei.
+  assert.deepEqual(aerulIntrebat(w, wx + 2, wy + 3, g + 1, { x: -1, y: 0, z: 0 }), { sub: false, celula: { x: wx + 1, y: wy + 3, z: g + 1 } })
 })
 
 test('inspector (EXP-6): pe un acoperis gros de 2 m, clicul de sus raspunde despre incaperea de dedesubt', () => {

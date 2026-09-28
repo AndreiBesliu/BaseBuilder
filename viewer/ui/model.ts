@@ -591,12 +591,26 @@ const VECINI_PLAN: readonly (readonly [number, number])[] = [[1, 0], [-1, 0], [0
  * indexul, la zi în afara tickului.
  */
 export function incaperea(w: World, wx: number, wy: number, z: number, n: NormalaFetei | null = null): IncapereLa | null {
+  const a = aerulIntrebat(w, wx, wy, z, n)
+  return a === null ? null : { ...a, e: explicaCelula(w.terrain, w.camere, a.celula.x, a.celula.y, a.celula.z) }
+}
+
+/**
+ * Aerul pe care îl întreabă `incaperea`, fără explicație: câteva citiri de teren. E cheia potrivită pentru
+ * o memorare (explicația inundă până la scurgere; aerul întrebat nu e mereu la z ± 1).
+ */
+export interface AerIntrebat {
+  readonly sub: boolean
+  readonly celula: Celula
+}
+
+export function aerulIntrebat(w: World, wx: number, wy: number, z: number, n: NormalaFetei | null = null): AerIntrebat | null {
   const r = cititorCamere(w.terrain)
-  const la = (x: number, y: number, zz: number): IncapereLa => ({ sub: zz < z && x === wx && y === wy, celula: { x, y, z: zz }, e: explicaCelula(w.terrain, w.camere, x, y, zz) })
+  const la = (x: number, y: number, zz: number): AerIntrebat => ({ sub: zz < z && x === wx && y === wy, celula: { x, y, z: zz } })
   if (n !== null && esteAerAcoperit(r, wx + n.x, wy + n.y, z + n.z)) return la(wx + n.x, wy + n.y, z + n.z)
   if (esteAerAcoperit(r, wx, wy, z + 1)) return la(wx, wy, z + 1)
   if (esteAer(r, wx, wy, z)) return esteAerAcoperit(r, wx, wy, z) ? la(wx, wy, z) : null
-  const prin = (dx: number, dy: number, dz: number): IncapereLa | null => {
+  const prin = (dx: number, dy: number, dz: number): AerIntrebat | null => {
     for (let k = 1; k <= GROSIME_MAX_INSPECTOR; k++) {
       const x = wx + k * dx, y = wy + k * dy, zz = z + k * dz
       if (esteAer(r, x, y, zz)) return esteAerAcoperit(r, x, y, zz) ? la(x, y, zz) : null
