@@ -17,7 +17,7 @@ import { Desemnare, desemnareLaCelula, seSapaLa } from '../src/sim/desemnari.ts'
 import type { World } from '../src/sim/state.ts'
 import { CHUNK_CELLS, ePodea, isSolid, Material, VOXEL_LEVELS } from '../src/sim/terrain/chunk.ts'
 import type { Terrain } from '../src/sim/terrain/terrain.ts'
-import { materialAt } from '../src/sim/terrain/terrain.ts'
+import { chunkKey, JURNAL_CAP, materialAt } from '../src/sim/terrain/terrain.ts'
 import { primulVizibil } from './tinta.ts'
 import type { Impact, Raza, V3 } from './tinta.ts'
 
@@ -212,27 +212,89 @@ export interface UsaDesenata extends Celula {
 /** Usile zidite din chunk-urile promovate (numai acolo exista voxeli zidite), cu orientarea lor. */
 export function usiDinTeren(t: Terrain): UsaDesenata[] {
   const out: UsaDesenata[] = []
-  for (const k of t.keys) {
-    const ch = t.chunks.get(k)!
-    const v = ch.voxels
-    if (!v) continue
-    for (let col = 0; col < CHUNK_CELLS * CHUNK_CELLS; col++) {
-      let z = 0
-      const end = v.columnStart[col + 1]!
-      for (let run = v.columnStart[col]!; run < end && z < VOXEL_LEVELS; run++) {
-        const len = v.runLength[run]!
-        if (v.runMaterial[run] === Material.USA) {
-          const x = ch.cx * CHUNK_CELLS + (col % CHUNK_CELLS)
-          const y = ch.cy * CHUNK_CELLS + ((col / CHUNK_CELLS) | 0)
-          for (let i = 0; i < len; i++) {
-            const zz = v.zBaseM + z + i
-            out.push({ x, y, z: zz, o: orientareUsa(t, x, y, zz) })
-          }
+  for (const k of t.keys) usiDinChunk(t, k, out)
+  return out
+}
+
+/** Usile zidite ale unui chunk (niciuna, daca nu e promovat), adaugate la `out`. */
+export function usiDinChunk(t: Terrain, key: number, out: UsaDesenata[] = []): UsaDesenata[] {
+  const ch = t.chunks.get(key)
+  const v = ch?.voxels
+  if (!ch || !v) return out
+  for (let col = 0; col < CHUNK_CELLS * CHUNK_CELLS; col++) {
+    let z = 0
+    const end = v.columnStart[col + 1]!
+    for (let run = v.columnStart[col]!; run < end && z < VOXEL_LEVELS; run++) {
+      const len = v.runLength[run]!
+      if (v.runMaterial[run] === Material.USA) {
+        const x = ch.cx * CHUNK_CELLS + (col % CHUNK_CELLS)
+        const y = ch.cy * CHUNK_CELLS + ((col / CHUNK_CELLS) | 0)
+        for (let i = 0; i < len; i++) {
+          const zz = v.zBaseM + z + i
+          out.push({ x, y, z: zz, o: orientareUsa(t, x, y, zz) })
         }
-        z += len
       }
+      z += len
     }
   }
+  return out
+}
+
+/** Usile desenate, pe chunk, tinute la zi din jurnalul terenului. */
+export interface UsiPeChunk {
+  teren: Terrain | null
+  /** `t.editari` la ultima actualizare. */
+  editari: number
+  /** Cheia chunk-ului → usile lui (doar chunk-urile cu usi). */
+  readonly harta: Map<number, UsaDesenata[]>
+}
+
+export function usiPeChunkNoi(): UsiPeChunk {
+  return { teren: null, editari: -1, harta: new Map() }
+}
+
+/**
+ * Aduce usile la zi. Pana acum orice editare de teren — si sapaturile pionilor, departe de orice usa —
+ * refacea lista TUTUROR usilor, scanand toate chunk-urile promovate (35 de chunk-uri, 132 de usi: mediana
+ * 1,1 ms, max 4,8 ms pe cadru cu editare; recenzia pe ecran, ECR-11). Acum, ca `remeshDinJurnal`: doar
+ * chunk-urile celulelor din jurnal si ale vecinelor lor pe x si y (orientarea unei usi citeste vecinii ei,
+ * si peste granita de chunk); tot, la alt teren sau cand jurnalul a pierdut editari. Intoarce cate chunk-uri
+ * a scanat, sau null cand terenul n-are nimic nou.
+ */
+export function actualizeazaUsiPeChunk(u: UsiPeChunk, t: Terrain): number | null {
+  if (u.teren === t && u.editari === t.editari) return null
+  const noi = t.editari - u.editari
+  let scanate = 0
+  if (u.teren !== t || noi < 0 || noi > JURNAL_CAP) {
+    u.harta.clear()
+    for (const k of t.keys) {
+      const l = usiDinChunk(t, k)
+      if (l.length > 0) u.harta.set(k, l)
+    }
+    scanate = t.keys.length
+  } else {
+    const atinse = new Set<number>()
+    for (let n = u.editari; n < t.editari; n++) {
+      const j = (n % JURNAL_CAP) * 3
+      const wx = t.jurnal[j]!, wy = t.jurnal[j + 1]!
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) atinse.add(chunkKey(Math.floor((wx + dx) / CHUNK_CELLS), Math.floor((wy + dy) / CHUNK_CELLS)))
+    }
+    for (const k of atinse) {
+      const l = usiDinChunk(t, k)
+      if (l.length > 0) u.harta.set(k, l)
+      else u.harta.delete(k)
+    }
+    scanate = atinse.size
+  }
+  u.teren = t
+  u.editari = t.editari
+  return scanate
+}
+
+/** Toate usile hartii, in ordinea lui `usiDinTeren` (cheile chunk-urilor, crescator). */
+export function toateUsile(u: UsiPeChunk): UsaDesenata[] {
+  const out: UsaDesenata[] = []
+  for (const k of [...u.harta.keys()].sort((a, b) => a - b)) for (const d of u.harta.get(k)!) out.push(d)
   return out
 }
 

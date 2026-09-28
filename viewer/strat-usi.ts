@@ -3,7 +3,8 @@
  * doar TRANSLATATE — fara rotatie, normala unei lovituri e deja in lume (verificatorul JUC-4: pe un
  * panou rotit, `face.normal` ramane in spatiul geometriei si clicul nimerea celula de alaturi).
  *
- * Se reface cand se schimba terenul (`editari`), nu pe cadru. Planul de taiere al slice-ului e global
+ * Se reface cand se schimba terenul (`editari`), nu pe cadru, si doar pe chunk-urile din jurnal
+ * (`actualizeazaUsiPeChunk`, recenzia pe ecran, ECR-11). Planul de taiere al slice-ului e global
  * (`renderer.clippingPlanes`), deci usile de deasupra nivelului activ se taie ca zidurile.
  */
 
@@ -12,18 +13,20 @@ import type { Terrain } from '../src/sim/terrain/terrain.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
 import { MATERIAL_COLOR } from '../src/render/palette.ts'
 import type { Impact } from './tinta.ts'
-import { GROSIME_USA, impactPeUsa, ORIENTARI, usiDinTeren } from './usi.ts'
-import type { Orientare, UsaDesenata } from './usi.ts'
+import { actualizeazaUsiPeChunk, GROSIME_USA, impactPeUsa, ORIENTARI, toateUsile, usiPeChunkNoi } from './usi.ts'
+import type { Orientare, UsaDesenata, UsiPeChunk } from './usi.ts'
 
 export interface StratUsi {
   readonly group: THREE.Group
   readonly plase: Record<Orientare, THREE.InstancedMesh>
   /** Instanta → usa, pe orientare. */
   readonly celule: Record<Orientare, UsaDesenata[]>
-  teren: Terrain | null
-  editari: number
+  /** Usile pe chunk, la zi din jurnalul terenului. */
+  readonly usi: UsiPeChunk
   /** Cate usi (celule) s-au desenat la ultima reconstructie. */
   desenate: number
+  /** Cate chunk-uri a scanat ultima reconstructie. */
+  scanate: number
 }
 
 const CAPACITATE_INITIALA = 32
@@ -61,17 +64,17 @@ export function creeazaStratUsi(scene: THREE.Scene): StratUsi {
     plase[o] = im
     celule[o] = []
   }
-  return { group, plase, celule, teren: null, editari: -1, desenate: 0 }
+  return { group, plase, celule, usi: usiPeChunkNoi(), desenate: 0, scanate: 0 }
 }
 
 const m4 = new THREE.Matrix4()
 
 /** Reface panourile, daca terenul s-a schimbat de la ultima data. */
 export function actualizeazaStratUsi(s: StratUsi, t: Terrain): void {
-  if (s.teren === t && s.editari === t.editari) return
-  s.teren = t
-  s.editari = t.editari
-  const usi = usiDinTeren(t)
+  const scanate = actualizeazaUsiPeChunk(s.usi, t)
+  if (scanate === null) return
+  s.scanate = scanate
+  const usi = toateUsile(s.usi)
   for (const o of ORIENTARI) s.celule[o] = []
   for (const u of usi) s.celule[u.o].push(u)
   for (const o of ORIENTARI) {

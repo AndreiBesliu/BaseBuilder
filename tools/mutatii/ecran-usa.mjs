@@ -88,6 +88,28 @@ export const MUTATII = [
     b: '  const zid = (a: number, b: number): boolean => isSolid(m(a, b, z))\n',
     t: T, e: 'usa pe ecran (ECR-8)',
   },
+  // --- ECR-11: stratul usilor din jurnal
+  {
+    n: 'ECR-11: tot terenul la fiecare editare (jurnalul ignorat)',
+    f: 'viewer/usi.ts',
+    a: '  if (u.teren !== t || noi < 0 || noi > JURNAL_CAP) {\n',
+    b: '  if (true) {\n',
+    t: T, e: 'usa pe ecran (ECR-11)',
+  },
+  {
+    n: 'ECR-11: vecinii de peste granita nu se rescaneaza (usa din chunk-ul alaturat ramane cu orientarea veche)',
+    f: 'viewer/usi.ts',
+    a: '      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) atinse.add(chunkKey(Math.floor((wx + dx) / CHUNK_CELLS), Math.floor((wy + dy) / CHUNK_CELLS)))\n',
+    b: '      atinse.add(chunkKey(Math.floor(wx / CHUNK_CELLS), Math.floor(wy / CHUNK_CELLS)))\n',
+    t: T, e: 'usa pe ecran (ECR-11)',
+  },
+  {
+    n: 'ECR-11: un chunk ramas fara usi isi pastreaza usile vechi',
+    f: 'viewer/usi.ts',
+    a: '      else u.harta.delete(k)\n',
+    b: '',
+    t: T, e: 'usa pe ecran (ECR-11)',
+  },
   // --- EXP-6: inspectorul
   {
     n: 'EXP-6: inspectorul nu intreaba aerul din fata fetei atinse',

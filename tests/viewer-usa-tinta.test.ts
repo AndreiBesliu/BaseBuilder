@@ -15,10 +15,10 @@ import { desemnareLaCelula } from '../src/sim/desemnari.ts'
 import { Piesa } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
 import { isSolid, Material } from '../src/sim/terrain/chunk.ts'
-import { fill, materialAt } from '../src/sim/terrain/terrain.ts'
+import { dig, fill, groundLevelM, materialAt } from '../src/sim/terrain/terrain.ts'
 import { alegeTinta, normalaLumii } from '../viewer/tinta.ts'
 import type { Impact, Raza } from '../viewer/tinta.ts'
-import { celuleUsiiInPlan, celuleUsiiPlan, golulTintit, grupUsa, orientareUsa } from '../viewer/usi.ts'
+import { actualizeazaUsiPeChunk, celuleUsiiInPlan, celuleUsiiPlan, golulTintit, grupUsa, orientareUsa, toateUsile, usiDinTeren, usiPeChunkNoi } from '../viewer/usi.ts'
 import { golulColoanei, planDreptunghi, Unealta } from '../viewer/ui/dreptunghi.ts'
 import type { Lumea } from '../viewer/ui/dreptunghi.ts'
 import { incaperea } from '../viewer/ui/model.ts'
@@ -214,6 +214,54 @@ test('usa pe ecran (ECR-8): usa de sus zidita singura, fara buiandrug, sta in pe
   for (const i of [0, 4]) for (const z of [g + 1, g + 2]) assert.ok(fill(w.terrain, wx + i, wy + 12, z, P).ok)
   for (let i = 0; i <= 4; i++) assert.ok(fill(w.terrain, wx + i, wy + 12, g + 3, i === 2 ? Material.USA : P).ok)
   assert.equal(orientareUsa(w.terrain, wx + 2, wy + 12, g + 3), 'orizontala')
+})
+
+// --- ECR-11: stratul usilor, refacut doar unde a scris jurnalul ------------------------------------
+
+test('usa pe ecran (ECR-11): usile pe chunk, din jurnal, sunt exact usiDinTeren — si peste granita de chunk; o editare departe scaneaza cel mult 4 chunk-uri', () => {
+  const { w, wx, wy, g } = sitPlat(12345, 12)
+  const t = w.terrain
+  const u = usiPeChunkNoi()
+  const la = (): void => { actualizeazaUsiPeChunk(u, t); assert.deepEqual(toateUsile(u), usiDinTeren(t)) }
+  la()
+  // Usa de 2 m pe ultima coloana a unui chunk (lx = 31), in zidul pe y: panoul sta in planul wx.
+  const bx = (Math.floor(wx / 32) + 1) * 32 - 1
+  for (const z of [g + 1, g + 2]) for (const [dy, m] of [[-1, P], [0, Material.USA], [1, P]] as const) assert.ok(fill(t, bx, wy + 3 + dy, z, m).ok)
+  la()
+  const jos = (): string | undefined => toateUsile(u).find((d) => d.x === bx && d.z === g + 1)?.o
+  assert.equal(jos(), 'subtireX')
+  // Plin pe x de o parte si de alta: panoul de jos se intoarce in planul wy. Al doilea plin e in chunk-ul
+  // VECIN (lx = 0): numai jurnalul lui il atinge.
+  assert.ok(fill(t, bx - 1, wy + 3, g + 1, P).ok)
+  la()
+  assert.equal(jos(), 'subtireX')
+  assert.ok(fill(t, bx + 1, wy + 3, g + 1, P).ok)
+  la()
+  assert.equal(jos(), 'subtireY', 'usa s-a reorientat dupa o editare de dincolo de granita')
+  // Editari pseudo-aleatoare (usi, pereti, sapaturi), cate 1–5 intre actualizari.
+  let s = 7
+  const rnd = (n: number): number => { s = (s * 1103515245 + 12345) % 2147483648; return s % n }
+  for (let pas = 0; pas < 60; pas++) {
+    for (let k = rnd(5); k >= 0; k--) {
+      const x = bx - 3 + rnd(7), y = wy + rnd(6), z = g + 1 + rnd(3)
+      const r = rnd(3)
+      if (r === 2) applyCommand(w, { kind: 'dig', wx: x, wy: y, z }, R)
+      else fill(t, x, y, z, r === 0 ? Material.USA : P)
+    }
+    la()
+  }
+  assert.ok(toateUsile(u).length > 0, 'fixtura are usi')
+  // Toate usile sapate: chunk-urile ramase fara usi nu-si pastreaza usile vechi.
+  for (const d of toateUsile(u)) assert.ok(dig(t, d.x, d.y, d.z).ok)
+  la()
+  assert.equal(toateUsile(u).length, 0)
+  // O editare departe de usi: se scaneaza chunk-ul ei (si vecinii de pe granita), nu toata lumea.
+  const departe = { x: wx + 70, y: wy + 70 }
+  const gd = groundLevelM(t, departe.x, departe.y)
+  assert.ok(gd.ok && fill(t, departe.x, departe.y, gd.value + 1, P).ok)
+  const scanate = actualizeazaUsiPeChunk(u, t)
+  assert.ok(scanate !== null && scanate <= 4 && t.keys.length > 4, `scanate ${scanate} din ${t.keys.length}`)
+  assert.deepEqual(toateUsile(u), usiDinTeren(t))
 })
 
 // --- EXP-6: inspectorul intreaba aerul din fata fetei atinse ----------------------------------------
