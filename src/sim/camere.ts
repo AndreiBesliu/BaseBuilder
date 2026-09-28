@@ -33,7 +33,9 @@
  * (bloc, z±1) pe aceeași celulă. Componenta = componentă conexă a grafului de bucăți. O editare
  * reface feliile atinse (≤ 256 de celule fiecare) și reparcurge bucățile componentelor atinse —
  * nu volumul lor. Prototipul panoului: 1–2 ms pe o rețea sigilată de 11.550 m³, față de 13–35 ms
- * pentru inundarea pe celule a lui v1.
+ * pentru inundarea pe celule a lui v1. Când lotul nu desparte și nu unește nimic, nici pe acelea:
+ * componenta se reface pe loc (`caleRapida`, recenzia încăperilor, IDX-1 — 813 din 1014 sincronizări
+ * pe o mină de 1557 de bucăți cu 20 de pioni, 183–197 → 89 µs/tick).
  *
  * ## Ce felii se refac la o editare e = (x, y, z) — lema
  *
@@ -258,6 +260,11 @@ export interface StatCamere {
   feliiRefacute: number
   celuleScanate: number
   bucatiVizitate: number
+  /**
+   * Sincronizari incheiate pe calea rapida (recenzia incaperilor, IDX-1): lotul a atins o singura
+   * componenta, care nu s-a despartit si nu s-a unit cu alta, deci s-a actualizat pe loc, fara BFS.
+   */
+  caiRapide: number
   coloaneCitite: number
   /** Coloane citite de pe chunk-uri nepromovate. Lema apronului spune 0 în joc. */
   coloaneNepromovate: number
@@ -306,7 +313,7 @@ export function indexCamere(t: Terrain | null = null): IndexCamere {
     comp: new Map(),
     cLibere: [],
     cUrmator: 0,
-    stat: { sincronizari: 0, recalculari: 0, feliiRefacute: 0, celuleScanate: 0, bucatiVizitate: 0, coloaneCitite: 0, coloaneNepromovate: 0 },
+    stat: { sincronizari: 0, recalculari: 0, feliiRefacute: 0, celuleScanate: 0, bucatiVizitate: 0, caiRapide: 0, coloaneCitite: 0, coloaneNepromovate: 0 },
   }
 }
 
@@ -533,6 +540,94 @@ function componente(idx: IndexCamere, seminte: readonly number[], moarte: Set<nu
 }
 
 /**
+ * Calea rapida a sincronizarii (recenzia incaperilor, IDX-1). `componente()` reparcurge TOATA componenta
+ * atinsa, deci costul unei sapaturi la fata unei mine crestea cu mina (1557 de bucati: 81% din timpul
+ * camerelor), desi in 98,9% din sincronizari componenta ramane una singura.
+ *
+ * Lotul trece pe aici daca a atins cel mult o componenta veche C (`moarte` ≤ 1), iar bucatile noi,
+ * impreuna cu vecinii care au supravietuit bucatilor sterse (`atinse`), sunt legate intr-un SINGUR grup
+ * de muchiile bucatilor noi — fara sa atinga alta componenta. Atunci C nu s-a despartit: fiecare bucata a
+ * lui C ramasa se leaga, prin muchii vechi, de un vecin al unei bucati sterse (C era conexa), adica de
+ * un membru al grupului; si nu s-a unit cu nimic: muchiile noi pleaca doar din bucatile noi, iar vecinii
+ * lor sunt toti in C. C isi pastreaza id-ul si se reface pe loc (lista, volumul, fetele, ancora), fara BFS.
+ * Altfel, `false`, si sincronizarea cade pe `componente()`, ca inainte.
+ */
+function caleRapida(idx: IndexCamere, noi: readonly number[], atinse: ReadonlySet<number>, moarte: Set<number>): boolean {
+  if (moarte.size > 1) return false
+  let c = -1
+  // determinism-ok: cel mult un element.
+  for (const m of moarte) c = m
+  const noiS = new Set(noi)
+  // Union-find pe bucatile grupului; parintele fiecarei bucati.
+  const par = new Map<number, number>()
+  const radacina = (a: number): number => {
+    let r = a
+    while (par.get(r)! !== r) r = par.get(r)!
+    while (par.get(a)! !== r) {
+      const u = par.get(a)!
+      par.set(a, r)
+      a = u
+    }
+    return r
+  }
+  // determinism-ok: doar verifica si adauga intr-un Map; raspunsul (da/nu) nu depinde de ordine.
+  for (const a of atinse) {
+    if (noiS.has(a)) continue
+    // Pe un index corect nu se intampla (vecinii bucatilor sterse sunt in componenta lor): garda de
+    // autoreparare — daca invariantul s-ar strica, BFS-ul rescrie `bComp`.
+    if (idx.bComp[a] !== c) return false
+    par.set(a, a)
+  }
+  for (const n of noi) par.set(n, n)
+  for (const n of noi) {
+    // determinism-ok: uniunea nu depinde de ordine; raspunsul e da/nu.
+    for (const q of idx.bVecini[n]!) {
+      if (!par.has(q)) {
+        const cq = idx.bComp[q]!
+        if (cq < 0) return false
+        if (c === -1) c = cq
+        else if (cq !== c) return false
+        par.set(q, q)
+      }
+      const ra = radacina(n)
+      const rb = radacina(q)
+      if (ra !== rb) par.set(ra, rb)
+    }
+  }
+  // O componenta cu totul noua (nicio bucata veche atinsa): n-are ce actualiza pe loc. Una stearsa cu
+  // totul (nimic nou, niciun supravietuitor): trebuie scoasa din index, deci tot BFS-ul.
+  if (c === -1 || par.size === 0) return false
+  let r0 = -1
+  // determinism-ok: raspunsul (un singur grup?) nu depinde de ordine.
+  for (const k of par.keys()) {
+    const r = radacina(k)
+    if (r0 === -1) r0 = r
+    else if (r !== r0) return false
+  }
+  const vechi = idx.comp.get(c)!
+  idx.stat.bucatiVizitate += par.size
+  // Bucatile lui C care au supravietuit (un slot sters poate fi deja al unei bucati noi), plus cele noi.
+  const bucati: number[] = []
+  for (const b of vechi.bucati) if (idx.bVecini[b] !== undefined && !noiS.has(b)) bucati.push(b)
+  for (const n of noi) {
+    idx.bComp[n] = c
+    bucati.push(n)
+  }
+  bucati.sort((a, b) => a - b)
+  let volum = 0
+  let deschise = 0
+  let ancora = Number.POSITIVE_INFINITY
+  for (const b of bucati) {
+    volum += idx.bCelule[b]!
+    deschise += idx.bDeschise[b]!
+    if (idx.bAncora[b]! < ancora) ancora = idx.bAncora[b]!
+  }
+  idx.comp.set(c, { id: c, ancora, volum, deschise, bucati })
+  moarte.clear()
+  return true
+}
+
+/**
  * Recalculul complet: aerul acoperit se enumeră pe coloanele chunk-urilor promovate (un chunk
  * nepromovat n-are), apoi se refac feliile care îl conțin, bloc cu bloc, apoi componentele.
  */
@@ -646,7 +741,8 @@ export function sincronizeazaCamere(idx: IndexCamere, t: Terrain): void {
   const moarte = new Set<number>()
   for (const cheie of [...murdare].sort((a, b) => a - b)) refaFelie(idx, r, cheie, noi, atinse, moarte)
   const seminte = [...noi, ...[...atinse].sort((a, b) => a - b)]
-  componente(idx, seminte, moarte)
+  if (caleRapida(idx, noi, atinse, moarte)) idx.stat.caiRapide++
+  else componente(idx, seminte, moarte)
   idx.stat.coloaneCitite += r.citite
   idx.stat.coloaneNepromovate += r.nepromovate
   idx.epoca++

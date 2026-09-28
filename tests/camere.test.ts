@@ -458,6 +458,8 @@ test('K05: o galerie lunga, acoperita si deschisa la gura — fiecare sapatura l
   let felii = 0
   let sapaturi = 0
   let bucatiGaleriei = 0
+  let ultimDx = 0
+  const rapide0 = w.camere.stat.caiRapide
   let prec = g
   for (let dx = 2; dx <= 65; dx++) {
     const gg = groundLevelM(t, wx + dx, wy + 5)
@@ -477,6 +479,7 @@ test('K05: o galerie lunga, acoperita si deschisa la gura — fiecare sapatura l
       bucatiGaleriei = Math.max(bucatiGaleriei, galeria!.bucati.length)
       sapaturi++
     }
+    ultimDx = dx
   }
   assert.ok(sapaturi >= 60, `galeria s-a oprit dupa ${sapaturi} de sapaturi (relief)`)
   // Garda pe bucati musca doar daca galeria are mai mult de 8 bucati (masurat: 12).
@@ -487,6 +490,99 @@ test('K05: o galerie lunga, acoperita si deschisa la gura — fiecare sapatura l
   // Pe o fata: felia ei si cel mult o vecina peste marginea blocului.
   assert.ok(felii <= sapaturi * 3, `felii refacute: ${felii} la ${sapaturi} de sapaturi`)
   assert.ok(celule <= sapaturi * 3 * 256, `celule scanate: ${celule}`)
+  // Calea rapida (recenzia incaperilor, IDX-1): sapatura la fata lungeste galeria, nu o desparte si nu
+  // o uneste cu nimic — deci galeria se reface pe loc, fara BFS. Masurat: 127 din 128; prima sapatura
+  // face o componenta noua (gura e cer), deci nu are ce actualiza.
+  const rapide = w.camere.stat.caiRapide - rapide0
+  assert.ok(rapide >= sapaturi - 1, `doar ${rapide} din ${sapaturi} sapaturi pe calea rapida`)
+  // O umplere care taie galeria in doua (ambele niveluri): lotul atinge o singura componenta, dar
+  // bucatile noi nu mai leaga cele doua jumatati — calea rapida refuza, iar BFS-ul reparcurge ambele
+  // jumatati, o singura data.
+  const taie = wx + 25
+  const gt = groundLevelM(t, taie, wy + 5)
+  assert.ok(gt.ok && ultimDx > 30)
+  const b = { ...w.camere.stat }
+  // Direct in teren, intr-un singur lot: comanda `fill` refuza celulele cu mormanul sapaturii in ele.
+  assert.ok(fill(t, taie, wy + 5, gt.value - 3, P).ok)
+  assert.ok(fill(t, taie, wy + 5, gt.value - 2, P).ok)
+  sincronizeazaCamere(w.camere, t)
+  const gGura = groundLevelM(t, wx + 2, wy + 5) as { value: number }
+  const gCapat = groundLevelM(t, wx + ultimDx, wy + 5) as { value: number }
+  const gura = componentaLa(w.camere, wx + 2, wy + 5, gGura.value - 2)
+  const capat = componentaLa(w.camere, wx + ultimDx, wy + 5, gCapat.value - 3)
+  assert.ok(gura && capat && gura.id !== capat.id, 'galeria taiata e doua componente')
+  assert.ok(!esteIncapere(gura!) && esteIncapere(capat!), 'jumatatea de la gura ramane deschisa; cealalta e o incapere')
+  assert.equal(w.camere.stat.caiRapide - b.caiRapide, 0, 'despartirea a trecut pe calea rapida')
+  const vizitate = w.camere.stat.bucatiVizitate - b.bucatiVizitate
+  assert.ok(vizitate <= gura!.bucati.length + capat!.bucati.length + 8, `despartirea: ${vizitate} bucati vizitate, jumatatile au ${gura!.bucati.length} + ${capat!.bucati.length}`)
+  egalCuRecalculul(w, 'galeria taiata')
+})
+
+test('K05 (IDX-1): o sapatura la fata unei mine acoperite mari trece pe calea rapida — mina se reface pe loc, fara s-o reparcurga', () => {
+  // Recenzia incaperilor, IDX-1: pe o mina de 1557 de bucati, BFS-ul pe componenta atinsa era 81% din
+  // timpul camerelor, desi in 98,9% din sincronizari componenta ramanea una singura.
+  const { w, wx, wy } = sitPlat(12345, 8)
+  const t = w.terrain
+  const N = 64
+  // Mina 64x64 pe trei niveluri, sub doua straturi de sol, cu stalpi de 1x1 la fiecare 4 m.
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    if (x % 4 === 0 && y % 4 === 0) continue
+    const gg = groundLevelM(t, wx + x, wy + y)
+    assert.ok(gg.ok)
+    for (let d = 2; d <= 4; d++) assert.ok(dig(t, wx + x, wy + y, gg.value - d).ok)
+  }
+  sincronizeazaCamere(w.camere, t)
+  const mina = componentaLa(w.camere, wx + 1, wy + 1, (groundLevelM(t, wx + 1, wy + 1) as { value: number }).value - 3)
+  assert.ok(mina && mina.bucati.length > 40, `fixtura: mina are ${mina?.bucati.length} bucati`)
+  let maxVizitate = 0
+  for (let i = 0; i < 20; i++) {
+    const x = wx + N, y = wy + 2 + i
+    const gg = groundLevelM(t, x, y) as { value: number }
+    const a = { ...w.camere.stat }
+    assert.ok(applyCommand(w, { kind: 'dig', wx: x, wy: y, z: gg.value - 3 }, R).ok)
+    assert.equal(w.camere.stat.caiRapide - a.caiRapide, 1, `sapatura ${i} n-a trecut pe calea rapida`)
+    maxVizitate = Math.max(maxVizitate, w.camere.stat.bucatiVizitate - a.bucatiVizitate)
+  }
+  assert.ok(maxVizitate <= 16, `${maxVizitate} bucati vizitate pe o sapatura, mina are ${mina!.bucati.length}`)
+  const dupa = componentaLa(w.camere, wx + 1, wy + 1, (groundLevelM(t, wx + 1, wy + 1) as { value: number }).value - 3)
+  assert.equal(dupa?.id, mina!.id, 'mina isi pastreaza id-ul pe calea rapida')
+  egalCuRecalculul(w, 'mina')
+})
+
+test('IDX-1: o gaura intre doua pivnite suprapuse le uneste — lotul atinge doar pivnita de jos, dar bucata noua se leaga si de cea de sus: calea rapida refuza', () => {
+  // Felia de deasupra editarii nu se reface (antetul), deci pivnita de sus NU e in `moarte`: unirea se
+  // vede doar din vecinii bucatilor noi.
+  const { w, wx, wy, g } = sitPlat(4242, 8)
+  const t = w.terrain
+  for (let dx = 1; dx <= 3; dx++) for (let dy = 1; dy <= 3; dy++) {
+    assert.ok(dig(t, wx + dx, wy + dy, g - 4).ok)
+    assert.ok(dig(t, wx + dx, wy + dy, g - 2).ok)
+  }
+  sincronizeazaCamere(w.camere, t)
+  assert.deepEqual(listaComponente(w.camere).map((c) => c.volum), [9, 9])
+  const a = { ...w.camere.stat }
+  assert.ok(applyCommand(w, { kind: 'dig', wx: wx + 2, wy: wy + 2, z: g - 3 }, R).ok)
+  assert.equal(w.camere.stat.caiRapide - a.caiRapide, 0, 'unirea a trecut pe calea rapida')
+  assert.deepEqual(listaComponente(w.camere).map((c) => c.volum), [19], 'cele doua pivnite si gaura sunt o singura incapere')
+  egalCuRecalculul(w, 'unirea')
+})
+
+test('IDX-1: un lot care umple o nisa si largeste o pivnita atinge doua componente — calea rapida refuza, iar nisa dispare din index', () => {
+  // Nisa e sub pivnita, deci felia ei se reface INTAI (ordinea cheilor): pivnita e ultima in `moarte`.
+  const { w, wx, wy, g } = sitPlat(12345, 8)
+  const t = w.terrain
+  assert.ok(dig(t, wx + 6, wy + 6, g - 5).ok)
+  for (let dx = 1; dx <= 3; dx++) for (let dy = 1; dy <= 3; dy++) assert.ok(dig(t, wx + dx, wy + dy, g - 2).ok)
+  sincronizeazaCamere(w.camere, t)
+  assert.deepEqual(listaComponente(w.camere).map((c) => c.volum).sort((a, b) => a - b), [1, 9])
+  const a = { ...w.camere.stat }
+  // Un singur lot: nisa umpluta, pivnita largita cu o celula.
+  assert.ok(fill(t, wx + 6, wy + 6, g - 5, P).ok)
+  assert.ok(dig(t, wx + 4, wy + 2, g - 2).ok)
+  sincronizeazaCamere(w.camere, t)
+  assert.equal(w.camere.stat.caiRapide - a.caiRapide, 0, 'lotul cu doua componente a trecut pe calea rapida')
+  assert.deepEqual(listaComponente(w.camere).map((c) => c.volum), [10], 'nisa umpluta a ramas in index')
+  egalCuRecalculul(w, 'nisa si pivnita')
 })
 
 test('K05: o lume incarcata reconstruieste o data, iar in regim niciodata', () => {

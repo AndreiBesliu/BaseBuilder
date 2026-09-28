@@ -146,10 +146,41 @@ export const MUTATII = [
     t: T, e: 'K05: o sapatura intr-o pivnita izolata dintre 576',
   },
   {
+    // Dupa calea rapida (IDX-1), sapaturile la fata galeriei nu mai trec prin BFS: proba musca la
+    // taierea galeriei in doua, care il cere.
     n: 'IDX-3: componentele atinse se reparcurg de doua ori pe sincronizare (acelasi index, costul dublu; oracolul e orb)',
     f: C,
-    a: '  componente(idx, seminte, moarte)',
-    b: '  componente(idx, seminte, moarte)\n  componente(idx, seminte, moarte)',
+    a: '  else componente(idx, seminte, moarte)',
+    b: '  else { componente(idx, seminte, moarte); componente(idx, seminte, moarte) }',
+    t: T, e: 'K05: o galerie lunga, acoperita si deschisa la gura',
+  },
+  // --- recenzia incaperilor: calea rapida a sincronizarii (IDX-1) — conditiile de iesire
+  {
+    n: 'IDX-1: calea rapida nu se ia niciodata (fiecare sapatura la fata minei reparcurge toata mina)',
+    f: C,
+    a: '  if (moarte.size > 1) return false',
+    b: '  if (moarte.size >= 0) return false',
+    t: T, e: 'K05 (IDX-1): o sapatura la fata unei mine',
+  },
+  {
+    n: 'IDX-1: calea rapida primeste un lot care atinge DOUA componente (cea golita cu totul ramane in index)',
+    f: C,
+    a: '  if (moarte.size > 1) return false',
+    b: '  if (moarte.size > 2) return false',
+    t: T, e: 'IDX-1: un lot care umple o nisa',
+  },
+  {
+    n: 'IDX-1: calea rapida nu vede unirea cu o componenta vecina bucatilor noi (doua pivnite suprapuse raman doua)',
+    f: C,
+    a: '        else if (cq !== c) return false',
+    b: '        else if (cq !== c) void 0',
+    t: T, e: 'IDX-1: o gaura intre doua pivnite suprapuse',
+  },
+  {
+    n: 'IDX-1: calea rapida nu vede despartirea (galeria taiata ramane o componenta)',
+    f: C,
+    a: '    else if (r !== r0) return false',
+    b: '    else if (r !== r0) void 0',
     t: T, e: 'K05: o galerie lunga, acoperita si deschisa la gura',
   },
   {
