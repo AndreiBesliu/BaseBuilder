@@ -10,7 +10,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { componenta, componenteInchiseDe, componenteInchiseDeMemorat, cititor, nodStabil, nodW } from '../src/sim/acces.ts'
+import { componenta, componenteInchiseDe, componenteInchiseDeMemorat, cititor, nodStabil, nodW, siguraMemorat } from '../src/sim/acces.ts'
 import { componentaLa, esteIncapere, listaComponente } from '../src/sim/camere.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { DEFAULT_RULES, parseRules } from '../src/sim/content.ts'
@@ -128,6 +128,21 @@ test('USA: incaperea cu usa e sigilata, iar pionul dinauntru are drum afara (con
     const c = componentaLa(w.camere, wx + 2, wy + 2, g + 1)
     assert.ok(c && esteIncapere(c) && c.volum === 18, `cu usa=${cuUsa}: o incapere de 18 m3`)
     assert.deepEqual(blocati(w).length, cuUsa ? 0 : 1, `cu usa=${cuUsa}`)
+  }
+})
+
+test('USA: un santier de usa nu inchide golul in F — interiorul ramane SIGUR pentru scaner (controlul: un perete planificat il inchide)', () => {
+  for (const [piesa, sigur] of [[Piesa.USA, true], [Piesa.PERETE, false]] as const) {
+    const { w, wx, wy, g } = sitPlat(777, 10)
+    const t = w.terrain
+    for (let z = g + 1; z <= g + 2; z++) for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) {
+      if (dx !== 0 && dx !== 4 && dy !== 0 && dy !== 4) continue
+      if (dx === 2 && dy === 0) continue
+      assert.ok(fill(t, wx + dx, wy + dy, z, P).ok)
+    }
+    for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) assert.ok(fill(t, wx + dx, wy + dy, g + 3, P).ok)
+    for (const z of [g + 1, g + 2]) assert.ok(applyCommand(w, { kind: 'desemneaza', wx: wx + 2, wy, z, piesa }, R).ok)
+    assert.equal(siguraMemorat(t, w.desemnari, R, w.acces, wx + 2, wy + 2, g + 1), sigur, `piesa ${piesa}`)
   }
 })
 

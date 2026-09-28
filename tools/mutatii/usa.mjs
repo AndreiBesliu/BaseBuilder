@@ -32,7 +32,7 @@ export const MUTATII = [
     f: 'src/sim/acces.ts',
     a: '  return blocheazaMersul(rules.piese[piesa]!.material)',
     b: '  return rules.piese[piesa]!.material !== Material.AER',
-    t: T, e: 'USA: casa cu etaj, usa in gol si chepeng',
+    t: T, e: 'USA: un santier de usa nu inchide golul',
   },
   {
     n: 'previzualizarea pune usile in C',
@@ -53,13 +53,6 @@ export const MUTATII = [
     f: 'src/sim/acces.ts',
     a: '  if (sp !== -1 && !ePodea(rules.piese[d.piesa[sp]!]!.material)) return false',
     b: '  void sp',
-    t: T, e: 'USA (USA-1): dintr-o groapa, o usa nu e scapare',
-  },
-  {
-    n: 'USA-1: previzualizarea: privirea inainte si pe usa',
-    f: 'src/sim/acces.ts',
-    a: '      if (faraPodea !== null && faraPodea.has(cheie)) return false',
-    b: '      void faraPodea',
     t: T, e: 'USA (USA-1): dintr-o groapa, o usa nu e scapare',
   },
   {

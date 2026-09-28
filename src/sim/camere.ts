@@ -199,6 +199,11 @@ export function esteAerAcoperit(r: CititorCamere, x: number, y: number, z: numbe
   return esteAer(r, x, y, z) && esteAcoperita(r, x, y, z)
 }
 
+/** Cel mai înalt hotar al coloanei (x, y); `base − 1` dacă e toată aer; +∞ în afara lumii. */
+export function varfLa(r: CititorCamere, x: number, y: number): number {
+  return coloana(r, x, y).varf
+}
+
 /** Aer sub cerul liber. */
 export function esteCer(r: CititorCamere, x: number, y: number, z: number): boolean {
   return esteAer(r, x, y, z) && !esteAcoperita(r, x, y, z)

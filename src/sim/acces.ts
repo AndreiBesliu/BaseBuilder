@@ -1028,9 +1028,9 @@ export function predicatAcces(
         }
       }
       if (inchise.size === 0) return false
-      // Fara privire inainte pentru o piesa care nu e podea (usa): nu scoate pe nimeni.
-      if (faraPodea !== null && faraPodea.has(cheie)) return false
-      // Privirea inainte: celula de deasupra lui p, stabila cu p zidita?
+      // Privirea inainte: celula de deasupra lui p, stabila cu p zidita? Pentru o usa (`faraPodea`)
+      // nu: graful de mai jos n-o socoteste podea, deci celula de deasupra nu e calcabila — o garda
+      // separata aici era redundanta, iar proba ei a iesit RATATA.
       const sus = nodStabil({ t, plan, zidite, inPlus: cheie, faraPodea }, rules, r)
       if (!sus.calcabila(px, py, pz + 1)) return false
       vecine.clear()

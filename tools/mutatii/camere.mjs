@@ -6,6 +6,8 @@
 
 const T = 'tests/camere.test.ts'
 const C = 'src/sim/camere.ts'
+const TE = 'tests/camere-explica.test.ts'
+const E = 'src/sim/camere-explica.ts'
 
 export const MUTATII = [
   {
@@ -126,5 +128,41 @@ export const MUTATII = [
     a: '      rebuildDirty(w.terrain, w.regions, rules)\n      sincronizeazaCamere(w.camere, w.terrain)\n      return accept(0)',
     b: '      rebuildDirty(w.terrain, w.regions, rules)\n      return accept(0)',
     t: T, e: 'PUNCTELE FIXE',
+  },
+  // --- explicatia inspectorului (camere-explica.ts)
+  {
+    n: 'JUC-1: orice scurgere e LATERAL (gaura din acoperis devine „deschidere in perete")',
+    f: E,
+    a: "  if (!inchisa) return { directie: 'LATERAL', gaura: L }",
+    b: "  return { directie: 'LATERAL', gaura: L }",
+    t: TE, e: 'explica (JUC-1): o gaura in acoperis iese SUS',
+  },
+  {
+    n: 'gaura din acoperis raportata la cota podelei, nu a acoperisului',
+    f: E,
+    a: '    if (Number.isFinite(v) && v > h) h = v',
+    b: '    void v',
+    t: TE, e: 'explica (JUC-1): o gaura in acoperis iese SUS',
+  },
+  {
+    n: 'orice gol pe drum e o usa, si fara ingustare (usa in mijlocul unei pivnite late de 2)',
+    f: E,
+    a: '        if (inainte !== null && latimeGol(inainte) <= latimeGol(g)) continue',
+    b: '        void inainte',
+    t: TE, e: 'explica: o pivnita lata de 2',
+  },
+  {
+    n: 'promisiunea nu se verifica: „devine incapere" dupa prima usa, desi aerul iese si pe al doilea gol',
+    f: E,
+    a: '      if (dupa.inchisa) {',
+    b: '      if (dupa.inchisa || pas >= 0) {',
+    t: TE, e: 'explica: doua goluri',
+  },
+  {
+    n: 'usile se numara pe celule (o usa de doua celule = 2 usi)',
+    f: E,
+    a: '  return grupuri',
+    b: '  return usi.size',
+    t: TE, e: 'explica: incaperea cu usa',
   },
 ]
