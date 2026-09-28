@@ -13,7 +13,7 @@
 import type { Rules } from '../src/sim/content.ts'
 import { celuleUsii } from '../src/sim/camere-explica.ts'
 import type { Celula, LumeGol } from '../src/sim/camere-explica.ts'
-import { Desemnare, desemnareLaCelula } from '../src/sim/desemnari.ts'
+import { Desemnare, desemnareLaCelula, seSapaLa } from '../src/sim/desemnari.ts'
 import type { World } from '../src/sim/state.ts'
 import { CHUNK_CELLS, ePodea, isSolid, Material, VOXEL_LEVELS } from '../src/sim/terrain/chunk.ts'
 import type { Terrain } from '../src/sim/terrain/terrain.ts'
@@ -21,9 +21,12 @@ import { materialAt } from '../src/sim/terrain/terrain.ts'
 import type { Impact, V3 } from './tinta.ts'
 
 /**
- * Lumea PLANULUI pentru unealta Usa: terenul plus piesele desemnate. Un jucator isi deseneaza de obicei
+ * Lumea PLANULUI pentru unealta Usa: terenul plus desemnarile. Un jucator isi deseneaza de obicei
  * toata casa, cu golul usii, inainte sa se zideasca ceva — pe terenul gol, golul n-ar fi un gol. O usa
  * (zidita sau desemnata) conteaza ca aer: un al doilea clic pe un gol pe jumatate desemnat il completeaza.
+ * La fel o celula solida desemnata la SAPAT: golul unei pivnite desenate, dar nesapate, e un gol (EXP-8,
+ * ECR-9). (`podea` ramane a terenului si a pieselor: golDeUsa o intreaba sub coloana de aer a golului,
+ * iar o celula desemnata la sapat intra in coloana.)
  */
 export function lumePlan(w: World, rules: Rules): LumeGol {
   const mat = (x: number, y: number, z: number): number => {
@@ -35,10 +38,11 @@ export function lumePlan(w: World, rules: Rules): LumeGol {
     if (s === -1 || w.desemnari.kind[s] !== Desemnare.CONSTRUIESTE) return null
     return rules.piese[w.desemnari.piesa[s]!]!.material
   }
+  const sapat = (x: number, y: number, z: number): boolean => isSolid(mat(x, y, z)) && seSapaLa(w.desemnari, x, y, z)
   return {
     aer: (x, y, z) => {
       const m = mat(x, y, z)
-      if (m !== Material.AER && m !== Material.USA) return false
+      if (m !== Material.AER && m !== Material.USA) return sapat(x, y, z)
       const p = piesa(x, y, z)
       return p === null || p === Material.USA
     },

@@ -308,11 +308,13 @@ export const MUTATII = [
   },
   // --- explicatia inspectorului (camere-explica.ts)
   {
+    // Tinta s-a mutat (recenzia, EXP-2): fara niciun gol pe drum, umplerea cerului da SUS si fara regula
+    // locala; regula locala decide singura cand pe drum e un gol de usa.
     n: 'JUC-1: orice scurgere e LATERAL (gaura din acoperis devine „deschidere in perete")',
     f: E,
     a: "  if (acoperite < 2 && cer > 0) return { directie: 'LATERAL', gaura: L }",
     b: "  return { directie: 'LATERAL', gaura: L }",
-    t: TE, e: 'explica (JUC-1): o gaura in acoperis iese SUS',
+    t: TE, e: 'explica (JUC-1): gaura in acoperisul camerei de dincolo de un gol de usa',
   },
   {
     n: 'putul (niciun vecin de cer) iese LATERAL, „gol in perete" la capatul coridorului',
@@ -331,8 +333,8 @@ export const MUTATII = [
   {
     n: 'gaura din acoperis raportata la cota podelei, nu a acoperisului',
     f: E,
-    a: '    if (Number.isFinite(v) && v > h) h = v',
-    b: '    void v',
+    a: '  return { x: L.x, y: L.y, z: Number.isFinite(v) && v > L.z ? v : L.z }',
+    b: '  return { x: L.x, y: L.y, z: L.z }',
     t: TE, e: 'explica (JUC-1): o gaura in acoperis iese SUS',
   },
   {

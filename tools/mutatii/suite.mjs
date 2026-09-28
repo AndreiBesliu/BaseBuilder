@@ -35,5 +35,6 @@ export const SUITE = [
   { nume: 'resurse', despre: 'mormanele de resurse pe ecran: treapta, rotatia, instantele, culoarea din fisier', M: resurse },
   { nume: 'camere', despre: 'S24-27 t.1: incaperile — indexul pe bucati, apa, fantomele, colturile de chunk, punctele fixe', M: camere },
   { nume: 'usa', despre: 'S24-27 t.1: usa — mersul, privirea inainte, sigilarea, refugiul, previzualizarea, zonele, continutul', M: usa },
+  { nume: 'explica', despre: 'recenzia incaperilor, B: explicatia (stalpul, acoperisul neterminat, cota gaurii, bugetul, chepengul, gropile, podeaua)', M: (await import('./explica.mjs')).MUTATII },
   { nume: 'unelte', despre: 'instrumentele: harnasamentul de mutatii (doar testul numit)', M: unelte },
 ]
