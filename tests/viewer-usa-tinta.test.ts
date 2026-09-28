@@ -136,9 +136,12 @@ test('usa pe ecran (ECR-1): raza care nu atinge nimic prin gol (crapatura, cer) 
 test('usa pe ecran (ECR-1): cu nivelul pornit, doar golurile de la nivelul activ in jos', () => {
   const { w, wx, wy, g } = sitPlat(12345, 12)
   casa(w, wx, wy, g, 5, (i, j) => (i === 2 && j === 0 ? 'aer' : null))
-  const r = razaSpre({ x: wx + 2.5, y: g + 1.5, z: wy }, 35)
-  // Nivelul activ g+1 (slice g+2): golul incepe acolo.
-  assert.deepEqual(rel(tintesteUsa(w, r, g + 2).gol, wx, wy, g), [[2, 0, 1], [2, 0, 2]])
+  const r = razaSpre({ x: wx + 2.5, y: g + 1.8, z: wy }, 35)
+  // Nivelul activ g+1 (slice g+2): golul incepe acolo. Controlul: coloana nivelului e in camera, dincolo
+  // de gol (verificatorul: la 35° frontal, cu nivelul pornit, 29 % din pixelii golului erau refuzati).
+  const cuNivel = tintesteUsa(w, r, g + 2)
+  assert.ok(cuNivel.t.ok && cuNivel.t.wy > wy && cuNivel.generic === null, JSON.stringify(cuNivel.t))
+  assert.deepEqual(rel(cuNivel.gol, wx, wy, g), [[2, 0, 1], [2, 0, 2]])
   // Nivelul activ g (solul): golul e deasupra planului de taiere, nu se vede.
   assert.equal(tintesteUsa(w, r, g + 1).gol, null)
 })
