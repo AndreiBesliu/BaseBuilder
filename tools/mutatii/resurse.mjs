@@ -34,4 +34,25 @@ export const MUTATII = [
     b: '  return x <= 0.0031308 ? x * 12.92 : 1.055 * x ** 2.4 - 0.055',
     t: T, e: 'resurse: culoarea liniara din fisier',
   },
+  {
+    n: 'ECR-1: pe voxelii netezisi se ia diagonala heightfield-ului (b–c), nu a quadului (a–d)',
+    f: 'src/render/cota.ts',
+    a: '  return u >= w ? a + (b - a) * u + (d - b) * w : a + (c - a) * w + (d - c) * u',
+    b: '  return u + w <= 1 ? a + (b - a) * u + (c - a) * w : d + (c - d) * (1 - u) + (b - d) * (1 - w)',
+    t: T, e: 'resurse: cota vizuala = fata desenata',
+  },
+  {
+    n: 'ECR-1: o coloana sapata tot „netezita" (mormanul din groapa pluteste la cota terenului de dinainte)',
+    f: 'src/render/cota.ts',
+    a: '  if (promovat && (!solidLa(t, wx, wy, g) || solidLa(t, wx, wy, g + 1))) return z',
+    b: '  if (false) return z',
+    t: T, e: 'resurse: cota vizuala = fata desenata',
+  },
+  {
+    n: 'ECR-1: instantele poarta iar nivelul intreg al celulei',
+    f: 'viewer/resurse.ts',
+    a: 'y: cotaVizuala(w.terrain, it.wx[i]! + 0.5, it.wy[i]! + 0.5, it.z[i]!),',
+    b: 'y: it.z[i]!,',
+    t: T, e: 'resurse: instantele poarta cota vizuala',
+  },
 ]

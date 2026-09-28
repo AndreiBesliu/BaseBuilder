@@ -12,12 +12,12 @@ import { codMotiv, Reason } from '../src/sim/result.ts'
 import { DetaliuMotiv } from '../src/sim/desemnari.ts'
 import { rezervariPentru, Strat } from '../src/sim/rezervari.ts'
 import { StareRatiune } from '../src/sim/joburi.ts'
-import { Zona } from '../src/sim/zone.ts'
+import { indexZone, vedereFaraDepozit, Zona } from '../src/sim/zone.ts'
 import { materialAt } from '../src/sim/terrain/terrain.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
 import { tick } from '../src/sim/world.ts'
 import type { World } from '../src/sim/state.ts'
-import { activitatePion, cauzaGolirii, creeazaPrevizualizare, inspecteazaCelula, inspecteazaPion, rezumatColonie, semnaleAlerte, stareDesemnare } from '../viewer/ui/model.ts'
+import { activitatePion, cauzaGolirii, creeazaPrevizualizare, refacePrevizualizarea, inspecteazaCelula, inspecteazaPion, rezumatColonie, semnaleAlerte, stareDesemnare } from '../viewer/ui/model.ts'
 import { actualizeaza, creeazaAlerte, REGULI_ALERTE } from '../viewer/ui/alerte.ts'
 import { laSit, lasaItem, patratPlat, picteaza, R, solid } from './fixturi.ts'
 import type { Sit } from './fixturi.ts'
@@ -106,6 +106,23 @@ test('MOD-1: depozit cu loc ⇒ alerta nu apare; pictat dupa, dispare in 1 s si 
   assert.equal(r.apare.length, 1, 'fara nicio zona, alerta trebuie sa apara intai')
   assert.equal(r.dispare.length, 1)
   assert.ok(r.dispare[0]! - pictat <= R.ticksPerSecond, `a disparut la ${r.dispare[0]! - pictat} tickuri dupa pictare`)
+})
+
+test('MOD-1: vedereFaraDepozit pe indexul LA ZI — un morman cu loc in depozit nu e „fara depozit"; fara loc, da', () => {
+  // Scenariile cu pioni nu prind ramura asta: cat se cara, indexul sta murdar (masurat de verificator).
+  // Aici indexul se reconstruieste explicit — testul scrie in lume, e fixtura.
+  const { w, sit } = laSit(4242, 1)
+  const p = patratPlat(w, sit, 1, 10, 60)!
+  picteaza(w, p.x0, p.y0, 1)
+  const a = lasaItem(w, Item.PIATRA, 50, sit.wx + 3, sit.wy + 6)
+  indexZone(w, R)
+  assert.equal(w.zone.index.murdar, false)
+  assert.equal(vedereFaraDepozit(w).esteFaraDepozit(w.iteme.laId.get(a)!), false, '50 incap in celula goala de 75')
+  lasaItem(w, Item.PIATRA, 75, p.x0, p.y0)
+  indexZone(w, R)
+  const v = vedereFaraDepozit(w)
+  assert.equal(v.esteFaraDepozit(w.iteme.laId.get(a)!), true, 'depozitul e plin')
+  assert.equal(v.depozite, 1)
 })
 
 test('MOD-5: un loc de dormit nu e depozit (bara de sus, inspectorul, „nimeni-cara")', () => {
@@ -448,4 +465,25 @@ test('T-06: previzualizarea se reface si cand se schimba TERENUL (o sapatura sub
   assert.ok(applyCommand(w, { kind: 'dig', wx: sit.wx + 3, wy: sit.wy, z: g }, R).ok)
   p.ia(w, R)
   assert.equal(p.calculari(), 2)
+})
+
+test('C2-2: o previzualizare SCUMPA nu se reface periodic cat se zideste — doar la actiune, plan nou, pauza', () => {
+  const baza = { proaspat: false, areMemorie: true, planSchimbat: false, pauza: false, ultimaMs: 50, trecutMs: 60_000 }
+  assert.equal(refacePrevizualizarea(baza), false, 'scumpa, planul neschimbat, jocul merge: niciodata periodic')
+  assert.equal(refacePrevizualizarea({ ...baza, ultimaMs: 8, trecutMs: 999 }), false, 'ieftina: nu mai des de o data pe secunda')
+  assert.equal(refacePrevizualizarea({ ...baza, ultimaMs: 8, trecutMs: 1_000 }), true)
+  for (const k of ['proaspat', 'planSchimbat', 'pauza'] as const) assert.equal(refacePrevizualizarea({ ...baza, [k]: true }), true, k)
+  assert.equal(refacePrevizualizarea({ ...baza, areMemorie: false }), true)
+})
+
+test('ECR-11: inspectorul arata lucrarea celulei atinse; pe cea de deasupra doar cand pe cea atinsa nu e nimic', () => {
+  const { w, sit } = laSit(7171, 1)
+  const p = patratPlat(w, sit, 3, 6, 40)!
+  const jos = applyCommand(w, { kind: 'desemneaza', wx: p.x0, wy: p.y0, z: p.g + 1, piesa: Piesa.PERETE }, R)
+  const sus = applyCommand(w, { kind: 'desemneaza', wx: p.x0, wy: p.y0, z: p.g + 2, piesa: Piesa.PERETE }, R)
+  assert.ok(jos.ok && sus.ok)
+  // Clic pe cubul de la sol+1: doar el, nu si cel de deasupra (doua „Lucrare" identice).
+  assert.deepEqual(inspecteazaCelula(w, R, p.x0, p.y0, p.g + 1, null).desemnari.map((d) => d.z), [p.g + 1])
+  // Clic pe sol (nimic desemnat acolo): lucrarea de deasupra lui, unde s-ar sta.
+  assert.deepEqual(inspecteazaCelula(w, R, p.x0, p.y0, p.g, null).desemnari.map((d) => d.z), [p.g + 1])
 })

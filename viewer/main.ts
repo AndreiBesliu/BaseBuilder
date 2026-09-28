@@ -1332,6 +1332,14 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
   const m = modificatori(ev)
   const u = unealtaTragerii(m)
   if (u === null) return
+  if (u === Unealta.ANULEAZA && !jobOverlay.visible) {
+    // Anulează retrage „doar ce se vede": cu Planul stins nu se vede nicio lucrare, iar o tragere
+    // peste teren gol stergea munca desenata acolo (recenzia UI-ului, ECR-12). Gestul aprinde Planul.
+    comutaJ()
+    ui.toast('Planul era stins: acum se văd lucrările. Trage din nou ca să le retragi.')
+    clickConsumat = true
+    return
+  }
   const t = tintaLa(ev.clientX, ev.clientY, m)
   // Apasarea pe cer nu porneste nimic.
   if (!t.ok) return
@@ -1550,6 +1558,13 @@ function seteazaNivel(cota: number | null): void {
 }
 function nivelJos(): void {
   const { lo, hi } = plajaSlice()
+  if (sliceLevel === null && ui !== null) {
+    // In joc, primul Q porneste la solul de sub camera: in varful ferestrei (sol +37), Construiește
+    // desena acolo, nevazut (recenzia UI-ului, ECR-5). Fara UI (verificare, gate), ca la 3613652.
+    const g = groundLevelM(world.terrain, Math.floor(controls.target.x), Math.floor(controls.target.z))
+    seteazaNivel(g.ok ? Math.max(lo, Math.min(hi, g.value + 2)) : hi)
+    return
+  }
   seteazaNivel(sliceLevel === null ? hi : Math.max(lo, Math.min(hi, sliceLevel - 1)))
 }
 function nivelSus(): void {

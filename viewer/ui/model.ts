@@ -360,6 +360,20 @@ export function creeazaPrevizualizare(ceas: () => number = () => 0): { ia(w: Wor
   }
 }
 
+/** Peste atat, o previzualizare e SCUMPA: nu se mai reface periodic, ca la stabilitate (S). */
+export const PREVIZ_SCUMPA_MS = 8
+
+/**
+ * Se reface ACUM previzualizarea din memoria UI-ului (alertele, inspectorul)? Una ieftina, cel mult o
+ * data pe secunda; una scumpa doar la o actiune a jucatorului, cand s-a schimbat PLANUL si in pauza.
+ * „O data la 10 s" era, cat se zidea un plan mare, un inghet de 43–60 ms la 10 s: fiecare piesa
+ * zidita ii schimba cheia (recenzia UI-ului, C2-2).
+ */
+export function refacePrevizualizarea(o: { readonly proaspat: boolean; readonly areMemorie: boolean; readonly planSchimbat: boolean; readonly pauza: boolean; readonly ultimaMs: number; readonly trecutMs: number }): boolean {
+  if (o.proaspat || !o.areMemorie || o.planSchimbat || o.pauza) return true
+  return o.ultimaMs <= PREVIZ_SCUMPA_MS && o.trecutMs >= 1_000
+}
+
 // ---------------------------------------------------------------------------------------------
 // celula
 // ---------------------------------------------------------------------------------------------
@@ -503,10 +517,13 @@ export function inspecteazaCelula(w: World, rules: Rules, wx: number, wy: number
   const sus = materialAt(w.terrain, wx, wy, z + 1)
   const d = w.desemnari
   const desemnari: InspectieDesemnare[] = []
+  // Celula atinsa intai; cea de deasupra (unde s-ar sta) doar cand pe cea atinsa nu e nimic. Cu
+  // amandoua, un zid inalt arata doua „Lucrare" identice (recenzia UI-ului, ECR-11).
   for (const zz of [z, z + 1]) {
     const ds = desemnareLaCelula(d, wx, wy, zz)
     if (ds === -1) continue
     desemnari.push({ id: d.id[ds]!, wx, wy, z: zz, piesa: d.piesa[ds]!, prioritate: d.prioritate[ds]!, stare: stareDesemnare(w, rules, ds, previz) })
+    break
   }
   let morman: InspectieMorman | null = null
   const is = itemLaCelula(w.iteme, wx, wy, z + 1)

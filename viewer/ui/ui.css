@@ -145,14 +145,17 @@
 .ui-oameni table { border-collapse: collapse; width: 100%; font-size: 12px; }
 .ui-oameni th { position: sticky; top: 0; background: var(--ui-bg-2); text-align: left; font-weight: 600; color: var(--ui-ink-2); padding: 4px 4px; cursor: pointer; user-select: none; white-space: nowrap; }
 .ui-oameni td { padding: 3px 4px; border-top: 1px solid var(--ui-line); white-space: nowrap; }
-.ui-oameni td.act { white-space: normal; max-width: 110px; }
+.ui-oameni td.act { white-space: normal; max-width: 150px; }
+/* Cu fila Oameni, sertarul se lateste: la 330 px, coloanele de munca si distanta erau ascunse dupa o
+   bara de derulare (masurat: scrollWidth 421 in 312 — recenzia UI-ului, ECR-2). */
+.ui-dreapta:has(.ui-oameni:not([hidden])) { width: 470px; }
 .ui-oameni tr.ales td { background: rgba(99, 174, 192, .16); }
 .ui-oameni tbody tr { cursor: pointer; }
 .ui-oameni tbody tr:hover td { background: var(--ui-bg-3); }
 .ui-oameni .ui-bara { width: 38px; }
 
 /* ---- carduri, toast ------------------------------------------------------------------------ */
-.ui-toasturi { position: fixed; bottom: 112px; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+.ui-toasturi { position: fixed; bottom: 132px; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
 .ui-toast { display: flex; gap: 10px; align-items: center; padding: 8px 10px 8px 14px; border-radius: var(--ui-r); background: var(--ui-bg-2); border: 1px solid var(--ui-line-2); max-width: min(760px, 90vw); pointer-events: auto; }
 .ui-toast.refuz { border-color: var(--ui-warn); }
 .ui-toast .ui-btn { border-color: var(--ui-line); height: 26px; }

@@ -195,6 +195,17 @@ async function ruleaza() {
     const r = await p.js(`({ titlu: !!document.querySelector('.ui-titlu'), butoane: document.querySelectorAll('.ui-titlu button').length, hud: document.getElementById('hud').hidden, mod: __kinstead.mod })`)
     bifa('titlu', r.titlu && r.butoane === 4 && r.hud, 'fara parametri: ecranul de titlu cu 4 butoane, HUD-ul ascuns', JSON.stringify(r))
     await p.poza('1-titlu.png')
+    // Ajutorul deschis de pe titlu: „Înapoi" si Esc duc la titlu, nu in demo (ECR-8).
+    await p.js(`[...document.querySelectorAll('.ui-titlu button')].find((b) => b.textContent === 'Ajutor')?.click(); true`)
+    await astepta(200)
+    const inapoi = await p.js(`(() => { const b = [...document.querySelectorAll('.ui-fereastra button')].find((x) => x.textContent === 'Înapoi'); b?.click(); return !!b })()`)
+    await astepta(200)
+    const dupaInapoi = await p.js(`!!document.querySelector('.ui-titlu')`)
+    await p.js(`[...document.querySelectorAll('.ui-titlu button')].find((b) => b.textContent === 'Ajutor')?.click(); true`)
+    await astepta(200)
+    await p.tasta('Escape')
+    const dupaEsc = await p.js(`!!document.querySelector('.ui-titlu')`)
+    bifa('ajutor-titlu', inapoi && dupaInapoi && dupaEsc, 'Ajutorul deschis de pe titlu: „Înapoi" si Esc duc la titlu', JSON.stringify({ inapoi, dupaInapoi, dupaEsc }))
     // Peste intervalul salvarii automate si peste minutul de asteptare: la 5 + 1 minute de joc, demo-ul
     // scria „auto" peste jocul jucatorului. Timpul se sare (`tick`), nu se asteapta 6 minute.
     await p.js('__kinstead.world.tick += 20 * 60 * 7; true')
@@ -213,6 +224,31 @@ async function ruleaza() {
     await astepta(1500)
     const m = await p.js(`({ plase: __kinstead.stratResurse?.plase?.size ?? 0, desenate: __kinstead.stratResurse?.desenate ?? -1, eroare: __kinstead.stratResurse?.eroare ?? null, icoane: [...document.querySelectorAll('.ui-res img')].filter((i) => i.naturalWidth === 128).length })`)
     bifa('mormane', m.plase === 12 && m.desenate === 25 && m.eroare === null && m.icoane === 4, 'joc nou: cele 12 plase din Blender incarcate, 25 de mormane desenate, 4 iconite in bara de sus', JSON.stringify(m))
+    // Baza fiecarui morman pe fata DESENATA a terenului: o raza verticala pe mesh-urile de teren (three
+    // din pagina), comparata cu cota instantei — oracolul nu trece prin functia testata (ECR-1).
+    const sol = await p.js(`(async () => {
+      const url = performance.getEntriesByType('resource').map((e) => e.name).find((n) => /deps\\/three\\.js/.test(n))
+      if (!url) return { n: -1, url: null }
+      const T = await import(url)
+      const K = __kinstead
+      const teren = [...K.meshes.values()]
+      const rc = new T.Raycaster(), jos = new T.Vector3(0, -1, 0), mat = new T.Matrix4(), v = new T.Vector3()
+      let n = 0, maxim = 0
+      const rele = []
+      for (const im of K.stratResurse.plase.values()) for (let k = 0; k < im.count; k++) {
+        im.getMatrixAt(k, mat); v.setFromMatrixPosition(mat)
+        rc.set(new T.Vector3(v.x, v.y + 6, v.z), jos); rc.far = 30
+        const h = rc.intersectObjects(teren, false)[0]
+        if (!h) continue
+        n++
+        const d = Math.abs(h.point.y - v.y)
+        if (d > maxim) maxim = d
+        if (d > 0.02) rele.push([Math.floor(v.x), Math.floor(v.z), +(h.point.y - v.y).toFixed(3)])
+      }
+      return { n, maxim: +maxim.toFixed(4), rele: rele.slice(0, 6) }
+    })()`)
+    if (sol.n === -1) console.log('(fara bifa „mormane-pe-sol": three nu se poate importa separat pe un build de productie)')
+    else bifa('mormane-pe-sol', sol.n === 25 && sol.rele.length === 0, 'joc nou: fiecare morman sta pe fata desenata a terenului (cel mult 2 cm)', JSON.stringify(sol))
     await p.poza('2-joc-nou.png')
   }
   // Pauza (Spatiu): pionii nu apuca sa termine sapaturi intre tragere si numarare. Bifa se uita la LUME
@@ -224,6 +260,20 @@ async function ruleaza() {
     const r = await p.js(`({ t: __kinstead.world.tick, buton: document.querySelector('.ui-sus button[title^="Pornește"]') !== null, modal: __kinstead.ui.modalDeschis() })`)
     bifa('pauza', r.t === t0 && r.buton && !r.modal, 'Spatiu pune pauza: tickul sta pe loc 1,5 s, butonul spune „Pornește"', `${t0} → ${r.t}; ${JSON.stringify(r)}`)
     if (NEGATIVA === 'pauza') await p.tasta(' ')
+  }
+  // Primul Q porneste nivelul la solul de sub camera (ECR-5), nu in varful ferestrei.
+  {
+    await p.tasta('r')
+    await p.tasta('q')
+    await astepta(400)
+    const rel = await p.js(`document.querySelector('.ui-nivel .rel')?.textContent ?? ''`)
+    await p.tasta('r')
+    bifa('primul-q', /^(la sol|sol \+1)$/.test(rel), 'primul Q: nivelul la solul de sub camera', rel)
+    // La 1280×720, marimile 125% si 150% nu incap: nu se pot alege (ECR-3).
+    await p.tasta('Escape')
+    const marimi = await p.js(`[...document.querySelectorAll('.ui-fereastra button')].filter((b) => /^\\d+%$/.test(b.textContent)).map((b) => ({ t: b.textContent, off: b.disabled, ales: b.getAttribute('aria-pressed') }))`)
+    await p.tasta('Escape')
+    bifa('marimi', marimi.length === 3 && !marimi[0].off && marimi[0].ales === 'true' && marimi[1].off && marimi[2].off, 'la 1280×720: 100% ales, 125% si 150% dezactivate (nu incap)', JSON.stringify(marimi))
   }
   // Un patrat plat langa oameni: locul ales de `locJocNou` are o fereastra 7×7 plata in centru.
   const loc = await p.js(`(() => { const a = __kinstead.world.agents; const x = Math.floor(a.x[0] / 1000), y = Math.floor(a.y[0] / 1000); return { x, y, z: a.z[0] } })()`)
@@ -326,10 +376,19 @@ async function ruleaza() {
     const interior = pereti.filter((d) => d.wx > x0 && d.wx < x0 + 6 && d.wy > y0 && d.wy < y0 + 6)
     bifa('perete', pereti.length === 24 && interior.length === 0, 'Construieste perete, dreptunghi 7×7: 24 de piese, doar pe contur', `${pereti.length}, ${interior.length} in interior; toast: ${await p.js('__f.toast()')}`)
     await p.poza('4-perete.png')
+    // Anulează cu Planul stins: gestul aprinde Planul, nu retrage lucrarile nevazute (ECR-12).
+    await p.tasta('a')
+    if (await p.js('__kinstead.jobOverlay.visible')) await p.tasta('j')
+    const inainte = await p.js('__f.des().length')
+    await p.trage([x0, y0], [x0 + 6, y0 + 6], sol + 1)
+    const r = await p.js(`({ n: __f.des().length, j: __kinstead.jobOverlay.visible })`)
+    bifa('anuleaza-plan-stins', r.n === inainte && r.j, 'Anulează cu Planul stins: aprinde Planul, nu retrage nimic nevazut', `${inainte} → ${r.n}; J ${r.j}`)
   }
   // --- 6b. doua dreptunghiuri, al doilea eliberat cat primul inca se aplica feliat (INT-4) ---
   {
     await p.tasta('d')
+    // Toasturile de dinainte se stivuiesc jos, peste colturile celui de-al doilea dreptunghi.
+    await p.js(`document.querySelectorAll('.ui-toast').forEach((t) => t.remove()); true`)
     const inainte = await p.js('__f.des().length')
     // 40×40 = 1.600 de comenzi (patru felii de 512), departe de inelul de mormane (6..36 in jurul startului).
     const A = [loc.x + 45, loc.y - 20], B = [loc.x + 84, loc.y + 19]
@@ -395,6 +454,8 @@ async function ruleaza() {
     await astepta(600)
     await p.tasta('o')
     await astepta(500)
+    const lat = await p.js(`(() => { const c = document.querySelector('.ui-oameni'); return { sw: c.scrollWidth, cw: c.clientWidth } })()`)
+    bifa('sertar-oameni', lat.sw <= lat.cw, 'sertarul Oameni: toate coloanele se vad, fara derulare orizontala', JSON.stringify(lat))
     // Randurile pe rand, pana la primul om care nu e cel urmarit (jocul e in pauza: nimeni nu se misca).
     const bid = await p.js(`(async () => { for (const tr of document.querySelectorAll('.ui-oameni tbody tr')) { tr.click(); await new Promise((r) => setTimeout(r, 60)); const s = __kinstead.ui.pionSelectat(); if (s !== null && s !== ${pion.id}) return s } return null })()`)
     const b = bid === null ? null : await p.js(`(() => { const a = __kinstead.world.agents; for (let i = 0; i < a.count; i++) if (a.alive[i] && a.id[i] === ${bid}) return { id: ${bid}, slot: i }; return null })()`)
@@ -455,11 +516,23 @@ async function ruleaza() {
     for (const k of ['s', 'j', 'q', 't', ' ']) await q.tasta(k)
     const ov1 = await q.js(`[__kinstead.stabOverlay.visible, __kinstead.jobOverlay.visible, document.getElementById('slice').textContent]`)
     bifa('camp-text', deschis && JSON.stringify(ov0) === JSON.stringify(ov1), 'literele tastate in campul „Sămânța lumii" nu comuta nimic', JSON.stringify({ deschis, ov0, ov1 }))
+    // Un camp golit nu porneste o colonie fara piatra (ECR-10).
+    const cautare0 = await q.js('location.search')
+    await q.js(`(() => { const i = document.querySelector('.ui-fereastra input[name=piatra]'); i.value = ''; [...document.querySelectorAll('.ui-fereastra button')].find((b) => b.textContent === 'Pornește').click(); return true })()`)
+    await astepta(400)
+    const gol = await q.js(`({ s: location.search, err: document.querySelector('.ui-fereastra .ui-motiv:not([hidden])')?.textContent ?? '' })`)
+    bifa('camp-gol', gol.s === cautare0 && /Piatră/.test(gol.err), 'Joc nou cu campul Piatră gol: nu porneste, spune ce lipseste', JSON.stringify(gol))
     await q.poza('6-joc-nou-dialog.png')
     // Esc pana nu mai e nicio fereastra (Esc fara fereastra deschide meniul). Intai focusul iese din
     // campul de text: acolo Esc nu face nimic (garda de camp, taste.ts).
     await q.js('document.activeElement?.blur(); true')
     for (let i = 0; i < 4 && await q.js('__kinstead.ui.modalDeschis()'); i++) await q.tasta('Escape')
+    // --- 10a. F1 la 1280×720: fereastra Ajutorului incepe de sus (ECR-9) ---
+    await q.tasta('F1')
+    await astepta(200)
+    const aj = await q.js(`(() => { const f = document.querySelector('.ui-fereastra'); return { sus: f?.scrollTop ?? -1, titlu: f?.querySelector('h2')?.textContent ?? null } })()`)
+    for (let i = 0; i < 4 && await q.js('__kinstead.ui.modalDeschis()'); i++) await q.tasta('Escape')
+    bifa('ajutor-sus', aj.sus === 0 && aj.titlu === 'Cum se joacă', 'F1: Ajutorul se deschide de sus, cu titlul vizibil', JSON.stringify(aj))
     // --- 10b. B (amprenta) stinge Planul cat e aprinsa, si il reaprinde la iesire (V4) ---
     const j0 = await q.js('__kinstead.jobOverlay.visible')
     const inainteB = await q.js(`({ modal: __kinstead.ui.modalDeschis(), focus: document.activeElement?.tagName ?? null })`)

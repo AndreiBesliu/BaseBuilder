@@ -310,14 +310,26 @@ def aseaza_in_amprenta(ob):
             v.co.z *= k
 
 
-def randeaza(obiecte, fisier, latime, inaltime, pas):
-    """Workbench cu culoarea pe varf: iconitele si foaia arata culorile exact, fara lumina scumpa."""
+def randeaza(obiecte, fisier, latime, inaltime, pas, icoana=False):
+    """
+    Workbench cu culoarea pe varf: iconitele si foaia arata culorile exact, fara lumina scumpa.
+
+    `icoana`: desenul umple patratul (incadrare pe conturul proiectat), mai luminos si cu contur
+    deschis. La 20 px in bara de sus, randarea foii (desen pe ~20% din patrat, transformarea implicita
+    a lui Blender, care intuneca) dadea pete cu contrast 1,3–2,1:1 fata de bara (recenzia UI-ului, ECR-6).
+    """
     sc = bpy.context.scene
     sc.render.engine = 'BLENDER_WORKBENCH'
     sc.display.shading.light = 'STUDIO'
     sc.display.shading.color_type = 'VERTEX'
-    sc.display.shading.show_shadows = True
+    # In iconita, umbra proiectata pe obiect doar il intuneca: la 20 px nu se citeste ca forma.
+    sc.display.shading.show_shadows = not icoana
     sc.display.shading.show_cavity = True
+    # „Standard": culorile paletei asa cum sunt; implicitul (AgX) le intuneca si le spala.
+    sc.view_settings.view_transform = 'Standard'
+    sc.view_settings.exposure = 1.5 if icoana else 0.0
+    sc.display.shading.show_object_outline = icoana
+    sc.display.shading.object_outline_color = (0.93, 0.90, 0.82)
     sc.render.film_transparent = True
     sc.render.resolution_x = latime
     sc.render.resolution_y = inaltime
@@ -342,6 +354,15 @@ def randeaza(obiecte, fisier, latime, inaltime, pas):
     cam.location = centru + directie * 6
     cam.rotation_euler = (-directie).to_track_quat('-Z', 'Y').to_euler()
     cam.data.ortho_scale = len(obiecte) * pas * 1.02 if len(obiecte) > 1 else 1.12
+    if icoana:
+        # Incadrarea pe conturul PROIECTAT al obiectului: 90% din patrat, centrat.
+        bpy.context.view_layer.update()
+        inv = cam.matrix_world.inverted()
+        pts = [inv @ (o.matrix_world @ v.co) for o in obiecte for v in o.data.vertices]
+        x0, x1 = min(p.x for p in pts), max(p.x for p in pts)
+        y0, y1 = min(p.y for p in pts), max(p.y for p in pts)
+        cam.location = cam.matrix_world @ Vector(((x0 + x1) / 2, (y0 + y1) / 2, 0))
+        cam.data.ortho_scale = max(x1 - x0, y1 - y0) / 0.9
     sc.camera = cam
     sc.render.filepath = fisier
     bpy.ops.render.render(write_still=True)
@@ -380,7 +401,7 @@ def main():
     if icoane:
         os.makedirs(icoane, exist_ok=True)
         for fel in fabrici:
-            randeaza([obiecte[f'{fel}_2']], os.path.abspath(os.path.join(icoane, f'{fel}.png')), 128, 128, 1.2)
+            randeaza([obiecte[f'{fel}_2']], os.path.abspath(os.path.join(icoane, f'{fel}.png')), 128, 128, 1.2, icoana=True)
         print('iconite:', icoane)
 
     foaie = arg('--foaie')

@@ -23,7 +23,7 @@ export const MUTATII = [
     f: 'src/sim/zone.ts',
     a: '      if (deMutat !== null) return !deMutat.has(i)',
     b: '      if (deMutat !== null) return true',
-    t: REC, e: 'MOD-1: depozit cu loc',
+    t: REC, e: 'MOD-1: vedereFaraDepozit pe indexul LA ZI',
   },
   {
     n: 'MOD-1: inspectorul nu mai intreaba de depozit (inapoi la „Pe jos: așteaptă un cărăuș")',
@@ -158,6 +158,21 @@ export const MUTATII = [
     a: "    case Reason.CELULA_OCUPATA: return { titlu: 'Cineva stă chiar acolo.', actiune: 'Încearcă din nou după ce pleacă.' }",
     b: "    case Reason.CELULA_OCUPATA: return { titlu: 'Cineva stă chiar acolo.', actiune: 'Se face după ce pleacă.' }",
     t: PUR, e: 'texte: CELULA_OCUPATA',
+  },
+  // --- C2-2, ECR-11 ---
+  {
+    n: 'C2-2: previzualizarea scumpa se reface iar periodic (la 10 s) cat se zideste',
+    f: 'viewer/ui/model.ts',
+    a: '  return o.ultimaMs <= PREVIZ_SCUMPA_MS && o.trecutMs >= 1_000',
+    b: '  return o.trecutMs >= (o.ultimaMs <= PREVIZ_SCUMPA_MS ? 1_000 : 10_000)',
+    t: REC, e: 'C2-2: o previzualizare SCUMPA',
+  },
+  {
+    n: 'ECR-11: inspectorul arata iar si lucrarea de deasupra (doua „Lucrare" identice)',
+    f: 'viewer/ui/model.ts',
+    a: '    desemnari.push({ id: d.id[ds]!, wx, wy, z: zz, piesa: d.piesa[ds]!, prioritate: d.prioritate[ds]!, stare: stareDesemnare(w, rules, ds, previz) })\n    break\n',
+    b: '    desemnari.push({ id: d.id[ds]!, wx, wy, z: zz, piesa: d.piesa[ds]!, prioritate: d.prioritate[ds]!, stare: stareDesemnare(w, rules, ds, previz) })\n',
+    t: REC, e: 'ECR-11: inspectorul arata lucrarea',
   },
   // --- INT-10: modul de verificare tinteste ca la 3613652 ---
   {

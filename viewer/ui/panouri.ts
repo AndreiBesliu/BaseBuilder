@@ -19,7 +19,7 @@ import { CATEGORII, Faction, Item, Piesa } from '../../src/sim/state.ts'
 import { Zona } from '../../src/sim/zone.ts'
 import { ascuns, attr, clasa, h, text } from './dom.ts'
 import { ICON } from './iconite.ts'
-import { cauzaGolirii, creeazaPrevizualizare, golita, inspecteazaCelula, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte } from './model.ts'
+import { cauzaGolirii, creeazaPrevizualizare, golita, inspecteazaCelula, refacePrevizualizarea, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte } from './model.ts'
 import type { Bara, InspectieCelula, Previz, RandOm } from './model.ts'
 import { actualizeaza, creeazaAlerte, eveniment, REGULI_ALERTE, Severitate } from './alerte.ts'
 import type { StareAlerta, Tinta } from './alerte.ts'
@@ -123,13 +123,15 @@ const LEGENDE: Readonly<Record<Overlay, { titlu: string; randuri: readonly { c: 
     randuri: [
       { c: '#d9a441', t: 'Cub: lucrare liberă — vine cineva când poate' },
       { c: '#63aec0', t: 'Cub albastru: cineva a luat-o — e pe drum sau lucrează' },
-      { c: '#b1553f', t: 'Cub roșu: niciun loc de unde să se lucreze' },
+      { c: '#b1553f', t: 'Cub roșu (lucrare): niciun loc de unde să se lucreze' },
       { c: '#3fb8b0', diag: true, t: 'Cub turcoaz CU DIAGONALE: niciun loc SIGUR (scară, deschidere, sau așteaptă o piesă)' },
       { c: '#d9708f', t: 'Cub roz: ar închide pe cineva sau ceva înăuntru' },
       { c: '#9b6bb5', t: 'Cub violet: nu se ajunge acolo' },
       { c: '#e08a3c', t: 'Cub portocaliu: un om a renunțat (drum blocat, prea scump)' },
       { c: '#7fa66b', t: 'Pătrate pe sol: depozit — mai luminoase cu cât sunt mai pline' },
       { c: '#d9a441', t: 'Cuburi mici, înalte cât sunt de pline: mormane' },
+      { c: '#b1553f', t: 'Morman roșu: n-are depozit unde să fie dus — pictează sau mărește un depozit' },
+      { c: '#63aec0', t: 'Morman albastru: vine un cărăuș (sau e luat pentru construit)' },
       { c: '#f2efe6', t: 'Linie: omul merge acolo' },
     ],
   },
@@ -228,6 +230,22 @@ export function monteazaUI(ctx: ContextUI): UI {
   const radacina = h('div', { class: 'ui', 'data-ui': '' })
   document.body.append(radacina)
   try { const z = localStorage.getItem('kinstead.ui.marime'); if (z) radacina.style.setProperty('zoom', z) } catch { /* fara stocare: marimea implicita */ }
+  /**
+   * Cat cere interfata, in pixeli CSS, ca nimic sa nu se suprapuna: bara de sus are ~990 px de continut,
+   * iar la 1280×720 marimea 125% suprapunea deja bara de unelte peste sertar (recenzia UI-ului, ECR-3).
+   * O marime care nu incape nu se poate alege, iar la o fereastra mai mica se coboara singura.
+   */
+  const LATIME_UI = 1100
+  const INALTIME_UI = 600
+  const marimeaActuala = (): number => Number(radacina.style.getPropertyValue('zoom') || '1')
+  const marimeaIncape = (z: number): boolean => window.innerWidth / z >= LATIME_UI && window.innerHeight / z >= INALTIME_UI
+  const potrivesteMarimea = (): void => {
+    if (marimeaIncape(marimeaActuala())) return
+    const z = ['1.25', '1'].find((x) => marimeaIncape(Number(x))) ?? '1'
+    radacina.style.setProperty('zoom', z)
+  }
+  potrivesteMarimea()
+  window.addEventListener('resize', potrivesteMarimea)
 
   const previzualizare = creeazaPrevizualizare(() => performance.now())
   /**
@@ -238,12 +256,19 @@ export function monteazaUI(ctx: ContextUI): UI {
    */
   let previzCache: Previz | null = null
   let previzLa = -Infinity
+  let previzPlan = -1
+  /**
+   * Una SCUMPA (peste 8 ms) nu se mai reface periodic: fiecare piesa zidita ii schimba cheia, deci
+   * „o data la 10 s" era un inghet de 43–60 ms la 10 s cat dura constructia unui plan mare (recenzia
+   * UI-ului, C2-2). Se reface doar la o actiune a jucatorului (`proaspat`), cand s-a schimbat PLANUL
+   * (`editariConstr`: nu si cand se zideste) si in pauza, unde costul nu se vede — ca stabilitatea (S).
+   */
   function previzRar(proaspat: boolean): Previz {
     const acum = performance.now()
-    const interval = previzCache !== null && previzCache.ms > 8 ? 10_000 : 1_000
-    if (proaspat || previzCache === null || acum - previzLa >= interval) {
+    if (previzCache === null || refacePrevizualizarea({ proaspat, areMemorie: true, planSchimbat: w.desemnari.editariConstr !== previzPlan, pauza: ctx.pauza(), ultimaMs: previzCache?.ms ?? 0, trecutMs: acum - previzLa })) {
       previzCache = previzualizare.ia(w, rules)
       previzLa = acum
+      previzPlan = w.desemnari.editariConstr
     }
     return previzCache
   }
@@ -322,7 +347,9 @@ export function monteazaUI(ctx: ContextUI): UI {
   const btnToate = iconBtn(ICON.toate, 'Toate', 'R', 'Toate nivelurile (R)')
   const nivel = h('div', { class: 'ui-insula ui-nivel', title: 'Rotița aici schimbă nivelul' }, h('div', { class: 'eticheta' }, 'Nivel'), btnSus, cota, rel, btnJos, btnToate)
   const urca = () => { const n = ctx.nivel(); if (n.cota !== null) ctx.seteazaNivel(n.cota >= n.hi ? null : n.cota + 1) }
-  const coboara = () => { const n = ctx.nivel(); ctx.seteazaNivel(n.cota === null ? n.hi : Math.max(n.lo, n.cota - 1)) }
+  // Primul „coboară" porneste nivelul la solul de sub camera, nu in varful ferestrei (37 m mai sus:
+  // Construiește desena acolo, nevazut — recenzia UI-ului, ECR-5). Ca „Alege nivelul de sub cameră".
+  const coboara = () => { const n = ctx.nivel(); ctx.seteazaNivel(n.cota === null ? (n.sol === null ? n.hi : n.sol + 2) : Math.max(n.lo, n.cota - 1)) }
   btnSus.addEventListener('click', urca)
   btnJos.addEventListener('click', coboara)
   btnToate.addEventListener('click', () => ctx.seteazaNivel(null))
@@ -570,7 +597,7 @@ export function monteazaUI(ctx: ContextUI): UI {
     for (const d of c.desemnari) {
       const fel = d.stare.fel === 'lucru' || d.stare.fel === 'libera' ? 'bine' : d.stare.fel === 'imposibila' ? 'critic' : 'atentie'
       const s = h('section', {},
-        h('div', { class: 'ui-kv' }, h('span', {}, 'Lucrare'), h('span', {}, d.piesa === Piesa.NICIUNA ? 'Sapă' : `Construiește: ${NUME_PIESA[d.piesa]!.toLowerCase()}`)),
+        h('div', { class: 'ui-kv' }, h('span', {}, 'Lucrare'), h('span', {}, `${d.piesa === Piesa.NICIUNA ? 'Sapă' : `Construiește: ${NUME_PIESA[d.piesa]!.toLowerCase()}`} · ${d.z} m${d.z > c.z ? ' (deasupra)' : ''}`)),
         h('div', { class: 'ui-kv' }, h('span', {}, 'Prioritate'), h('span', { class: 'num', title: 'În versiunea asta prioritatea se alege la desenare (bara de jos)' }, `${d.prioritate} din ${rules.designationPriorityLevels}`)),
         motivEl(d.stare.text, fel),
       )
@@ -618,7 +645,7 @@ export function monteazaUI(ctx: ContextUI): UI {
   const thead = h('thead', {}, h('tr', {},
     h('th', { 'data-sort': 'nume' }, 'Nume'), h('th', { 'data-sort': 'act' }, 'Ce face'),
     h('th', { 'data-sort': 'foame', title: 'Foame' }, 'Foa.'), h('th', { 'data-sort': 'odihna', title: 'Odihnă' }, 'Odi.'), h('th', { 'data-sort': 'disp', title: 'Dispoziție' }, 'Disp.'),
-    ...NUME_CATEGORIE.map((n, c) => h('th', { 'data-cat': c, title: `${n}: clic sortează nimic; Shift+clic pune toată coloana pe 1` }, n.slice(0, 4) + '.')),
+    ...NUME_CATEGORIE.map((n, c) => h('th', { 'data-cat': c, title: `${n} — Shift+clic: toți pe 1 la munca asta` }, n === 'Construiește' ? 'Constr.' : n)),
     h('th', { 'data-sort': 'dist', title: 'Distanța până la cameră' }, 'Dist.'),
   ))
   corpOameni.append(h('table', {}, thead, tbody))
@@ -713,7 +740,7 @@ export function monteazaUI(ctx: ContextUI): UI {
       listaPasi.replaceChildren(...items.map(([gata, t]) => h('li', { class: gata ? 'facut' : '' }, t)))
     }
     const hr = prognozaHrana(w, rules)
-    text(hranaPasi, Number.isFinite(hr.minute) ? `Hrana e finită în versiunea asta: ajunge ${textMinute(hr.minute)}.` : '')
+    text(hranaPasi, hr.puncte <= 0 ? 'Nu mai ai hrană: în versiunea asta nu se poate produce.' : Number.isFinite(hr.minute) ? `Hrana e finită în versiunea asta: ajunge ${textMinute(hr.minute)}.` : '')
     if (items.every(([a]) => a)) { pasiInchise = true; scrieVizibilitatePasi() }
   }
 
@@ -724,8 +751,8 @@ export function monteazaUI(ctx: ContextUI): UI {
    * primul, cu butonul lui cu tot (recenzia UI-ului, INT-4).
    */
   const TOASTURI_MAX = 3
-  const toasturi = h('div', { class: 'ui ui-toasturi' })
-  document.body.append(toasturi)
+  const toasturi = h('div', { class: 'ui-toasturi' })
+  radacina.append(toasturi)
   function toast(mesaj: string, refuz = false, actiune?: { eticheta: string; f: () => void }): void {
     let timer = 0
     const scoate = () => { window.clearTimeout(timer); t.remove() }
@@ -746,14 +773,22 @@ export function monteazaUI(ctx: ContextUI): UI {
     const f = h('div', { class: 'ui-fereastra', role: 'dialog', 'aria-modal': 'true' }, ...copii)
     voal.replaceChildren(f)
     ascuns(voal, false)
-    f.querySelector<HTMLElement>('button, input')?.focus()
+    // Fara `preventScroll`, focusul pe „Închide" (ultimul element al Ajutorului) derula fereastra la
+    // capat: la 720p, titlul si paragraful de inceput nu se vedeau (recenzia UI-ului, ECR-9).
+    f.querySelector<HTMLElement>('button, input')?.focus({ preventScroll: true })
+    f.scrollTop = 0
+    peTitlu = false
     return f
   }
   function inchideFereastra(): void { voal.replaceChildren(); ascuns(voal, true); titluDeschis = false }
+  /** Fereastra deschisa E ecranul de titlu (nu una peste el: Ajutor, Încarcă, Joc nou). */
+  let peTitlu = false
   const inapoi = () => (titluDeschis ? arataTitlul : arataMeniul)
 
   function esc(): boolean {
-    if (!voal.hidden) { if (!titluDeschis) inchideFereastra(); return true }
+    // Peste titlu, Esc intoarce la titlu; pe titlu insusi nu face nimic (e o alegere). Inainte, o
+    // fereastra deschisa din titlu nu se inchidea cu Esc deloc (recenzia UI-ului, ECR-8).
+    if (!voal.hidden) { if (!titluDeschis) inchideFereastra(); else if (!peTitlu) arataTitlul(); return true }
     if (ui.unealta !== Unealta.SELECTEAZA) { alegeUnealta(Unealta.SELECTEAZA); return true }
     if (selectie) { selectie = null; ctx.urmareste(null); scrieInspector(true); return true }
     arataMeniul()
@@ -763,10 +798,16 @@ export function monteazaUI(ctx: ContextUI): UI {
   function arataMeniul(): void {
     // Momentul linistit al salvarii automate: meniul se deschide oricum.
     salvareAutomata(true)
-    const marimi = ['1', '1.25', '1.5'].map((z) => butonText(`${Math.round(Number(z) * 100)}%`, () => {
-      radacina.style.setProperty('zoom', z)
-      try { localStorage.setItem('kinstead.ui.marime', z) } catch { /* fara stocare */ }
-    }, 'Mărimea interfeței'))
+    const marimi: HTMLButtonElement[] = ['1', '1.25', '1.5'].map((z) => {
+      const b = butonText(`${Math.round(Number(z) * 100)}%`, () => {
+        radacina.style.setProperty('zoom', z)
+        try { localStorage.setItem('kinstead.ui.marime', z) } catch { /* fara stocare */ }
+        for (const x of marimi) attr(x, 'aria-pressed', x === b ? 'true' : 'false')
+      }, 'Mărimea interfeței')
+      attr(b, 'aria-pressed', marimeaActuala() === Number(z) ? 'true' : 'false')
+      if (!marimeaIncape(Number(z))) { b.disabled = true; b.title = `Nu încape în fereastra de acum (${window.innerWidth} × ${window.innerHeight}): cere ${Math.ceil(LATIME_UI * Number(z))} × ${Math.ceil(INALTIME_UI * Number(z))}` }
+      return b
+    })
     deschideFereastra(
       h('h2', {}, 'Meniu'),
       h('div', { class: 'ui-meniu' },
@@ -851,12 +892,16 @@ export function monteazaUI(ctx: ContextUI): UI {
     prog()
     const eroare = h('div', { class: 'ui-motiv', hidden: true })
     const campuri = [seed, oameni, piatra, hrana]
+    const NUME_CAMP = ['Sămânța lumii', 'Oameni', 'Piatră', 'Hrană']
     const porneste = butonText('Pornește', () => {
+      // Un camp gol sau cu litere e `Number('') === 0`, care trecea de verificari: o colonie fara
+      // piatra, pornita fara niciun cuvant (recenzia UI-ului, ECR-10).
+      const rau = campuri.findIndex((i) => i.value.trim() === '' || !i.validity.valid || !Number.isInteger(Number(i.value)) || Number(i.value) < Number(i.min) || Number(i.value) > Number(i.max))
+      if (rau >= 0) { eroare.textContent = `${NUME_CAMP[rau]}: scrie un număr întreg între ${campuri[rau]!.min} și ${campuri[rau]!.max}.`; ascuns(eroare, false); campuri[rau]!.focus(); return }
       const v = campuri.map((i) => Number(i.value))
-      const bune = v.every((x, i) => Number.isInteger(x) && x >= Number(campuri[i]!.min) && x <= Number(campuri[i]!.max))
-      if (!bune) { eroare.textContent = 'Toate câmpurile sunt numere întregi, în limitele lor.'; ascuns(eroare, false); return }
       ctx.jocNou({ seed: v[0]!, oameni: v[1]!, piatra: v[2]!, hrana: v[3]! })
     })
+    for (const c of campuri) c.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); porneste.click() } })
     deschideFereastra(
       h('h2', {}, 'Joc nou'),
       h('div', { class: 'sub' }, 'Aceeași sămânță dă aceeași lume. Locul de start e ales plat.'),
@@ -875,7 +920,9 @@ export function monteazaUI(ctx: ContextUI): UI {
         h('p', {}, 'Nu comanzi oamenii direct: ceri lucrări — săpat, ziduri, depozite —, iar ei le fac când pot. Când nu pot, Selectează ▸ clic pe lucrare spune de ce, și ce poți face.'),
         h('p', { class: 'sub' }, 'Hrana nu se poate produce încă în versiunea asta: ce aduci la început e tot ce au.'),
         ...AJUTOR.flatMap((s) => [h('h3', {}, s.sectiune), h('dl', {}, ...s.randuri.flatMap(([t, d]) => [h('dt', {}, t), h('dd', {}, d)]))])),
-      h('div', { class: 'ui-actiuni' }, butonText('Închide', inchideFereastra)),
+      // Deschis de pe titlu, „Închide" lasa jucatorul in demo, fara hrana si cu alerta critica: acolo
+      // e „Înapoi", la titlu, ca la Încarcă si Joc nou (recenzia UI-ului, ECR-8).
+      h('div', { class: 'ui-actiuni' }, titluDeschis ? butonText('Înapoi', inapoi()) : butonText('Închide', inchideFereastra)),
     )
   }
 
@@ -891,6 +938,9 @@ export function monteazaUI(ctx: ContextUI): UI {
 
   function arataTitlul(): void {
     titluDeschis = true
+    // Cifrele demo-ului din lume, nu scrise de mana („24 de oameni" erau 20 si 4 jefuitori: ECR-13).
+    const rd = rezumatColonie(w, rules)
+    const oameniDemo = `${cant(rd.colonisti, 'oameni')}${rd.jefuitori > 0 ? ` și ${cant(rd.jefuitori, 'jefuitori', 'un jefuitor')}` : ''}`
     deschideFereastra(
       h('div', { class: 'ui-titlu' },
         h('h1', {}, 'KINSTEAD'),
@@ -899,9 +949,10 @@ export function monteazaUI(ctx: ContextUI): UI {
         h('div', { class: 'ui-meniu' },
           butonText('Joc nou…', arataJocNou),
           butonText('Încarcă…', () => { void arataIncarcarea() }),
-          butonText('Explorează demo-ul', () => { titluDeschis = false; inchideFereastra() }, 'Fortăreața de probă: camere săpate, un zid, un turn, 24 de oameni (și câțiva jefuitori)'),
+          butonText('Explorează demo-ul', () => { titluDeschis = false; inchideFereastra() }, `Fortăreața de probă: camere săpate, un zid, un turn, ${oameniDemo}`),
           butonText('Ajutor', arataAjutorul))),
     )
+    peTitlu = true
   }
 
   let golitaArataa = false

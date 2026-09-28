@@ -9,6 +9,7 @@
 
 import { Item } from '../src/sim/state.ts'
 import type { World } from '../src/sim/state.ts'
+import { cotaVizuala } from '../src/render/cota.ts'
 
 /** Numele felului in fisier. Indexat cu `Item`. */
 export const FEL_RESURSA: Readonly<Record<number, string>> = {
@@ -46,11 +47,16 @@ export function rotatiaMormanului(wx: number, wy: number): number {
   return ((h >>> 0) / 0x100000000) * Math.PI * 2
 }
 
-/** O instanta: celula (centrul ei se calculeaza la desen) si rotatia. */
+/** O instanta: celula (centrul ei se calculeaza la desen), rotatia si cota bazei. */
 export interface InstantaMorman {
   readonly wx: number
   readonly wy: number
   readonly z: number
+  /**
+   * Cota la care se DESENEAZA baza: fata de sus vizibila a solului in centrul celulei (`cotaVizuala`).
+   * Pe o suprafata naturala, netezita, difera de `z` cu pana la 0,5 m (recenzia UI-ului, ECR-1).
+   */
+  readonly y: number
   readonly rot: number
 }
 
@@ -66,7 +72,7 @@ export function instanteMormane(w: World, stackMax: number): Map<string, Instant
     const cheie = numePlasa(it.kind[i]!, treaptaMormanului(it.cantitate[i]!, stackMax))
     let l = out.get(cheie)
     if (!l) { l = []; out.set(cheie, l) }
-    l.push({ wx: it.wx[i]!, wy: it.wy[i]!, z: it.z[i]!, rot: rotatiaMormanului(it.wx[i]!, it.wy[i]!) })
+    l.push({ wx: it.wx[i]!, wy: it.wy[i]!, z: it.z[i]!, y: cotaVizuala(w.terrain, it.wx[i]! + 0.5, it.wy[i]! + 0.5, it.z[i]!), rot: rotatiaMormanului(it.wx[i]!, it.wy[i]!) })
   }
   return out
 }

@@ -51,7 +51,6 @@ export function creeazaStratResurse(scene: THREE.Scene, url: string): StratResur
       }
       const im = new THREE.InstancedMesh(geo, material, CAPACITATE_INITIALA)
       im.count = 0
-      im.frustumCulled = false
       im.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
       im.name = m.name
       plase.set(m.name, im)
@@ -73,7 +72,8 @@ const sus = new THREE.Vector3(0, 1, 0)
 
 /**
  * Reface instantele din lume. O(mormane); se cheama rar (la cateva cadre si dupa comenzi), nu pe cadru.
- * Coordonatele scenei: x = wx, y = cota, z = wy; mormanul sta pe podeaua celulei lui (y = z).
+ * Coordonatele scenei: x = wx, y = cota, z = wy; mormanul sta pe fata de sus VIZIBILA a solului (`y`
+ * din `instanteMormane`): pe terenul natural, netezita, nu nivelul intreg al celulei.
  */
 export function actualizeazaStratResurse(s: StratResurse, w: World, stackMax: number): void {
   if (s.plase === null) return
@@ -87,7 +87,6 @@ export function actualizeazaStratResurse(s: StratResurse, w: World, stackMax: nu
       let cap = im.instanceMatrix.count
       while (cap < l.length) cap *= 2
       tinta = new THREE.InstancedMesh(im.geometry, im.material, cap)
-      tinta.frustumCulled = false
       tinta.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
       tinta.name = nume
       s.group.remove(im)
@@ -98,12 +97,15 @@ export function actualizeazaStratResurse(s: StratResurse, w: World, stackMax: nu
     for (let k = 0; k < l.length; k++) {
       const x = l[k]!
       q.setFromAxisAngle(sus, x.rot)
-      p.set(x.wx + 0.5, x.z, x.wy + 0.5)
+      p.set(x.wx + 0.5, x.y, x.wy + 0.5)
       m4.compose(p, q, unu)
       tinta.setMatrixAt(k, m4)
     }
     tinta.count = l.length
     tinta.instanceMatrix.needsUpdate = true
+    // Culling pe sfera instantelor: fara ea, 4096 de mormane pline se desenau si cu camera intoarsa
+    // (pe iGPU 5,7 → 1,2 ms pe cadru; recenzia UI-ului, C2-1). 0,17 ms pentru toate plasele, la 10 cadre.
+    tinta.computeBoundingSphere()
     total += l.length
   }
   s.desenate = total
