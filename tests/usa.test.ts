@@ -19,7 +19,7 @@ import { cellOf } from '../src/sim/drumuri.ts'
 import { hashWorld } from '../src/sim/hash.ts'
 import { itemLaCelula, stergeItem } from '../src/sim/iteme.ts'
 import { arInchideCeva, constructiaPrevizualizata, lastJobReport } from '../src/sim/joburi.ts'
-import { canStep, isWalkable } from '../src/sim/regions.ts'
+import { canStep, find, isWalkable, NO_REGION, regionAt } from '../src/sim/regions.ts'
 import { cellKey } from '../src/sim/path.ts'
 import { decode, encode } from '../src/sim/save.ts'
 import { Faction, Item, Piesa } from '../src/sim/state.ts'
@@ -269,6 +269,39 @@ test('USA (USA-3): podeaua de sub usa cade — pionul si mormanul din toc ajung 
     const za = ma.w.iteme.z[0]! - ma.g
     const zu = mu.w.iteme.z[0]! - mu.g
     assert.equal(zu, za, `buiandrug=${buiandrug}: mormanul din toc ajunge unde ar fi ajuns fara usa`)
+  }
+})
+
+test('USA poarta (USA-3, recenzia incaperilor): piatra din usa de sus desfacuta cade prin usa, la indemana — nu pe creasta gardului (controlul: PERETE)', () => {
+  // Poarta intr-un gard de 2 m fara acoperis; pionii desfac doar usa de sus. Sub ea sta usa de jos,
+  // care nu e podea, deci celula sapata nu e calcabila: pe e063f40 `asazaItem` trecea la vecini, cu
+  // z+1 inaintea lui z−1, si punea piatra pe creasta gardului (g+3), izolata. La un PERETE aceeasi
+  // piesa ajunge pe zidul de jos (g+2), la un pas de sol.
+  for (const seed of [12345, 777]) {
+    for (const mat of [Material.USA, P]) {
+      const { w, wx, wy, g } = sitPlat(seed, 18)
+      const y = wy + 8, xu = wx + 8
+      for (let dx = 0; dx < 9; dx++) for (const z of [g + 1, g + 2]) assert.ok(fill(w.terrain, wx + 4 + dx, y, z, wx + 4 + dx === xu ? mat : P).ok)
+      for (let i = 0; i < 10; i++) lasaItem(w, Item.HRANA, 75, wx + 1 + (i % 3), wy + 1 + ((i / 3) | 0))
+      for (let i = 0; i < 3; i++) assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (wx + 6 + i) * 1000 + 500, y: (wy + 4) * 1000 + 500, z: g + 1, faction: Faction.ASEZARE }, R).ok)
+      const o = applyCommand(w, { kind: 'desemneaza', wx: xu, wy: y, z: g + 2 }, R)
+      assert.ok(o.ok, JSON.stringify(o))
+      const id = o.ok ? o.value : -1
+      assert.ok(panaCand(w, 6000, (ww) => slotDesemnare(ww.desemnari, id) === -1) !== -1, `seed ${seed}, mat ${mat}: piesa de sus nedesfacuta`)
+      ruleaza(w, 200)
+      const it = w.iteme
+      const unde: string[] = []
+      const rp = find(w.regions, regionAt(w.regions, cellOf(w.agents.x[0]!), cellOf(w.agents.y[0]!), w.agents.z[0]!))
+      let piatra = 0
+      for (let i = 0; i < it.count; i++) {
+        if (it.alive[i] !== 1 || it.kind[i] !== Item.PIATRA) continue
+        piatra += it.cantitate[i]!
+        const r = regionAt(w.regions, it.wx[i]!, it.wy[i]!, it.z[i]!)
+        if (r === NO_REGION || find(w.regions, r) !== rp) unde.push(`(${it.wx[i]! - xu},${it.wy[i]! - y},g+${it.z[i]! - g}) x${it.cantitate[i]}`)
+      }
+      assert.ok(piatra > 0, `seed ${seed}, mat ${mat}: premisa — piesa desfacuta a dat piatra`)
+      assert.deepEqual(unde, [], `seed ${seed}, mat ${mat}: piatra izolata (departe de pioni)`)
+    }
   }
 })
 

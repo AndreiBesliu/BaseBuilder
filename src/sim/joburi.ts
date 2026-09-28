@@ -2966,7 +2966,12 @@ export function sapaVoxel(w: World, wx: number, wy: number, z: number, rules: Ru
   retrageCeluleDeZonaNecalcabile(w, rules, wx, wy, z + 1)
   const y = rules.digYield[mat.value]
   if (y && y.cantitate > 0) {
-    asazaItem(w, rules, y.fel, y.cantitate, wx, wy, z)
+    // O USA desfacuta: sub ea poate sta tot o usa, care nu e podea, deci celula sapata nu e
+    // calcabila. `asazaItem` trecea atunci la vecini, cu z+1 inaintea lui z−1, si punea piatra pe
+    // creasta zidului de langa — la 2 m peste sol, izolata (recenzia incaperilor, USA-3: poarta
+    // dintr-un gard). Piatra cade prin usa, ca pionul si mormanul la prabusire.
+    const cota = mat.value === Material.USA ? cotaDeRefugiu(w.terrain, wx, wy, z) : z
+    asazaItem(w, rules, y.fel, y.cantitate, wx, wy, cota)
     raport.itemeProduse++
     raport.unitatiProduse += y.cantitate
   }

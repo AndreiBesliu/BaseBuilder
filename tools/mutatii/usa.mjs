@@ -135,6 +135,13 @@ export const MUTATII = [
     b: '        if (true) {',
     t: T, e: 'USA toc (USA-1): usa se deseneaza si se zideste intr-un gol sapat',
   },
+  {
+    n: 'USA-3 (recenzia incaperilor): piatra din usa desfacuta se asaza la cota ei (urca pe creasta gardului)',
+    f: 'src/sim/joburi.ts',
+    a: '    const cota = mat.value === Material.USA ? cotaDeRefugiu(w.terrain, wx, wy, z) : z',
+    b: '    const cota = z',
+    t: T, e: 'USA poarta (USA-3, recenzia incaperilor)',
+  },
   // --- viewer-ul usii si al incaperilor (partea pura)
   {
     n: 'unealta Usa nu vede zidurile planificate (golul unui zid doar desenat nu e gol)',

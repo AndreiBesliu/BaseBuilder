@@ -179,7 +179,7 @@ export const MUTATII = [
     a: "      if (existaTinta && !existaTinta(r.targetId, r.layer)) {", b: "      if (existaTinta && false) {",
     t: 'tests/rezervari.test.ts', e: 'INVARIANT: clauza' },
   { n: 'yield-ul nu se produce', f: 'src/sim/joburi.ts',
-    a: "  if (y && y.cantitate > 0) {\n    asazaItem(w, rules, y.fel, y.cantitate, wx, wy, z)", b: "  if (y && y.cantitate < 0) {\n    asazaItem(w, rules, y.fel, y.cantitate, wx, wy, z)",
+    a: "  if (y && y.cantitate > 0) {\n    // O USA desfacuta", b: "  if (y && y.cantitate < 0) {\n    // O USA desfacuta",
     t: 'tests/iteme.test.ts', e: 'sapatul PRODUCE' },
   { n: 'capacitatea de transport ignorata', f: 'src/sim/joburi.ts',
     a: "      const cant = Math.min(liberPeItem(w, s), rules.haulCarryMax)\n      if (!poateRezerva", b: "      const cant = liberPeItem(w, s)\n      if (!poateRezerva",
