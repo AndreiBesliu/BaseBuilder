@@ -222,9 +222,16 @@ export const MUTATII = [
   {
     n: 'marfa se lasa si PE un santier (zidirea se blocheaza singura)',
     f: 'src/sim/iteme.ts',
-    a: '          if (santier !== -1 && w.desemnari.kind[santier] === Desemnare.CONSTRUIESTE) continue',
-    b: '          void santier',
+    a: '          if (subSantier(w, rules, nx, ny, zs)) continue\n',
+    b: '',
     t: 'tests/constructie.test.ts', e: 'marfa nu se lasa PE un santier',
+  },
+  {
+    n: 'USA-5: asazaItem sare santierul doar la cota celulei, nu si la cap (buiandrugul)',
+    f: 'src/sim/iteme.ts',
+    a: '          if (subSantier(w, rules, nx, ny, zs)) continue\n',
+    b: '          if (subSantier(w, { ...rules, agentHeadroomM: 1 }, nx, ny, zs)) continue\n',
+    t: 'tests/santier-depozit.test.ts', e: 'DEPOZIT PESTE SANTIER (USA-5): marfa lasata la picioare nu ajunge sub un buiandrug',
   },
 
   // --- pasul 6b: driverul de construit ---

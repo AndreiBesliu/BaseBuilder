@@ -34,6 +34,7 @@ import { rezervariPentru, Strat } from './rezervari.ts'
 import { DetaliuItem } from './iteme.ts'
 import { Desemnare, desemnareLaCelula } from './desemnari.ts'
 import { DEFAULT_RULES } from './content.ts'
+import { blocheazaMersul } from './terrain/chunk.ts'
 
 /**
  * Sta celula (wx, wy, z) sub un santier de CONSTRUIT viu — la cota ei sau in headroom-ul de
@@ -41,14 +42,27 @@ import { DEFAULT_RULES } from './content.ts'
  * picioare si la cap. Recenzia incaperilor (USA-5): un depozit pictat peste amprenta unei
  * constructii primea marfa pe santier, iar constructorul astepta cu piatra in mana pana pleca din
  * asezare — 4/4 pioni plecati pe un zid de 7×2. O singura intrebare, citita de indexul de zone
- * (celula nu se ofera ca destinatie), de `lasa` (carausul prins pe drum) si de vederea UI-ului.
+ * (celula nu se ofera ca destinatie), de `lasa` (carausul prins pe drum), de `asazaItem` si de
+ * vederea UI-ului.
+ *
+ * Doar santierele pieselor care BLOCHEAZA mersul: `celulaLibera` se cere numai pentru ele (USA-1), deci
+ * un morman in tocul unei usi, sub usa de sus desemnata, nu opreste nimic — si o usa de jos zidita
+ * trebuie sa-l poata primi (designul: itemele pot sta pe usa).
  */
 export function subSantier(w: World, rules: Rules, wx: number, wy: number, z: number): boolean {
   for (let h = 0; h < rules.agentHeadroomM; h++) {
     const ds = desemnareLaCelula(w.desemnari, wx, wy, z + h)
-    if (ds !== -1 && w.desemnari.kind[ds] === Desemnare.CONSTRUIESTE) return true
+    if (ds !== -1 && santierBlocant(w, rules, ds)) return true
   }
   return false
+}
+
+/** Desemnarea `ds` e un santier de CONSTRUIT al unei piese care blocheaza mersul (nu o usa)? */
+function santierBlocant(w: World, rules: Rules, ds: number): boolean {
+  const d = w.desemnari
+  if (d.kind[ds] !== Desemnare.CONSTRUIESTE) return false
+  const spec = rules.piese[d.piesa[ds]!]
+  return spec !== undefined && blocheazaMersul(spec.material)
 }
 
 /**
@@ -465,7 +479,7 @@ export function indexZone(w: World, rules: Rules): IndexZone {
   else subSantierScratch.fill(0, 0, c.count)
   const d = w.desemnari
   for (let ds = 0; ds < d.count; ds++) {
-    if (d.alive[ds] === 0 || d.kind[ds] !== Desemnare.CONSTRUIESTE) continue
+    if (d.alive[ds] === 0 || !santierBlocant(w, rules, ds)) continue
     for (let h = 0; h < rules.agentHeadroomM; h++) {
       const cz = celulaDeZonaLa(s, d.wx[ds]!, d.wy[ds]!, d.z[ds]! - h)
       if (cz !== -1) subSantierScratch[cz] = 1

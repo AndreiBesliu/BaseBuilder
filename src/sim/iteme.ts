@@ -35,10 +35,10 @@ import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import type { World } from './state.ts'
 import { cellKey } from './path.ts'
-import { Desemnare, desemnareLaCelula, seSapaLa } from './desemnari.ts'
+import { seSapaLa } from './desemnari.ts'
 import { isWalkable } from './regions.ts'
 import { rezervariPentru, Strat } from './rezervari.ts'
-import { celulaDeZonaLa, marcheazaZoneMurdare } from './zone.ts'
+import { celulaDeZonaLa, marcheazaZoneMurdare, subSantier } from './zone.ts'
 
 /** Detaliul unui refuz memorat pe item. Pentru „De ce nu?". */
 export const DetaliuItem = {
@@ -258,9 +258,10 @@ export function asazaItem(w: World, rules: Rules, kind: number, cantitate: numbe
           // Si nu se lasa marfa PE un santier: constructorul sta langa celula pe
           // care o zideste, deci celula aia e in ordinea de cautare a lui
           // `lasaLaPicioare` — iar apoi zidirea ar fi refuzata cu CELULA_OCUPATA de
-          // propria lui marfa.
-          const santier = desemnareLaCelula(w.desemnari, nx, ny, zs)
-          if (santier !== -1 && w.desemnari.kind[santier] === Desemnare.CONSTRUIESTE) continue
+          // propria lui marfa. Nici SUB un santier (un buiandrug la z+1): `celulaLibera` il
+          // refuza si la cap — aceeasi intrebare ca indexul de zone si `lasa` (recenzia
+          // incaperilor, USA-5: „o functie, un adevar").
+          if (subSantier(w, rules, nx, ny, zs)) continue
           if (trecere === 0 && podeaDesemnata) continue
           if (trecere === 1 && !podeaDesemnata) continue
           const loc = locPeCelula(w, rules, kind, nx, ny, zs)

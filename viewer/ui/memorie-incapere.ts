@@ -38,7 +38,7 @@ import { componentaLa, decodeazaFelie, FELIE } from '../../src/sim/camere.ts'
 import type { Celula } from '../../src/sim/camere-explica.ts'
 import { JURNAL_CAP } from '../../src/sim/terrain/terrain.ts'
 import { incaperea } from './model.ts'
-import type { IncapereLa } from './model.ts'
+import type { IncapereLa, NormalaFetei } from './model.ts'
 
 /** Cel mai des cât se reface explicația, fără un clic: o dată la 250 ms (reîmprospătarea inspectorului). */
 export const FRANA_MIN_MS = 250
@@ -48,10 +48,11 @@ export const FRANA_COSTURI = 20
 /** Ce știe memoria despre lumea în care a calculat. `editari` înaintează cât rămâne valabilă. */
 export interface AmprentaIncaperii {
   editari: number
-  /** Celula selectată. */
+  /** Celula selectată și normala feței atinse (alt aer întrebat pe altă față: EXP-6). */
   readonly x: number
   readonly y: number
   readonly z: number
+  readonly n: NormalaFetei | null
   /** Blocurile (de FELIE celule) din care o editare o invalidează, cu margini cu tot. */
   readonly bx0: number
   readonly bx1: number
@@ -64,7 +65,7 @@ export interface AmprentaIncaperii {
  * întrebate (celula explicată e deasupra sau dedesubtul celei selectate) și blocul celulei selectate,
  * plus un bloc de jur împrejur.
  */
-export function amprentaIncaperii(w: World, x: number, y: number, z: number, inc: IncapereLa | null): AmprentaIncaperii {
+export function amprentaIncaperii(w: World, x: number, y: number, z: number, inc: IncapereLa | null, n: NormalaFetei | null = null): AmprentaIncaperii {
   let bx0 = Math.floor(x / FELIE)
   let bx1 = bx0
   let by0 = Math.floor(y / FELIE)
@@ -79,7 +80,7 @@ export function amprentaIncaperii(w: World, x: number, y: number, z: number, inc
       if (f.by > by1) by1 = f.by
     }
   }
-  return { editari: w.terrain.editari, x, y, z, bx0: bx0 - 1, bx1: bx1 + 1, by0: by0 - 1, by1: by1 + 1 }
+  return { editari: w.terrain.editari, x, y, z, n, bx0: bx0 - 1, bx1: bx1 + 1, by0: by0 - 1, by1: by1 + 1 }
 }
 
 /**
@@ -124,9 +125,13 @@ export function usilePropuse(w: World, inc: IncapereLa | null): UsilePropuse {
   return { lipsa, desemnata: usa === inc.e.usiPropuse.length }
 }
 
+function aceeasiNormala(a: NormalaFetei | null, b: NormalaFetei | null): boolean {
+  return a === null || b === null ? a === b : a.x === b.x && a.y === b.y && a.z === b.z
+}
+
 export interface MemorieIncapere {
-  /** Încăperea pentru celula selectată; `clic` = o acțiune a jucătorului, care sare frâna. */
-  ia(w: World, x: number, y: number, z: number, clic: boolean): IncapereLa | null
+  /** Încăperea pentru celula selectată (fața atinsă: `n`); `clic` = o acțiune a jucătorului, care sare frâna. */
+  ia(w: World, x: number, y: number, z: number, clic: boolean, n?: NormalaFetei | null): IncapereLa | null
   /** Câte calcule s-au făcut (testele; Diagnosticul). */
   calcule(): number
   /** Se schimbă la fiecare calcul: cheia de redesenare a inspectorului. */
@@ -139,21 +144,21 @@ export interface MemorieIncapere {
  */
 export function creeazaMemorieIncapere(
   ceas: () => number,
-  calculeaza: (w: World, x: number, y: number, z: number) => IncapereLa | null = incaperea,
+  calculeaza: (w: World, x: number, y: number, z: number, n: NormalaFetei | null) => IncapereLa | null = incaperea,
 ): MemorieIncapere {
   let amprenta: AmprentaIncaperii | null = null
   let raspuns: IncapereLa | null = null
   let urmatorLa = Number.NEGATIVE_INFINITY
   let calcule = 0
   return {
-    ia(w, x, y, z, clic) {
-      const aceeasi = amprenta !== null && amprenta.x === x && amprenta.y === y && amprenta.z === z
+    ia(w, x, y, z, clic, n = null) {
+      const aceeasi = amprenta !== null && amprenta.x === x && amprenta.y === y && amprenta.z === z && aceeasiNormala(amprenta.n, n)
       if (aceeasi && amprentaValabila(w, amprenta!)) return raspuns
       const acum = ceas()
       if (aceeasi && !clic && acum < urmatorLa) return raspuns
-      raspuns = calculeaza(w, x, y, z)
+      raspuns = calculeaza(w, x, y, z, n)
       const cost = ceas() - acum
-      amprenta = amprentaIncaperii(w, x, y, z, raspuns)
+      amprenta = amprentaIncaperii(w, x, y, z, raspuns, n)
       urmatorLa = acum + Math.max(FRANA_MIN_MS, FRANA_COSTURI * cost)
       calcule++
       return raspuns

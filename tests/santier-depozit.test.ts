@@ -17,7 +17,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { applyCommand } from '../src/sim/commands.ts'
 import { slotDesemnare } from '../src/sim/desemnari.ts'
-import { itemLaCelula } from '../src/sim/iteme.ts'
+import { creeazaItem, itemLaCelula } from '../src/sim/iteme.ts'
 import { lastJobReport } from '../src/sim/joburi.ts'
 import { codMotiv, Reason } from '../src/sim/result.ts'
 import { decode, encode } from '../src/sim/save.ts'
@@ -164,16 +164,17 @@ test('DEPOZIT PESTE SANTIER (USA-5): cursa — un perete desemnat pe celula spre
 })
 
 test('DEPOZIT PESTE SANTIER (USA-5): un morman deja sub santier (buiandrug) e refuz pe tinta — CELULA_OCUPATA, marfa jos, fara asteptare', () => {
-  // Plasa pentru ce ajunge pe santier altfel decat prin depozit: o salvare de dinainte de reparatie,
-  // o cadere, sau marfa lasata la picioare sub un buiandrug (`asazaItem` sare doar santierul de la
-  // cota lui). Pe e063f40 constructorul astepta cu piatra in mana, la fiecare tick, pana pleca.
+  // Plasa pentru ce ajunge pe santier altfel decat prin depozit: o salvare de dinainte de reparatie
+  // (mormanul pus direct, ca la incarcare) sau o cadere. Pe e063f40 constructorul astepta cu piatra
+  // in mana, la fiecare tick, pana pleca.
   const { w, wx, wy, g } = sitPlat(777, 18)
   const x = wx + 8, y = wy + 6
   for (const dx of [-1, 1]) for (const z of [g + 1, g + 2]) assert.ok(fill(w.terrain, x + dx, y, z, P).ok)
   const o = applyCommand(w, { kind: 'desemneaza', wx: x, wy: y, z: g + 2, piesa: Piesa.PERETE }, R)
   assert.ok(o.ok, JSON.stringify(o))
   const id = o.ok ? o.value : -1
-  assert.ok(applyCommand(w, { kind: 'lasaItem', fel: Item.PAMANT, cantitate: 20, wx: x, wy: y, z: g + 1 }, R).ok)
+  assert.ok(creeazaItem(w.iteme, w.nextId++, Item.PAMANT, x, y, g + 1, 20).ok)
+  marcheazaZoneMurdare(w)
   assert.notEqual(itemLaCelula(w.iteme, x, y, g + 1), -1, 'premisa: mormanul e sub buiandrug')
   lasaItem(w, Item.PIATRA, 40, wx + 2, wy + 2)
   for (let i = 0; i < 10; i++) lasaItem(w, Item.HRANA, 75, wx + 14 + (i % 3), wy - 1 + ((i / 3) | 0))
@@ -195,6 +196,17 @@ test('DEPOZIT PESTE SANTIER (USA-5): un morman deja sub santier (buiandrug) e re
   assert.equal(w.desemnari.ultimulMotiv[ds], codMotiv(Reason.CELULA_OCUPATA), 'cauza pe santier: CELULA_OCUPATA')
   assert.ok(ocupat < 100, `constructorul a asteptat langa santier ${ocupat} tickuri`)
   assert.ok(maxCuMarfa < 1000, `un constructor a tinut piatra in mana ${maxCuMarfa} tickuri la rand`)
+})
+
+test('DEPOZIT PESTE SANTIER (USA-5): marfa lasata la picioare nu ajunge sub un buiandrug desemnat (asazaItem intreaba subSantier)', () => {
+  const { w, wx, wy, g } = sitPlat(12345, 12)
+  const x = wx + 5, y = wy + 5
+  assert.ok(applyCommand(w, { kind: 'desemneaza', wx: x, wy: y, z: g + 2, piesa: Piesa.PERETE }, R).ok)
+  const m = applyCommand(w, { kind: 'lasaItem', fel: Item.PAMANT, cantitate: 20, wx: x, wy: y, z: g + 1 }, R)
+  assert.ok(m.ok, JSON.stringify(m))
+  assert.equal(itemLaCelula(w.iteme, x, y, g + 1), -1, 'celula de sub santier (capul constructorului) ramane libera')
+  const s = w.iteme.laId.get(m.ok ? m.value : -1)!
+  assert.equal(Math.max(Math.abs(w.iteme.wx[s]! - x), Math.abs(w.iteme.wy[s]! - y)), 1, 'mormanul sta langa, la indemana')
 })
 
 test('DEPOZIT PESTE SANTIER (USA-5): vederea UI-ului cu indexul murdar nu numara drept loc o celula de depozit de sub un santier', () => {

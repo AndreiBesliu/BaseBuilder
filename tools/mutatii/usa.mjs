@@ -242,4 +242,11 @@ export const MUTATII = [
     b: '  const dedesubt = null as AerIntrebat | null\n',
     t: TV, e: 'viewer incaperi (JUC-7)',
   },
+  {
+    n: 'USA-1 + USA-5: santierul unei USI conteaza ca santier care se blocheaza (mormanul din toc e alungat de sub usa de sus)',
+    f: 'src/sim/zone.ts',
+    a: '  return spec !== undefined && blocheazaMersul(spec.material)\n',
+    b: '  return spec !== undefined\n',
+    t: T, e: 'USA toc (USA-1): usa de sus se zideste peste un morman din toc',
+  },
 ]

@@ -263,7 +263,7 @@ function scrieOverlay(o: JobOverlay, s: Scriere, w: World, rules: Rules): void {
   // vechi dupa ce se picteaza un depozit, pana se cara mormanul, iar Planul il tinea rosu.
   const it = w.iteme
   const stackMax = rules.itemStackMax
-  const vedere = vedereFaraDepozit(w)
+  const vedere = vedereFaraDepozit(w, rules)
   for (let i = 0; i < it.count; i++) {
     if (it.alive[i] === 0) continue
     o.iteme++

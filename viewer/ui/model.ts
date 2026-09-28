@@ -549,7 +549,7 @@ export function inspecteazaCelula(w: World, rules: Rules, wx: number, wy: number
     let rezervat = 0
     for (const r of rezervariPentru(w.rezervari, it.id[is]!, Strat.CARAT)) rezervat += r.count
     for (const r of rezervariPentru(w.rezervari, it.id[is]!, Strat.MANCAT)) rezervat += r.count
-    morman = { id: it.id[is]!, fel: it.kind[is]!, cantitate: it.cantitate[is]!, rezervat, stare: stareMorman(w, rules, is, vedereFaraDepozit(w)) }
+    morman = { id: it.id[is]!, fel: it.kind[is]!, cantitate: it.cantitate[is]!, rezervat, stare: stareMorman(w, rules, is, vedereFaraDepozit(w, rules)) }
   }
   let zona: InspectieCelula['zona'] = null
   const cs = celulaDeZonaLa(w.zone, wx, wy, z + 1)
@@ -712,7 +712,7 @@ export function semnaleAlerte(w: World, rules: Rules, previz: Previz | null): Ma
   m.set('nimeni-sapa', deSapat > 0 && !pe.sapa ? { activ: true, text: 'Nimeni n-are voie să sape (prioritate 0 sau Exclusiv pe altceva).', tinta: null } : inactiv)
   m.set('nimeni-construieste', d.viiConstruieste > 0 && !pe.construieste ? { activ: true, text: 'Nimeni n-are voie să construiască (prioritate 0 sau Exclusiv pe altceva).', tinta: null } : inactiv)
   // Pe jos = in afara unui DEPOZIT (un loc de dormit nu e depozit: MOD-5).
-  const vedere = vedereFaraDepozit(w)
+  const vedere = vedereFaraDepozit(w, rules)
   const it = w.iteme
   let peJosIteme = 0
   for (let i = 0; i < it.count; i++) if (it.alive[i] === 1 && prioritateaLocului(w.zone, it.wx[i]!, it.wy[i]!, it.z[i]!) === 0) peJosIteme++

@@ -63,10 +63,10 @@ export const MUTATII = [
     t: INC, e: 'inspector (EXP-4): o editare langa componenta fara epoca noua',
   },
   {
-    n: 'EXP-4: amprenta fara marginea de un bloc (gura putului din blocul vecin nu se vede)',
+    n: 'EXP-4: amprenta fara marginea de un bloc (tinda din blocul vecin nu se vede)',
     f: 'viewer/ui/memorie-incapere.ts',
-    a: '  return { editari: w.terrain.editari, x, y, z, bx0: bx0 - 1, bx1: bx1 + 1, by0: by0 - 1, by1: by1 + 1 }',
-    b: '  return { editari: w.terrain.editari, x, y, z, bx0, bx1, by0, by1 }',
+    a: '  return { editari: w.terrain.editari, x, y, z, n, bx0: bx0 - 1, bx1: bx1 + 1, by0: by0 - 1, by1: by1 + 1 }',
+    b: '  return { editari: w.terrain.editari, x, y, z, n, bx0, bx1, by0, by1 }',
     t: INC, e: 'inspector (EXP-4): o editare langa componenta fara epoca noua',
   },
   {
@@ -75,6 +75,13 @@ export const MUTATII = [
     a: '  if (c !== null) {\n    for (const b of c.bucati) {',
     b: '  if (c !== null && false) {\n    for (const b of c.bucati) {',
     t: INC, e: 'inspector (EXP-4): o editare langa componenta fara epoca noua',
+  },
+  {
+    n: 'EXP-6: memoria inspectorului ignora fata atinsa (acelasi zid, doua incaperi)',
+    f: 'viewer/ui/memorie-incapere.ts',
+    a: '  return a === null || b === null ? a === b : a.x === b.x && a.y === b.y && a.z === b.z\n',
+    b: '  return true\n',
+    t: INC, e: 'inspector (EXP-6): acelasi zid intrebat pe doua fete',
   },
   {
     n: 'ECR-3: cheia veche — orice editare din lume invalideaza memoria (terrain.editari)',

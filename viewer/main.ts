@@ -31,7 +31,7 @@ import { createJobOverlay, rebuildJobOverlay, rezumatJoburi } from './overlay-jo
 import { actualizeazaInchise, avanseazaStabilitate, createStabilityOverlay, pornesteStabilitate, progresStabilitate, redeseneazaStabilitate } from './overlay-stabilitate.ts'
 import { Item, Piesa } from '../src/sim/state.ts'
 import { desemnareLaCelula, slotDesemnare } from '../src/sim/desemnari.ts'
-import type { CelulaJ, Impact, Raza } from './tinta.ts'
+import type { CelulaJ, Impact, Raza, V3 } from './tinta.ts'
 import { celulaDeZonaLa } from '../src/sim/zone.ts'
 import { cellKey } from '../src/sim/path.ts'
 import { createDensePanel, densePanelReport, PANEL_HZ, tickDensePanel } from './panel-dens.ts'
@@ -933,6 +933,8 @@ type TintaClick =
     readonly ok: true; readonly wx: number; readonly wy: number; readonly z: number
     /** Unealta Usa: celulele golului tintit (`golulTintit`), null = nu e un gol sub cursor. */
     readonly gol?: readonly { readonly x: number; readonly y: number; readonly z: number }[] | null
+    /** `inspecteaza`: normala fetei atinse (`alegeTinta`) — inspectorul intreaba aerul din fata ei (EXP-6). */
+    readonly n?: V3
   }
   | { readonly ok: false; readonly mesaj: string }
 
@@ -1493,7 +1495,7 @@ renderer.domElement.addEventListener('click', (ev) => {
     return
   }
   const { wx, wy, z } = t
-  if (mod === 'inspecteaza') { ui?.inspecteazaCelula(wx, wy, z); return }
+  if (mod === 'inspecteaza') { ui?.inspecteazaCelula(wx, wy, z, t.n ?? null); return }
   const u = unealtaCurenta()
 
   // Click = DESEMNEAZA (un pion vine sa sape sau sa zideasca). Alt+click = sapa pe loc (unealta de

@@ -22,7 +22,7 @@ import { ICON } from './iconite.ts'
 import { cauzaGolirii, creeazaPrevizualizare, golita, inspecteazaCelula, refacePrevizualizarea, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte } from './model.ts'
 import { creeazaMemorieIncapere, usilePropuse } from './memorie-incapere.ts'
 import type { UsilePropuse } from './memorie-incapere.ts'
-import type { Bara, IncapereLa, InspectieCelula, Previz, RandOm } from './model.ts'
+import type { Bara, IncapereLa, InspectieCelula, NormalaFetei, Previz, RandOm } from './model.ts'
 import { actualizeaza, creeazaAlerte, eveniment, REGULI_ALERTE, Severitate } from './alerte.ts'
 import type { StareAlerta, Tinta } from './alerte.ts'
 import { cant, NUME_ITEM, NUME_MATERIAL, NUME_PIESA, NUME_ZONA, textIncapere, textIndiciuUsa, textMinute, textNumar, textPrioritatePersonala, textTimp } from './texte.ts'
@@ -92,7 +92,8 @@ export interface UI {
   ciclezaPiesa(): void
   /** Numele de azi al piesei alese (randul „piesa" din Diagnostic): o singura functie pentru amandoua. */
   numePiesa(): string
-  inspecteazaCelula(wx: number, wy: number, z: number): void
+  /** `n` = normala fetei atinse: inspectorul intreaba aerul din fata ei (recenzia explicatiei, EXP-6). */
+  inspecteazaCelula(wx: number, wy: number, z: number, n?: NormalaFetei | null): void
   inspecteazaPion(id: number): void
   pionSelectat(): number | null
   toast(mesaj: string, refuz?: boolean, actiune?: { eticheta: string; f: () => void }): void
@@ -286,7 +287,7 @@ export function monteazaUI(ctx: ContextUI): UI {
   const pasi = { depozit: false, sapa: false, piesa: false, pion: false }
   if (ctx.primiPasi) [pasi.depozit, pasi.sapa, pasi.piesa, pasi.pion] = [!!ctx.primiPasi[0], !!ctx.primiPasi[1], !!ctx.primiPasi[2], !!ctx.primiPasi[3]]
   const primiPasi = (): boolean[] => [pasi.depozit, pasi.sapa, pasi.piesa, pasi.pion]
-  let selectie: { fel: 'celula'; wx: number; wy: number; z: number } | { fel: 'pion'; id: number } | null = null
+  let selectie: { fel: 'celula'; wx: number; wy: number; z: number; n: NormalaFetei | null } | { fel: 'pion'; id: number } | null = null
   let dreptunghi: { text: string; rosu: boolean } | null = null
   let sertar: 'inspector' | 'oameni' = 'inspector'
 
@@ -301,7 +302,7 @@ export function monteazaUI(ctx: ContextUI): UI {
     alegeUnealta,
     ciclezaPiesa,
     numePiesa: () => (ui.unealta === Unealta.CONSTRUIESTE ? NUME_PIESA[ui.piesa]!.toLowerCase() : 'sapa (P)'),
-    inspecteazaCelula: (wx, wy, z) => { selectie = { fel: 'celula', wx, wy, z }; ctx.urmareste(null); arataSertar('inspector'); scrieInspector(true) },
+    inspecteazaCelula: (wx, wy, z, n = null) => { selectie = { fel: 'celula', wx, wy, z, n }; ctx.urmareste(null); arataSertar('inspector'); scrieInspector(true) },
     inspecteazaPion: (id) => { selectie = { fel: 'pion', id }; noteaza('pion'); arataSertar('inspector'); scrieInspector(true); scrieOameni(true) },
     pionSelectat: () => (selectie?.fel === 'pion' ? selectie.id : null),
     toast,
@@ -589,7 +590,7 @@ export function monteazaUI(ctx: ContextUI): UI {
     // Explicația inundă până la scurgere, iar inspectorul se reface de 4 ori pe secundă (panoul camerelor,
     // JUC-8): memoria ei nu se invalidează decât de o editare lângă componentă, iar frâna o ține sub 5%
     // din timp cât minerii lucrează chiar acolo (recenzia încăperilor, EXP-4 / ECR-3). Un clic o sare.
-    const inc = memorieIncapere.ia(w, selectie.wx, selectie.wy, selectie.z, fortat)
+    const inc = memorieIncapere.ia(w, selectie.wx, selectie.wy, selectie.z, fortat, selectie.n)
     const usi = usilePropuse(w, inc)
     const cheie = `${JSON.stringify(c)}|${memorieIncapere.versiune()}|${usi.lipsa.length}|${usi.desemnata}`
     if (!fortat && cheie === inspectorCheie) return

@@ -147,26 +147,36 @@ test('inspector (ECR-3): sapaturile sub acoperis in ALTA componenta (epoca noua)
   assert.equal(json(mem.ia(w, x, y, z, false)), json(incaperea(w, x, y, z)), 'raspunsul memorat e cel proaspat')
 })
 
-test('inspector (EXP-4): o editare langa componenta fara epoca noua (bloc langa gura putului) si una la capatul departe al unei galerii lungi refac memoria', () => {
-  // 1. Gura putului in blocul vecin: camera se termina la x = B−1, putul e la x = B (B multiplu de 16), iar
-  //    blocul zidit pe sol la x = B+1 muta cota gaurii fara sa atinga aer acoperit.
+test('inspector (EXP-4): o editare langa componenta fara epoca noua (in fata tindei, in blocul vecin) si una la capatul departe al unei galerii lungi refac memoria', () => {
+  // 1. Casa se termina la x = B−1 (B multiplu de 16), cu golul usii in zidul de est, sub acoperis; in fata
+  //    lui, la x = B, o tinda fara acoperis intre doua cioturi de zid. Scurgerea e tinda: LATERAL (cer si
+  //    spre est). Un bloc zidit la x = B+1, in blocul vecin, o inchide pe laturi — acum aerul iese doar
+  //    in sus (SUS) —, fara sa atinga aer acoperit: nicio felie refacuta, epoca ramane. (Inainte de EXP-3,
+  //    proba era cota gaurii langa gura unui put; cota se ia acum de pe drum, deci nu mai depinde de
+  //    vecinii gurii.)
   {
     const { w, wx, wy, g } = sitPlat(777, 24)
     const B = Math.ceil((wx + 5) / 16) * 16
-    const Z = g - 4
-    for (const z of [Z, Z + 1]) for (let x = B - 4; x < B; x++) for (let y = wy + 4; y < wy + 8; y++) sapa(w, x, y, z)
-    for (let z = g; z >= Z; z--) sapa(w, B, wy + 5, z)
+    const y0 = wy + 3, yu = wy + 5
+    for (let z = g + 1; z <= g + 2; z++) {
+      for (let x = B - 5; x <= B - 1; x++) for (let y = y0; y <= y0 + 4; y++) {
+        const zid = x === B - 5 || x === B - 1 || y === y0 || y === y0 + 4
+        if (zid && !(x === B - 1 && y === yu)) assert.ok(fill(w.terrain, x, y, z, P).ok)
+      }
+      assert.ok(fill(w.terrain, B, yu - 1, z, P).ok && fill(w.terrain, B, yu + 1, z, P).ok, 'cioturile tindei')
+    }
+    for (let x = B - 5; x <= B - 1; x++) for (let y = y0; y <= y0 + 4; y++) assert.ok(fill(w.terrain, x, y, g + 3, P).ok)
     sincronizeazaCamere(w.camere, w.terrain)
     const mem = creeazaMemorieIncapere(() => 0)
-    const sel = [B - 3, wy + 5, Z - 1] as const
+    const sel = [B - 3, yu, g] as const
     const e0 = mem.ia(w, ...sel, true)
-    assert.ok(e0 && e0.e.fel === 'DESCHISA' && e0.e.directie === 'SUS', json(e0))
+    assert.ok(e0 && e0.e.fel === 'DESCHISA' && e0.e.directie === 'LATERAL' && e0.e.scurgere.x === B, json(e0))
     const ep = w.camere.epoca
-    assert.ok(fill(w.terrain, B + 1, wy + 5, g + 1, P).ok && fill(w.terrain, B + 1, wy + 5, g + 2, P).ok)
+    assert.ok(fill(w.terrain, B + 1, yu, g + 1, P).ok && fill(w.terrain, B + 1, yu, g + 2, P).ok)
     sincronizeazaCamere(w.camere, w.terrain)
-    assert.equal(w.camere.epoca, ep, 'blocul de pe sol nu atinge aer acoperit: epoca ramane')
+    assert.equal(w.camere.epoca, ep, 'blocul din fata tindei nu atinge aer acoperit: epoca ramane')
     const proaspat = incaperea(w, ...sel)
-    assert.notEqual(json(proaspat), json(e0), 'cota gaurii s-a schimbat (altfel proba n-ar masura nimic)')
+    assert.ok(proaspat && proaspat.e.fel === 'DESCHISA' && proaspat.e.directie === 'SUS', `tinda inchisa pe laturi: aerul iese in sus (altfel proba n-ar masura nimic) — ${json(proaspat)}`)
     assert.equal(json(mem.ia(w, ...sel, true)), json(proaspat), 'memoria vede editarea din blocul vecin')
   }
   // 2. O galerie sigilata de 40 m (trei blocuri), intrebata la capatul de vest; un put la capatul de est.
@@ -187,6 +197,26 @@ test('inspector (EXP-4): o editare langa componenta fara epoca noua (bloc langa 
     assert.ok(Math.floor((wx + 39) / 16) - Math.floor((wx + 1) / 16) >= 2, 'putul e la cel putin doua blocuri de celula intrebata')
     assert.equal(mem.ia(w, ...sel, true)?.e.fel, 'DESCHISA', 'memoria acopera toata componenta, nu doar blocul celulei')
   }
+})
+
+test('inspector (EXP-6): acelasi zid intrebat pe doua fete — memoria tine si fata atinsa, nu doar celula', () => {
+  const { w, wx, wy, g } = sitPlat(12345, 10)
+  // Doua camere sub acelasi acoperis, despartite de zidul x = 3: A (x 1..2) are golul usii (1, 0), B (x 4..5) e inchisa.
+  for (let z = g + 1; z <= g + 2; z++) for (let a = 0; a <= 6; a++) for (let b = 0; b <= 4; b++) {
+    const zid = a === 0 || a === 3 || a === 6 || b === 0 || b === 4
+    if (zid && !(a === 1 && b === 0)) assert.ok(fill(w.terrain, wx + a, wy + b, z, P).ok)
+  }
+  for (let a = 0; a <= 6; a++) for (let b = 0; b <= 4; b++) assert.ok(fill(w.terrain, wx + a, wy + b, g + 3, P).ok)
+  sincronizeazaCamere(w.camere, w.terrain)
+  const zid = [wx + 3, wy + 2, g + 1] as const
+  const mem = creeazaMemorieIncapere(() => 0)
+  const spreA = mem.ia(w, ...zid, true, { x: -1, y: 0, z: 0 })
+  assert.equal(spreA?.e.fel, 'DESCHISA', `fata dinspre A: ${json(spreA)}`)
+  const spreB = mem.ia(w, ...zid, true, { x: 1, y: 0, z: 0 })
+  assert.equal(spreB?.e.fel, 'INCAPERE', `fata dinspre B, dupa A, pe aceeasi celula: ${json(spreB)}`)
+  assert.equal(mem.calcule(), 2)
+  assert.equal(json(mem.ia(w, ...zid, false, { x: 1, y: 0, z: 0 })), json(spreB), 'aceeasi fata: din memorie')
+  assert.equal(mem.calcule(), 2)
 })
 
 test('inspector (EXP-4): frana — cu minerii in mina intrebata, o recalculare cel mult la max(250 ms, 20 × costul); un clic o sare', () => {

@@ -492,12 +492,20 @@ async function ruleaza() {
       await p.tasta('v')
       await p.js(`__f.centreaza(${hx + 2.5}, ${hy + 2.5}, ${hs + 1}, 9)`)
       await astepta(250)
-      // Nivelul: aerul casei (sol +1 fata de solul de sub camera).
-      await p.tasta('q')
-      for (let i = 0; i < 4; i++) {
-        const rel = await p.js(`document.querySelector('.ui-nivel .rel')?.textContent ?? ''`)
+      // Nivelul: aerul casei (sol +1 fata de solul de sub camera). Dupa fiecare tasta se ASTEAPTA eticheta
+      // noua: citita la 80 ms, sub incarcare, era cea veche, bucla apasa tasta gresita si se oprea la
+      // „sol −1" — bifa „incaperi" pica 1 din 3 rulari si pe codul de baza (agentul D1 al remedierii).
+      const eticheta = () => p.js(`document.querySelector('.ui-nivel .rel')?.textContent ?? ''`)
+      const tastaNivel = async (k) => {
+        const inainte = await eticheta()
+        await p.tasta(k)
+        for (let j = 0; j < 30 && (await eticheta()) === inainte; j++) await astepta(50)
+      }
+      await tastaNivel('q')
+      for (let i = 0; i < 8; i++) {
+        const rel = await eticheta()
         if (rel === 'sol +1') break
-        await p.tasta(/sol \+[2-9]/.test(rel) ? 'q' : 'e')
+        await tastaNivel(/sol \+[2-9]/.test(rel) ? 'q' : 'e')
       }
       await p.tasta('i')
       await astepta(400)
