@@ -86,10 +86,17 @@ export const MUTATII = [
   },
   {
     n: 'zonele se picteaza si in golul usii',
-    f: 'src/sim/commands.ts',
-    a: '  return !(m.ok && m.value === Material.USA)',
-    b: '  return m.ok',
+    f: 'src/sim/joburi.ts',
+    a: '  return isWalkable(t, x, y, z, rules) && materialFast(t, x, y, z) !== Material.USA',
+    b: '  return isWalkable(t, x, y, z, rules)',
     t: T, e: 'USA: zonele nu se picteaza in golul unei usi',
+  },
+  {
+    n: 'USA-2 (recenzia incaperilor): retragerea de dupa zidire intreaba doar „e calcabila?" (zona pictata inainte ramane in toc)',
+    f: 'src/sim/joburi.ts',
+    a: '    if (celulaDeZonaPosibila(w.terrain, wx, wy, zDeLa - h, rules)) continue',
+    b: '    if (isWalkable(w.terrain, wx, wy, zDeLa - h, rules)) continue',
+    t: T, e: 'USA zona (USA-2): o celula de zona pictata INAINTE de usa',
   },
   {
     n: 'CTR-9: garda de continut doar intr-un sens (un PERETE din USA trece)',

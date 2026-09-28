@@ -390,6 +390,38 @@ test('USA: zonele nu se picteaza in golul unei usi', () => {
   assert.notEqual(celulaDeZonaLa(w.zone, wx + 2, wy + 2, g + 1), -1, 'fata usii e')
 })
 
+test('USA zona (USA-2): o celula de zona pictata INAINTE de usa iese din golul ei la zidire — cu comanda fill si cu pionii', () => {
+  // Ordinea obisnuita a jucatorului: intai depozitul peste camera (si peste intrare), apoi usa. Testul
+  // de mai sus probeaza doar ordinea inversa. Pe e063f40 celula din gol supravietuia usii: retragerea
+  // intreba doar „e calcabila?", iar golul usii ramane calcabil — marfa carata in prag, paturi in toc.
+  for (const cuPioni of [false, true]) {
+    const { w, wx, wy, g, x0, y0, pioni } = cameraCuToc(777, true)
+    const out = applyCommand(w, { kind: 'picteazaZona', x0: x0 + 1, y0, x1: x0 + 3, y1: y0 + 3, z: g + 1, fel: Zona.DEPOZIT }, R)
+    assert.ok(out.ok, JSON.stringify(out))
+    assert.notEqual(celulaDeZonaLa(w.zone, x0 + 2, y0, g + 1), -1, 'premisa: golul e celula de zona')
+    const zidita = (ww: World): boolean => [g + 1, g + 2].every((z) => { const m = materialAt(ww.terrain, x0 + 2, y0, z); return m.ok && m.value === Material.USA })
+    if (!cuPioni) {
+      for (const z of [g + 1, g + 2]) assert.ok(applyCommand(w, { kind: 'fill', wx: x0 + 2, wy: y0, z, material: Material.USA }, R).ok)
+    } else {
+      for (const z of [g + 1, g + 2]) assert.ok(applyCommand(w, { kind: 'desemneaza', wx: x0 + 2, wy: y0, z, piesa: Piesa.USA }, R).ok)
+      lasaItem(w, Item.PIATRA, 40, wx + 1, wy + 1)
+      for (let i = 0; i < 4; i++) lasaItem(w, Item.PAMANT, 20, wx + 2 + i, wy + 12)
+      pioni()
+      assert.ok(panaCand(w, 3000, zidita) !== -1, 'usile nezidite de pioni in 3000 de tickuri')
+    }
+    assert.ok(zidita(w))
+    assert.equal(celulaDeZonaLa(w.zone, x0 + 2, y0, g + 1), -1, `cuPioni=${cuPioni}: celula de zona a ramas in golul usii`)
+    assert.notEqual(celulaDeZonaLa(w.zone, x0 + 2, y0 + 1, g + 1), -1, 'controlul: interiorul ramane depozit')
+    if (cuPioni) {
+      // Si nimic nu mai e carat in prag dupa zidire (pamantul de afara merge in depozitul dinauntru).
+      const cant = (): number => { const it = itemLaCelula(w.iteme, x0 + 2, y0, g + 1); return it === -1 ? 0 : w.iteme.cantitate[it]! }
+      const inainte = cant()
+      ruleaza(w, 1500)
+      assert.ok(cant() <= inainte, `marfa carata in prag dupa zidire: ${inainte} -> ${cant()}`)
+    }
+  }
+})
+
 test('USA: continutul leaga piesa USA de materialul USA in ambele sensuri (CTR-9)', () => {
   const piese = (inlocuiri: Record<string, unknown>): unknown => {
     const baza = JSON.parse(JSON.stringify({

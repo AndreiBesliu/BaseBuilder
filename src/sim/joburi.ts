@@ -2765,15 +2765,27 @@ function reconciliazaTintaMoarta(w: World, rules: Rules, id: number): void {
  * morman in lume — voxelul ramane, marfa nu se pierde.
  */
 /**
+ * Poate sta o celula de zona pe (x, y, z)? Calcabila, si NU in golul unei usi: marfa carata acolo
+ * ar sta in prag, iar un pat in toc. UN singur adevar, citit de pictare (`picteazaZona`) si de
+ * retragerea de dupa o editare de teren: pana la recenzia incaperilor (USA-2) retragerea intreba
+ * doar „e calcabila?", iar golul unei usi ramane calcabil — deci o zona pictata INAINTE de usa
+ * supravietuia zidirii ei, cu pioni dormind in toc si marfa carata in prag.
+ */
+export function celulaDeZonaPosibila(t: Terrain, x: number, y: number, z: number, rules: Rules): boolean {
+  return isWalkable(t, x, y, z, rules) && materialFast(t, x, y, z) !== Material.USA
+}
+
+/**
  * Celulele de zona de pe coloana (wx, wy), intre `zDeLa` si headroom-ul de sub
- * ea, care nu mai sunt calcabile dupa o editare de teren: se retrag, intrerupand
- * carausii care le tineau ca destinatie (marfa le ajunge la picioare).
+ * ea, pe care nu mai poate sta o zona dupa o editare de teren (necalcabile, sau
+ * in golul unei usi abia zidite): se retrag, intrerupand carausii care le tineau
+ * ca destinatie (marfa le ajunge la picioare).
  */
 export function retrageCeluleDeZonaNecalcabile(w: World, rules: Rules, wx: number, wy: number, zDeLa: number): void {
   for (let h = 0; h <= rules.agentHeadroomM; h++) {
     const cs = celulaDeZonaLa(w.zone, wx, wy, zDeLa - h)
     if (cs === -1) continue
-    if (isWalkable(w.terrain, wx, wy, zDeLa - h, rules)) continue
+    if (celulaDeZonaPosibila(w.terrain, wx, wy, zDeLa - h, rules)) continue
     anuleazaCelulaDeZona(w, rules, cs)
     stergeCelulaDeZona(w.zone, cs)
   }

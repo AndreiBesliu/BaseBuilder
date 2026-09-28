@@ -22,22 +22,12 @@ import type { Rules } from './content.ts'
 import { DEFAULT_RULES } from './content.ts'
 import { isWalkable, rebuildDirty } from './regions.ts'
 import { sincronizeazaCamere } from './camere.ts'
-import { blocheazaMersul, esteMaterialCunoscut, isSolid, Material, MATERIAL_MAX, type MaterialId } from './terrain/chunk.ts'
+import { blocheazaMersul, esteMaterialCunoscut, isSolid, MATERIAL_MAX, type MaterialId } from './terrain/chunk.ts'
 import { CHUNK_GRID, inWorld, materialAt, setFocus, voxelRangeM, WORLD_CELLS } from './terrain/terrain.ts'
 import { adaugaDesemnare, Desemnare, slotDesemnare } from './desemnari.ts'
-import { acoperaDesemnarea, anuleazaCelulaDeZona, anuleazaDesemnare, celulaLibera, sapaManual, Sfarsit, terminaJob, uitaRacirileDeMarfa, uitaTintele, zidesteVoxel } from './joburi.ts'
+import { acoperaDesemnarea, anuleazaCelulaDeZona, anuleazaDesemnare, celulaDeZonaPosibila, celulaLibera, sapaManual, Sfarsit, terminaJob, uitaRacirileDeMarfa, uitaTintele, zidesteVoxel } from './joburi.ts'
 import { asazaItem } from './iteme.ts'
 import { adaugaCelulaDeZona, celulaDeZonaLa, creeazaZona, marcheazaZoneMurdare, slotZona, stergeCelulaDeZona, stergeZona, Zona, ZONE_FELURI } from './zone.ts'
-
-/**
- * Se poate picta o celula de zona aici? Calcabila, si NU in golul unei usi: marfa carata acolo ar
- * sta in prag (iar o usa zidita peste o celula de zona o scoate oricum, in `zidesteVoxel`).
- */
-function celulaDeZonaPosibila(w: World, x: number, y: number, z: number, rules: Rules): boolean {
-  if (!isWalkable(w.terrain, x, y, z, rules)) return false
-  const m = materialAt(w.terrain, x, y, z)
-  return !(m.ok && m.value === Material.USA)
-}
 
 export type Command =
   | { readonly kind: 'spawnAgent'; readonly x: number; readonly y: number; readonly z: number; readonly faction: FactionId }
@@ -404,11 +394,17 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       }
       // Intai se numara ce ar intra, fara sa se scrie nimic: o zona noua se
       // creeaza (si id-ul se consuma) DOAR daca intra macar o celula.
+      //
+      // Ce celula poate tine o zona (calcabila, nu in golul unei usi) spune `celulaDeZonaPosibila`
+      // din joburi.ts — aceeasi functie cu care zidirea si sapatul retrag celulele ramase fara loc.
+      // Pana la recenzia incaperilor (USA-2) predicatul era copiat aici, iar comentariul lui sustinea
+      // ca „o usa zidita peste o celula de zona o scoate oricum"; retragerea intreba insa doar „e
+      // calcabila?", iar golul usii ramane calcabil — zona pictata inainte de usa ramanea in toc.
       let bune = 0
       let sarite = 0
       for (let y = y0; y <= y1; y++) {
         for (let x = x0; x <= x1; x++) {
-          if (!celulaDeZonaPosibila(w, x, y, cmd.z, rules) || celulaDeZonaLa(w.zone, x, y, cmd.z) !== -1) sarite++
+          if (!celulaDeZonaPosibila(w.terrain, x, y, cmd.z, rules) || celulaDeZonaLa(w.zone, x, y, cmd.z) !== -1) sarite++
           else bune++
         }
       }
@@ -423,7 +419,7 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       let adaugate = 0
       for (let y = y0; y <= y1; y++) {
         for (let x = x0; x <= x1; x++) {
-          if (!celulaDeZonaPosibila(w, x, y, cmd.z, rules) || celulaDeZonaLa(w.zone, x, y, cmd.z) !== -1) continue
+          if (!celulaDeZonaPosibila(w.terrain, x, y, cmd.z, rules) || celulaDeZonaLa(w.zone, x, y, cmd.z) !== -1) continue
           const out = adaugaCelulaDeZona(w.zone, w.nextId, zonaId, x, y, cmd.z)
           if (!out.ok) continue
           w.nextId++
