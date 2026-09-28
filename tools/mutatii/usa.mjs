@@ -142,6 +142,56 @@ export const MUTATII = [
     b: '    const cota = z',
     t: T, e: 'USA poarta (USA-3, recenzia incaperilor)',
   },
+  // --- recenzia incaperilor, CTR-7: gardile usii de pe un singur loc de apel (mut-usa.mjs al lentilei)
+  {
+    n: 'CTR-7 U01: predicatul de acces eticheteaza graful fara faraPodea (chepengul planificat devine pod)',
+    f: 'src/sim/acces.ts',
+    a: '        et = etichetare(nodStabil({ t, plan, zidite, faraPodea }, rules, r), dovedite)',
+    b: '        et = etichetare(nodStabil({ t, plan, zidite }, rules, r), dovedite)',
+    t: T, e: 'USA pod (CTR-7)',
+  },
+  {
+    n: 'CTR-7 U11: calea incrementala a memoriei accesului pune santierul de usa in C (golul se inchide)',
+    f: 'src/sim/acces.ts',
+    a: '    if (s !== -1 && d.kind[s] === Desemnare.CONSTRUIESTE && inC(rules, d.piesa[s]!)) {',
+    b: '    if (s !== -1 && d.kind[s] === Desemnare.CONSTRUIESTE) {',
+    t: T, e: 'USA memorie (CTR-7)',
+  },
+  {
+    n: 'CTR-7 U17: nodStabil sta pe o usa zidita (chepengul zidit devine pod)',
+    f: 'src/sim/acces.ts',
+    a: '      if (!ePodea(materialCitit(r, x, y, z - 1))) {',
+    b: '      if (materialCitit(r, x, y, z - 1) === Material.AER || materialCitit(r, x, y, z - 1) === Material.APA) {',
+    t: T, e: 'USA pod (CTR-7)',
+  },
+  {
+    n: 'CTR-7 U06: in W o usa e podea (chepengul leaga insula de mal)',
+    f: 'src/sim/acces.ts',
+    a: '    ePodea(materialCitit(r, x, y, z)) || (extra !== null && extra.has(cellKey(x, y, z)))',
+    b: '    (materialCitit(r, x, y, z) !== Material.AER && materialCitit(r, x, y, z) !== Material.APA) || (extra !== null && extra.has(cellKey(x, y, z)))',
+    t: T, e: 'USA pod (CTR-7)',
+  },
+  {
+    n: 'CTR-7 U08: coborarea de urgenta aterizeaza pe un chepeng (caderea se opreste pe usa)',
+    f: 'src/sim/acces.ts',
+    a: '  const peCe = (a: number, b: number, c: number): boolean => ePodea(materialCitit(r, a, b, c))',
+    b: '  const peCe = (a: number, b: number, c: number): boolean => { const m = materialCitit(r, a, b, c); return m !== Material.AER && m !== Material.APA }',
+    t: T, e: 'USA coborare (CTR-7)',
+  },
+  {
+    n: 'CTR-7 U09: coborarea de urgenta nu trece cu capul prin usa',
+    f: 'src/sim/acces.ts',
+    a: '  const blocheaza = (a: number, b: number, c: number): boolean => blocheazaMersul(materialCitit(r, a, b, c))',
+    b: '  const blocheaza = (a: number, b: number, c: number): boolean => { const m = materialCitit(r, a, b, c); return m !== Material.AER && m !== Material.APA }',
+    t: T, e: 'USA coborare (CTR-7)',
+  },
+  {
+    n: 'CTR-7 U12: refugiul se opreste pe usa (piatra din usa de sus ramane deasupra celei de jos)',
+    f: 'src/sim/joburi.ts',
+    a: '  while (z > baza && !ePodea(materialFast(t, wx, wy, z - 1))) z--',
+    b: '  while (z > baza && materialFast(t, wx, wy, z - 1) === Material.AER) z--',
+    t: T, e: 'USA poarta (USA-3, recenzia incaperilor)',
+  },
   // --- viewer-ul usii si al incaperilor (partea pura)
   {
     n: 'unealta Usa nu vede zidurile planificate (golul unui zid doar desenat nu e gol)',

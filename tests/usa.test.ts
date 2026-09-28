@@ -10,7 +10,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { componenta, componenteInchiseDe, componenteInchiseDeMemorat, cititor, nodStabil, nodW, siguraMemorat } from '../src/sim/acces.ts'
+import { componenta, componenteInchiseDe, componenteInchiseDeMemorat, cititor, iesireDeUrgenta, memorieAcces, nodStabil, nodW, siguraMemorat } from '../src/sim/acces.ts'
 import { componentaLa, esteIncapere, listaComponente } from '../src/sim/camere.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { DEFAULT_RULES, parseRules } from '../src/sim/content.ts'
@@ -26,7 +26,7 @@ import { Faction, Item, Piesa } from '../src/sim/state.ts'
 import type { PiesaId, World } from '../src/sim/state.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
 import type { MaterialId } from '../src/sim/terrain/chunk.ts'
-import { fill, materialAt } from '../src/sim/terrain/terrain.ts'
+import { dig, fill, materialAt } from '../src/sim/terrain/terrain.ts'
 import { celulaDeZonaLa, Zona } from '../src/sim/zone.ts'
 import { lasaItem, panaCand, R, ruleaza, sitPlat } from './fixturi.ts'
 
@@ -144,6 +144,88 @@ test('USA: un santier de usa nu inchide golul in F — interiorul ramane SIGUR p
     for (const z of [g + 1, g + 2]) assert.ok(applyCommand(w, { kind: 'desemneaza', wx: wx + 2, wy, z, piesa }, R).ok)
     assert.equal(siguraMemorat(t, w.desemnari, R, w.acces, wx + 2, wy + 2, g + 1), sigur, `piesa ${piesa}`)
   }
+})
+
+// --- recenzia incaperilor, CTR-7: gardile usii puse pe cate un singur loc de apel -----------------
+//
+// Mutatiile pe un singur loc (predicatul de acces fara `faraPodea`, calea incrementala a memoriei,
+// `nodStabil` care sta pe o usa zidita) treceau toate suitele; trei aveau efect demonstrat in joc.
+
+/** Insula 3x3 inconjurata de un sant de 3 m (sapat direct in teren), cu un pion pe malul de afara. */
+function insula(seed: number): { w: World; wx: number; wy: number; g: number; x0: number; y0: number } {
+  const { w, wx, wy, g } = sitPlat(seed, 18)
+  const x0 = wx + 8, y0 = wy + 8
+  for (let dx = -1; dx <= 3; dx++) for (let dy = -1; dy <= 3; dy++) {
+    if (dx >= 0 && dx <= 2 && dy >= 0 && dy <= 2) continue
+    for (const z of [g, g - 1, g - 2]) assert.ok(dig(w.terrain, x0 + dx, y0 + dy, z).ok)
+  }
+  assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (wx + 2) * 1000 + 500, y: (wy + 2) * 1000 + 500, z: g + 1, faction: Faction.ASEZARE }, R).ok)
+  return { w, wx, wy, g, x0, y0 }
+}
+
+test('USA pod (CTR-7): un chepeng peste sant nu e pod — zidul de pe insula ramane fara acces (chepengul planificat si zidit)', () => {
+  // Un chepeng (usa) peste sant, la cota solului; un zid desemnat pe insula. Pe usa nu se sta, deci
+  // nici un chepeng planificat, nici unul zidit nu duc pe insula: zidul nu se promite. Cu usa
+  // socotita podea (in predicatul de acces sau in `nodStabil`), previzualizarea il dadea CONSTRUIBIL.
+  for (const zidit of [false, true]) {
+    const { w, g, x0, y0 } = insula(12345)
+    if (zidit) assert.ok(fill(w.terrain, x0 - 1, y0 + 1, g, Material.USA).ok)
+    else assert.ok(applyCommand(w, { kind: 'desemneaza', wx: x0 - 1, wy: y0 + 1, z: g, piesa: Piesa.USA }, R).ok)
+    assert.ok(applyCommand(w, { kind: 'desemneaza', wx: x0 + 1, wy: y0 + 1, z: g + 1, piesa: Piesa.PERETE }, R).ok)
+    const p = constructiaPrevizualizata(w, R)
+    assert.ok(p.faraAcces.includes(cellKey(x0 + 1, y0 + 1, g + 1)), `chepeng ${zidit ? 'zidit' : 'planificat'}: zidul de pe insula nu se promite`)
+    // Si in W (graful lumii zidite, al pungilor si al sigilarii): insula e inchisa.
+    assert.equal(componenta(nodW(w.terrain, null, R), R, x0 + 1, y0 + 1, g + 1).deschisa, false, `chepeng ${zidit ? 'zidit' : 'planificat'}: insula legata in W`)
+  }
+  // Controlul: o punte de piatra in locul chepengului chiar leaga insula — testul nu e vid.
+  const { w, g, x0, y0 } = insula(12345)
+  assert.ok(fill(w.terrain, x0 - 1, y0 + 1, g, P).ok)
+  assert.equal(componenta(nodW(w.terrain, null, R), R, x0 + 1, y0 + 1, g + 1).deschisa, true, 'controlul: puntea de piatra leaga')
+})
+
+test('USA coborare (CTR-7): din punga se sare pe langa o usa la cap si prin un chepeng de dedesubt (controlul: piatra)', () => {
+  // Coborarea de urgenta (`iesireDinPunga`) de pe un platou de 3 m: de pe mijloc, prima margine in
+  // ordinea BFS e estul, (x0+3, y0+1), cu aterizarea pe sol la g+1 (tests/acces-coborare.test.ts).
+  // O usa pe coloana de iesire nu schimba nimic: la inaltimea capului se trece prin ea, iar caderea
+  // trece prin ea (nu e podea). Aceeasi celula din piatra schimba iesirea.
+  const est = (cota: number, material: MaterialId): [number, number, number] | null => {
+    const { w, wx, wy, g } = sitPlat(4242, 16)
+    const x0 = wx + 6, y0 = wy + 6
+    const t = w.terrain
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) for (let z = g + 1; z <= g + 3; z++) assert.ok(fill(t, x0 + dx, y0 + dy, z, Material.ROCA).ok)
+    // Direct in teren: o piesa in aer nu s-ar desena (ca grinda din acces-coborare.test.ts).
+    assert.ok(fill(t, x0 + 3, y0 + 1, g + cota, material).ok)
+    const tinta = iesireDeUrgenta(t, R, x0 + 1, y0 + 1, g + 4, cititor(t), null, memorieAcces().stat)
+    return tinta === null ? null : [tinta[0] - x0, tinta[1] - y0, tinta[2] - g]
+  }
+  assert.deepEqual(est(5, Material.USA), [3, 1, 1], 'usa la inaltimea capului: se trece prin ea')
+  assert.notDeepEqual(est(5, P), [3, 1, 1], 'controlul: piatra la inaltimea capului nu se trece')
+  assert.deepEqual(est(2, Material.USA), [3, 1, 1], 'chepeng sub caderea: se cade prin el pana pe sol')
+  assert.notDeepEqual(est(2, P), [3, 1, 1], 'controlul: pe piatra se aterizeaza (un pas, nu o coborare)')
+})
+
+test('USA memorie (CTR-7): santierul de usa desemnat DUPA ce memoria accesului exista nu inchide golul (calea incrementala)', () => {
+  // Testul de mai sus („un santier de usa nu inchide golul in F") atinge doar calea `goleste` a
+  // memoriei: desemnarea vine inainte de prima citire. Aici memoria exista deja, deci santierul intra
+  // pe calea incrementala.
+  const { w, wx, wy, g } = sitPlat(777, 10)
+  for (let z = g + 1; z <= g + 2; z++) for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) {
+    if (dx !== 0 && dx !== 4 && dy !== 0 && dy !== 4) continue
+    if (dx === 2 && dy === 0) continue
+    assert.ok(fill(w.terrain, wx + dx, wy + dy, z, P).ok)
+  }
+  for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) assert.ok(fill(w.terrain, wx + dx, wy + dy, g + 3, P).ok)
+  assert.ok(siguraMemorat(w.terrain, w.desemnari, R, w.acces, wx + 2, wy + 2, g + 1), 'controlul: golul deschis, memoria construita')
+  for (const z of [g + 1, g + 2]) assert.ok(applyCommand(w, { kind: 'desemneaza', wx: wx + 2, wy, z, piesa: Piesa.USA }, R).ok)
+  assert.ok(siguraMemorat(w.terrain, w.desemnari, R, w.acces, wx + 2, wy + 2, g + 1), 'dupa usa desemnata: interiorul ramane SIGUR')
+  // Controlul: un PERETE desemnat pe aceeasi cale inchide golul — testul nu e vid.
+  for (const z of [g + 1, g + 2]) {
+    const ds = w.desemnari
+    for (let s = 0; s < ds.count; s++) if (ds.alive[s] === 1 && ds.wx[s] === wx + 2 && ds.wy[s] === wy && ds.z[s] === z) assert.ok(applyCommand(w, { kind: 'anuleazaDesemnarea', id: ds.id[s]! }, R).ok)
+  }
+  assert.ok(siguraMemorat(w.terrain, w.desemnari, R, w.acces, wx + 2, wy + 2, g + 1), 'controlul: dupa anulare, tot deschis')
+  for (const z of [g + 1, g + 2]) assert.ok(applyCommand(w, { kind: 'desemneaza', wx: wx + 2, wy, z, piesa: Piesa.PERETE }, R).ok)
+  assert.ok(!siguraMemorat(w.terrain, w.desemnari, R, w.acces, wx + 2, wy + 2, g + 1), 'controlul: un perete planificat inchide golul')
 })
 
 // --- USA-1: privirea inainte ----------------------------------------------------
