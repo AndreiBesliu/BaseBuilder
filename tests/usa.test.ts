@@ -17,8 +17,8 @@ import { DEFAULT_RULES, parseRules } from '../src/sim/content.ts'
 import { slotDesemnare } from '../src/sim/desemnari.ts'
 import { cellOf } from '../src/sim/drumuri.ts'
 import { hashWorld } from '../src/sim/hash.ts'
-import { stergeItem } from '../src/sim/iteme.ts'
-import { arInchideCeva, constructiaPrevizualizata } from '../src/sim/joburi.ts'
+import { itemLaCelula, stergeItem } from '../src/sim/iteme.ts'
+import { arInchideCeva, constructiaPrevizualizata, lastJobReport } from '../src/sim/joburi.ts'
 import { canStep, isWalkable } from '../src/sim/regions.ts'
 import { cellKey } from '../src/sim/path.ts'
 import { decode, encode } from '../src/sim/save.ts'
@@ -301,6 +301,82 @@ test('USA (M5): salvare si incarcare in mijlocul casei cu usa dau aceeasi lume',
   ruleaza(a.w, 2500)
   ruleaza(b, 2500)
   assert.equal(hashWorld(b), hashWorld(a.w))
+})
+
+// --- recenzia incaperilor, USA-1: o usa nu ingroapa pe nimeni ----------------------------
+//
+// `celulaLibera` (pion sau morman la picioare SI la cap) se cerea si pentru usa. Pe e063f40 un morman
+// in toc — celula usii de jos, adica capul celei de sus — oprea usa de sus pe veci, cu constructorul
+// neintreruptibil (piatra in mana) pana pleca din asezare; iar desenarea usii intr-un gol sapat era
+// refuzata, fiindca piatra din zid iese in toc. Controlul: aceeasi geometrie cu PERETE.
+
+/** Camera 5x5 cu pereti de 2 m si acoperis; `gol` lasa deschisa coloana (2,0) — locul usii. */
+function cameraCuToc(seed: number, gol: boolean): { w: World; wx: number; wy: number; g: number; x0: number; y0: number; pioni: () => void } {
+  const { w, wx, wy, g } = sitPlat(seed, 18)
+  const x0 = wx + 6, y0 = wy + 6
+  for (let z = g + 1; z <= g + 2; z++) for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) {
+    if (dx !== 0 && dx !== 4 && dy !== 0 && dy !== 4) continue
+    if (gol && dx === 2 && dy === 0) continue
+    assert.ok(fill(w.terrain, x0 + dx, y0 + dy, z, P).ok)
+  }
+  for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) assert.ok(fill(w.terrain, x0 + dx, y0 + dy, g + 3, P).ok)
+  const pioni = (): void => {
+    for (let i = 0; i < 10; i++) lasaItem(w, Item.HRANA, 75, wx + 14 + (i % 3), wy - 1 + ((i / 3) | 0))
+    for (let i = 0; i < 3; i++) assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (wx + 2) * 1000 + 500, y: (wy + 12 + i) * 1000 + 500, z: g + 1, faction: Faction.ASEZARE }, R).ok)
+  }
+  return { w, wx, wy, g, x0, y0, pioni }
+}
+
+test('USA toc (USA-1): usa de sus se zideste peste un morman din toc (usa de jos zidita), fara asteptare', () => {
+  for (const seed of [12345, 777]) {
+    const { w, wx, wy, g, x0, y0, pioni } = cameraCuToc(seed, true)
+    assert.ok(applyCommand(w, { kind: 'fill', wx: x0 + 2, wy: y0, z: g + 1, material: Material.USA }, R).ok)
+    assert.ok(applyCommand(w, { kind: 'desemneaza', wx: x0 + 2, wy: y0, z: g + 2, piesa: Piesa.USA }, R).ok)
+    // Pamant: nu e materialul niciunei piese, deci nimeni nu-l ia din toc ca sursa.
+    assert.ok(applyCommand(w, { kind: 'lasaItem', fel: Item.PAMANT, cantitate: 20, wx: x0 + 2, wy: y0, z: g + 1 }, R).ok)
+    assert.notEqual(itemLaCelula(w.iteme, x0 + 2, y0, g + 1), -1, 'premisa: mormanul e in toc')
+    lasaItem(w, Item.PIATRA, 20, wx + 1, wy + 1)
+    pioni()
+    let ocupat = 0
+    const t = panaCand(w, 2000, (ww) => {
+      ocupat += lastJobReport().santierOcupat
+      const m = materialAt(ww.terrain, x0 + 2, y0, g + 2)
+      return m.ok && m.value === Material.USA
+    })
+    assert.ok(t !== -1, `seed ${seed}: usa de sus nezidita in 2000 de tickuri (santier ocupat ${ocupat})`)
+    assert.equal(ocupat, 0, `seed ${seed}: constructorul a asteptat ${ocupat} tickuri langa usa`)
+    assert.notEqual(itemLaCelula(w.iteme, x0 + 2, y0, g + 1), -1, 'mormanul ramane in toc (pe usa)')
+  }
+})
+
+test('USA toc (USA-1): usa se deseneaza si se zideste intr-un gol sapat, cu piatra din zid ramasa in toc', () => {
+  for (const seed of [12345, 777]) {
+    const { w, x0, y0, g, pioni } = cameraCuToc(seed, false)
+    assert.ok(applyCommand(w, { kind: 'dig', wx: x0 + 2, wy: y0, z: g + 2 }, R).ok)
+    assert.ok(applyCommand(w, { kind: 'dig', wx: x0 + 2, wy: y0, z: g + 1 }, R).ok)
+    assert.notEqual(itemLaCelula(w.iteme, x0 + 2, y0, g + 1), -1, 'premisa: zidul sapat lasa un morman in toc')
+    for (const z of [g + 1, g + 2]) {
+      const o = applyCommand(w, { kind: 'desemneaza', wx: x0 + 2, wy: y0, z, piesa: Piesa.USA }, R)
+      assert.ok(o.ok, `seed ${seed}, z=g+${z - g}: ${JSON.stringify(o)}`)
+    }
+    pioni()
+    const t = panaCand(w, 2000, (ww) => [g + 1, g + 2].every((z) => { const m = materialAt(ww.terrain, x0 + 2, y0, z); return m.ok && m.value === Material.USA }))
+    assert.ok(t !== -1, `seed ${seed}: usile din golul sapat nezidite in 2000 de tickuri`)
+  }
+})
+
+test('USA toc (USA-1): controlul — un PERETE nu se deseneaza peste un morman si nici deasupra lui (capul)', () => {
+  const { w, x0, y0, g } = cameraCuToc(12345, true)
+  assert.ok(applyCommand(w, { kind: 'lasaItem', fel: Item.PAMANT, cantitate: 20, wx: x0 + 2, wy: y0, z: g + 1 }, R).ok)
+  for (const z of [g + 1, g + 2]) {
+    const o = applyCommand(w, { kind: 'desemneaza', wx: x0 + 2, wy: y0, z, piesa: Piesa.PERETE }, R)
+    assert.equal(o.ok, false, `z=g+${z - g}`)
+    if (!o.ok) assert.equal(o.reason, 'CELULA_OCUPATA')
+    // Si pe calea de zidire (comanda `fill`, aceeasi `zidesteVoxel` ca jobul).
+    const f = applyCommand(w, { kind: 'fill', wx: x0 + 2, wy: y0, z, material: P }, R)
+    assert.equal(f.ok, false, `fill z=g+${z - g}`)
+    if (!f.ok) assert.equal(f.reason, 'CELULA_OCUPATA')
+  }
 })
 
 // --- zone, continut --------------------------------------------------------------------

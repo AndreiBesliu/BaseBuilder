@@ -105,6 +105,29 @@ export const MUTATII = [
     b: '    if (mat[1] === Material.USA && id !== Piesa.USA) {',
     t: T, e: 'USA: continutul leaga piesa USA de materialul USA',
   },
+  // --- recenzia incaperilor, USA-1: `celulaLibera` doar pentru piesele care blocheaza mersul, in trei
+  // locuri. Polaritatea `true` = codul de pe e063f40 (celula libera ceruta si pentru usa).
+  {
+    n: 'USA-1 (recenzia incaperilor): zidirea cere celula libera si pentru usa (mormanul din toc opreste usa de sus)',
+    f: 'src/sim/joburi.ts',
+    a: '  if (blocheazaMersul(material)) {\n    const liber = celulaLibera(w, rules, wx, wy, z)',
+    b: '  if (true) {\n    const liber = celulaLibera(w, rules, wx, wy, z)',
+    t: T, e: 'USA toc (USA-1): usa de sus se zideste peste un morman din toc',
+  },
+  {
+    n: 'USA-1 (recenzia incaperilor): constructorul asteapta celula libera si la usa (piatra in mana, pe veci)',
+    f: 'src/sim/joburi.ts',
+    a: '  if (blocheazaMersul(spec.material)) {\n    const liber = celulaLibera(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!)',
+    b: '  if (true) {\n    const liber = celulaLibera(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!)',
+    t: T, e: 'USA toc (USA-1): usa de sus se zideste peste un morman din toc',
+  },
+  {
+    n: 'USA-1 (recenzia incaperilor): desenarea cere celula libera si pentru usa (golul sapat nu primeste usa)',
+    f: 'src/sim/commands.ts',
+    a: '        if (blocheazaMersul(rules.piese[piesa]!.material)) {',
+    b: '        if (true) {',
+    t: T, e: 'USA toc (USA-1): usa se deseneaza si se zideste intr-un gol sapat',
+  },
   // --- viewer-ul usii si al incaperilor (partea pura)
   {
     n: 'unealta Usa nu vede zidurile planificate (golul unui zid doar desenat nu e gol)',

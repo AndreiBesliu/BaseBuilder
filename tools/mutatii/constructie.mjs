@@ -171,8 +171,8 @@ export const MUTATII = [
   {
     n: 'desenarea verifica si SPRIJINUL (K07 in oglinda)',
     f: 'src/sim/commands.ts',
-    a: '        const liber = celulaLibera(w, rules, cmd.wx, cmd.wy, cmd.z)\n        if (!liber.ok) return liber',
-    b: '        const liber = celulaLibera(w, rules, cmd.wx, cmd.wy, cmd.z)\n        if (!liber.ok) return liber\n        const sprijin = poateSustine(w.terrain, rules, cmd.wx, cmd.wy, cmd.z)\n        if (!sprijin.ok) return sprijin',
+    a: '          const liber = celulaLibera(w, rules, cmd.wx, cmd.wy, cmd.z)\n          if (!liber.ok) return liber',
+    b: '          const liber = celulaLibera(w, rules, cmd.wx, cmd.wy, cmd.z)\n          if (!liber.ok) return liber\n          const sprijin = poateSustine(w.terrain, rules, cmd.wx, cmd.wy, cmd.z)\n          if (!sprijin.ok) return sprijin',
     t: 'tests/constructie.test.ts', e: 'ACCEPTANTA: casa de 177 de piese',
   },
   {
@@ -185,8 +185,8 @@ export const MUTATII = [
   {
     n: 'desenarea nu verifica ocuparea (se deseneaza peste pion si morman)',
     f: 'src/sim/commands.ts',
-    a: '        const liber = celulaLibera(w, rules, cmd.wx, cmd.wy, cmd.z)\n        if (!liber.ok) return liber',
-    b: '        void celulaLibera',
+    a: '          const liber = celulaLibera(w, rules, cmd.wx, cmd.wy, cmd.z)\n          if (!liber.ok) return liber',
+    b: '          void celulaLibera',
     t: 'tests/constructie.test.ts', e: 'ce SE verifica la desenare',
   },
   {
@@ -845,8 +845,8 @@ export const MUTATII = [
   {
     n: 'santierul ocupat se descopera abia la capatul lucrului (refuz, marfa jos, racire)',
     f: 'src/sim/joburi.ts',
-    a: "  if (!celulaLibera(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!).ok) {\n    raport.santierOcupat++\n    return\n  }",
-    b: "  if (false) {\n    raport.santierOcupat++\n    return\n  }",
+    a: "    const liber = celulaLibera(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!)\n    if (!liber.ok) {",
+    b: "    const liber = accept()\n    if (!liber.ok) {",
     t: 'tests/constructie.test.ts', e: 'un santier ocupat TRECATOR',
   },  {
     n: 'piesa GRINDA poate fi din orice material (o grinda de lemn prin piese nu tine nimic)',

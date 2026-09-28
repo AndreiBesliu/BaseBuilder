@@ -22,7 +22,7 @@ import type { Rules } from './content.ts'
 import { DEFAULT_RULES } from './content.ts'
 import { isWalkable, rebuildDirty } from './regions.ts'
 import { sincronizeazaCamere } from './camere.ts'
-import { esteMaterialCunoscut, isSolid, Material, MATERIAL_MAX, type MaterialId } from './terrain/chunk.ts'
+import { blocheazaMersul, esteMaterialCunoscut, isSolid, Material, MATERIAL_MAX, type MaterialId } from './terrain/chunk.ts'
 import { CHUNK_GRID, inWorld, materialAt, setFocus, voxelRangeM, WORLD_CELLS } from './terrain/terrain.ts'
 import { adaugaDesemnare, Desemnare, slotDesemnare } from './desemnari.ts'
 import { acoperaDesemnarea, anuleazaCelulaDeZona, anuleazaDesemnare, celulaLibera, sapaManual, Sfarsit, terminaJob, uitaRacirileDeMarfa, uitaTintele, zidesteVoxel } from './joburi.ts'
@@ -323,8 +323,13 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
         if (isSolid(mat.value)) {
           return refuse(Reason.CELULA_PLINA, { material: mat.value, wx: cmd.wx, wy: cmd.wy, z: cmd.z })
         }
-        const liber = celulaLibera(w, rules, cmd.wx, cmd.wy, cmd.z)
-        if (!liber.ok) return liber
+        // Celula libera doar pentru o piesa care BLOCHEAZA mersul (recenzia incaperilor, USA-1):
+        // o usa nu ingroapa pe nimeni. Refuzata peste un morman, o usa nu se putea desena in golul
+        // sapat intr-un zid (piatra iese in toc) si nici deasupra unui morman lasat pe usa de jos.
+        if (blocheazaMersul(rules.piese[piesa]!.material)) {
+          const liber = celulaLibera(w, rules, cmd.wx, cmd.wy, cmd.z)
+          if (!liber.ok) return liber
+        }
         // SI ATAT. Sprijinul NU se verifica aici, si nu e o scapare: un blueprint
         // e AER pana se construieste, deci judecat singur aproape orice piesa are
         // suport 0. Panoul de design a masurat: pe o casa de 177 de celule,

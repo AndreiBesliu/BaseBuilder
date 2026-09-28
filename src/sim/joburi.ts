@@ -2441,9 +2441,17 @@ function zideste(w: World, rules: Rules, slot: number): void {
   // un santier nu mai ajunge — `celulaDeLucru` sare santierele vii, `pornesteDoarme`
   // doarme pe vecin — deci ce ramane e trecator, si se asteapta, fara progres.
   // Sprijinul pierdut si celula plina raman refuzuri ale TINTEI, mai jos.
-  if (!celulaLibera(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!).ok) {
-    raport.santierOcupat++
-    return
+  //
+  // Doar pentru o piesa care BLOCHEAZA mersul (recenzia incaperilor, USA-1): o usa nu ingroapa pe
+  // nimeni, deci `celulaLibera` n-are ce pazi la ea. Cu verificarea si la usa, un morman lasat in
+  // toc (celula usii de jos, capul celei de sus) oprea usa de sus pe veci, iar constructorul,
+  // neintreruptibil cu piatra in mana, astepta pana pleca din asezare.
+  if (blocheazaMersul(spec.material)) {
+    const liber = celulaLibera(w, rules, d.wx[ds]!, d.wy[ds]!, d.z[ds]!)
+    if (!liber.ok) {
+      raport.santierOcupat++
+      return
+    }
   }
   // Regula de sigilare, la primul tick de munca: o piesa care ar inchide un pion, un morman
   // sau o zona nu se incepe. Refuz cu racire pe santier si marfa JOS — niciodata asteptare cu
@@ -2884,8 +2892,13 @@ export function celulaLibera(w: World, rules: Rules, wx: number, wy: number, z: 
  * zideste; scrise de doua ori, un pion ar putea face ce jucatorului i se refuza.
  */
 export function zidesteVoxel(w: World, rules: Rules, wx: number, wy: number, z: number, material: MaterialId): Outcome<void> {
-  const liber = celulaLibera(w, rules, wx, wy, z)
-  if (!liber.ok) return liber
+  // Celula libera doar sub o piesa care BLOCHEAZA mersul: o usa nu ingroapa pe nimeni, nici la
+  // picioare, nici la cap (recenzia incaperilor, USA-1). Aceeasi conditie ca in `zideste` si la
+  // desenare — un morman sau un om din toc nu opresc usa.
+  if (blocheazaMersul(material)) {
+    const liber = celulaLibera(w, rules, wx, wy, z)
+    if (!liber.ok) return liber
+  }
   const sprijin = poateSustine(w.terrain, rules, wx, wy, z)
   if (!sprijin.ok) return sprijin
   const out = fill(w.terrain, wx, wy, z, material)
