@@ -239,11 +239,11 @@ export const MUTATII = [
     t: T, e: 'FETE pe hartie: un stalp de 1x1',
   },
   {
-    n: 'muchiile spre vecine diferite se contopesc intr-un rand (debaraua vede o singura vecina)',
+    n: 'muchiile spre vecine diferite se contopesc intr-un rand (pivnita din mijloc vede o singura vecina)',
     f: F,
     a: '      const k2 = x.fel === FelFata.MUCHIE ? vecina : x.adancime',
     b: '      const k2 = x.adancime',
-    t: T, e: 'FETE pe hartie: debaraua',
+    t: T, e: 'FETE pe hartie: MUCHIE inaintea solului',
   },
   {
     n: 'L2-4: agregarea nu refuza o muchie spre o celula care nu e aer acoperit (bComp[-1], tacut)',

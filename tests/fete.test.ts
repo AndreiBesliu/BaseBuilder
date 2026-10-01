@@ -271,18 +271,22 @@ test('FETE pe hartie: debaraua de la etajul din mijloc al casei cu trei niveluri
   egalCuRecalculul(w, 'debaraua')
 })
 
-test('FETE pe hartie: MUCHIE inaintea solului — doua pivnite in roca, la 3 m una de alta, raman legate prin 6 fete MUCHIE de fiecare parte', () => {
+test('FETE pe hartie: MUCHIE inaintea solului — trei pivnite in roca, la 3 m una de alta: cea din mijloc are doua randuri MUCHIE, cate 6 fete spre fiecare vecina', () => {
   // Ordinea din tabelul §4.2: drumul care ajunge, prin ≤ K celule de hotar, la aerul altei componente e
-  // MUCHIE chiar dacă trece prin sol natural (cele 1.776 de muchii ale M10).
-  const { w, wx, wy, g } = sitPlat(12345, 12)
+  // MUCHIE chiar dacă trece prin sol natural (cele 1.776 de muchii ale M10). Iar muchiile spre vecine
+  // diferite, pe aceeași direcție și prin același zid, sunt rânduri diferite.
+  const { w, wx, wy, g } = sitPlat(12345, 16)
   const t = w.terrain
-  for (const x of [1, 2, 3, 7, 8, 9]) for (let y = 1; y <= 3; y++) for (const z of [g - 5, g - 4]) assert.ok(dig(t, wx + x, wy + y, z).ok)
+  for (const x of [1, 2, 3, 7, 8, 9, 13, 14, 15]) for (let y = 1; y <= 3; y++) for (const z of [g - 5, g - 4]) assert.ok(dig(t, wx + x, wy + y, z).ok)
   sincronizeazaCamere(w.camere, t)
-  const A = randuri(w, wx + 2, wy + 2, g - 4)
-  const B = randuri(w, wx + 8, wy + 2, g - 4)
-  assert.notEqual(A.c.id, B.c.id)
-  assert.deepEqual(A.a.randuri.filter((q) => q.fel === FelFata.MUCHIE).map((q) => [q.vecina, q.fete, w.camere.fete.compCheie[q.compozitie]]), [[B.c.id, 6, '1x3']])
-  assert.deepEqual(B.a.randuri.filter((q) => q.fel === FelFata.MUCHIE).map((q) => [q.vecina, q.fete, w.camere.fete.compCheie[q.compozitie]]), [[A.c.id, 6, '1x3']])
+  const vest = randuri(w, wx + 2, wy + 2, g - 4)
+  const mijloc = randuri(w, wx + 8, wy + 2, g - 4)
+  const est = randuri(w, wx + 14, wy + 2, g - 4)
+  assert.equal(new Set([vest.c.id, mijloc.c.id, est.c.id]).size, 3)
+  const muchii = (r: { a: AgregareFete }): (string | number)[][] => r.a.randuri.filter((q) => q.fel === FelFata.MUCHIE).map((q) => [q.vecina, q.fete, w.camere.fete.compCheie[q.compozitie]!])
+  assert.deepEqual(muchii(mijloc), [[vest.c.id, 6, '1x3'], [est.c.id, 6, '1x3']].sort((p, q) => (p[0] as number) - (q[0] as number)))
+  assert.deepEqual(muchii(vest), [[mijloc.c.id, 6, '1x3']])
+  assert.deepEqual(muchii(est), [[mijloc.c.id, 6, '1x3']])
 })
 
 test('FETE pe hartie: un stalp de 1x1 in mijlocul unei pivnite — cele 8 fete laterale ale lui sunt SINE (drumul prin stalp se intoarce in pivnita) si ies din randuri', () => {
