@@ -4717,3 +4717,18 @@ un defect reparat pe ALTĂ ramură e verde pe ambele ramuri și roșu la îmbina
   invalidează memoria inspectorului (proiectat); textele toasturilor ușii stau în main.ts.
 - **Indexul:** extinderea căii rapide (despărțirile rămân pe BFS: p99 ~800 µs pe mină); M08 fără probă;
   suita a crescut cu ~10 s (testele care depășesc jurnalul, ~0,9 s fiecare).
+
+---
+
+## Task Started — 01.10.2026 — S24-27, tăietura 2: temperatura pe încăperi
+
+**Prompt:** „continua" (după închiderea tăieturii 1: încăperile și ușa)
+**Model:** Claude Opus 5.5 (claude-opus-5-5), Claude Code, Ultracode.
+
+Tăietura 1 a livrat indexul încăperilor (componentele de aer acoperit) și ușa; simularea nu le citea.
+Tăietura asta pune temperatura pe ele: un scalar pe componentă, integrat rar, cu izolația suprafeței care
+o desparte de exterior, de sol și de încăperile vecine (DESIGN §5.1: „ce contează la răcire e ce se află
+deasupra camerei"). Pe HEAD nu există ceas de zi, nici anotimpuri — doar temperatura de bază a macro-hărții
+—, deci felia aduce și ceasul și clima de afară. Metoda, ca la tăietura 1: hartă și măsurători pe HEAD →
+design → panou adversarial → cod → probe → recenzie a codului. Contractul lăsat de tăietura 1 (proveniența
+la contopiri și despărțiri, fețele pe fel) e în registrul ei.
