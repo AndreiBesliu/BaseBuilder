@@ -101,5 +101,36 @@
     "MOLOZ": { "fel": "PIATRA", "cantitate": 10 },
     "GRINDA": { "fel": "PIATRA", "cantitate": 20 },
     "USA": { "fel": "PIATRA", "cantitate": 20 }
+  },
+  "calendar": { "ziTicks": 40320, "zilePeAnotimp": 4, "anotimpStart": "TOAMNA", "ziStart": 1, "oraStart": 8 },
+  "clima": {
+    "tMedieMc": 9400,
+    "amplitudineAnMc": 11200,
+    "amplitudineZiMc": 5000,
+    "ziCeaMaiRece": 14,
+    "oraCeaMaiCalda": 15,
+    "valFrig": { "amplitudineMc": -10000, "platouOre": 18, "rampaOre": 3, "ziMin": 2, "ziMax": 3 },
+    "deltaAdancMc": -9000,
+    "dAdancMm": 2000,
+    "dSezonMm": 800
+  },
+  "termic": {
+    "kCelule": 8,
+    "rSiLateralMiimi": 130,
+    "rSiSusMiimi": 100,
+    "rSiJosMiimi": 170,
+    "rSeMiimi": 40,
+    "gDeschisMilliWPeK": 200000,
+    "cAerJPeK": 1210,
+    "material": {
+      "ROCA": 340,
+      "PAMANT": 850,
+      "IARBA": 850,
+      "LEMN_CONSTRUIT": 500,
+      "PIATRA_CONSTRUITA": 590,
+      "MOLOZ": 2000,
+      "GRINDA": 590,
+      "USA": 300
+    }
   }
 }

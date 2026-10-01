@@ -24,6 +24,8 @@ import { DetaliuItem } from '../../src/sim/iteme.ts'
 import { FelJob, Gand, Item, PasCara, PasConstruieste, PasJob, Piesa } from '../../src/sim/state.ts'
 import { Material } from '../../src/sim/terrain/chunk.ts'
 import { Zona } from '../../src/sim/zone.ts'
+import { Anotimp } from '../../src/sim/calendar.ts'
+import type { Moment } from '../../src/sim/calendar.ts'
 
 /** Un motiv tradus: ce s-a intamplat, si ce poate face jucatorul. `actiune` gol = nimic de facut decat asteptat. */
 export interface TextMotiv {
@@ -405,6 +407,77 @@ const FORMAT_RO = new Intl.NumberFormat('ro-RO', { maximumFractionDigits: 0 })
 /** Un numar intreg ca in romana („1.240"): acelasi `Intl` si in node, si in Electron. */
 export function textNumar(n: number): string {
   return FORMAT_RO.format(Math.trunc(n))
+}
+
+// ---- bara de sus: calendarul si temperatura de afara (design temperatura v2, §6) ----------------
+
+/** Pe `Anotimp`: PRIMAVARA, VARA, TOAMNA, IARNA. */
+export const NUME_ANOTIMP: readonly string[] = ['Primăvară', 'Vară', 'Toamnă', 'Iarnă']
+
+/** Sub atat pe ora urmatoare (Q16 °C: un sfert de grad), sageata e „→": la varful zilei si in vale. */
+export const PRAG_TENDINTA_Q16 = 16384
+
+/** Grade intregi, cu minusul tipografic: „8°", „−3°", „0°" (si −0,4 °C e „0°", nu „−0°"). */
+export function textGrade(q16: number): string {
+  const g = Math.round(q16 / 65536)
+  return g < 0 ? `−${-g}°` : `${g}°`
+}
+
+/** Unde merge aerul in ora de joc urmatoare: „↗", „↘" sau „→". `delta` = T(peste o ora) − T(acum), Q16 °C. */
+export function textTendinta(deltaQ16: number): string {
+  if (deltaQ16 >= PRAG_TENDINTA_Q16) return '↗'
+  if (deltaQ16 <= -PRAG_TENDINTA_Q16) return '↘'
+  return '→'
+}
+
+/**
+ * Bara de sus: „Toamnă 2/4 · 14:20 · 8° ↘". Buget: ≤ 130 px la 12 px (panoul, L5-4: textul v1, „Toamnă ·
+ * ziua 2 din 4 · 14:20 · 8 °C ↘", nu incapea la 1.100 px). Ce nu incape aici sta in `textTitluCalendar`.
+ */
+export function textCalendar(m: Moment, zilePeAnotimp: number, tAfaraQ16: number, deltaOraQ16: number): string {
+  const ora = `${String(m.ora).padStart(2, '0')}:${String(m.minut).padStart(2, '0')}`
+  return `${NUME_ANOTIMP[m.anotimp]} ${m.zi}/${zilePeAnotimp} · ${ora} · ${textGrade(tAfaraQ16)} ${textTendinta(deltaOraQ16)}`
+}
+
+/** O durata de joc in zile, sau in ore sub o zi: „în 3 zile", „într-o zi", „în 5 ore", „într-o oră". */
+export function textPesteZile(tickuri: number, ziTicks: number): string {
+  const zile = Math.floor(tickuri / ziTicks)
+  if (zile >= 2) return `în ${cant(zile, 'zile')}`
+  if (zile === 1) return 'într-o zi'
+  const ore = Math.ceil((tickuri * 24) / ziTicks)
+  return ore >= 2 ? `în ${cant(ore, 'ore')}` : 'într-o oră'
+}
+
+/** Minute REALE: „41 min", „2 h 03 min", „< 1 min". */
+export function textMinuteReale(min: number): string {
+  const m = Math.round(min)
+  if (m < 1) return '< 1 min'
+  if (m < 60) return `${m} min`
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`
+}
+
+/**
+ * Tooltip-ul calendarului: „Iarna în 3 zile (≈ 41 min la 3×) · timp de joc 1:23:45" — cat mai e pana la
+ * presiune, si in timpul REAL la viteza aleasa (panoul, L3-6: ca jucatorul sa vada ritmul). In iarna:
+ * „Iarna se termină în 2 zile (…)". Timpul total de joc a iesit din bara; ramane aici si in numele
+ * salvarilor.
+ */
+export function textTitluCalendar(p: {
+  readonly tick: number
+  readonly moment: Moment
+  /** Tickuri pana la urmatorul inceput de iarna, si de primavara (`panaLaAnotimp`). */
+  readonly panaLaIarna: number
+  readonly panaLaPrimavara: number
+  readonly ziTicks: number
+  readonly ticksPerSecond: number
+  /** Viteza aleasa (1, 2, 3), si in pauza. */
+  readonly viteza: number
+}): string {
+  const iarna = p.moment.anotimp === Anotimp.IARNA
+  const t = iarna ? p.panaLaPrimavara : p.panaLaIarna
+  const reale = textMinuteReale(t / p.ticksPerSecond / p.viteza / 60)
+  const ce = iarna ? `Iarna se termină ${textPesteZile(t, p.ziTicks)}` : `Iarna ${textPesteZile(t, p.ziTicks)}`
+  return `${ce} (≈ ${reale} la ${p.viteza}×) · timp de joc ${textTimp(p.tick, p.ticksPerSecond)}`
 }
 
 /** Minute de joc, rotunjite, pentru prognoze: „~16 min", „~2 h 5 min". */

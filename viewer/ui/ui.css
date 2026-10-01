@@ -49,8 +49,12 @@
 .ui-sus .grup { display: flex; align-items: center; gap: 2px; padding: 0 8px; border-right: 1px solid var(--ui-line); height: 100%; }
 .ui-sus .grup:last-child { border-right: 0; }
 .ui-sus .spatiu { flex: 1; }
-.ui-marca { font: 600 15px/1 var(--ui-titlu); letter-spacing: .22em; color: var(--ui-ink); padding: 0 6px; }
-.ui-timp { color: var(--ui-ink-2); min-width: 60px; font-size: 12px; }
+/* Calendarul si aerul de afara. Fara rupere: o lipsa de loc iese ca depasire a barei, pe care o prinde
+   ui-fum („bara-sus"), nu ca un text pe trei randuri care iese din cei 40 px. Latimea e a celui mai lat
+   text posibil („Primăvară 4/4 · 23:59 · −3° →", 153 px masurat la 12 px = 12,75em; „Toamnă 2/4 · 14:20 ·
+   8° ↘" are 132), ca bara sa nu se miste cand trece de la 9° la 10° sau se schimba sageata; cifrele
+   tabulare o tin pe loc cand trece minutul. */
+.ui-calendar { color: var(--ui-ink-2); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 12.75em; }
 .ui-res { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: var(--ui-r); cursor: default; white-space: nowrap; }
 .ui-res:hover { background: var(--ui-bg-3); }
 .ui-res .pata { width: 10px; height: 10px; border-radius: 2px; flex: none; }

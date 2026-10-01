@@ -441,6 +441,18 @@ export function cereriPentru(w: World, rules: Rules, slot: number): readonly Cer
 // ---------------------------------------------------------------------------
 
 /**
+ * 2^k EXACT, pentru 0 ≤ k ≤ 52, din dublari succesive. Scanerul de disciplina interzice `**` in
+ * src/sim (semantica `Math.pow`, aproximata de motor; panoul temperaturii, L4-7). Valorile sunt
+ * aceleasi bit cu bit cu `2 ** k` de dinainte — o putere a lui 2 e reprezentabila exact —, deci
+ * scorul nu se misca (hash-urile de referinta raman). 4^p = 2^(2p).
+ */
+const DOI_LA: readonly number[] = (() => {
+  const t = [1]
+  for (let k = 1; k <= 52; k++) t.push(t[k - 1]! * 2)
+  return t
+})()
+
+/**
  * A e strict mai bun decat B?
  *
  * `prio` in 1..designationPriorityLevels, `pers` in 1..personalPriorityLevels,
@@ -448,8 +460,8 @@ export function cereriPentru(w: World, rules: Rules, slot: number): readonly Cer
  * distanta ≤ 2·16384, deci produsul ramane sub 2^41 — sigur ca intreg JS.
  */
 export function maiBun(prioA: number, persA: number, distA: number, prioB: number, persB: number, distB: number): boolean {
-  const gA = 2 ** (prioA + 2 * (persA - 1))
-  const gB = 2 ** (prioB + 2 * (persB - 1))
+  const gA = DOI_LA[prioA + 2 * (persA - 1)]!
+  const gB = DOI_LA[prioB + 2 * (persB - 1)]!
   return gA * (1 + distB) > gB * (1 + distA)
 }
 
@@ -1279,7 +1291,7 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
   let n = 0
   let inRacire = 0
   if (activ.sapa) {
-    const gPers = 4 ** (persS - 1)
+    const gPers = DOI_LA[2 * (persS - 1)]!
     for (let s = 0; s < d.count; s++) {
       if (d.alive[s] === 0) continue
       // Poarta pe FEL, si sta in trecerea IEFTINA, nu in cea scumpa.
@@ -1316,7 +1328,7 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       candSlot[n] = s
       candDist[n] = Math.max(0, dist0 - margine)
       candDist2[n] = 0
-      candG[n] = 2 ** d.prioritate[s]! * gPers
+      candG[n] = DOI_LA[d.prioritate[s]!]! * gPers
       candId[n] = d.id[s]!
       candPers[n] = persS
       candPrio[n] = d.prioritate[s]!
@@ -1324,7 +1336,7 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
     }
   }
   if (activ.cara) {
-    const gPers = 4 ** (persC - 1)
+    const gPers = DOI_LA[2 * (persC - 1)]!
     for (const s of ix.deMutat) {
       if (it.alive[s] === 0) continue
       raport.vizite++
@@ -1348,7 +1360,7 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       candSlot[n] = s
       candDist[n] = dist0
       candDist2[n] = 0
-      candG[n] = 2 ** ix.maxPrioLibera[it.kind[s]!]! * gPers
+      candG[n] = DOI_LA[ix.maxPrioLibera[it.kind[s]!]!]! * gPers
       candId[n] = it.id[s]!
       candPers[n] = persC
       candPrio[n] = ix.maxPrioLibera[it.kind[s]!]!
@@ -1358,7 +1370,7 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
 
   // Fara niciun santier viu nu se plateste nicio baleiere de mormane: iesire O(1).
   if (activ.construieste && d.viiConstruieste > 0) {
-    const gPers = 4 ** (persB - 1)
+    const gPers = DOI_LA[2 * (persB - 1)]!
     const rez = rezumatMaterial(w, rules, slot)
     // „N-are din ce" se afla O DATA pe fel, nu o data pe santier: un blocaj de
     // material opreste toata categoria, si pe 400 de santiere asta e diferenta
@@ -1446,7 +1458,7 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
       // Al doilea picior: morman -> santier. Se stie ieftin fiindca rezumatul tine
       // UN morman per piesa, deci e acelasi pentru toate santierele ei.
       candDist2[n] = Math.abs(it.wx[m.slot]! - d.wx[s]!) + Math.abs(it.wy[m.slot]! - d.wy[s]!) + Math.abs(it.z[m.slot]! - d.z[s]!)
-      candG[n] = 2 ** d.prioritate[s]! * gPers
+      candG[n] = DOI_LA[d.prioritate[s]!]! * gPers
       candId[n] = d.id[s]!
       candPers[n] = persB
       candPrio[n] = d.prioritate[s]!

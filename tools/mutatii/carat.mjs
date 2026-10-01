@@ -142,7 +142,7 @@ export const MUTATII = [
     e2: [{ f: 'src/sim/zone.ts', a: "    const prioLoc = prioritateaLocului(s, it.wx[i]!, it.wy[i]!, it.z[i]!)", b: "    const prioLoc = 0" }],
     t: 'tests/carat.test.ts', e: 'strict mai bun' },
   { n: 'CARA evaluat doar cand SAPA nu da nimic', f: 'src/sim/joburi.ts',
-    a: "  if (activ.cara) {\n    const gPers = 4 ** (persC - 1)", b: "  if (activ.cara && n === 0) {\n    const gPers = 4 ** (persC - 1)",
+    a: "  if (activ.cara) {\n    const gPers = DOI_LA[2 * (persC - 1)]!", b: "  if (activ.cara && n === 0) {\n    const gPers = DOI_LA[2 * (persC - 1)]!",
     t: 'tests/carat.test.ts', e: 'carieră + depozit' },
   { n: 'exclusiv: fiecare categorie la maxim sare peste celelalte', f: 'src/sim/joburi.ts',
     a: "    sapa: pS > 0 && (!exclusiv || pS === rules.personalPriorityLevels),\n    cara: pC > 0 && (!exclusiv || pC === rules.personalPriorityLevels),", b: "    sapa: pS > 0 && !(exclusiv && pC === rules.personalPriorityLevels),\n    cara: pC > 0 && !(exclusiv && pS === rules.personalPriorityLevels),",
@@ -251,7 +251,7 @@ export const MUTATII = [
     f: 'src/sim/joburi.ts',
     a: "    sapa: pS > 0 && (!exclusiv || pS === rules.personalPriorityLevels),",
     b: "    sapa: pS > 0,",
-    e2: [{ f: 'src/sim/joburi.ts', a: "    const gPers = 4 ** (persC - 1)", b: "    const gPers = 1" }],
+    e2: [{ f: 'src/sim/joburi.ts', a: "    const gPers = DOI_LA[2 * (persC - 1)]!", b: "    const gPers = 1" }],
     t: 'tests/carat.test.ts', e: 'doi pioni cu prioritati DIFERITE',
   },
 

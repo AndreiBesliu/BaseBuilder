@@ -25,7 +25,9 @@ import type { UsilePropuse } from './memorie-incapere.ts'
 import type { Bara, IncapereLa, InspectieCelula, NormalaFetei, Previz, RandOm } from './model.ts'
 import { actualizeaza, creeazaAlerte, eveniment, REGULI_ALERTE, Severitate } from './alerte.ts'
 import type { StareAlerta, Tinta } from './alerte.ts'
-import { cant, NUME_ITEM, NUME_MATERIAL, NUME_PIESA, NUME_ZONA, textIncapere, textIndiciuUsa, textMinute, textNumar, textPrioritatePersonala, textTimp } from './texte.ts'
+import { cant, NUME_ITEM, NUME_MATERIAL, NUME_PIESA, NUME_ZONA, textCalendar, textIncapere, textIndiciuUsa, textMinute, textNumar, textPrioritatePersonala, textTimp, textTitluCalendar } from './texte.ts'
+import { Anotimp, momentul, panaLaAnotimp, tickuriPeOra } from '../../src/sim/calendar.ts'
+import { tAfara } from '../../src/sim/clima.ts'
 import { conturImplicit, Unealta } from './dreptunghi.ts'
 import type { UnealtaId } from './dreptunghi.ts'
 import { eTimpulSalvariiAutomate, idAutomata, salvareAutomataPermisa } from './salvari-plic.ts'
@@ -243,7 +245,7 @@ export function monteazaUI(ctx: ContextUI): UI {
   document.body.append(radacina)
   try { const z = localStorage.getItem('kinstead.ui.marime'); if (z) radacina.style.setProperty('zoom', z) } catch { /* fara stocare: marimea implicita */ }
   /**
-   * Cat cere interfata, in pixeli CSS, ca nimic sa nu se suprapuna: bara de sus are ~990 px de continut,
+   * Cat cere interfata, in pixeli CSS, ca nimic sa nu se suprapuna: bara de sus are ~1.095 px de continut cu 2 insigne,
    * iar la 1280×720 marimea 125% suprapunea deja bara de unelte peste sertar (recenzia UI-ului, ECR-3).
    * O marime care nu incape nu se poate alege, iar la o fereastra mai mica se coboara singura.
    */
@@ -318,8 +320,12 @@ export function monteazaUI(ctx: ContextUI): UI {
   }
 
   // ---- bara de sus ---------------------------------------------------------------------------
+  // Calendarul si aerul de afara in locul timpului total si al marcii KINSTEAD (design temperatura
+  // v2, §6; panoul, L5-4): marca ramane pe ecranul de titlu, timpul total in tooltip si in numele
+  // salvarilor. Masurat pe bara reala (ui-fum, „bara-sus"), la 1.100 px cu 2 insigne si cu calendarul
+  // la latimea celui mai lat text al lui (153 px): raman 5 px. Cu marca si timpul total, depasea cu 46.
   const btnMeniu = iconBtn(ICON.meniu, '', '', 'Meniu (Esc)')
-  const timp = h('span', { class: 'ui-timp num', title: 'Timpul de joc' }, '0:00:00')
+  const calendar = h('span', { class: 'ui-calendar' }, '')
   const resurse = new Map<number, { rad: HTMLElement; val: HTMLElement }>()
   const grupRes = h('div', { class: 'grup' })
   const prognoza = h('span', { class: 'prognoza' })
@@ -340,7 +346,7 @@ export function monteazaUI(ctx: ContextUI): UI {
   const btnViteze = [1, 2, 3].map((v) => iconBtn('', `${v}×`, '', `Viteza ${v}× (tasta ${v})`))
   const efectiva = h('span', { class: 'ui-viteza-efectiva', title: 'Viteza reală: simularea nu ține pasul' })
   radacina.append(h('div', { class: 'ui-sus' },
-    h('div', { class: 'grup' }, btnMeniu, h('span', { class: 'ui-marca' }, 'KINSTEAD'), timp),
+    h('div', { class: 'grup' }, btnMeniu, calendar),
     grupRes,
     h('div', { class: 'grup' }, btnOameni),
     h('div', { class: 'spatiu' }),
@@ -1056,7 +1062,7 @@ export function monteazaUI(ctx: ContextUI): UI {
     if (acc < 250) return
     acc = 0
     const r = rezumatColonie(w, rules)
-    text(timp, textTimp(w.tick, rules.ticksPerSecond))
+    scrieCalendar()
     for (const [fel, x] of resurse) {
       const m = r.marfa[fel]!
       text(x.val, textNumar(m.total))
@@ -1098,6 +1104,23 @@ export function monteazaUI(ctx: ContextUI): UI {
     scrieOameni()
     scriePasi()
     if (dreptunghi === null) scrieIndiciu()
+  }
+
+  /** Bara de sus: „Toamnă 2/4 · 14:20 · 8° ↘"; tendinta e pe ora de joc urmatoare (clima e o functie pura de tick). */
+  function scrieCalendar(): void {
+    const m = momentul(w.tick, rules)
+    const acum = tAfara(w.seed, w.tick, rules)
+    const pesteOra = tAfara(w.seed, w.tick + tickuriPeOra(rules), rules)
+    text(calendar, textCalendar(m, rules.calendar.zilePeAnotimp, acum, pesteOra - acum))
+    attr(calendar, 'title', textTitluCalendar({
+      tick: w.tick,
+      moment: m,
+      panaLaIarna: panaLaAnotimp(w.tick, Anotimp.IARNA, rules),
+      panaLaPrimavara: panaLaAnotimp(w.tick, Anotimp.PRIMAVARA, rules),
+      ziTicks: rules.calendar.ziTicks,
+      ticksPerSecond: rules.ticksPerSecond,
+      viteza: ctx.viteza(),
+    }))
   }
 
   function scrieLegenda(faraNivel: boolean): void {

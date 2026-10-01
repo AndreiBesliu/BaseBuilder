@@ -16,6 +16,9 @@ import { REGION_SIZE } from './regions.ts'
 import { esteMaterialDeStructura, isSolid, Material } from './terrain/chunk.ts'
 import type { MaterialId } from './terrain/chunk.ts'
 import { Gand, GAND_PENTRU_NEVOIE, GANDURI, Item, ITEME, Nevoie, NEVOI, Piesa } from './state.ts'
+import { Anotimp, ANOTIMPURI, MINUTE_PE_ZI, NUME_ANOTIMPURI } from './calendar.ts'
+import type { AnotimpId } from './calendar.ts'
+import { tabeleClima } from './clima.ts'
 
 /** Ce lasa in urma un voxel sapat: felul de item si cate unitati. `cantitate` 0 = nimic (aer, apa). */
 export interface DigYield {
@@ -64,6 +67,100 @@ export interface SpecNevoie {
   readonly prag: number
   /** Sub atat, pionul isi intrerupe jobul in curs. Strict sub `prag`. */
   readonly pragCritic: number
+}
+
+/**
+ * Ceasul (design temperatura v2, §1): DERIVED din `w.tick`, citit doar prin `calendar.ts`.
+ * Anul incepe cu primavara, ziua 1, 00:00.
+ */
+export interface ReguliCalendar {
+  /** Tickurile unei zile de joc. Multiplu de 1440: minutul e un numar intreg de tickuri (40.320 = 28 pe minut). */
+  readonly ziTicks: number
+  /** Zilele unui anotimp; anul are 4 anotimpuri. */
+  readonly zilePeAnotimp: number
+  /** Anotimpul tickului 0 (`Anotimp`). In fisier, numele: `"TOAMNA"`. */
+  readonly anotimpStart: AnotimpId
+  /** Ziua din anotimp a tickului 0, de la 1. */
+  readonly ziStart: number
+  /** Ora tickului 0, 0..23. */
+  readonly oraStart: number
+}
+
+/** Valul de frig: o data pe iarna, o zi aleasa din seed (design §2). `amplitudineMc: 0` il opreste. */
+export interface ValFrig {
+  /** Cat coboara aerul pe platou, in m°C (≤ 0). */
+  readonly amplitudineMc: number
+  /** Cat tine platoul, in ore de joc. */
+  readonly platouOre: number
+  /** Cat tine fiecare rampa (in jos de la 00:00, si inapoi dupa platou), in ore de joc. 2 · rampa + platou ≤ 24. */
+  readonly rampaOre: number
+  /** Ziua din iarna (de la 1, ca in calendar) intre care se alege ziua valului: [ziMin, ziMax]. */
+  readonly ziMin: number
+  readonly ziMax: number
+}
+
+/** Tabelele solului pe adancime, d = 0..64 (`ADANCIME_MAX`), DERIVATE in `parseRules` (`tabeleClima`). */
+export interface TabeleClima {
+  /** e^(−(d + ½)/D_a), Q16. */
+  readonly expAdancQ16: readonly number[]
+  /** e^(−(d + ½)/D_s), Q16. */
+  readonly expSezonQ16: readonly number[]
+  /** Intarzierea undei anului la adancimea d, in Q16 de tura: (d + ½) / (2π · D_s). */
+  readonly lagQ16: readonly number[]
+}
+
+/**
+ * Clima de afara si a solului (design §2–§3). Toate campurile sunt INTREGI, cu unitatea in nume
+ * (panoul, L4-5): m°C, mm, ore, zile. O singura clima pe toata lumea.
+ */
+export interface ReguliClima {
+  /** Media anuala a aerului, m°C. */
+  readonly tMedieMc: number
+  /** Amplitudinea undei anului, m°C. */
+  readonly amplitudineAnMc: number
+  /** Amplitudinea undei zilei, m°C. */
+  readonly amplitudineZiMc: number
+  /**
+   * Ziua anului (0 = prima zi a primaverii) la al carei INCEPUT (00:00) e momentul cel mai rece al
+   * anului. 14 = mijlocul iernii (iarna = zilele 12..15 cu 4 zile pe anotimp).
+   */
+  readonly ziCeaMaiRece: number
+  /** Ora cea mai calda a zilei, 0..23. Cea mai rece e cu 12 ore inainte. */
+  readonly oraCeaMaiCalda: number
+  readonly valFrig: ValFrig
+  /** Cu cat e solul adanc sub media aerului, m°C (regula de JOC: sub pamant e frig). */
+  readonly deltaAdancMc: number
+  /** Adancimea pe care solul se apropie de ΔT_adanc (D_a), mm. */
+  readonly dAdancMm: number
+  /** Adancimea de amortizare a undei anului (D_s), mm. */
+  readonly dSezonMm: number
+  /** DERIVATE din `dAdancMm` si `dSezonMm`; nu se scriu in fisier. */
+  readonly tabele: TabeleClima
+}
+
+/**
+ * Constantele termice (design §4), citite din valul 2 (fetele, graful). Rezistentele sunt in MIIMI de
+ * m²K/W pe o fata de 1 m², ca toata starea sa ramana pe intregi.
+ */
+export interface ReguliTermic {
+  /** Cate celule de hotar strabate cel mult mersul unei fete (K). */
+  readonly kCelule: number
+  /** Rezistenta stratului de aer de langa perete (R_si), pe clasa de directie a fetei. */
+  readonly rSiLateralMiimi: number
+  readonly rSiSusMiimi: number
+  readonly rSiJosMiimi: number
+  /** Rezistenta stratului de aer de afara (R_se). */
+  readonly rSeMiimi: number
+  /** Conductanta unei fete DESCHISE (ventilatia), mW/K. [P: 200 W/K; calibrat in t.2b.] */
+  readonly gDeschisMilliWPeK: number
+  /** Capacitatea termica a aerului unei celule de 1 m³, J/K. Intra in garda de stabilitate (pasul din t.2b). */
+  readonly cAerJPeK: number
+  /**
+   * R pe celula de 1 m, indexat cu `MaterialId` (ca `digYield`); AER si APA au 0 (nu sunt hotar: drumul
+   * se opreste la ele). SUB_BAZA si MARGINE (conventia camerelor) se citesc ca ROCA. In fisier, un
+   * obiect cu numele materialelor SOLIDE.
+   */
+  readonly material: readonly number[]
 }
 
 export interface Rules {
@@ -322,12 +419,23 @@ export interface Rules {
    * un numar pe care jucatorul nu-l poate traduce in mese.
    */
   readonly nutritie: readonly number[]
+
+  // --- temperatura (S24-27, taietura 2a) ---
+  //
+  // In t.2a nimic din simulare nu le citeste: le citesc bara de sus si (din valul 2) regimul
+  // permanent al incaperilor. Hash-urile nu se misca.
+  readonly calendar: ReguliCalendar
+  readonly clima: ReguliClima
+  readonly termic: ReguliTermic
 }
 
 type FieldSpec = { min: number; max: number }
 
+/** Sectiunile-obiect, validate fiecare de parserul ei. */
+const SECTIUNI = ['digYield', 'piese', 'nevoi', 'nutritie', 'ganduri', 'calendar', 'clima', 'termic'] as const
+
 /** Campurile NUMERICE. `digYield`, `nevoi` si `nutritie` sunt tabele si se valideaza separat. */
-const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield' | 'piese' | 'nevoi' | 'nutritie' | 'ganduri'>, FieldSpec> = {
+const RULES_SPEC: Record<Exclude<keyof Rules, (typeof SECTIUNI)[number]>, FieldSpec> = {
   agentCapacity: { min: 1, max: 100000 },
   agentStepMm: { min: 1, max: 100000 },
   ticksPerSecond: { min: 1, max: 240 },
@@ -407,6 +515,45 @@ const RULES_SPEC: Record<Exclude<keyof Rules, 'digYield' | 'piese' | 'nevoi' | '
   multiplicatorMax: { min: 1000, max: 100000 },
   ganduriSloturi: { min: 1, max: 64 },
 }
+
+// Plafonul lui `ziTicks` tine produsele calendarului exacte: un an are cel mult 4 × 64 × 10.080.000
+// = 2,6e9 tickuri, iar faza (tickInAn × 65536) ramane sub 2^53.
+const CALENDAR_SPEC: Readonly<Record<string, FieldSpec>> = {
+  ziTicks: { min: MINUTE_PE_ZI, max: 10_080_000 },
+  zilePeAnotimp: { min: 1, max: 64 },
+  ziStart: { min: 1, max: 64 },
+  oraStart: { min: 0, max: 23 },
+}
+// Plafoanele amplitudinilor (50 °C) tin produsul amplitudine Q16 × e^ Q16 × cos Q14 sub 2^53
+// (`tSol`); D ≥ 10 cm tine seria lui e^(1 m / D) sub 10 la exponent.
+const CLIMA_SPEC: Readonly<Record<string, FieldSpec>> = {
+  tMedieMc: { min: -50000, max: 50000 },
+  amplitudineAnMc: { min: 0, max: 50000 },
+  amplitudineZiMc: { min: 0, max: 50000 },
+  ziCeaMaiRece: { min: 0, max: 255 },
+  oraCeaMaiCalda: { min: 0, max: 23 },
+  deltaAdancMc: { min: -50000, max: 50000 },
+  dAdancMm: { min: 100, max: 100000 },
+  dSezonMm: { min: 100, max: 100000 },
+}
+const VAL_FRIG_SPEC: Readonly<Record<string, FieldSpec>> = {
+  amplitudineMc: { min: -50000, max: 0 },
+  platouOre: { min: 0, max: 24 },
+  rampaOre: { min: 0, max: 12 },
+  ziMin: { min: 1, max: 64 },
+  ziMax: { min: 1, max: 64 },
+}
+const TERMIC_SPEC: Readonly<Record<string, FieldSpec>> = {
+  kCelule: { min: 1, max: 64 },
+  rSiLateralMiimi: { min: 1, max: 10000 },
+  rSiSusMiimi: { min: 1, max: 10000 },
+  rSiJosMiimi: { min: 1, max: 10000 },
+  rSeMiimi: { min: 0, max: 10000 },
+  gDeschisMilliWPeK: { min: 0, max: 1_000_000_000 },
+  cAerJPeK: { min: 1, max: 10_000_000 },
+}
+/** R maxim pe celula: 100 m²K/W, de 100 de ori peste moloz. */
+const MAX_R_MIIMI = 100000
 
 /** Numele materialelor si ale felurilor de item, pentru fisierul de reguli. Liste ORDONATE, nu `Object.keys`. */
 const NUME_MATERIALE: readonly (readonly [string, number])[] = [
@@ -702,6 +849,183 @@ function parseDigYield(raw: unknown): Outcome<DigYield[]> {
 }
 
 /**
+ * Campurile intregi ale unei sectiuni-obiect (`calendar`, `clima`, `clima.valFrig`, `termic`), cu
+ * aceleasi coduri ca la radacina: cheie necunoscuta → COMANDA_NECUNOSCUTA, lipsa sau ne-intreaga →
+ * LIPSA_MATERIAL, in afara domeniului → CAPACITATE_DEPASITA. `alte` = cheile pe care le valideaza
+ * apelantul (nume, tabele).
+ */
+function campuriIntregi(raw: unknown, sectiune: string, spec: Readonly<Record<string, FieldSpec>>, alte: readonly string[] = []): Outcome<Record<string, number>> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return refuse(Reason.LIPSA_MATERIAL, { camp: sectiune, asteptat: 'obiect', primit: Array.isArray(raw) ? 'tablou' : typeof raw })
+  }
+  const obj = raw as Record<string, unknown>
+  const cunoscute = Object.keys(spec).sort()
+  for (const key of Object.keys(obj).sort()) {
+    if (!cunoscute.includes(key) && !alte.includes(key)) {
+      return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: `${sectiune}.${key}`, cunoscute: [...cunoscute, ...alte].join(', ') })
+    }
+  }
+  const out: Record<string, number> = {}
+  for (const key of cunoscute) {
+    const v = obj[key]
+    const s = spec[key]!
+    if (v === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: `${sectiune}.${key}` })
+    if (typeof v !== 'number' || !Number.isInteger(v)) return refuse(Reason.LIPSA_MATERIAL, { camp: `${sectiune}.${key}`, asteptat: 'intreg', primit: String(v) })
+    if (v < s.min || v > s.max) return refuse(Reason.CAPACITATE_DEPASITA, { camp: `${sectiune}.${key}`, valoare: v, min: s.min, max: s.max })
+    out[key] = v
+  }
+  return accept(out)
+}
+
+/** Sectiunea `calendar`. `anotimpStart` e numele in fisier si numarul din `Anotimp` in forma parsata. */
+function parseCalendar(raw: unknown): Outcome<ReguliCalendar> {
+  const c = campuriIntregi(raw, 'calendar', CALENDAR_SPEC, ['anotimpStart'])
+  if (!c.ok) return c
+  const v = c.value
+  const a = (raw as Record<string, unknown>).anotimpStart
+  let anotimp: number
+  if (typeof a === 'string') {
+    anotimp = NUME_ANOTIMPURI.indexOf(a)
+    if (anotimp < 0) return refuse(Reason.VALOARE_INVALIDA, { camp: 'calendar.anotimpStart', valoare: a, cunoscute: NUME_ANOTIMPURI.join(', ') })
+  } else if (typeof a === 'number' && Number.isInteger(a) && a >= 0 && a < ANOTIMPURI) {
+    anotimp = a
+  } else if (a === undefined) {
+    return refuse(Reason.LIPSA_MATERIAL, { camp: 'calendar.anotimpStart' })
+  } else {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'calendar.anotimpStart', valoare: String(a), cunoscute: NUME_ANOTIMPURI.join(', ') })
+  }
+  // Ora si minutul sunt numere intregi de tickuri: altfel „14:20" ar cadea intre doua tickuri, iar
+  // ora valului de frig ar depinde de rotunjire.
+  if (v.ziTicks! % MINUTE_PE_ZI !== 0) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'calendar.ziTicks', valoare: v.ziTicks!, multiplu: MINUTE_PE_ZI, motiv: 'un minut de joc trebuie sa fie un numar intreg de tickuri' })
+  }
+  if (v.ziStart! > v.zilePeAnotimp!) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'calendar.ziStart', valoare: v.ziStart!, max: v.zilePeAnotimp! })
+  }
+  return accept({ ziTicks: v.ziTicks!, zilePeAnotimp: v.zilePeAnotimp!, anotimpStart: anotimp as AnotimpId, ziStart: v.ziStart!, oraStart: v.oraStart! })
+}
+
+/** Doua tablouri de numere identice (pentru tabelele derivate din forma parsata). */
+function acelasiTablou(a: unknown, b: readonly number[]): boolean {
+  return Array.isArray(a) && a.length === b.length && a.every((x, i) => x === b[i])
+}
+
+/**
+ * Sectiunea `clima`. Tabelele solului se CALCULEAZA aici, din `dAdancMm` si `dSezonMm`; forma deja
+ * parsata (cum e `DEFAULT_RULES`) le poarta, si atunci trebuie sa fie exact cele recalculate — altfel
+ * un tabel scris de mana ar fi ignorat tacut sau, mai rau, crezut.
+ */
+function parseClima(raw: unknown, cal: ReguliCalendar): Outcome<ReguliClima> {
+  const c = campuriIntregi(raw, 'clima', CLIMA_SPEC, ['valFrig', 'tabele'])
+  if (!c.ok) return c
+  const obj = raw as Record<string, unknown>
+  if (obj.valFrig === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'clima.valFrig' })
+  const vf = campuriIntregi(obj.valFrig, 'clima.valFrig', VAL_FRIG_SPEC)
+  if (!vf.ok) return vf
+  const v = vf.value
+  if (2 * v.rampaOre! + v.platouOre! > 24) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'clima.valFrig', motiv: 'rampa, platoul si rampa inapoi incap in aceeasi zi: 2 · rampaOre + platouOre ≤ 24', rampaOre: v.rampaOre!, platouOre: v.platouOre! })
+  }
+  if (v.ziMin! > v.ziMax! || v.ziMax! > cal.zilePeAnotimp) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'clima.valFrig.ziMax', motiv: 'ziua valului e o zi a iernii: 1 ≤ ziMin ≤ ziMax ≤ zilePeAnotimp', ziMin: v.ziMin!, ziMax: v.ziMax!, zilePeAnotimp: cal.zilePeAnotimp })
+  }
+  const zileAn = ANOTIMPURI * cal.zilePeAnotimp
+  if (c.value.ziCeaMaiRece! >= zileAn) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'clima.ziCeaMaiRece', valoare: c.value.ziCeaMaiRece!, max: zileAn - 1 })
+  }
+  const tabele = tabeleClima(c.value.dAdancMm!, c.value.dSezonMm!)
+  if (obj.tabele !== undefined) {
+    const t = obj.tabele as Record<string, unknown> | null
+    // determinism-ok: se numara cheile (exact cele trei tabele), ordinea lor nu conteaza.
+    if (typeof t !== 'object' || t === null || !acelasiTablou(t.expAdancQ16, tabele.expAdancQ16) || !acelasiTablou(t.expSezonQ16, tabele.expSezonQ16) || !acelasiTablou(t.lagQ16, tabele.lagQ16) || Object.keys(t).length !== 3) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: 'clima.tabele', motiv: 'tabelele sunt DERIVATE din dAdancMm si dSezonMm: nu se scriu in fisier, iar in forma parsata trebuie sa fie exact cele recalculate' })
+    }
+  }
+  const valFrig: ValFrig = { amplitudineMc: v.amplitudineMc!, platouOre: v.platouOre!, rampaOre: v.rampaOre!, ziMin: v.ziMin!, ziMax: v.ziMax! }
+  return accept({
+    tMedieMc: c.value.tMedieMc!,
+    amplitudineAnMc: c.value.amplitudineAnMc!,
+    amplitudineZiMc: c.value.amplitudineZiMc!,
+    ziCeaMaiRece: c.value.ziCeaMaiRece!,
+    oraCeaMaiCalda: c.value.oraCeaMaiCalda!,
+    valFrig,
+    deltaAdancMc: c.value.deltaAdancMc!,
+    dAdancMm: c.value.dAdancMm!,
+    dSezonMm: c.value.dSezonMm!,
+    tabele,
+  })
+}
+
+/**
+ * Tabelul `termic.material` → R indexat cu `MaterialId`. Ca `digYield`: in fisier un obiect cu numele
+ * materialelor SOLIDE, fiecare obligatoriu (panoul, L3-5: IARBA si LEMN_CONSTRUIT lipseau, iar o valoare
+ * implicita ascunsa ar fi intrat in loc); AER si APA nu au voie sa apara. Forma parsata e tabloul.
+ */
+function parseRezistente(raw: unknown): Outcome<number[]> {
+  if (Array.isArray(raw)) {
+    if (raw.length !== NUME_MATERIALE.length) return refuse(Reason.VALOARE_INVALIDA, { camp: 'termic.material', lungime: raw.length, asteptat: NUME_MATERIALE.length })
+    const obj: Record<string, unknown> = {}
+    for (const [nume, id] of NUME_MATERIALE) {
+      if (!isSolid(id)) {
+        if (raw[id] !== 0) return refuse(Reason.VALOARE_INVALIDA, { camp: `termic.material.${nume}`, motiv: 'materialul nu e solid: nu e hotar, drumul se opreste la el' })
+        continue
+      }
+      obj[nume] = raw[id]
+    }
+    raw = obj
+  }
+  if (typeof raw !== 'object' || raw === null) return refuse(Reason.LIPSA_MATERIAL, { camp: 'termic.material', asteptat: 'obiect', primit: typeof raw })
+  const obj = raw as Record<string, unknown>
+  const cunoscute = NUME_MATERIALE.map(([n]) => n)
+  for (const key of Object.keys(obj).sort()) {
+    if (!cunoscute.includes(key)) return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: `termic.material.${key}`, cunoscute: cunoscute.join(', ') })
+  }
+  const out: number[] = []
+  for (const [nume, id] of NUME_MATERIALE) {
+    const v = obj[nume]
+    if (!isSolid(id)) {
+      if (v !== undefined) return refuse(Reason.VALOARE_INVALIDA, { camp: `termic.material.${nume}`, motiv: 'materialul nu e solid: nu e hotar, drumul se opreste la el' })
+      out[id] = 0
+      continue
+    }
+    if (v === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: `termic.material.${nume}` })
+    if (typeof v !== 'number' || !Number.isInteger(v)) return refuse(Reason.VALOARE_INVALIDA, { camp: `termic.material.${nume}`, asteptat: 'intreg (miimi de m²K/W)', primit: String(v) })
+    // R ≤ 0 pe un solid: o fata fara rezistenta (conductanta infinita, sau negativa) — iar garda de
+    // stabilitate de mai jos ar imparti la zero.
+    if (v <= 0) return refuse(Reason.VALOARE_INVALIDA, { camp: `termic.material.${nume}`, valoare: v, motiv: 'un material solid trebuie sa aiba rezistenta termica pozitiva' })
+    if (v > MAX_R_MIIMI) return refuse(Reason.CAPACITATE_DEPASITA, { camp: `termic.material.${nume}`, valoare: v, min: 1, max: MAX_R_MIIMI })
+    out[id] = v
+  }
+  return accept(out)
+}
+
+/** Sectiunea `termic`. */
+function parseTermic(raw: unknown): Outcome<ReguliTermic> {
+  const t = campuriIntregi(raw, 'termic', TERMIC_SPEC, ['material'])
+  if (!t.ok) return t
+  const m = (raw as Record<string, unknown>).material
+  if (m === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'termic.material' })
+  const mat = parseRezistente(m)
+  if (!mat.ok) return mat
+  const v = t.value
+  return accept({
+    kCelule: v.kCelule!,
+    rSiLateralMiimi: v.rSiLateralMiimi!,
+    rSiSusMiimi: v.rSiSusMiimi!,
+    rSiJosMiimi: v.rSiJosMiimi!,
+    rSeMiimi: v.rSeMiimi!,
+    gDeschisMilliWPeK: v.gDeschisMilliWPeK!,
+    cAerJPeK: v.cAerJPeK!,
+    material: mat.value,
+  })
+}
+
+/** `clima` implicita cu tabelele ei: aceeasi functie ca in `parseRules`, deci forma parsata trece revalidarea. */
+function cuTabeleClima(c: Omit<ReguliClima, 'tabele'>): ReguliClima {
+  return { ...c, tabele: tabeleClima(c.dAdancMm, c.dSezonMm) }
+}
+
+/**
  * Valideaza un obiect brut ca `Rules`. Refuza campurile necunoscute — un camp
  * scris gresit intr-un mod ar trece tacut altfel si ar folosi valoarea implicita.
  */
@@ -715,13 +1039,13 @@ export function parseRules(raw: unknown): Outcome<Rules> {
   // garantata de spec si nu depinde de starea rularii.
   const known = Object.keys(RULES_SPEC)
   for (const key of Object.keys(obj).sort()) {
-    if (key === 'digYield' || key === 'piese' || key === 'nevoi' || key === 'nutritie' || key === 'ganduri') continue
+    if ((SECTIUNI as readonly string[]).includes(key)) continue
     if (!known.includes(key)) {
-      return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: key, cunoscute: [...known, 'digYield', 'piese', 'nevoi', 'nutritie', 'ganduri'].join(', ') })
+      return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: key, cunoscute: [...known, ...SECTIUNI].join(', ') })
     }
   }
 
-  const out: Record<string, number | readonly DigYield[] | readonly SpecPiesa[] | readonly SpecNevoie[] | readonly SpecGand[] | readonly number[]> = {}
+  const out: Record<string, unknown> = {}
   for (const key of known) {
     const spec = RULES_SPEC[key as keyof typeof RULES_SPEC]
     const v = obj[key]
@@ -756,6 +1080,18 @@ export function parseRules(raw: unknown): Outcome<Rules> {
   const ganduriOut = parseGanduri(obj.ganduri)
   if (!ganduriOut.ok) return ganduriOut
   out.ganduri = ganduriOut.value
+  if (obj.calendar === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'calendar' })
+  const calendarOut = parseCalendar(obj.calendar)
+  if (!calendarOut.ok) return calendarOut
+  out.calendar = calendarOut.value
+  if (obj.clima === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'clima' })
+  const climaOut = parseClima(obj.clima, calendarOut.value)
+  if (!climaOut.ok) return climaOut
+  out.clima = climaOut.value
+  if (obj.termic === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'termic' })
+  const termicOut = parseTermic(obj.termic)
+  if (!termicOut.ok) return termicOut
+  out.termic = termicOut.value
   const r = out as unknown as Rules
 
   // Invarianti INTRE campuri. Fiecare e o lege de care depinde corectitudinea,
@@ -1003,6 +1339,36 @@ export function parseRules(raw: unknown): Outcome<Rules> {
     })
   }
 
+  // STABILITATEA PASULUI EXPLICIT din t.2b: 6 · g_max < 1 (panoul, L1-06).
+  //
+  // Pasul de 1 Hz (`ticksPerSecond` tickuri = ticksPerSecond · 86.400 / ziTicks secunde de joc)
+  // muta T_i cu Σ g (T_j − T_i), g = G · dt / C_i. Ramane pozitiv (nu oscileaza, nu sare peste
+  // vecini) cat Σ g ≤ 1. O incapere are cel mult 6 fete pe celula si C ≥ V · c_aer, deci
+  // Σ g ≤ 6 · G_max · dt / c_aer, unde G_max e fata cea mai conductiva prin O celula: cea mai
+  // mica R_si, R_se si cel mai slab izolator — o fata cu usa spre afara, 1/(0,10 + 0,04 + 0,30)
+  // (o muchie camera–camera are doua R_si si e sub ea). Cu implicitele, 6 · g_max = 0,48.
+  // Garantia nu depinde de masa (c_masa), ci de R_min din continut — de aici garda.
+  //
+  // Pe intregi, cu R in miimi: 6 · g_max < 1 ⟺ 6000 · tps · 86.400 < ziTicks · c_aer · (R_si + R_se + R_min).
+  // BigInt: la plafoanele din specificatii, dreapta trece de 2^53.
+  {
+    const t = r.termic
+    let rMin = MAX_R_MIIMI
+    for (const [, id] of NUME_MATERIALE) if (isSolid(id)) rMin = Math.min(rMin, t.material[id]!)
+    const rFata = Math.min(t.rSiLateralMiimi, t.rSiSusMiimi, t.rSiJosMiimi) + t.rSeMiimi + rMin
+    const stanga = 6000n * BigInt(r.ticksPerSecond) * 86400n
+    const dreapta = BigInt(r.calendar.ziTicks) * BigInt(t.cAerJPeK) * BigInt(rFata)
+    if (stanga >= dreapta) {
+      return refuse(Reason.VALOARE_INVALIDA, {
+        camp: 'termic.stabilitate',
+        motiv: 'pasul termic explicit n-ar fi stabil: 6 · g_max trebuie sa fie sub 1 (cea mai slaba fata prin o celula conduce prea mult)',
+        saseGMaxMiimi: Number((stanga * 1000n) / dreapta),
+        rFataMiimi: rFata,
+        rMinMiimi: rMin,
+      })
+    }
+  }
+
   return accept(r)
 }
 
@@ -1165,4 +1531,43 @@ export const DEFAULT_RULES: Rules = {
     { valoare: -70, durata: 6000 },
     { valoare: 250, durata: 20000 },
   ],
+
+  // --- temperatura (design temperatura v2, §1–§4; deciziile 1–4 pentru Andrei) ---
+  //
+  // Ziua de 24 h × 1.680 de tickuri (o ora = 84 s la 1×), 4 zile pe anotimp, anul de 16 zile =
+  // 645.120 de tickuri (8 h 58 min la 1×). Start toamna, ziua 1, 08:00: prima iarna dupa 3 zile si
+  // 16 ore — 2 h 03 min la 1×, 41 min la 3× (tinta PLAN „45–90 min" se atinge la 3×). Ziua nevoilor
+  // e alta (40.500, somnul), deci nimic din nevoi nu se misca.
+  calendar: { ziTicks: 40320, zilePeAnotimp: 4, anotimpStart: Anotimp.TOAMNA, ziStart: 1, oraStart: 8 },
+  // O vale din Romania: 9,4 °C media, ±11,2 °C anul, ±5 °C ziua; cel mai rece la mijlocul iernii
+  // (inceputul zilei 14 din 16) si la 03:00, cel mai cald la 15:00. Fara val, minimul anului e
+  // −6,79 °C; valul (−10 °C, o zi pe iarna, a 2-a sau a 3-a) duce minimul la −16,1…−16,8 °C.
+  // Solul: −9 °C fata de media aerului la adanc, D_a = 2 m (3,7 °C la 2 m: pivnita tine hrana sub
+  // 5 °C vara — regula de JOC, fizic ar fi ~10 °C); unda anului se stinge pe D_s = 0,8 m.
+  clima: cuTabeleClima({
+    tMedieMc: 9400,
+    amplitudineAnMc: 11200,
+    amplitudineZiMc: 5000,
+    ziCeaMaiRece: 14,
+    oraCeaMaiCalda: 15,
+    valFrig: { amplitudineMc: -10000, platouOre: 18, rampaOre: 3, ziMin: 2, ziMax: 3 },
+    deltaAdancMc: -9000,
+    dAdancMm: 2000,
+    dSezonMm: 800,
+  }),
+  // R in miimi de m²K/W pe celula de 1 m (design §4.3). Indexat cu MaterialId: AER, ROCA, PAMANT,
+  // IARBA, APA, LEMN_CONSTRUIT, PIATRA_CONSTRUITA, MOLOZ, GRINDA, USA. GRINDA si USA sunt de PIATRA
+  // in joc (chunk.ts): grinda are R-ul pietrei, usa e „subtire" (regula de joc), iar lemnul nu
+  // izoleaza mai bine decat pamantul (DESIGN §5.1). Nicio celula construita nu trece de R(PAMANT).
+  termic: {
+    kCelule: 8,
+    rSiLateralMiimi: 130,
+    rSiSusMiimi: 100,
+    rSiJosMiimi: 170,
+    rSeMiimi: 40,
+    gDeschisMilliWPeK: 200000,
+    // 1,2 kg/m³ × 1.005 J/(kg·K), rotunjit: aerul unei celule.
+    cAerJPeK: 1210,
+    material: [0, 340, 850, 850, 0, 500, 590, 2000, 590, 300],
+  },
 }

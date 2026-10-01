@@ -285,6 +285,63 @@ async function ruleaza() {
     bifa('pauza', r.t === t0 && r.buton && !r.modal, 'Spatiu pune pauza: tickul sta pe loc 1,5 s, butonul spune „Pornește"', `${t0} → ${r.t}; ${JSON.stringify(r)}`)
     if (NEGATIVA === 'pauza') await p.tasta(' ')
   })
+  // Bara de sus (design temperatura v2, §6; panoul, L5-4): la latimea minima a UI-ului (LATIME_UI = 1.100 px)
+  // si cu doua insigne, nimic nu iese din bara. Inainte, cu marca KINSTEAD si timpul total, grupul Pauza ajungea
+  // la x = 1.142 (masurat de panou), iar calendarul din v1 ar fi depasit cu 255 px. Se masoara si cel mai lat text
+  // pe care il poate scrie calendarul in fiecare anotimp (extremele climei, pe seed-ul lumii), nu doar cel de
+  // acum: tickul probei e mereu toamna. Insignele se pun in DOM si se scot la loc; lumea nu se atinge.
+  await pas('bara-sus', async () => {
+    p.win.setContentSize(1100, H)
+    await astepta(700)
+    const r = await p.js(`(async () => {
+      const sus = document.querySelector('.ui-sus')
+      const cal = sus.querySelector('.ui-calendar') ?? sus.querySelector('.ui-timp')
+      const ins = sus.querySelector('.ui-res[title^="Oamenii"] > span:last-child')
+      const inainte = [...ins.childNodes]
+      ins.replaceChildren(...[['atentie', '3 flămânzi'], ['atentie', '2 obosiți']].map(([c, t]) => { const e = document.createElement('span'); e.className = 'ui-insigna ' + c; e.textContent = t; return e }))
+      const vechi = cal.textContent
+      const texte = [vechi]
+      let variante = 'niciuna'
+      try {
+        const T = await import('/@fs/${REPO}/viewer/ui/texte.ts')
+        const Cl = await import('/@fs/${REPO}/src/sim/clima.ts')
+        const Ca = await import('/@fs/${REPO}/src/sim/calendar.ts')
+        const R = __kinstead.rules ?? (await import('/@fs/${REPO}/src/sim/content.ts')).DEFAULT_RULES
+        const seed = __kinstead.world.seed
+        const ext = [[Infinity, -Infinity], [Infinity, -Infinity], [Infinity, -Infinity], [Infinity, -Infinity]]
+        for (let t = 0; t < Ca.tickuriPeAn(R); t += 28) {
+          const a = Ca.momentul(t, R).anotimp, v = Cl.tAfara(seed, t, R)
+          ext[a][0] = Math.min(ext[a][0], v); ext[a][1] = Math.max(ext[a][1], v)
+        }
+        for (let a = 0; a < 4; a++) for (const v of ext[a]) for (const d of [-65536, 0, 65536]) {
+          texte.push(T.textCalendar({ anotimp: a, zi: R.calendar.zilePeAnotimp, ora: 23, minut: 59 }, R.calendar.zilePeAnotimp, v, d))
+        }
+        variante = ext.map(([mn, mx]) => Math.round(mn / 65536) + '..' + Math.round(mx / 65536)).join(' | ')
+      } catch (e) { variante = 'fara calendar: ' + String(e?.message ?? e).slice(0, 80) }
+      const masuri = []
+      for (const t of texte) {
+        cal.textContent = t
+        const c = cal.getBoundingClientRect()
+        const ultim = sus.lastElementChild.getBoundingClientRect()
+        const spatiu = sus.querySelector('.spatiu')?.getBoundingClientRect().width ?? 0
+        masuri.push({ t, sw: sus.scrollWidth, cw: sus.clientWidth, lat: +c.width.toFixed(1), inalt: Math.round(c.height), dreapta: Math.round(ultim.right), rezerva: Math.round(spatiu) })
+      }
+      cal.textContent = vechi
+      ins.replaceChildren(...inainte)
+      const lat = masuri.reduce((a, m) => (m.lat > a.lat ? m : a), masuri[0])
+      const ingust = masuri.reduce((a, m) => (m.lat < a.lat ? m : a), masuri[0])
+      const rele = masuri.filter((m) => !(m.sw <= m.cw && m.dreapta <= m.cw && m.inalt <= 20))
+      return { latime: innerWidth, marca: !!sus.querySelector('.ui-marca'), cate: masuri.length, variante, acum: masuri[0], celMaiLat: lat, celMaiIngust: ingust, rele: rele.slice(0, 4), titlu: cal.title, text: vechi }
+    })()`)
+    p.win.setContentSize(W, H)
+    await astepta(700)
+    // Si bara nu se misca atunci cand se schimba textul: calendarul are aceeasi latime pentru oricare din ele.
+    bifa('bara-sus', r.latime === 1100 && !r.marca && r.cate >= 25 && r.rele.length === 0 && r.celMaiLat.lat - r.celMaiIngust.lat <= 1,
+      'bara de sus la 1.100 px, cu 2 insigne si cu cel mai lat calendar al fiecarui anotimp: nimic nu iese din bara, calendarul e pe un rand, de aceeasi latime pentru orice text, fara marca KINSTEAD',
+      JSON.stringify({ latime: r.latime, marca: r.marca, cate: r.cate, variante: r.variante, acum: r.acum, celMaiLat: r.celMaiLat, celMaiIngust: r.celMaiIngust, rele: r.rele }))
+    bifa('bara-sus-calendar', /^(Primăvară|Vară|Toamnă|Iarnă) \d+\/\d+ · \d\d:\d\d · −?\d+° [↗↘→]$/.test(r.text) && /^Iarna (în|într-o|se termină) .+ \(≈ .+ la [123]×\) · timp de joc \d+:\d\d:\d\d$/.test(r.titlu),
+      'calendarul din bara („Toamnă 1/4 · 08:00 · 15° ↗") si tooltip-ul lui („Iarna în 3 zile (≈ 2 h 03 min la 1×) · timp de joc 0:00:02")', JSON.stringify({ text: r.text, titlu: r.titlu }))
+  })
   // Primul Q porneste nivelul la solul de sub camera (ECR-5), nu in varful ferestrei.
   await pas('primul-q', async () => {
     await p.tasta('r')

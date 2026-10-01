@@ -32,6 +32,15 @@ const FORBIDDEN = [
   { re: /\bnew\s+Promise\b/, msg: 'Promise — simularea e sincrona, pas cu pas' },
   { re: /\bsetTimeout\s*\(|\bsetInterval\s*\(/, msg: 'timer — simularea nu asteapta ceasul' },
   { re: /\bprocess\.(env|argv|hrtime)\b/, msg: 'process.* — nucleul nu citeste mediul' },
+  // Functiile transcendente sunt APROXIMATE de motor (ECMA-262 nu le cere bit-identice): aceeasi
+  // lume ar avea alta clima pe alta masina. Clima foloseste tabele pe intregi (clima.ts); `**` are
+  // semantica lui `Math.pow`. `Math.sqrt` ramane permis: IEEE 754 il cere corect rotunjit.
+  // (Panoul temperaturii, L4-7: inainte, singura interdictie din `Math.*` era `random`.)
+  {
+    re: /\bMath\.(sin|cos|tan|asin|acos|atan|atan2|sinh|cosh|tanh|asinh|acosh|atanh|exp|expm1|log|log1p|log2|log10|pow|cbrt|hypot)\b/,
+    msg: 'Math.<transcendenta> — aproximata de motor, nu bit-identica intre masini: tabele pe intregi (clima.ts)',
+  },
+  { re: /\*\*/, msg: '** — semantica Math.pow, aproximata de motor: inmultiri intregi' },
 ]
 
 /** Suspecte: permise doar cu `.sort(` pe aceeasi linie sau cu justificare. */
