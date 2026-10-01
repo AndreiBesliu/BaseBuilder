@@ -4732,3 +4732,56 @@ deasupra camerei"). Pe HEAD nu există ceas de zi, nici anotimpuri — doar temp
 —, deci felia aduce și ceasul și clima de afară. Metoda, ca la tăietura 1: hartă și măsurători pe HEAD →
 design → panou adversarial → cod → probe → recenzie a codului. Contractul lăsat de tăietura 1 (proveniența
 la contopiri și despărțiri, fețele pe fel) e în registrul ei.
+
+## Pauză — 01.10.2026 — S24-27 t.2: designul închis, t.2a valul 1 livrat
+
+**Prompt:** „sa iei pauza cand se poate" (în timpul valului 1)
+**Model:** Claude Opus 5.5 (claude-opus-5-5), Claude Code, Ultracode.
+
+**Ce s-a făcut până la pauză.**
+- **Hartă și măsurători pe HEAD** (5 agenți, 1,69 M): graful termic pe M10 are 677 de noduri și 1.776 de
+  muchii, 275.406 fețe; o trecere completă prin fețe costă 60–70 ms, pasul pe graf ~10 µs (costul e în fețe,
+  nu în integrare); ziua nevoilor e deja de **40.500 de tickuri** (un somn la 162 × `nevoiTicks`), nu „≈ 4
+  minute" cum scria DESIGN §4 — cifra veche n-a fost măsurată niciodată; fizica reală nu duce o pivniță sub
+  5 °C într-o vale din România (solul adânc ≈ 10 °C); proveniența (a2) prototipată cu 0 erori față de forța
+  brută.
+- **Panoul pe designul v1** (5 lentile + 13 verificatori, 4,30 M, 34 de constatări). Trei rădăcini găsite
+  independent de mai multe lentile: graful refăcut doar la `epoca` rămânea vechi după editări care schimbă
+  DOAR fețe — pământ pe acoperiș, o podea pe sol deasupra unei pivnițe (169 din 169 de loturi de suprafață
+  ies din sincronizare fără `epoca++`; salvare + încărcare ≠ rularea continuă, CRITIC); pasul implicit scris
+  literal trecea de 2^53 pe C' real și devenea dependent de ordine (CRITIC); migrarea împărțea la zero pentru
+  o cameră fără rezervoare (debaraua din mijlocul unei case cu trei niveluri). Și una de joc: cu mecanismul
+  v1, **pivnița nu stătea sub 5 °C vara la nicio adâncime** — solul era la 8 celule, casa și cerul la 1 m;
+  reparația verificată: solul natural e rezervor chiar la prima lui celulă, cu ΔT_adânc −9 °C.
+- **Designul v2** (`research/temperatura-t2.md`): felia se taie în **t.2a** — ceasul, clima, solul, fețele,
+  graful, *regimul permanent* (unde ar ajunge temperatura) și ce vede jucătorul; neutră la hash — și **t.2b**
+  — inerția, starea salvată, proveniența, schema 8. Reparațiile panoului pentru t.2b sunt scrise la §9.
+- **t.2a, valul 1** (2 agenți pe ramuri paralele, 1,06 M; `58efb63`, `8146bbf`, `29eb93d`):
+  - ceasul (`calendar.ts`; ziua de 40.320 de tickuri, 4 zile pe anotimp, start toamna), clima de afară cu
+    valul de frig (`clima.ts`; cosinusul pe întregi, Q14, eroare < 0,0001), solul (tabele pe adâncime pe
+    întregi, adâncimea clampată în funcție), secțiunile `calendar` / `clima` / `termic` în content cu
+    validare; testul de conținut compară acum `rules.json` cu `DEFAULT_RULES` pe TOT obiectul (înainte doar
+    `piese`; trei mutații în fișier treceau 128 de teste); scanerul interzice dur funcțiile transcendente și
+    `**` (`joburi.ts` folosea `**` în 8 locuri — înlocuit cu tabelul `DOI_LA`, valori identice bit cu bit);
+    bara de sus „Toamnă 2/4 · 14:20 · 8° ↘", fără marca KINSTEAD (depășea 1.100 px și pe HEAD, cu 2 insigne);
+  - fețele încăperilor (`fete.ts`): clasificarea pe convenția camerelor (DESCHISĂ / MUCHIE / SOL / EXT / APA
+    / ADÂNC, solul ca rezervor la prima lui celulă), cache pe bucată ținut la zi cu D+ pe ORICE lot (și pe
+    ramura care iese devreme), K+1 pași, restricțiile (a) și (b) — hala de 30 m: +100–150 µs pe lot, nu
+    1,3 ms —, `epocaFete`, `sincronizeazaCamere` întoarce `{felii, recalcul}`; oracolul incremental ==
+    recalculul complet pe cutii, pe un fuzz de suprafață nou, pe casa ridicată de pioni peste o pivniță (42 de
+    loturi schimbă fețe fără epocă nouă — exact cifra verificatorului).
+- **Porți pe `main` îmbinat:** 912 teste, **778/778 de probe prinse** (~14,5 min local, arbore curat la final), hash `52b16ed2` neschimbat (simularea nu citește
+  temperaturile).
+
+**Abateri de la design, scrise de agenți:** ziua cea mai rece e ziua anului (implicit 14, adică ziua 3 a
+iernii la 00:00 — cifrele designului veneau din prototip, textul „ziua 2, 12:00" era greșit); adâncimea solului
+se evaluează la centrul celulei (d + 0,5 m); MUCHIE și SINE se decid la citire, nu în cache (o săpătură
+departe poate uni două camere fără să atingă fețele); M10 are 88.577 de rânduri în cache, nu 35.406 (muchiile
+pe celula de dincolo), refacerea completă a fețelor 151–175 ms; K e încă parametrul implicit 8, nelegat de
+content; bara de sus are lățime fixă de 153 px (cel mai lat text), nu 130.
+
+**Ce urmează:** valul 2 al t.2a — legarea lui K de content, conductanța din (clasă, fel, compoziție) + R,
+graful pe (`epoca`, `epocaFete`) cu muchia luată o dată (ancora mai mică), `regimPermanent` (Gauss–Seidel pe
+întregi), `canaleTermice`, oracolul grafului; inspectorul (echilibrul + „pe ce stă temperatura", scris pe loc)
+și overlay-ul Temperatură pe tastă proprie. Apoi recenzia codului t.2a, OWNER_VERIFY 17 (deciziile de la §8 ale
+designului), apoi t.2b.

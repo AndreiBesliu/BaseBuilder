@@ -29,6 +29,7 @@ Impuse mecanic de `tools/check-sim-discipline.mjs`, care rulează în `npm run c
 | Interzis | De ce |
 |---|---|
 | `Date.now()`, `new Date()`, `performance.now()` | `w.tick` e **singura** sursă de timp. Ceasul mașinii face simularea dependentă de viteza hardware-ului. |
+| `Math.sin/cos/exp/log/pow/…`, operatorul `**` | ECMA-262 le declară „aproximate de implementare": rezultatul poate diferi între motoare. Cosinusul și exponențialele se fac pe întregi, din tabele (`clima.ts`). |
 | `Math.random()` | Aleatorul vine din fluxuri **numite** (`rng.ts`). Un RNG global face ca o tragere în plus într-un sistem să miște secvența altui sistem, iar replay-urile vechi nu se mai reproduc. |
 | `async` / `await` / `Promise` / timere | Simularea e sincronă și pas cu pas. |
 | `process.env`, `process.argv` | Nucleul nu citește mediul. |
@@ -89,7 +90,7 @@ Pe Windows, `kinstead.bat` le adună pe toate: dublu-click deschide un meniu, ia
 
 ```bash
 npm run mutatii -- --lista      # ce suite există
-npm run mutatii                 # toate cele 690, ~12 min local (28.09, cronometrat, vezi mai jos)
+npm run mutatii                 # toate cele 778, ~14,5 min local (01.10, cronometrat, vezi mai jos)
 npm run mutatii -- nevoi        # o singură suită
 npm run mutatii -- nevoi podeaua  # doar mutațiile al căror nume conține „podeaua"
 npm run mutatii -- --izolare    # fiecare test NUMIT de o probă, singur, pe cod nemutat (~2 min)
@@ -137,6 +138,7 @@ potrivește în două locuri editează altul decât cel gândit, rulează testel
 > După încăperi și recenzia lor (28.09): **690 de probe în ~12 min** local, arbore curat la final. Cinci agenți
 > au rulat suita completă în paralel, fiecare în worktree-ul lui (12 min 30 s sub încărcare): un worktree în
 > afara dosarului sincronizat de Drive nu are problema restaurării; `git -c gc.auto=0 commit` acolo.
+> După t.2a valul 1 al temperaturii (01.10): **778 de probe în ~14,5 min** local, arbore curat la final.
 >
 > `tools/check-mutatii.mjs` a fost scris ca înlocuitor static și rămâne util, dar nu mai e o
 > compensație: el răspunde la „proba ARE ce să măsoare?", nu la „măsoară?". A doua întrebare
