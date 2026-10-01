@@ -25,6 +25,7 @@ import {
   varfLa,
 } from '../src/sim/camere.ts'
 import { applyCommand } from '../src/sim/commands.ts'
+import { formaCanonicaFete, formaCanonicaFeteRecalculata } from '../src/sim/fete.ts'
 import { decode, encode } from '../src/sim/save.ts'
 import type { World } from '../src/sim/state.ts'
 import { Faction, Item } from '../src/sim/state.ts'
@@ -56,8 +57,13 @@ function casa(t: Terrain, x0: number, y0: number, g: number, L: number, H: numbe
   }
 }
 
+/**
+ * Oracolul: indexul == recalculul complet, iar cache-ul de fețe (fete.ts, S24-27 t.2a) == recalculul complet
+ * al fețelor pe același index — după fiecare lot al fiecărui test de mai jos, fuzz-ul de cutii inclus.
+ */
 function egalCuRecalculul(w: World, mesaj: string): void {
   assert.deepEqual(formaCanonica(w.camere), formaCanonica(construiesteCamere(w.terrain)), mesaj)
+  assert.deepEqual(formaCanonicaFete(w.camere), formaCanonicaFeteRecalculata(w.camere, w.terrain), `${mesaj} (fetele)`)
 }
 
 // --- definiția ---------------------------------------------------------------
@@ -295,15 +301,24 @@ test('depasirea jurnalului reconstruieste complet si da acelasi index', () => {
   casa(w.terrain, wx, wy, g, 5, 2)
   sincronizeazaCamere(w.camere, w.terrain)
   const inainte = w.camere.stat.recalculari
-  // Peste JURNAL_CAP editari nevazute: sapat si zidit la loc, departe de casa.
+  const feteInainte = w.camere.fete.stat.recalculari
+  // Peste JURNAL_CAP editari nevazute: sapat si zidit la loc, departe de casa. Plus pamant pe acoperis, in
+  // acelasi lot depasit: fetele SUS se schimba, iar D+ nu are voie sa citeasca inelul suprascris — cache-ul
+  // de fete se reface integral.
   for (let i = 0; i <= JURNAL_CAP / 2; i++) {
     dig(w.terrain, wx + 8, wy + 8, g)
     fill(w.terrain, wx + 8, wy + 8, g, P)
   }
-  sincronizeazaCamere(w.camere, w.terrain)
+  for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) fill(w.terrain, wx + dx, wy + dy, g + 4, Material.PAMANT)
+  const rez = sincronizeazaCamere(w.camere, w.terrain)
+  assert.deepEqual(rez, { felii: [], recalcul: true }, 'contractul: depasirea e un recalcul')
   assert.equal(w.camere.stat.recalculari, inainte + 1)
+  assert.equal(w.camere.fete.stat.recalculari, feteInainte + 1, 'cache-ul de fete s-a refacut o data')
   egalCuRecalculul(w, 'dupa depasire')
   assert.equal(listaComponente(w.camere).length, 1)
+  // Si un index al ALTUI teren: tot recalcul.
+  const alta = sitPlat(777, 10).w
+  assert.deepEqual(sincronizeazaCamere(w.camere, alta.terrain), { felii: [], recalcul: true })
 })
 
 // --- punctele fixe ---------------------------------------------------------------
@@ -398,6 +413,9 @@ test('SALVARE: lumea incarcata are exact indexul lumii continue, reconstruit in 
   assert.equal(w2.camere.vazute, w2.terrain.editari)
   assert.equal(w2.camere.stat.recalculari, 1)
   assert.deepEqual(formaCanonica(w2.camere), formaCanonica(w.camere))
+  // Cache-ul de fete e TRANSIENT: decode il reface complet, iar el iese identic cu al lumii continue.
+  assert.equal(w2.camere.fete.stat.recalculari, 1)
+  assert.deepEqual(formaCanonicaFete(w2.camere), formaCanonicaFete(w.camere))
   assert.ok(listaComponente(w2.camere).some(esteIncapere))
 })
 

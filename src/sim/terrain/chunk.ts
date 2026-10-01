@@ -99,6 +99,19 @@ export function esteMaterialDeStructura(m: number): boolean {
 }
 
 /**
+ * E `m` SOL NATURAL pentru temperatura (S24-27 t.2a, design-temperatura-v2 §4.2)? ROCA, PAMANT, IARBA:
+ * prima celula de sol de pe drumul unei fete e rezervorul ei, la T_sol(d). Pe conventia camerelor, stanca
+ * de sub baza ferestrei si marginea lumii se citesc ca ROCA (src/sim/fete.ts), deci sunt si ele sol.
+ *
+ * NU e complementul lui `esteMaterialDeStructura`: MOLOZ nu-l zideste nimeni, dar nu e sol — e o gramada
+ * afanata, cu R-ul ei, pe care caldura o strabate. Iar pamantul pus de jucator pe un acoperis E sol: intrebarea
+ * e ce material e, nu cine l-a pus acolo.
+ */
+export function eSolNatural(m: number): boolean {
+  return m === Material.ROCA || m === Material.PAMANT || m === Material.IARBA
+}
+
+/**
  * Cea mai mare valoare din `Material`. Se schimba odata cu tabelul — un test cere
  * egalitatea cu maximul valorilor, ca un material nou sa nu ramana in afara lui.
  */

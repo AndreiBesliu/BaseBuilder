@@ -66,6 +66,10 @@
  * hotar până la prima celulă de aer, plafon 8 — 0 roșii din 3.240, +25–36% felii) și derivarea
  * fețelor la 1 Hz; în ambele cazuri `formaCanonica` se extinde cu fețele, pe fel și cu grosime.
  *
+ * Tăietura 2a a ales prima cale, în forma designului v2 (D+ cu K+1 pași, restricțiile (a) și (b)): cache-ul
+ * de fețe pe bucată stă în `fete.ts` și se ține la zi AICI, în `sincronizeazaCamere`, pe orice lot cu editări
+ * — și pe ramura care nu reface nicio felie. Oracolul lui are formă proprie (`formaCanonicaFete`).
+ *
  * ## Obiectele `Felie` nu se modifică niciodată
  *
  * `refaFelie` creează un obiect `Felie` NOU, cu un `cel` nou; obiectele vechi rămân exact cum erau
@@ -96,6 +100,10 @@
 import type { Terrain } from './terrain/terrain.ts'
 import { ensureChunk, JURNAL_CAP, WORLD_CELLS } from './terrain/terrain.ts'
 import { CHUNK_CELLS, cellHeightCm, decodeColumn, groundLevelFromCm, Material, promotedBaseM, surfaceMatAt, VOXEL_LEVELS } from './terrain/chunk.ts'
+import type { CacheFete } from './fete.ts'
+// Import circular (fete.ts citește de aici cititorul și indexul): sigur, fiindcă niciun modul nu folosește la
+// evaluarea lui o legătură venită din celălalt — vezi antetul din fete.ts.
+import { actualizeazaFete, cacheFete, K_FETE_IMPLICIT, reconstruiesteFete } from './fete.ts'
 
 /** Latura unei felii — blocul regiunilor. */
 export const FELIE = 16
@@ -136,15 +144,20 @@ export function decodeazaCelula(k: number): { x: number; y: number; z: number } 
 // cititorul de coloane — trăiește o singură sincronizare
 // ---------------------------------------------------------------------------
 
-interface Coloana {
+export interface Coloana {
   readonly afara: boolean
   readonly base: number
   readonly mat: Uint8Array
   /** Cel mai înalt hotar din fereastră; `base − 1` dacă nu e niciunul. */
   readonly varf: number
+  /**
+   * Solul NATURAL al coloanei (heightfield-ul, pe care săpatul nu-l schimbă): adâncimea fețelor (fete.ts).
+   * În afara lumii, +∞: stânca de dincolo de margine e adâncă.
+   */
+  readonly gNat: number
 }
 
-const COLOANA_AFARA: Coloana = { afara: true, base: 0, mat: new Uint8Array(0), varf: Number.POSITIVE_INFINITY }
+const COLOANA_AFARA: Coloana = { afara: true, base: 0, mat: new Uint8Array(0), varf: Number.POSITIVE_INFINITY, gNat: Number.POSITIVE_INFINITY }
 
 /**
  * Coloane decodate o dată pe sincronizare, apoi aruncate. Panoul a măsurat un cache persistent la
@@ -162,7 +175,8 @@ export function cititorCamere(t: Terrain): CititorCamere {
   return { t, col: new Map(), citite: 0, nepromovate: 0 }
 }
 
-function coloana(r: CititorCamere, x: number, y: number): Coloana {
+/** Coloana (x, y), decodată o dată pe cititor. În afara lumii: `afara`, cu vârful la +∞. */
+export function coloana(r: CititorCamere, x: number, y: number): Coloana {
   if (x < 0 || y < 0 || x >= WORLD_CELLS || y >= WORLD_CELLS) return COLOANA_AFARA
   const k = y * WORLD_CELLS + x
   const gasit = r.col.get(k)
@@ -198,7 +212,7 @@ function coloana(r: CititorCamere, x: number, y: number): Coloana {
       break
     }
   }
-  const c: Coloana = { afara: false, base, mat, varf }
+  const c: Coloana = { afara: false, base, mat, varf, gNat: groundLevelFromCm(cellHeightCm(ch, lx, ly)) }
   r.col.set(k, c)
   return c
 }
@@ -236,7 +250,7 @@ export function esteCer(r: CititorCamere, x: number, y: number, z: number): bool
 // indexul
 // ---------------------------------------------------------------------------
 
-interface Felie {
+export interface Felie {
   readonly cheie: number
   /** Id-ul bucății fiecărei celule; −1 = nu e aer acoperit. */
   readonly cel: Int32Array
@@ -276,6 +290,13 @@ export interface IndexCamere {
   vazute: number
   /** Crește la fiecare sincronizare care a schimbat ceva: cheia de redesenare a viewer-ului. */
   epoca: number
+  /**
+   * TRANSIENT, monotonă: crește când D+ marchează cel puțin o bucată și la recalculul fețelor (fete.ts).
+   * Fețele se schimbă și fără `epoca` nouă (pământ pe acoperiș); graful termic se reface pe oricare.
+   */
+  epocaFete: number
+  /** TRANSIENT: cache-ul de fețe pe bucată (fete.ts), ținut la zi în aceeași sincronizare. */
+  readonly fete: CacheFete
   readonly felii: Map<number, Felie>
   /** Cheile feliilor, MEREU sortate: singura ordine de iterare. */
   readonly chei: number[]
@@ -295,11 +316,14 @@ export interface IndexCamere {
   readonly stat: StatCamere
 }
 
-export function indexCamere(t: Terrain | null = null): IndexCamere {
+/** `k`: câte celule de hotar străbate mersul fețelor (fete.ts); valul 2 îl leagă de content. */
+export function indexCamere(t: Terrain | null = null, k: number = K_FETE_IMPLICIT): IndexCamere {
   return {
     teren: t,
     vazute: t ? t.editari : 0,
     epoca: 0,
+    epocaFete: 0,
+    fete: cacheFete(k),
     felii: new Map(),
     chei: [],
     bFelie: new Int32Array(64),
@@ -677,34 +701,50 @@ export function reconstruiesteCamere(idx: IndexCamere, t: Terrain): void {
   componente(idx, noi, moarte)
   idx.stat.coloaneCitite += r.citite
   idx.stat.coloaneNepromovate += r.nepromovate
+  reconstruiesteFete(idx, t)
   idx.epoca++
 }
 
 /** Un index nou, construit complet pe teren (încărcare, teste). */
-export function construiesteCamere(t: Terrain): IndexCamere {
-  const idx = indexCamere(t)
+export function construiesteCamere(t: Terrain, k: number = K_FETE_IMPLICIT): IndexCamere {
+  const idx = indexCamere(t, k)
   reconstruiesteCamere(idx, t)
   return idx
 }
 
 /**
+ * Ce a făcut o sincronizare (design-temperatura-v2 §4.4, contractul minim; t.2b îl extinde cu proveniența).
+ * `felii`: cheile feliilor refăcute — exact cele al căror obiect `Felie` s-a schimbat, a apărut sau a
+ * dispărut —, sortate. `recalcul`: indexul (și cache-ul de fețe) s-a refăcut complet; `felii` e atunci gol.
+ */
+export interface SincronizareCamere {
+  readonly felii: readonly number[]
+  readonly recalcul: boolean
+}
+
+const NIMIC: SincronizareCamere = { felii: [], recalcul: false }
+const RECALCUL: SincronizareCamere = { felii: [], recalcul: true }
+
+/**
  * Aduce indexul la zi cu jurnalul terenului. Se cheamă DOAR din punctele fixe ale simulării
  * (sfârșitul tickului, sfârșitul comenzilor de teren) — vezi antetul.
  */
-export function sincronizeazaCamere(idx: IndexCamere, t: Terrain): void {
+export function sincronizeazaCamere(idx: IndexCamere, t: Terrain): SincronizareCamere {
   if (idx.teren !== t) {
     reconstruiesteCamere(idx, t)
-    return
+    return RECALCUL
   }
   const n = t.editari - idx.vazute
-  if (n === 0) return
+  if (n === 0) return NIMIC
   if (n < 0 || n > JURNAL_CAP) {
     reconstruiesteCamere(idx, t)
-    return
+    return RECALCUL
   }
   idx.stat.sincronizari++
   const r = cititorCamere(t)
   const murdare = new Set<number>()
+  // Editările lotului, pentru D+ (fete.ts): x, y, z și capătul de jos al rulajului de aer de sub ea.
+  const lot: number[] = []
   const areFelie = (x: number, y: number, z: number): boolean => idx.felii.has(cheieFelie(Math.floor(x / FELIE), Math.floor(y / FELIE), z))
   const inLume = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < WORLD_CELLS && y < WORLD_CELLS
   for (let i = idx.vazute; i < t.editari; i++) {
@@ -715,6 +755,7 @@ export function sincronizeazaCamere(idx: IndexCamere, t: Terrain): void {
     // Celulele schimbate: e și rulajul de aer de sub ea, pe terenul de acum (lema din antet).
     let jos = z
     while (esteAer(r, x, y, jos - 1)) jos--
+    lot.push(x, y, z, jos)
     const bx = Math.floor(x / FELIE)
     const by = Math.floor(y / FELIE)
     for (let zz = jos; zz <= z; zz++) {
@@ -732,20 +773,29 @@ export function sincronizeazaCamere(idx: IndexCamere, t: Terrain): void {
   }
   idx.vazute = t.editari
   if (murdare.size === 0) {
+    // Fețele se schimbă și fără nicio felie refăcută — pământ pe acoperiș, o podea pe sol peste o pivniță,
+    // al doilea strat de acoperiș —, deci D+ rulează ÎNAINTEA ieșirii devreme (design-temperatura-v2 §4.4).
+    actualizeazaFete(idx, r, lot, [], [])
     idx.stat.coloaneCitite += r.citite
     idx.stat.coloaneNepromovate += r.nepromovate
-    return
+    return NIMIC
   }
+  const felii = [...murdare].sort((a, b) => a - b)
+  // Obiectele `Felie` de dinainte: nu se modifică niciodată (antetul), deci rămân versiunea veche.
+  const vechi = felii.map((k) => idx.felii.get(k))
   const noi: number[] = []
   const atinse = new Set<number>()
   const moarte = new Set<number>()
-  for (const cheie of [...murdare].sort((a, b) => a - b)) refaFelie(idx, r, cheie, noi, atinse, moarte)
+  for (const cheie of felii) refaFelie(idx, r, cheie, noi, atinse, moarte)
   const seminte = [...noi, ...[...atinse].sort((a, b) => a - b)]
   if (caleRapida(idx, noi, atinse, moarte)) idx.stat.caiRapide++
   else componente(idx, seminte, moarte)
+  // Fețele, pe indexul de după lot: drumurile D+ marchează bucățile de acum.
+  actualizeazaFete(idx, r, lot, felii, vechi)
   idx.stat.coloaneCitite += r.citite
   idx.stat.coloaneNepromovate += r.nepromovate
   idx.epoca++
+  return { felii, recalcul: false }
 }
 
 const VECINI_LATERALI = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const

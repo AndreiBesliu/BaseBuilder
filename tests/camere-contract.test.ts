@@ -10,6 +10,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import type { SincronizareCamere } from '../src/sim/camere.ts'
 import { bucataLa, celuleComponentei, celuleLaNivel, cheieCelula, componentaLa, decodeazaCelula, listaComponente, sincronizeazaCamere } from '../src/sim/camere.ts'
 import type { World } from '../src/sim/state.ts'
 import { Material, VOXEL_LEVELS } from '../src/sim/terrain/chunk.ts'
@@ -54,13 +55,13 @@ test('CONTRACT: fetele deschise pe hartie — gaura de 1 in acoperis = 8, golul 
  * sincronizare. `inainte` se cheamă ÎNAINTEA fiecărei sincronizări și întoarce verificarea de după ea.
  * Aceeași secvență pentru toate testele de mai jos.
  */
-function fuzzContractInainte(inainte: (w: World, g: number) => () => void): void {
+function fuzzContractInainte(inainte: (w: World, g: number) => (rez: SincronizareCamere) => void): void {
   const { w, wx, wy, g } = sitPlat(12345, 8)
   casa(w.terrain, wx, wy, g, 5, 2, [[2, 0, 1], [2, 0, 2]])
   const sincronizeaza = (): void => {
     const dupa = inainte(w, g)
-    sincronizeazaCamere(w.camere, w.terrain)
-    dupa()
+    const rez = sincronizeazaCamere(w.camere, w.terrain)
+    dupa(rez)
   }
   sincronizeaza()
   let s = 7
@@ -150,6 +151,26 @@ test('CONTRACT: o sincronizare nu modifica obiectele Felie vechi — refaFelie c
     }
   })
   assert.ok(verificate > 300 && refacute > 100, `vid: ${verificate} felii vechi verificate, ${refacute} refacute`)
+})
+
+test('CONTRACT: sincronizeazaCamere intoarce cheile feliilor refacute, sortate — exact cele al caror obiect Felie s-a schimbat, a aparut sau a disparut', () => {
+  // Design-temperatura-v2 §4.4 (panoul, L2-6): t.2b afla din `felii` ce s-a refacut, in O(lot), fara sa
+  // compare toate feliile. Aici comparatia completa pe identitatea obiectelor e controlul.
+  let loturi = 0
+  let cuFelii = 0
+  fuzzContractInainte((w) => {
+    const inainte = new Map(w.camere.felii)
+    return (rez) => {
+      const schimbate = new Set<number>()
+      for (const [k, f] of w.camere.felii) if (inainte.get(k) !== f) schimbate.add(k)
+      for (const k of inainte.keys()) if (!w.camere.felii.has(k)) schimbate.add(k)
+      assert.equal(rez.recalcul, false)
+      assert.deepEqual(rez.felii, [...schimbate].sort((a, b) => a - b), 'feliile intoarse de sincronizare')
+      loturi++
+      if (rez.felii.length > 0) cuFelii++
+    }
+  })
+  assert.ok(loturi > 50 && cuFelii > 30, `vid: ${loturi} loturi, ${cuFelii} cu felii refacute`)
 })
 
 test('CONTRACT: un acoperis pe ultimul nivel al ferestrei de voxeli acopera', () => {
