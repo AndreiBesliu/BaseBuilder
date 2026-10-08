@@ -156,11 +156,48 @@ export interface ReguliTermic {
   /** Capacitatea termica a aerului unei celule de 1 m³, J/K. Intra in garda de stabilitate (pasul din t.2b). */
   readonly cAerJPeK: number
   /**
+   * Masa unei fete a carei PRIMA celula e construita (si a solului natural de suprafata, `d < dSolMasivM`:
+   * stratul de sus, pamantul zidit), J/K — designul t.2b §4.
+   */
+  readonly cConstrJPeK: number
+  /** Masa unei fete de sol natural MASIV (`d ≥ dSolMasivM`) si a unei fete de apa, J/K (§4). */
+  readonly cSolJPeK: number
+  /** De la ce adancime sub solul natural (m, `clamp(gNat − z, 0, 64)` al primei celule) solul e masiv. */
+  readonly dSolMasivM: number
+  /** Caldura unui om, W (§5.1; o citeste pasul de 1 Hz din t.2b). */
+  readonly omW: number
+  /**
    * R pe celula de 1 m, indexat cu `MaterialId` (ca `digYield`); AER si APA au 0 (nu sunt hotar: drumul
    * se opreste la ele). SUB_BAZA si MARGINE (conventia camerelor) se citesc ca ROCA. In fisier, un
    * obiect cu numele materialelor SOLIDE.
    */
   readonly material: readonly number[]
+  /** DERIVATE din `cAerJPeK`, `cConstrJPeK` si `cSolJPeK` (`maseTermice`); nu se scriu in fisier. */
+  readonly mase: MaseTermice
+}
+
+/**
+ * Masele pe clasa, in unitatea μ = `cAerJPeK / 16` (t.2b §1: 75,6 J/K la implicite), INTREGI: C' al unei
+ * componente e o suma exacta de intregi, fara rotunjirea totalului (evidenta C3 a provenientei, §3). Aerul unei
+ * celule are exact 16 μ; celelalte sunt `round(c / μ)`.
+ */
+export interface MaseTermice {
+  readonly aer: number
+  readonly constr: number
+  readonly sol: number
+}
+
+/** Cate unitati de masa (μ) are aerul unei celule: μ = c_aer / 16 (§1). */
+export const MASA_AER_MU = 16
+
+/** `round(c / μ)` = `round(16·c / cAer)`, pe intregi, jumatatea in sus (c, cAer ≥ 0). */
+function masaInMu(c: number, cAer: number): number {
+  return Math.floor((2 * MASA_AER_MU * c + cAer) / (2 * cAer))
+}
+
+/** Masele derivate (aceeasi functie in `parseRules` si in `DEFAULT_RULES`). */
+export function maseTermice(cAerJPeK: number, cConstrJPeK: number, cSolJPeK: number): MaseTermice {
+  return { aer: MASA_AER_MU, constr: masaInMu(cConstrJPeK, cAerJPeK), sol: masaInMu(cSolJPeK, cAerJPeK) }
 }
 
 export interface Rules {
@@ -551,6 +588,12 @@ const TERMIC_SPEC: Readonly<Record<string, FieldSpec>> = {
   rSeMiimi: { min: 0, max: 10000 },
   gDeschisMilliWPeK: { min: 0, max: 1_000_000_000 },
   cAerJPeK: { min: 1, max: 10_000_000 },
+  // Masele fetelor (t.2b §4): 0 e voie (o fata fara masa), plafoanele tin 32·c sub 2^53 si masa in μ sub 2^31
+  // la c_aer 1. Calibrarea (fereastra [15,8; 19,68] kJ/K a lui cConstr) e a testelor de τ, nu a validarii.
+  cConstrJPeK: { min: 0, max: 100_000_000 },
+  cSolJPeK: { min: 0, max: 100_000_000 },
+  dSolMasivM: { min: 0, max: 64 },
+  omW: { min: 0, max: 10_000 },
 }
 /** R maxim pe celula: 100 m²K/W, de 100 de ori peste moloz. */
 const MAX_R_MIIMI = 100000
@@ -1001,13 +1044,26 @@ function parseRezistente(raw: unknown): Outcome<number[]> {
 
 /** Sectiunea `termic`. */
 function parseTermic(raw: unknown): Outcome<ReguliTermic> {
-  const t = campuriIntregi(raw, 'termic', TERMIC_SPEC, ['material'])
+  const t = campuriIntregi(raw, 'termic', TERMIC_SPEC, ['material', 'mase'])
   if (!t.ok) return t
   const m = (raw as Record<string, unknown>).material
   if (m === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'termic.material' })
   const mat = parseRezistente(m)
   if (!mat.ok) return mat
   const v = t.value
+  // Rotunjirea la μ = c_aer / 16 muta masele cu 0,007% (constr) si 0,0015% (sol) la implicite (testul pe hartie).
+  // Nu e garda: probele de stabilitate plimba c_aer intre 1 si 10^7, unde masele ies chiar 0 — o lume valida.
+  const mase = maseTermice(v.cAerJPeK!, v.cConstrJPeK!, v.cSolJPeK!)
+  // Masele sunt DERIVATE (ca tabelele climei): forma deja parsata le poarta, si atunci trebuie sa fie exact cele
+  // recalculate — altfel o masa scrisa de mana ar fi crezuta.
+  const scrise = (raw as Record<string, unknown>).mase
+  if (scrise !== undefined) {
+    const s = scrise as Record<string, unknown> | null
+    // determinism-ok: se numara cheile (exact cele trei), ordinea lor nu conteaza.
+    if (typeof s !== 'object' || s === null || s.aer !== mase.aer || s.constr !== mase.constr || s.sol !== mase.sol || Object.keys(s).length !== 3) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: 'termic.mase', motiv: 'masele sunt DERIVATE din cAerJPeK, cConstrJPeK si cSolJPeK: nu se scriu in fisier, iar in forma parsata trebuie sa fie exact cele recalculate' })
+    }
+  }
   return accept({
     kCelule: v.kCelule!,
     rSiLateralMiimi: v.rSiLateralMiimi!,
@@ -1016,7 +1072,12 @@ function parseTermic(raw: unknown): Outcome<ReguliTermic> {
     rSeMiimi: v.rSeMiimi!,
     gDeschisMilliWPeK: v.gDeschisMilliWPeK!,
     cAerJPeK: v.cAerJPeK!,
+    cConstrJPeK: v.cConstrJPeK!,
+    cSolJPeK: v.cSolJPeK!,
+    dSolMasivM: v.dSolMasivM!,
+    omW: v.omW!,
     material: mat.value,
+    mase,
   })
 }
 
@@ -1574,6 +1635,17 @@ export const DEFAULT_RULES: Rules = {
     gDeschisMilliWPeK: 200000,
     // 1,2 kg/m³ × 1.005 J/(kg·K), rotunjit: aerul unei celule.
     cAerJPeK: 1210,
+    // Masele fetelor (t.2b §4, decizia 5): o singura constanta pentru construit si solul de suprafata, care pune
+    // casa de piatra 5×5×2 la τ_loc 3,58 h, etajul la 4,03, golul usii la 0,92 h si pivnitele la 1,23–1,48 zile
+    // (tests/capacitate.test.ts; panoul t.2b, verif-NUM-1: fereastra lui cConstr e [15,8; 19,68] kJ/K, iar 18 sta la
+    // 13,9% / 8,5% de capete).
+    // Solul masiv incepe sub primul metru. Un om: 100 W.
+    cConstrJPeK: 18000,
+    cSolJPeK: 300000,
+    dSolMasivM: 1,
+    omW: 100,
     material: [0, 340, 850, 850, 0, 500, 590, 2000, 590, 300],
+    // μ = 1210 / 16 = 75,625 J/K: 18.000 → 238 μ (17.998,75 J/K), 300.000 → 3.967 μ (300.004,4 J/K).
+    mase: maseTermice(1210, 18000, 300000),
   },
 }

@@ -97,7 +97,7 @@ export const MUTATII = [
   {
     n: 'sloturile bucatilor sterse isi pastreaza randurile (fantoma de randuri pe un slot liber)',
     f: F,
-    a: '      c.randuri[b] = undefined\n',
+    a: '      c.inreg[b] = undefined\n',
     b: '',
     t: TC, e: 'ORACOL: incremental == recalcul complet, fuzz pe uscat',
   },

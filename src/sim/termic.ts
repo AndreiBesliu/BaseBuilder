@@ -544,7 +544,7 @@ function construiesteGraf(idx: IndexCamere, rules: Rules, contributii: (Contribu
   for (let i = 0; i < n; i++) {
     rezStart[i] = rezBin.length
     for (const b of comps[i]!.bucati) {
-      const rr = idx.fete.randuri[b]
+      const rr = idx.fete.inreg[b]?.randuri
       if (rr === undefined) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'bucata fara randuri de fete', bucata: b })
       const r = acumuleazaBucata(l, i, b, rr)
       if (r !== null) return r

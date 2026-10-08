@@ -21,15 +21,15 @@ export const MUTATII = [
   {
     n: 'createWorld construieste indexul cu K-ul implicit, nu cu termic.kCelule din reguli',
     f: 'src/sim/world.ts',
-    a: '    camere: indexCamere(terrain, rules.termic.kCelule),',
-    b: '    camere: indexCamere(terrain),',
+    a: '    camere: indexCamere(terrain, rules.termic.kCelule, rules.termic.dSolMasivM),',
+    b: '    camere: indexCamere(terrain, undefined, rules.termic.dSolMasivM),',
     t: T, e: 'TERMIC K: indexul unei lumi e construit cu termic.kCelule',
   },
   {
     n: 'decode construieste indexul cu K-ul implicit (lumea incarcata cu K 3 ar avea fetele lui 8)',
     f: 'src/sim/save.ts',
-    a: '    camere: construiesteCamere(terrain, rules.termic.kCelule),',
-    b: '    camere: construiesteCamere(terrain),',
+    a: '    camere: construiesteCamere(terrain, rules.termic.kCelule, rules.termic.dSolMasivM),',
+    b: '    camere: construiesteCamere(terrain, undefined, rules.termic.dSolMasivM),',
     t: T, e: 'TERMIC K: indexul unei lumi e construit cu termic.kCelule',
   },
   // --- conductanta (§4.2), pe hartie: oracolul calculeaza la fel in ambele parti

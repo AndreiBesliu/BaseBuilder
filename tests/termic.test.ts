@@ -371,23 +371,23 @@ test('TERMIC invariantul muchiei: o muchie spre o celula care nu e aer acoperit 
   const idx = w.camere
   graf(idx)
   const b = bucataLa(idx, wx + 1, wy + 2, g - 4)
-  const vechi = idx.fete.randuri[b]!
+  const vechi = idx.fete.inreg[b]!
   try {
     // (1) Un rând MUCHIE care arată în roca dintre cele două pivnițe.
-    idx.fete.randuri[b] = [...vechi, { clasa: ClasaDir.LAT, fel: FelFata.MUCHIE, compozitie: 0, prima: Material.ROCA, adancime: -1, dincolo: cheieCelula(wx + 3, wy + 2, g - 4), fete: 1 }]
+    idx.fete.inreg[b] = { ...vechi, randuri: [...vechi.randuri, { clasa: ClasaDir.LAT, fel: FelFata.MUCHIE, compozitie: 0, prima: Material.ROCA, adancime: -1, dincolo: cheieCelula(wx + 3, wy + 2, g - 4), fete: 1 }] }
     idx.epocaFete++
     const rau = grafTermic(idx, R)
     assert.ok(!rau.ok && rau.reason === Reason.INVARIANT_INCALCAT && String(rau.params.motiv).startsWith('celula de dincolo'), JSON.stringify(rau))
     // (2) O față în plus spre cealaltă pivniță, doar din capătul ăsta: sumele din cele două capete diferă.
-    const m = vechi.find((x) => x.fel === FelFata.MUCHIE)!
-    idx.fete.randuri[b] = vechi.map((x) => (x === m ? { ...x, fete: x.fete + 1 } : x))
+    const m = vechi.randuri.find((x) => x.fel === FelFata.MUCHIE)!
+    idx.fete.inreg[b] = { ...vechi, randuri: vechi.randuri.map((x) => (x === m ? { ...x, fete: x.fete + 1 } : x)) }
     idx.epocaFete++
     const asim = grafTermic(idx, R)
     assert.ok(!asim.ok && asim.reason === Reason.INVARIANT_INCALCAT && asim.params.motiv === 'muchie asimetrica', JSON.stringify(asim))
     const r = regimPermanent(w, R, 0)
     assert.ok(!r.ok, 'regimul nu ruleaza pe un graf refuzat')
   } finally {
-    idx.fete.randuri[b] = vechi
+    idx.fete.inreg[b] = vechi
     idx.epocaFete++
   }
   graf(idx)
@@ -406,14 +406,14 @@ test('TERMIC muchia vazuta doar din capatul MIC: un rand MUCHIE spre o pivnita d
   assert.ok(B.ancora < A.ancora, 'fixtura: B e capatul mic')
   graf(w.camere)
   const b = bucataLa(w.camere, wx + 14, wy + 2, g - 11)
-  const vechi = w.camere.fete.randuri[b]!
+  const vechi = w.camere.fete.inreg[b]!
   try {
-    w.camere.fete.randuri[b] = [...vechi, { clasa: ClasaDir.LAT, fel: FelFata.MUCHIE, compozitie: 0, prima: Material.ROCA, adancime: -1, dincolo: cheieCelula(wx + 1, wy + 2, g - 1), fete: 40 }]
+    w.camere.fete.inreg[b] = { ...vechi, randuri: [...vechi.randuri, { clasa: ClasaDir.LAT, fel: FelFata.MUCHIE, compozitie: 0, prima: Material.ROCA, adancime: -1, dincolo: cheieCelula(wx + 1, wy + 2, g - 1), fete: 40 }] }
     w.camere.epocaFete++
     const o = grafTermic(w.camere, R)
     assert.ok(!o.ok && o.reason === Reason.INVARIANT_INCALCAT && o.params.motiv === 'muchie vazuta dintr-un singur capat', JSON.stringify(o))
   } finally {
-    w.camere.fete.randuri[b] = vechi
+    w.camere.fete.inreg[b] = vechi
     w.camere.epocaFete++
   }
   graf(w.camere)
@@ -432,18 +432,18 @@ test('TERMIC invariantul fetelor DESCHISE: un rand DESCHISA scris EXT in cache s
   graf(idx)
   assert.ok(agregaComponenta(idx, c).ok)
   const b = bucataLa(idx, wx + 2, wy, g + 1)
-  const vechi = idx.fete.randuri[b]!
-  const d = vechi.find((x) => x.fel === FelFata.DESCHISA)
+  const vechi = idx.fete.inreg[b]!
+  const d = vechi.randuri.find((x) => x.fel === FelFata.DESCHISA)
   assert.ok(d, 'fixtura: bucata golului are un rand DESCHISA')
   try {
-    idx.fete.randuri[b] = vechi.map((x) => (x === d ? { ...x, fel: FelFata.EXT } : x))
+    idx.fete.inreg[b] = { ...vechi, randuri: vechi.randuri.map((x) => (x === d ? { ...x, fel: FelFata.EXT } : x)) }
     idx.epocaFete++
     const o = grafTermic(idx, R)
     assert.ok(!o.ok && o.reason === Reason.INVARIANT_INCALCAT && o.params.motiv === 'fetele DESCHISA nu sunt fetele deschise ale componentei', JSON.stringify(o))
     const a = agregaComponenta(idx, c)
     assert.ok(!a.ok && a.reason === Reason.INVARIANT_INCALCAT && a.params.motiv === 'fetele DESCHISA nu sunt fetele deschise ale componentei', JSON.stringify(a))
   } finally {
-    idx.fete.randuri[b] = vechi
+    idx.fete.inreg[b] = vechi
     idx.epocaFete++
   }
   graf(idx)
@@ -870,14 +870,14 @@ test('TERMIC memoria contributiilor: pamant pe acoperisul casei cu trei niveluri
   for (const c of listaComponente(idx)) bucati += c.bucati.length
   assert.equal(statMemorieTermica(idx).bucatiCalculate, bucati, 'prima refacere calculeaza fiecare bucata')
   for (const [dx, dy] of [[4, 4], [1, 1], [7, 2]] as const) {
-    const inainte = [...idx.fete.randuri]
+    const inainte = [...idx.fete.inreg]
     const st = statMemorieTermica(idx).bucatiCalculate
     const epoca = idx.epoca
     assert.ok(fill(w.terrain, x0 + dx, y0 + dy, g + 10, Material.PAMANT).ok)
     sincronizeazaCamere(idx, w.terrain)
     assert.equal(idx.epoca, epoca, 'fixtura: pamantul pe acoperis schimba doar fetele')
     let noi = 0
-    for (const c of listaComponente(idx)) for (const b of c.bucati) if (idx.fete.randuri[b] !== inainte[b]) noi++
+    for (const c of listaComponente(idx)) for (const b of c.bucati) if (idx.fete.inreg[b] !== inainte[b]) noi++
     assert.ok(noi > 0 && noi < bucati, `fixtura: ${noi} din ${bucati} bucati cu randuri noi`)
     egalCuGrafulNou(w, `pamant (${dx},${dy})`)
     assert.equal(statMemorieTermica(idx).bucatiCalculate - st, noi, `pamant (${dx},${dy}): doar bucatile cu randuri noi`)
@@ -896,13 +896,13 @@ test('TERMIC memoria contributiilor tine cat epoca: doua galerii lungi, unite la
   egalCuGrafulNou(w, 'doua galerii')
   assert.equal(graf(w.camere).muchieA.length, 1, 'fixtura: galeriile sunt legate printr-o muchie')
   const departe = bucataLa(w.camere, wx + 18, wy + 2, g - 4)
-  const rr = w.camere.fete.randuri[departe]!
+  const rr = w.camere.fete.inreg[departe]!.randuri
   assert.ok(rr.some((x) => x.fel === FelFata.MUCHIE), 'fixtura: capatul departat are muchii spre galeria vecina')
   const epoca = w.camere.epoca
   for (const z of [g - 5, g - 4]) assert.ok(dig(t, wx + 1, wy + 3, z).ok)
   sincronizeazaCamere(w.camere, t)
   assert.ok(w.camere.epoca > epoca)
-  assert.equal(w.camere.fete.randuri[departe], rr, 'fixtura: randurile capatului departat sunt acelasi tablou')
+  assert.equal(w.camere.fete.inreg[departe]!.randuri, rr, 'fixtura: randurile capatului departat sunt acelasi tablou')
   const U = componentaLa(w.camere, wx + 18, wy + 2, g - 4)!
   assert.equal(componentaLa(w.camere, wx + 18, wy + 4, g - 4)!.id, U.id, 'fixtura: galeriile s-au unit')
   egalCuGrafulNou(w, 'galeriile unite')

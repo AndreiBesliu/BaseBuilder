@@ -103,7 +103,7 @@ import { CHUNK_CELLS, cellHeightCm, decodeColumn, groundLevelFromCm, Material, p
 import type { CacheFete } from './fete.ts'
 // Import circular (fete.ts citește de aici cititorul și indexul): sigur, fiindcă niciun modul nu folosește la
 // evaluarea lui o legătură venită din celălalt — vezi antetul din fete.ts.
-import { actualizeazaFete, cacheFete, K_FETE_IMPLICIT, reconstruiesteFete } from './fete.ts'
+import { actualizeazaFete, cacheFete, D_SOL_MASIV_IMPLICIT, K_FETE_IMPLICIT, reconstruiesteFete } from './fete.ts'
 
 /** Latura unei felii — blocul regiunilor. */
 export const FELIE = 16
@@ -316,14 +316,17 @@ export interface IndexCamere {
   readonly stat: StatCamere
 }
 
-/** `k`: câte celule de hotar străbate mersul fețelor (fete.ts); valul 2 îl leagă de content. */
-export function indexCamere(t: Terrain | null = null, k: number = K_FETE_IMPLICIT): IndexCamere {
+/**
+ * `k`: câte celule de hotar străbate mersul fețelor (fete.ts); `dSolMasiv`: de la ce adâncime solul natural e masiv
+ * (contoarele de capacitate, t.2b §4). Amândouă vin din content (`termic`) și țin cât indexul.
+ */
+export function indexCamere(t: Terrain | null = null, k: number = K_FETE_IMPLICIT, dSolMasiv: number = D_SOL_MASIV_IMPLICIT): IndexCamere {
   return {
     teren: t,
     vazute: t ? t.editari : 0,
     epoca: 0,
     epocaFete: 0,
-    fete: cacheFete(k),
+    fete: cacheFete(k, dSolMasiv),
     felii: new Map(),
     chei: [],
     bFelie: new Int32Array(64),
@@ -706,8 +709,8 @@ export function reconstruiesteCamere(idx: IndexCamere, t: Terrain): void {
 }
 
 /** Un index nou, construit complet pe teren (încărcare, teste). */
-export function construiesteCamere(t: Terrain, k: number = K_FETE_IMPLICIT): IndexCamere {
-  const idx = indexCamere(t, k)
+export function construiesteCamere(t: Terrain, k: number = K_FETE_IMPLICIT, dSolMasiv: number = D_SOL_MASIV_IMPLICIT): IndexCamere {
+  const idx = indexCamere(t, k, dSolMasiv)
   reconstruiesteCamere(idx, t)
   return idx
 }

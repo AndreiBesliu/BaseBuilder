@@ -341,6 +341,49 @@ test('clima: un numar cu virgula e refuzat — cifrele sunt intregi, cu unitatea
   if (!out.ok) assert.equal(out.params.camp, 'clima.valFrig')
 })
 
+test('termic t.2b: cConstrJPeK, cSolJPeK, dSolMasivM si omW sunt intregi cu plaje (in afara lor refuzate cu min si max); masele pe clasa sunt DERIVATE — scrise in fisier, sau atinse in forma parsata, se refuza', () => {
+  // Plajele (t.2b §4): masele 0..10^8 J/K, adancimea solului masiv 0..64 m (capatul tabelelor), omul 0..10.000 W.
+  for (const [camp, v, min, max] of [['cConstrJPeK', -1, 0, 100_000_000], ['cSolJPeK', 100_000_001, 0, 100_000_000], ['dSolMasivM', 65, 0, 64], ['omW', 10_001, 0, 10_000]] as const) {
+    const r = fisier()
+    r.termic[camp] = v
+    const out = parseRules(r)
+    assert.equal(out.ok, false, `${camp} = ${v}`)
+    if (!out.ok) {
+      assert.equal(out.reason, Reason.CAPACITATE_DEPASITA, camp)
+      assert.equal(out.params.camp, `termic.${camp}`)
+      assert.equal(out.params.min, min)
+      assert.equal(out.params.max, max)
+    }
+    const control = fisier()
+    control.termic[camp] = v < min ? min : max
+    assert.ok(parseRules(control).ok, `controlul: ${camp} = ${control.termic[camp]} trece`)
+  }
+  for (const camp of ['cConstrJPeK', 'cSolJPeK', 'dSolMasivM', 'omW']) {
+    const r = fisier()
+    delete r.termic[camp]
+    const out = parseRules(r)
+    assert.equal(out.ok, false, `${camp} lipsa`)
+    if (!out.ok) assert.equal(out.params.camp, `termic.${camp}`)
+  }
+  // Masele: fisierul nu le are si le primeste (μ = 1210/16); alt c_constr da alta masa.
+  const r = fisier()
+  r.termic.cConstrJPeK = 25000
+  const out = parseRules(r)
+  assert.ok(out.ok)
+  if (out.ok) assert.deepEqual(out.value.termic.mase, { aer: 16, constr: 331, sol: 3967 })
+  // Scrise în fișier cu alte valori decât cele derivate: refuzate (cu valorile derivate sunt chiar forma parsată).
+  const scrise = fisier()
+  scrise.termic.mase = { aer: 16, constr: 250, sol: 3967 }
+  const o1 = parseRules(scrise)
+  assert.equal(o1.ok, false, 'masele scrise in fisier')
+  if (!o1.ok) assert.equal(o1.params.camp, 'termic.mase')
+  const atinse = parseRules({ ...DEFAULT_RULES, termic: { ...DEFAULT_RULES.termic, mase: { ...DEFAULT_RULES.termic.mase, constr: 239 } } })
+  assert.equal(atinse.ok, false, 'masele atinse in forma parsata')
+  if (!atinse.ok) assert.equal(atinse.params.camp, 'termic.mase')
+  const altC = parseRules({ ...DEFAULT_RULES, termic: { ...DEFAULT_RULES.termic, cSolJPeK: 250000 } })
+  assert.equal(altC.ok, false, 'forma parsata cu masele altui c_sol')
+})
+
 test('clima: tabelele solului sunt DERIVATE — calculate din D_a si D_s, iar un tabel scris de mana e refuzat', () => {
   // Fisierul nu le are, si le primeste; D_a schimbat da alt tabel.
   const r = fisier()

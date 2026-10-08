@@ -91,6 +91,20 @@
  * recalculul complet. `epoca` își păstrează sensul (s-a schimbat aerul acoperit). Graful din valul 2 se
  * reface când oricare dintre ele s-a mișcat.
  *
+ * ## Capacitatea (t.2b §4): contoarele pe bucată
+ *
+ * `C = V·c_aer + Σ_fețe c(prima celulă de pe normală)`, cu fețele SINE și MUCHIE incluse. Masa unei fețe ține
+ * doar de vecinul imediat (materialul lui pe convenția camerelor și adâncimea lui, `clamp(gNat − z, 0, 64)`):
+ * construit → `cConstr`; sol natural masiv (`d ≥ dSolMasivM`) → `cSol`; sol natural de suprafață → `cConstr`;
+ * apă → `cSol`; aer (acoperit: nu e față; de sub cer: DESCHISĂ) → 0. Un singur loc o spune: `clasaMasei`, iar
+ * `capacitateCelulei` o aplică pe cei 6 vecini (B2 a măsurat: 6 vecini == mersul fețelor pe ~235.800 de celule).
+ *
+ * Fiecare bucată are în cache o ÎNREGISTRARE: rândurile ei și contoarele `nAer`, `nConstr`, `nSolMasiv`, `nApa`,
+ * scrise împreună de `scrieRanduri`. Contoarele sunt un câmp al înregistrării, nu un tablou pe slot: ramura (b)
+ * mută înregistrarea pe un slot NOU fără `scrieRanduri`, iar un contor pe slot ar fi rămas al vechiului ocupant
+ * (panoul t.2b, IDX-1: C' greșit pe 7 din 10 salvări pe M10 lărgit). Indexul nu știe masele (ele țin de
+ * content): contoarele sunt numărători, C' = Σ contoare × mase (`capacitateMu`).
+ *
  * ## Importul circular cu camere.ts
  *
  * `camere.ts` cheamă de aici întreținerea, iar de aici se citesc cititorul de coloane și indexul. Ciclul e
@@ -105,6 +119,7 @@ import type { CititorCamere, Coloana, Componenta, Felie, IndexCamere } from './c
 import { bucataLa, cheieCelula, cititorCamere, coloana, decodeazaCelula, decodeazaFelie, FELIE } from './camere.ts'
 import type { Outcome } from './result.ts'
 import { accept, Reason, refuse } from './result.ts'
+import type { MaseTermice } from './content.ts'
 import { DEFAULT_RULES } from './content.ts'
 
 /**
@@ -114,6 +129,9 @@ import { DEFAULT_RULES } from './content.ts'
  * nu scris a doua oară.
  */
 export const K_FETE_IMPLICIT: number = DEFAULT_RULES.termic.kCelule
+
+/** `dSolMasivM` implicit (ca K): lumea îl ia din content în `createWorld` și în `decode`. */
+export const D_SOL_MASIV_IMPLICIT: number = DEFAULT_RULES.termic.dSolMasivM
 
 /** Adâncimea maximă a solului, în metri: capătul tabelelor pe adâncime din §3 (0..64). */
 export const ADANCIME_MAX = 64
@@ -192,11 +210,29 @@ export interface StatFete {
   recalculari: number
 }
 
+/**
+ * Contoarele de capacitate (t.2b §4): celulele de aer și fețele pe clasă de masă. `nConstr` cuprinde și solul
+ * natural de suprafață (`d < dSolMasivM`), care are masa construcției; `nApa` are masa solului masiv.
+ */
+export interface ContoareMasa {
+  readonly nAer: number
+  readonly nConstr: number
+  readonly nSolMasiv: number
+  readonly nApa: number
+}
+
+/** Înregistrarea unei bucăți în cache: rândurile și contoarele, scrise împreună (antetul). */
+export interface InregistrareFete extends ContoareMasa {
+  readonly randuri: readonly RandFete[]
+}
+
 export interface CacheFete {
   /** K: câte celule de hotar străbate mersul. Fix pe viața cache-ului (alt K = alt cache, recalculat). */
   readonly k: number
-  /** Rândurile fiecărei bucăți, pe slotul ei din index (`IndexCamere.b*`); `undefined` = slot liber. */
-  randuri: (readonly RandFete[] | undefined)[]
+  /** De la ce adâncime solul natural e masiv (contoarele, §4). Fix pe viața cache-ului, ca K. */
+  readonly dSolMasiv: number
+  /** Înregistrarea fiecărei bucăți, pe slotul ei din index (`IndexCamere.b*`); `undefined` = slot liber. */
+  inreg: (InregistrareFete | undefined)[]
   /** Numărările pe material ale fiecărei compoziții (indexate cu `MaterialId`). Id 0 = drumul gol. */
   compNumarari: Uint8Array[]
   /** Cheia canonică a fiecărei compoziții, independentă de istoria tabelului (oracolul compară pe ea). */
@@ -208,11 +244,13 @@ export interface CacheFete {
 }
 
 /** Un cache gol, cu tabelul compozițiilor gata (id 0 = drumul gol). */
-export function cacheFete(k: number = K_FETE_IMPLICIT): CacheFete {
+export function cacheFete(k: number = K_FETE_IMPLICIT, dSolMasiv: number = D_SOL_MASIV_IMPLICIT): CacheFete {
   if (!Number.isInteger(k) || k < 1 || k > ADANCIME_MAX) throw new RangeError(`K al fetelor trebuie sa fie intreg in [1, ${ADANCIME_MAX}], nu ${k}`)
+  if (!Number.isInteger(dSolMasiv) || dSolMasiv < 0 || dSolMasiv > ADANCIME_MAX) throw new RangeError(`dSolMasiv trebuie sa fie intreg in [0, ${ADANCIME_MAX}], nu ${dSolMasiv}`)
   const c: CacheFete = {
     k,
-    randuri: [],
+    dSolMasiv,
+    inreg: [],
     compNumarari: [],
     compCheie: [],
     compDupaCheie: new Map(),
@@ -223,9 +261,9 @@ export function cacheFete(k: number = K_FETE_IMPLICIT): CacheFete {
   return c
 }
 
-/** Golește rândurile și tabelul compozițiilor (recalculul complet). Contoarele rămân. */
+/** Golește înregistrările și tabelul compozițiilor (recalculul complet). Contoarele `stat` rămân. */
 function golesteFete(c: CacheFete): void {
-  c.randuri = []
+  c.inreg = []
   c.compNumarari = [new Uint8Array(NR_MAT)]
   c.compCheie = ['']
   c.compDupaCheie.clear()
@@ -278,6 +316,92 @@ function adancimeIn(c: Coloana, z: number): number {
   const d = c.gNat - z
   if (d <= 0) return 0
   return d >= ADANCIME_MAX ? ADANCIME_MAX : d
+}
+
+// ---------------------------------------------------------------------------
+// masa fețelor (t.2b §4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Clasa de masă a unei fețe, după PRIMA celulă de pe normală. SOL_SUPRAFATA, SOL_MASIV și APA sunt masa care
+ * intră și iese la `T_sol(d)` (proveniența C3, §3); CONSTR iese la T-ul componentei și apare la T-ul rezultat.
+ */
+export const ClasaMasei = { NIMIC: 0, CONSTR: 1, SOL_SUPRAFATA: 2, SOL_MASIV: 3, APA: 4 } as const
+export type ClasaMaseiId = (typeof ClasaMasei)[keyof typeof ClasaMasei]
+
+/** E clasa una care intră și iese la temperatura solului? */
+export function eClasaDeSol(k: ClasaMaseiId): boolean {
+  return k === ClasaMasei.SOL_SUPRAFATA || k === ClasaMasei.SOL_MASIV || k === ClasaMasei.APA
+}
+
+/**
+ * Clasa de masă a feței al cărei prim vecin are materialul `m` (pe convenția camerelor) la adâncimea `d`. Aerul
+ * — acoperit (nu e față) sau de sub cer (DESCHISĂ) — n-are masă. UN singur loc spune asta: contoarele, evidența
+ * C3 a provenienței și oracolele o citesc de aici.
+ */
+export function clasaMasei(m: number, d: number, dSolMasiv: number): ClasaMaseiId {
+  if (m === Material.AER) return ClasaMasei.NIMIC
+  if (m === Material.APA) return ClasaMasei.APA
+  if (eSolNatural(m)) return d >= dSolMasiv ? ClasaMasei.SOL_MASIV : ClasaMasei.SOL_SUPRAFATA
+  return ClasaMasei.CONSTR
+}
+
+/**
+ * Materialele de DINAINTE de lot ale celulelor editate în el (`cheieCelula` → material), din jurnalul terenului;
+ * `null` = terenul de acum. Restul celulelor n-au fost editate, deci au același material.
+ */
+export type MaterialeVechi = ReadonlyMap<number, number> | null
+
+/**
+ * Clasa de masă a feței celulei (x, y, z) pe direcția `dir` (0..5: +x, −x, +y, −y, sus, jos): vecinul pe
+ * convenția camerelor (sub bază și în afara lumii ROCA, peste fereastră AER), cu adâncimea lui. Cu `vechi`,
+ * pe materialele de dinainte de lot.
+ */
+export function clasaFetei(r: CititorCamere, x: number, y: number, z: number, dir: number, dSolMasiv: number, vechi: MaterialeVechi): ClasaMaseiId {
+  const nx = x + DX[dir]!
+  const ny = y + DY[dir]!
+  const nz = z + DZ[dir]!
+  const col = coloana(r, nx, ny)
+  let m = materialIn(col, nz)
+  // În afara lumii nu se editează nimic (iar cheia unei celule de acolo s-ar suprapune peste alta).
+  if (vechi !== null && !col.afara) {
+    const v = vechi.get(cheieCelula(nx, ny, nz))
+    if (v !== undefined) m = v
+  }
+  return clasaMasei(m, adancimeIn(col, nz), dSolMasiv)
+}
+
+/** Contoare mutabile, adunate celulă cu celulă. */
+export interface ContoareMasaMutabile {
+  nAer: number
+  nConstr: number
+  nSolMasiv: number
+  nApa: number
+}
+
+export function contoareGoale(): ContoareMasaMutabile {
+  return { nAer: 0, nConstr: 0, nSolMasiv: 0, nApa: 0 }
+}
+
+/** Adună o față de clasa `k` în contoare (cu semnul `s`, ±1). */
+export function adunaClasa(acc: ContoareMasaMutabile, k: ClasaMaseiId, s: number): void {
+  if (k === ClasaMasei.CONSTR || k === ClasaMasei.SOL_SUPRAFATA) acc.nConstr += s
+  else if (k === ClasaMasei.SOL_MASIV) acc.nSolMasiv += s
+  else if (k === ClasaMasei.APA) acc.nApa += s
+}
+
+/**
+ * Capacitatea celulei de aer acoperit (x, y, z), adunată în `acc`: aerul ei și cele 6 fețe (§4) — o față există
+ * doar spre un vecin care nu e aer, deci cele interioare n-au masă, iar SINE și MUCHIE (prin perete) au.
+ */
+export function capacitateCelulei(r: CititorCamere, x: number, y: number, z: number, dSolMasiv: number, vechi: MaterialeVechi, acc: ContoareMasaMutabile): void {
+  acc.nAer++
+  for (let d = 0; d < 6; d++) adunaClasa(acc, clasaFetei(r, x, y, z, d, dSolMasiv, vechi), 1)
+}
+
+/** C' în unitatea μ (`MaseTermice`): Σ contoare × mase. Exact pe Number cât C' < 2^53. */
+export function capacitateMu(n: ContoareMasa, mase: MaseTermice): number {
+  return n.nAer * mase.aer + n.nConstr * mase.constr + (n.nSolMasiv + n.nApa) * mase.sol
 }
 
 /** O față, scrisă de `clasifica` (un singur obiect, rescris la fiecare apel). */
@@ -361,15 +485,20 @@ function comparaRanduri(a: RandFete, b: RandFete): number {
 }
 
 /**
- * Rândurile bucăților unei felii, dintr-o singură trecere pe cele 256 de celule. `doar` = bucățile cerute
- * (null: toate). Scrie în cache și întoarce câte bucăți a scris.
+ * Înregistrările bucăților unei felii (rândurile și contoarele de capacitate), dintr-o singură trecere pe cele
+ * 256 de celule. `doar` = bucățile cerute (null: toate). Scrie în cache și întoarce câte bucăți a scris.
  */
 function scrieRanduri(c: CacheFete, r: CititorCamere, f: Felie, doar: ReadonlySet<number> | null): number {
   const { bx, by, z } = decodeazaFelie(f.cheie)
   const x0 = bx * FELIE
   const y0 = by * FELIE
   const acc = new Map<number, Map<number, Map<number, RandMutabil>>>()
-  for (const b of f.bucati) if (doar === null || doar.has(b)) acc.set(b, new Map())
+  const cap = new Map<number, ContoareMasaMutabile>()
+  for (const b of f.bucati) {
+    if (doar !== null && !doar.has(b)) continue
+    acc.set(b, new Map())
+    cap.set(b, contoareGoale())
+  }
   const n = FELIE * FELIE
   for (let s = 0; s < n; s++) {
     const b = f.cel[s]!
@@ -378,6 +507,7 @@ function scrieRanduri(c: CacheFete, r: CititorCamere, f: Felie, doar: ReadonlySe
     if (peBucata === undefined) continue
     const x = x0 + (s % FELIE)
     const y = y0 + ((s / FELIE) | 0)
+    capacitateCelulei(r, x, y, z, c.dSolMasiv, null, cap.get(b)!)
     for (let d = 0; d < 6; d++) {
       if (!clasifica(c, r, x, y, z, d, SCRATCH)) continue
       c.stat.feteClasificate++
@@ -400,7 +530,8 @@ function scrieRanduri(c: CacheFete, r: CititorCamere, f: Felie, doar: ReadonlySe
     // determinism-ok: idem — inserare in ordinea celulelor, apoi sortare.
     for (const m2 of peBucata.values()) for (const rr of m2.values()) randuri.push(rr)
     randuri.sort(comparaRanduri)
-    c.randuri[b] = randuri
+    const k = cap.get(b)!
+    c.inreg[b] = { randuri, nAer: k.nAer, nConstr: k.nConstr, nSolMasiv: k.nSolMasiv, nApa: k.nApa }
   }
   return acc.size
 }
@@ -505,18 +636,19 @@ export function actualizeazaFete(idx: IndexCamere, r: CititorCamere, lot: readon
   if (marcate.size > 0) idx.epocaFete++
   if (felii.length === 0 && marcate.size === 0) return 0
 
-  // 1. Rândurile bucăților vechi ale feliilor refăcute, luate ÎNAINTE de orice scriere: un slot eliberat
+  // 1. Înregistrările bucăților vechi ale feliilor refăcute, luate ÎNAINTE de orice scriere: un slot eliberat
   //    poate fi deja al unei bucăți noi.
-  const vechiRanduri = new Map<number, readonly RandFete[] | undefined>()
+  const vechiRanduri = new Map<number, InregistrareFete | undefined>()
   for (const fv of vechi) {
     if (fv === undefined) continue
     for (const b of fv.bucati) {
-      vechiRanduri.set(b, c.randuri[b])
-      c.randuri[b] = undefined
+      vechiRanduri.set(b, c.inreg[b])
+      c.inreg[b] = undefined
     }
   }
 
-  // 2. Feliile refăcute: (b) pe cele cu aceeași mulțime de celule, recalcul pe rest.
+  // 2. Feliile refăcute: (b) pe cele cu aceeași mulțime de celule, recalcul pe rest. Înregistrarea se mută
+  //    întreagă — rândurile ȘI contoarele (antetul: un contor pe slot ar rămâne al vechiului ocupant).
   for (let i = 0; i < felii.length; i++) {
     const fn = idx.felii.get(felii[i]!)
     if (fn === undefined) continue
@@ -531,7 +663,7 @@ export function actualizeazaFete(idx: IndexCamere, r: CititorCamere, lot: readon
       const purtate = marcate.has(bn) ? undefined : vechiRanduri.get(harta.get(bn)!)
       if (purtate === undefined) deCalculat.add(bn)
       else {
-        c.randuri[bn] = purtate
+        c.inreg[bn] = purtate
         c.stat.bucatiPurtate++
       }
     }
@@ -585,7 +717,29 @@ export function reconstruiesteFete(idx: IndexCamere, t: Terrain): void {
 
 /** Rândurile bucății `b` (un slot viu al indexului), sau `undefined` pentru un slot liber. */
 export function randuriBucatii(idx: IndexCamere, b: number): readonly RandFete[] | undefined {
-  return idx.fete.randuri[b]
+  return idx.fete.inreg[b]?.randuri
+}
+
+/** Contoarele de capacitate ale bucății `b`, sau `undefined` pentru un slot liber. */
+export function contoareBucatii(idx: IndexCamere, b: number): ContoareMasa | undefined {
+  return idx.fete.inreg[b]
+}
+
+/**
+ * Contoarele de capacitate ale componentei: suma pe bucățile ei, O(bucăți), ca volumul. Refuz `INVARIANT_INCALCAT`
+ * dacă o bucată n-are înregistrare (fiecare bucată vie are una).
+ */
+export function contoareComponentei(idx: IndexCamere, comp: Componenta): Outcome<ContoareMasa> {
+  const acc = contoareGoale()
+  for (const b of comp.bucati) {
+    const k = idx.fete.inreg[b]
+    if (k === undefined) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'bucata fara inregistrare de fete', bucata: b })
+    acc.nAer += k.nAer
+    acc.nConstr += k.nConstr
+    acc.nSolMasiv += k.nSolMasiv
+    acc.nApa += k.nApa
+  }
+  return accept(acc)
 }
 
 export interface Compozitie {
@@ -639,7 +793,7 @@ export function agregaComponenta(idx: IndexCamere, comp: Componenta): Outcome<Ag
   let total = 0
   let deschise = 0
   for (const b of comp.bucati) {
-    const rr = c.randuri[b]
+    const rr = c.inreg[b]?.randuri
     if (rr === undefined) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'bucata fara randuri de fete', bucata: b })
     for (const x of rr) {
       total += x.fete
@@ -699,7 +853,7 @@ export function feteleCelulei(idx: IndexCamere, r: CititorCamere, x: number, y: 
   const b = bucataLa(idx, x, y, z)
   if (b < 0) return []
   const comp = idx.bComp[b]!
-  const tmp = cacheFete(idx.fete.k)
+  const tmp = cacheFete(idx.fete.k, idx.fete.dSolMasiv)
   const o: Fata = { fel: FelFata.DESCHISA, compozitie: 0, prima: 0, adancime: -1, dincolo: -1 }
   const out: FataCelulei[] = []
   for (let d = 0; d < 6; d++) {
@@ -730,20 +884,21 @@ function canonica(idx: IndexCamere, c: CacheFete): string[] {
   for (const kf of idx.chei) {
     for (const b of idx.felii.get(kf)!.bucati) {
       vii++
-      const rr = c.randuri[b]
-      out.push(`${idx.bAncora[b]}|${rr === undefined ? 'FARA RANDURI' : rr.map((x) => formaRand(c, x)).sort().join('; ')}`)
+      const e = c.inreg[b]
+      out.push(e === undefined ? `${idx.bAncora[b]}|FARA RANDURI` : `${idx.bAncora[b]}|a${e.nAer} c${e.nConstr} s${e.nSolMasiv} w${e.nApa}|${e.randuri.map((x) => formaRand(c, x)).sort().join('; ')}`)
     }
   }
   let cuRanduri = 0
-  for (const rr of c.randuri) if (rr !== undefined) cuRanduri++
+  for (const e of c.inreg) if (e !== undefined) cuRanduri++
   if (cuRanduri !== vii) out.push(`SLOTURI CU RANDURI ${cuRanduri}, BUCATI VII ${vii}`)
   return out
 }
 
 /**
- * Forma canonică a cache-ului: o linie pe bucată (ancora, rândurile cu compoziția pe cheie, sortate), în
- * ordinea feliilor, plus o linie de alarmă dacă vreun slot liber are rânduri. Oracolul: cache-ul ținut
- * incremental == `formaCanonicaFeteRecalculata` pe același index.
+ * Forma canonică a cache-ului: o linie pe bucată (ancora, contoarele de capacitate, rândurile cu compoziția pe
+ * cheie, sortate), în ordinea feliilor, plus o linie de alarmă dacă vreun slot liber are rânduri. Oracolul:
+ * cache-ul ținut incremental == `formaCanonicaFeteRecalculata` pe același index — deci și „contoarele ținute la
+ * zi == Σ capacitateCelulei pe recalcul", după fiecare lot, în testele care îl rulează deja (t.2b §4, IDX-1).
  */
 export function formaCanonicaFete(idx: IndexCamere): string[] {
   return canonica(idx, idx.fete)
@@ -751,7 +906,7 @@ export function formaCanonicaFete(idx: IndexCamere): string[] {
 
 /** Forma canonică a recalculului complet al fețelor indexului, într-un cache nou (indexul nu se atinge). */
 export function formaCanonicaFeteRecalculata(idx: IndexCamere, t: Terrain): string[] {
-  const c = cacheFete(idx.fete.k)
+  const c = cacheFete(idx.fete.k, idx.fete.dSolMasiv)
   calculeazaToate(c, idx, t)
   return canonica(idx, c)
 }

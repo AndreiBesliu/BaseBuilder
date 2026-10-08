@@ -122,6 +122,10 @@
     "rSeMiimi": 40,
     "gDeschisMilliWPeK": 200000,
     "cAerJPeK": 1210,
+    "cConstrJPeK": 18000,
+    "cSolJPeK": 300000,
+    "dSolMasivM": 1,
+    "omW": 100,
     "material": {
       "ROCA": 340,
       "PAMANT": 850,

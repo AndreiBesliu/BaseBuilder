@@ -67,7 +67,7 @@ export function createWorld(seed: number, rules: Rules = DEFAULT_RULES): World {
     acces: memorieAcces(),
     // Gol și la zi: o lume nouă n-are aer acoperit (heightfield fără surplombe). K-ul fețelor vine din
     // content (`termic.kCelule`); un index își păstrează K-ul pe toată viața lui (și la `buildM10PeLume`).
-    camere: indexCamere(terrain, rules.termic.kCelule),
+    camere: indexCamere(terrain, rules.termic.kCelule, rules.termic.dSolMasivM),
     plecatiTotal: 0,
   }
 }

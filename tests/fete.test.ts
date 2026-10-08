@@ -169,7 +169,7 @@ test('FETE pe hartie: M10 — 275.406 de fete, 74.846 ajung la aer acoperit; cel
   let acoperit = 0
   let inAfara = 0
   for (const kf of idx.chei) for (const b of idx.felii.get(kf)!.bucati) {
-    const rr = idx.fete.randuri[b]
+    const rr = idx.fete.inreg[b]?.randuri
     assert.ok(rr, `bucata ${b} fara randuri`)
     for (const x of rr!) {
       fete += x.fete
@@ -714,13 +714,13 @@ test('FETE: agregarea refuza cu INVARIANT_INCALCAT o muchie a carei celula de di
   const bun = agregaComponenta(w.camere, A)
   assert.ok(bun.ok && bun.value.randuri.some((q) => q.fel === FelFata.MUCHIE), 'fixtura: pivnitele sunt legate')
   const b = bucataLa(w.camere, wx + 1, wy + 2, g - 4)
-  const vechi = w.camere.fete.randuri[b]
-  w.camere.fete.randuri[b] = [...vechi!, { clasa: 2, fel: FelFata.MUCHIE, compozitie: 0, prima: Material.ROCA, adancime: -1, dincolo: cheieCelula(wx + 3, wy + 2, g - 4), fete: 1 }]
+  const vechi = w.camere.fete.inreg[b]!
+  w.camere.fete.inreg[b] = { ...vechi, randuri: [...vechi.randuri, { clasa: 2, fel: FelFata.MUCHIE, compozitie: 0, prima: Material.ROCA, adancime: -1, dincolo: cheieCelula(wx + 3, wy + 2, g - 4), fete: 1 }] }
   try {
     const rau = agregaComponenta(w.camere, A)
     assert.ok(!rau.ok && rau.reason === Reason.INVARIANT_INCALCAT, JSON.stringify(rau))
   } finally {
-    w.camere.fete.randuri[b] = vechi
+    w.camere.fete.inreg[b] = vechi
   }
 })
 
