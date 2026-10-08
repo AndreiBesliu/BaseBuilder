@@ -3,9 +3,19 @@
  * Inspectorul (memoria termica, cheia de redesenare, textele pe hartie), overlay-ul Temperatura (U): ancorele pe
  * piese, densitatea, tenta pe luminozitate, ritmul regimului; tasta U.
  *
- * Ce NU e aici: scrisul PE LOC in DOM, inaintea comparatiei cheii (panouri.ts), si stratul DOM al cifrelor
- * (etichete-temperatura.ts) — in node nu exista DOM. Le probeaza ui-fum („temperatura-fara-clic": butonul ramane
- * acelasi nod; „temperatura-etichete"), rulat si pe codul vechi (rosu) si cu temperatura pusa in cheie (rosu).
+ * Ce NU e aici: scrisul PE LOC in DOM, inaintea comparatiei cheii (panouri.ts), stratul DOM al cifrelor
+ * (etichete-temperatura.ts) si excluderea I/U (main.ts) — in node nu exista DOM. Le probeaza ui-fum:
+ * - „temperatura-fara-clic": butonul „Arată nivelul" ramane acelasi nod (rulat pe codul vechi si cu temperatura pusa
+ *   in cheie: rosu);
+ * - „temperatura-etichete-la-zi": dupa ore de joc sarite in pauza, fiecare cifra vizibila == textEticheta(valoarea
+ *   overlay-ului). „temperatura-etichete" citeste cifra O DATA, la aprindere: cu cifra scrisa o singura data
+ *   (`if (e.textContent === '') text(e, …)`), ui-fum iesea 59/59 verde, cu 20 din 24 de cifre gresite pe ecran
+ *   (recenzia t.2a, L4-5). Antetul de aici spunea ca stratul e probat; nu era;
+ * - „temperatura-exclude-I": I si U se exclud in ambele sensuri (pasul stingea I inainte de U, tocmai ca sa n-o
+ *   exercite; fara cele doua linii din comutaI / comutaU, ui-fum iesea tot verde);
+ * - „temperatura-legenda-clic": cifrele legendei scrise PE LOC — un clic tinut apasat peste o schimbare a lor reuseste
+ *   (cu cifrele in cheia legendei, se pierdea).
+ * Fiecare dintre cele trei noi e masurata ROSIE pe mutantul ei, cu ui-fum (08.10; recenzia t.2a, L4-3/L4-5).
  */
 
 const T = 'tests/viewer-termic.test.ts'
@@ -279,6 +289,42 @@ export const MUTATII = [
     a: '  if (max - min >= INTERVAL_MIN_Q16) return { lo: min, hi: max }',
     b: '  return { lo: min, hi: max }',
     t: T, e: E11,
+  },
+  // --- recenzia t.2a, L4-4: necunoscutul iese de pe rampa, aerul de afara intra in scara
+  {
+    n: 'L4-4: aerul de afara scos din intervalul tentei (totul cade iar langa mijlocul rampei)',
+    f: O,
+    a: '  return intervalTenta(Math.min(min, tAfara), Math.max(max, tAfara))',
+    b: '  return intervalTenta(min, max)',
+    t: T, e: E11,
+  },
+  {
+    n: 'L4-4: recolorarea pe intervalul fara aerul de afara',
+    f: O,
+    a: '  const { lo, hi } = intervalCuAfara(o.min, o.max, o.tAfara)\n',
+    b: '  const { lo, hi } = intervalTenta(o.min, o.max)\n',
+    t: T, e: E12,
+  },
+  {
+    n: 'L4-4: patratul fara valoare iar desenat, gri, in mijlocul rampei',
+    f: O,
+    a: '      for (let k = 0; k < 6; k++) arr.set([0, 0, 0, 0], (i * 6 + k) * 4)\n',
+    b: '      for (let k = 0; k < 6; k++) arr.set([0.5, 0.5, 0.5, 1], (i * 6 + k) * 4)\n',
+    t: T, e: E12,
+  },
+  {
+    n: 'L4-4: fara alphaTest (patratele cu alfa 0 scriu adancime)',
+    f: O,
+    a: 'opacity: 0.7, alphaTest: 0.01, depthTest: false',
+    b: 'opacity: 0.7, depthTest: false',
+    t: T, e: E12,
+  },
+  {
+    n: 'L4-4: geometria noua pe acelasi nivel fara valorile mutate prin celule (id-urile rotite lasa tot nivelul fara valoare)',
+    f: O,
+    a: '    if (peCelula !== null) mutaValorile(o, peCelula)\n',
+    b: '',
+    t: T, e: E12,
   },
   // --- ritmul overlay-ului
   {

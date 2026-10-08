@@ -15,6 +15,7 @@ const CO = 'src/sim/content.ts'
 const RJ = 'content/rules.json'
 const SC = 'tools/check-sim-discipline.mjs'
 const TX = 'viewer/ui/texte.ts'
+const MO = 'viewer/ui/model.ts'
 const TCA = 'tests/calendar.test.ts'
 const TCL = 'tests/clima.test.ts'
 const TCO = 'tests/content.test.ts'
@@ -338,7 +339,7 @@ export const MUTATII = [
   {
     n: 'bara de sus: ora fara zero in fata (8:00 in loc de 08:00, latimea sare)',
     f: TX, a: "  const ora = `${String(m.ora).padStart(2, '0')}:", b: '  const ora = `${String(m.ora)}:',
-    t: TB, e: 'bara de sus: ',
+    t: TB, e: 'bara de sus: „Toamnă 2/4',
   },
   {
     n: 'tooltip-ul calendarului: in iarna tot „Iarna în …" (pana la iarna de la anul)',
@@ -370,5 +371,26 @@ export const MUTATII = [
     n: 'bara de sus: clima altei lumi (seed 0: valul de frig in alta zi)',
     f: TX, a: '  const acum = tAfara(seed, tick, rules)', b: '  const acum = tAfara(0, tick, rules)',
     t: TB, e: 'bara de sus: „Toamnă 2/4',
+  },
+  // --- insignele barei (recenzia t.2a, L4-6: cinci insigne scoteau butoanele de viteza din fereastra) ---
+  {
+    n: 'insignele: fara pliere (cinci insigne scot butoanele de viteza din bara)',
+    f: MO, a: '  if (ins.length <= insigneDespliate(latimeCss)) return ins\n', b: '  return ins\n',
+    t: TB, e: 'bara de sus: insignele',
+  },
+  {
+    n: 'insignele: doua despliate la 1.100 px (in cazul cel mai rau ies cu 53 px)',
+    f: MO, a: '  return latimeCss >= 1280 ? 3 : 1', b: '  return latimeCss >= 1280 ? 3 : 2',
+    t: TB, e: 'bara de sus: insignele',
+  },
+  {
+    n: 'insignele: una singura si pe ecranele late (pragul de 1.280 ignorat)',
+    f: MO, a: '  return latimeCss >= 1280 ? 3 : 1', b: '  return 1',
+    t: TB, e: 'bara de sus: insignele',
+  },
+  {
+    n: 'insigna pliata: rosul pierdut (o alerta critica ascunsa intr-un „N alerte" portocaliu)',
+    f: MO, a: "clasa: ins.some((x) => x.clasa === 'critic') ? 'critic' : 'atentie'", b: "clasa: 'atentie'",
+    t: TB, e: 'bara de sus: insignele',
   },
 ]

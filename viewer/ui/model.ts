@@ -146,6 +146,36 @@ export function rezumatColonie(w: World, rules: Rules): RezumatColonie {
   return { marfa, hrana: prognozaHrana(w, rules), colonisti, jefuitori, flamanzi, obositi, nefericiti, pleacaCurand, plecati: w.plecatiTotal }
 }
 
+/** O insigna a barei de sus, langa „Oameni": clasa (atentie / critic), textul si tooltip-ul ('' = fara). */
+export interface Insigna {
+  readonly clasa: 'atentie' | 'critic'
+  readonly text: string
+  readonly titlu: string
+}
+
+/**
+ * Cate insigne incap DESPLIATE in bara de sus, pe latimea UI-ului (px CSS: `innerWidth / zoom`). Masurat pe bara reala
+ * (ui-fum, „bara-sus"; recenzia t.2a, L4-6), in cazul cel mai rau — cel mai lat calendar, hrana „~12 h 59 min",
+ * indicatorul de viteza, numere de doua cifre: la 1.100 px (LATIME_UI) incape UNA (raman 18 px; doua ies cu pana la
+ * 53 px, chiar si „3 flămânzi" + „2 obosiți" nu mai incap langa o prognoza lunga); la 1.280 px incap trei (raman 54 px;
+ * patru ies cu 14). Peste, ele se pliaza intr-una: „5 alerte", cu lista in tooltip.
+ */
+export function insigneDespliate(latimeCss: number): number {
+  return latimeCss >= 1280 ? 3 : 1
+}
+
+/** Insignele barei de sus (flamanzi, obositi, refuza munca, plecati, jefuitori), pliate peste `insigneDespliate`. */
+export function insigneBara(r: Pick<RezumatColonie, 'flamanzi' | 'obositi' | 'nefericiti' | 'plecati' | 'jefuitori'>, latimeCss: number): Insigna[] {
+  const ins: Insigna[] = []
+  if (r.flamanzi) ins.push({ clasa: 'atentie', text: cant(r.flamanzi, 'flămânzi'), titlu: '' })
+  if (r.obositi) ins.push({ clasa: 'atentie', text: cant(r.obositi, 'obosiți'), titlu: '' })
+  if (r.nefericiti) ins.push({ clasa: 'critic', text: `${r.nefericiti} refuză munca`, titlu: '' })
+  if (r.plecati) ins.push({ clasa: 'critic', text: cant(r.plecati, 'plecați'), titlu: '' })
+  if (r.jefuitori) ins.push({ clasa: 'atentie', text: cant(r.jefuitori, 'jefuitori'), titlu: '' })
+  if (ins.length <= insigneDespliate(latimeCss)) return ins
+  return [{ clasa: ins.some((x) => x.clasa === 'critic') ? 'critic' : 'atentie', text: cant(ins.length, 'alerte'), titlu: ins.map((x) => x.text).join(' · ') }]
+}
+
 /** Asezarea s-a golit: niciun colonist viu si macar unul plecat. Stare DERIVATA: tine si dupa o incarcare. */
 export function golita(w: World): boolean {
   if (w.plecatiTotal <= 0) return false

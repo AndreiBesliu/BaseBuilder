@@ -286,27 +286,31 @@ async function ruleaza() {
     if (NEGATIVA === 'pauza') await p.tasta(' ')
   })
   // Bara de sus (design temperatura v2, §6; panoul, L5-4): la latimea minima a UI-ului (LATIME_UI = 1.100 px)
-  // si cu doua insigne, nimic nu iese din bara. Inainte, cu marca KINSTEAD si timpul total, grupul Pauza ajungea
-  // la x = 1.142 (masurat de panou), iar calendarul din v1 ar fi depasit cu 255 px. Se masoara si cel mai lat text
-  // pe care il poate scrie calendarul in fiecare anotimp (extremele climei, pe seed-ul lumii), nu doar cel de
-  // acum: tickul probei e mereu toamna. Insignele se pun in DOM si se scot la loc; lumea nu se atinge.
+  // nimic nu iese din bara. Inainte, cu marca KINSTEAD si timpul total, grupul Pauza ajungea la x = 1.142 (masurat de
+  // panou), iar calendarul din v1 ar fi depasit cu 255 px. Se masoara si cel mai lat text pe care il poate scrie
+  // calendarul in fiecare anotimp (extremele climei, pe seed-ul lumii), nu doar cel de acum: tickul probei e mereu toamna.
+  // Cazul cel mai RAU (recenzia t.2a, L4-6): bifa proba doar 2 insigne scurte, iar a treia scotea 3× din ecran. Acum,
+  // fiecare submultime a celor 5 insigne (numere de doua cifre), pliata de `insigneBara` (model.ts) — aceeasi functie
+  // ca panouri.ts —, cu hrana „~12 h 59 min" si indicatorul „≈1,2×", cu fiecare calendar; la 1.100 si la 1.280 px.
+  // Insignele, prognoza si indicatorul se pun in DOM si se scot la loc; lumea nu se atinge.
   await pas('bara-sus', async () => {
-    p.win.setContentSize(1100, H)
-    await astepta(700)
-    const r = await p.js(`(async () => {
+    const masoara = (latime) => p.js(`(async () => {
       const sus = document.querySelector('.ui-sus')
       const cal = sus.querySelector('.ui-calendar') ?? sus.querySelector('.ui-timp')
       const ins = sus.querySelector('.ui-res[title^="Oamenii"] > span:last-child')
-      const inainte = [...ins.childNodes]
-      ins.replaceChildren(...[['atentie', '3 flămânzi'], ['atentie', '2 obosiți']].map(([c, t]) => { const e = document.createElement('span'); e.className = 'ui-insigna ' + c; e.textContent = t; return e }))
+      const prog = sus.querySelector('.prognoza')
+      const ef = sus.querySelector('.ui-viteza-efectiva')
+      const inainte = { ins: [...ins.childNodes], prog: prog.textContent, ef: ef.textContent }
       const vechi = cal.textContent
       const texte = [vechi]
       let variante = 'niciuna'
       let asteptat = null
+      let seturi = []
       try {
         const T = await import('/@fs/${REPO}/viewer/ui/texte.ts')
         const Cl = await import('/@fs/${REPO}/src/sim/clima.ts')
         const Ca = await import('/@fs/${REPO}/src/sim/calendar.ts')
+        const M = await import('/@fs/${REPO}/viewer/ui/model.ts')
         const R = __kinstead.rules ?? (await import('/@fs/${REPO}/src/sim/content.ts')).DEFAULT_RULES
         const seed = __kinstead.world.seed
         const ext = [[Infinity, -Infinity], [Infinity, -Infinity], [Infinity, -Infinity], [Infinity, -Infinity]]
@@ -320,28 +324,49 @@ async function ruleaza() {
         variante = ext.map(([mn, mx]) => Math.round(mn / 65536) + '..' + Math.round(mx / 65536)).join(' | ')
         // Ce TREBUIE sa scrie bara acum: aceeasi compunere ca panouri.ts (baraDeSus), la tickul si seed-ul lumii.
         asteptat = { tick: __kinstead.world.tick, ...T.baraDeSus(__kinstead.world.tick, seed, R, __kinstead.stare().viteza) }
+        // Toate cele 32 de submultimi ale insignelor, cu 12 pe fiecare, pliate ca in joc la latimea de acum.
+        const z = Number(document.querySelector('.ui').style.getPropertyValue('zoom') || '1')
+        for (let m = 0; m < 32; m++) {
+          const n = (k) => (m & (1 << k) ? 12 : 0)
+          seturi.push(M.insigneBara({ flamanzi: n(0), obositi: n(1), nefericiti: n(2), plecati: n(3), jefuitori: n(4) }, innerWidth / z))
+        }
       } catch (e) { variante = 'fara calendar: ' + String(e?.message ?? e).slice(0, 80) }
+      if (seturi.length === 0) seturi = [[{ clasa: 'atentie', text: '3 flămânzi', titlu: '' }, { clasa: 'atentie', text: '2 obosiți', titlu: '' }]]
+      prog.textContent = '~12 h 59 min'
+      ef.textContent = '≈1,2×'
       const masuri = []
-      for (const t of texte) {
-        cal.textContent = t
-        const c = cal.getBoundingClientRect()
-        const ultim = sus.lastElementChild.getBoundingClientRect()
-        const spatiu = sus.querySelector('.spatiu')?.getBoundingClientRect().width ?? 0
-        masuri.push({ t, sw: sus.scrollWidth, cw: sus.clientWidth, lat: +c.width.toFixed(1), inalt: Math.round(c.height), dreapta: Math.round(ultim.right), rezerva: Math.round(spatiu) })
+      for (const set of seturi) {
+        ins.replaceChildren(...set.map((x) => { const e = document.createElement('span'); e.className = 'ui-insigna ' + x.clasa; if (x.titlu) e.title = x.titlu; e.textContent = x.text; return e }))
+        for (const t of texte) {
+          cal.textContent = t
+          const c = cal.getBoundingClientRect()
+          const ultim = sus.lastElementChild.getBoundingClientRect()
+          const spatiu = sus.querySelector('.spatiu')?.getBoundingClientRect().width ?? 0
+          masuri.push({ t, ins: set.map((x) => x.text).join(', '), sw: sus.scrollWidth, cw: sus.clientWidth, lat: +c.width.toFixed(1), inalt: Math.round(c.height), dreapta: Math.round(ultim.right), rezerva: Math.round(spatiu) })
+        }
       }
       cal.textContent = vechi
-      ins.replaceChildren(...inainte)
+      ins.replaceChildren(...inainte.ins)
+      prog.textContent = inainte.prog
+      ef.textContent = inainte.ef
       const lat = masuri.reduce((a, m) => (m.lat > a.lat ? m : a), masuri[0])
       const ingust = masuri.reduce((a, m) => (m.lat < a.lat ? m : a), masuri[0])
+      const stramt = masuri.reduce((a, m) => (m.rezerva < a.rezerva ? m : a), masuri[0])
       const rele = masuri.filter((m) => !(m.sw <= m.cw && m.dreapta <= m.cw && m.inalt <= 20))
-      return { latime: innerWidth, marca: !!sus.querySelector('.ui-marca'), cate: masuri.length, variante, acum: masuri[0], celMaiLat: lat, celMaiIngust: ingust, rele: rele.slice(0, 4), titlu: cal.title, text: vechi, asteptat }
+      const despliate = Math.max(...seturi.map((s) => (s.length === 1 && / alerte$/.test(s[0].text) ? 0 : s.length)))
+      return { latime: innerWidth, ceruta: ${latime}, marca: !!sus.querySelector('.ui-marca'), cate: masuri.length, seturi: seturi.length, despliate, variante, acum: masuri[0], celMaiLat: lat, celMaiIngust: ingust, celMaiStramt: stramt, rele: rele.slice(0, 4), titlu: cal.title, text: vechi, asteptat }
     })()`)
+    p.win.setContentSize(1100, H)
+    await astepta(700)
+    const r = await masoara(1100)
     p.win.setContentSize(W, H)
     await astepta(700)
+    const r2 = await masoara(W)
+    const bine = (x, latime) => x.latime === latime && !x.marca && x.seturi === 32 && x.cate >= 32 * 25 && x.rele.length === 0 && x.celMaiLat.lat - x.celMaiIngust.lat <= 1
     // Si bara nu se misca atunci cand se schimba textul: calendarul are aceeasi latime pentru oricare din ele.
-    bifa('bara-sus', r.latime === 1100 && !r.marca && r.cate >= 25 && r.rele.length === 0 && r.celMaiLat.lat - r.celMaiIngust.lat <= 1,
-      'bara de sus la 1.100 px, cu 2 insigne si cu cel mai lat calendar al fiecarui anotimp: nimic nu iese din bara, calendarul e pe un rand, de aceeasi latime pentru orice text, fara marca KINSTEAD',
-      JSON.stringify({ latime: r.latime, marca: r.marca, cate: r.cate, variante: r.variante, acum: r.acum, celMaiLat: r.celMaiLat, celMaiIngust: r.celMaiIngust, rele: r.rele }))
+    bifa('bara-sus', bine(r, 1100) && bine(r2, W) && r.despliate === 1 && r2.despliate === 3,
+      'bara de sus la 1.100 si la 1.280 px, in cazul cel mai rau (oricare din cele 5 insigne, cu 12 pe fiecare, pliate peste una / trei in „N alerte"; hrana „~12 h 59 min"; „≈1,2×"; cel mai lat calendar al fiecarui anotimp): nimic nu iese din bara, calendarul e pe un rand, de aceeasi latime pentru orice text, fara marca KINSTEAD',
+      JSON.stringify({ l1100: { latime: r.latime, marca: r.marca, cate: r.cate, despliate: r.despliate, variante: r.variante, celMaiStramt: r.celMaiStramt, celMaiLat: r.celMaiLat, celMaiIngust: r.celMaiIngust, rele: r.rele }, l1280: { latime: r2.latime, cate: r2.cate, despliate: r2.despliate, celMaiStramt: r2.celMaiStramt, rele: r2.rele } }))
     // EXACT ce scrie baraDeSus la tickul lumii (recenzia t.2a, L2-3), nu doar formatul: regexul de dinainte accepta prin
     // constructie o sageata inversata, tooltip-ul din iarna socotit pana la urmatoarea iarna si clima altei lumi.
     bifa('bara-sus-calendar', r.asteptat !== null && r.text === r.asteptat.text && r.titlu === r.asteptat.titlu
@@ -860,6 +885,93 @@ async function ruleaza() {
     bifa('temperatura-etichete', s1.ancoreCasa === 1 && s1.eticheta !== null && s1.eticheta.vizibil && /^−?\d+,\d°$/.test(s1.eticheta.text), 'overlay-ul U: o cifra pe casa de proba, ancorata in interiorul ei si vizibila („4,5°")', JSON.stringify({ ancoreCasa: s1.ancoreCasa, eticheta: s1.eticheta, etichete: s1.etichete }))
     bifa('temperatura-legenda', /^Temperatură \(U\) \| /.test(s1.legenda ?? '') && /°C la echilibru · afară −?\d+ °C$/.test(s1.legenda ?? ''), 'legenda lui U: intervalul de la nivel si aerul de afara', String(s1.legenda))
     await p.poza('7-temperatura-overlay.png')
+    // Cifrele DOM urmaresc LUMEA, nu doar aprinderea (recenzia t.2a, L4-5): bifa de mai sus citea cifra o singura data,
+    // deci un strat care scrie textul o singura data trecea. Lumea sta pe pauza si i se sare tickul cu cate o ora, pana
+    // cand macar o cifra ASTEPTATA se schimba (altfel bifa n-ar avea dinti); apoi, dupa regimul nou (cheia lui poarta
+    // tickul) si un cadru, fiecare cifra vizibila == textEticheta(valoarea overlay-ului pentru ancora ei).
+    const cifreAcum = () => p.js(`(async () => {
+      const K = __kinstead, o = K.tempOverlay, s = K.etichete ? K.etichete() : null
+      const T = await import('/@fs/${REPO}/viewer/ui/texte.ts')
+      if (!s) return { lipsa: true }
+      const out = []
+      s.spanuri.forEach((e, i) => {
+        const a = o.ancore[i]
+        const v = a ? o.valori.get(a.comp) : undefined
+        out.push({ vizibil: !e.hidden && !s.radacina.hidden, text: e.textContent, asteptat: v === undefined ? '' : T.textEticheta(v) })
+      })
+      return { tick: K.world.tick, regim: o.regimCheie, pauza: K.stare().pauza, cifre: out }
+    })()`)
+    const c0 = await cifreAcum()
+    const tickInainte = c0.tick
+    let c1 = c0
+    for (let salt = 0; salt < 4; salt++) {
+      const tinta = await p.js('__kinstead.world.tick += 1680; __kinstead.world.tick')
+      for (let j = 0; j < 40; j++) {
+        await astepta(100)
+        c1 = await cifreAcum()
+        if (String(c1.regim).startsWith(`${tinta}|`)) break
+      }
+      await astepta(150)
+      c1 = await cifreAcum()
+      if (c1.cifre.some((x, i) => x.asteptat !== '' && x.asteptat !== c0.cifre[i]?.asteptat)) break
+    }
+    const vizibile = (c1.cifre ?? []).filter((x) => x.vizibil)
+    const gresite = vizibile.filter((x) => x.text !== x.asteptat)
+    const mutate = (c1.cifre ?? []).filter((x, i) => x.asteptat !== '' && x.asteptat !== c0.cifre?.[i]?.asteptat).length
+    bifa('temperatura-etichete-la-zi', !c1.lipsa && c1.pauza && vizibile.length >= 1 && gresite.length === 0 && mutate >= 1,
+      'cifrele lui U urmaresc lumea: dupa ore de joc sarite in pauza (valorile s-au mutat), fiecare cifra vizibila == textEticheta(valoarea overlay-ului)', JSON.stringify({ tick0: c0.tick, tick1: c1.tick, vizibile: vizibile.length, mutate, gresite: gresite.slice(0, 4), cifre: vizibile.slice(0, 4) }))
+    // Un clic pe „Ce înseamnă / Ascunde culorile" cu o reimprospatare a cifrelor INTRE mousedown si mouseup (recenzia
+    // t.2a, L4-3): cu cifrele in cheia legendei, legenda — si butonul — se refacea la fiecare schimbare a lor (U aprins,
+    // 3×: ~0,6/s), iar clicul al carui mousedown cadea pe nodul vechi se pierdea (5–6 din 30). Aici, determinist: butonul
+    // e tinut apasat cat se sar trei ore de joc si cat cifrele legendei se schimba pe ecran; abia apoi se elibereaza. Sase
+    // clicuri (numar par: starea legendei, tinuta in localStorage, ramane cea de dinainte).
+    const legendaAcum = () => p.js(`(() => {
+      const L = document.querySelector('.ui-legenda'), b = L?.querySelector('h3 button')
+      if (!b) return null
+      const r = b.getBoundingClientRect(), x = r.x + r.width / 2, y = r.y + r.height / 2
+      return { x, y, buton: b.textContent, peButon: document.elementFromPoint(x, y)?.closest('button') === b, cifre: L.querySelector('.cifre')?.textContent ?? '' }
+    })()`)
+    let reusite = 0
+    let reimprospatate = 0
+    const clicuri = []
+    for (let k = 0; k < 6; k++) {
+      const l0 = await legendaAcum()
+      if (l0 === null || !l0.peButon) { clicuri.push({ k, l0 }); continue }
+      await p.muta(l0.x, l0.y)
+      await p.apasa(l0.x, l0.y)
+      await p.js('__kinstead.world.tick += 3 * 1680; true')
+      let l1 = l0
+      for (let j = 0; j < 40 && l1 !== null && l1.cifre === l0.cifre; j++) { await astepta(100); l1 = await legendaAcum() }
+      if (l1 !== null && l1.cifre !== l0.cifre) reimprospatate++
+      await p.elibereaza(l0.x, l0.y)
+      await astepta(300)
+      const l2 = await legendaAcum()
+      if (l2 !== null && l2.buton !== l0.buton) reusite++
+      clicuri.push({ k, inainte: l0.buton, dupa: l2?.buton ?? null, cifre: [l0.cifre, l1?.cifre ?? null] })
+    }
+    bifa('temperatura-legenda-clic', reusite === 6 && reimprospatate === 6,
+      'legenda lui U: 6 din 6 clicuri pe „Ce înseamnă / Ascunde culorile" reusesc, fiecare cu cifrele legendei schimbate intre mousedown si mouseup', JSON.stringify({ reusite, reimprospatate, clicuri: clicuri.slice(0, 3) }))
+    // I si U tenteaza amandoua podeaua nivelului: aprinse impreuna, culorile s-ar amesteca (main.ts, comutaI / comutaU).
+    // Pasul de mai sus stingea I inainte de U, tocmai ca sa n-o exercite; acum, in ambele sensuri (recenzia t.2a, L4-5).
+    const iu = () => p.js(`({ I: document.querySelector('button[title^="Încăperile închise"]')?.getAttribute('aria-pressed') ?? null, U: document.querySelector('button[title^="Unde ar ajunge temperatura"]')?.getAttribute('aria-pressed') ?? null, tu: __kinstead.tempOverlay.visible })`)
+    const iu0 = await iu()
+    await p.tasta('i')
+    await astepta(400)
+    const iu1 = await iu()
+    await p.tasta('u')
+    await astepta(400)
+    const iu2 = await iu()
+    bifa('temperatura-exclude-I', iu0.U === 'true' && iu0.I === 'false' && iu1.I === 'true' && iu1.U === 'false' && !iu1.tu && iu2.U === 'true' && iu2.I === 'false' && iu2.tu,
+      'I si U se exclud in ambele sensuri: cu U aprins, I stinge U; cu I aprins, U stinge I', JSON.stringify({ iu0, iu1, iu2 }))
+    // Orele sarite mai sus se completeaza pana la zile intregi: pasii de mai jos gasesc ora din zi de dinainte. Altfel,
+    // „temperatura-fara-clic" cadea pe 03:00, in valea zilei, unde o ora de joc nu muta echilibrul casei cu 0,05 °C.
+    await p.js(`(async () => {
+      const R = __kinstead.rules ?? (await import('/@fs/${REPO}/src/sim/content.ts')).DEFAULT_RULES
+      const w = __kinstead.world, zi = R.calendar.ziTicks
+      w.tick += (zi - ((w.tick - ${tickInainte}) % zi)) % zi
+      return w.tick
+    })()`)
+    await astepta(1300)
     // Butonul din „Hărți": U stins din tasta, aprins din buton.
     await p.tasta('u')
     await astepta(300)

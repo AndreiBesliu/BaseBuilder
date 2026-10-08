@@ -38,6 +38,7 @@ import {
   CULOARE_RECE,
   createTemperaturaOverlay,
   culoareTemperatura,
+  intervalCuAfara,
   intervalTenta,
   PRAG_PX_CELULA,
 } from '../viewer/overlay-temperatura.ts'
@@ -532,7 +533,7 @@ function luminanta(c: readonly number[]): number {
   return 0.2126 * l(c[0]!) + 0.7152 * l(c[1]!) + 0.0722 * l(c[2]!)
 }
 
-test('TERMIC ECRAN tenta: luminozitatea creste strict cu temperatura (nu rosu-verde); intervalul de cel putin 2 °C', () => {
+test('TERMIC ECRAN tenta: luminozitatea creste strict cu temperatura (nu rosu-verde); intervalul de cel putin 2 °C, cu aerul de afara in el', () => {
   const lo = -5 * Q, hi = 15 * Q
   let prec = -1
   for (let i = 0; i <= 40; i++) {
@@ -549,14 +550,30 @@ test('TERMIC ECRAN tenta: luminozitatea creste strict cu temperatura (nu rosu-ve
   assert.deepEqual(intervalTenta(3 * Q, 4 * Q), { lo: 2.5 * Q, hi: 4.5 * Q })
   assert.deepEqual(intervalTenta(0, 10 * Q), { lo: 0, hi: 10 * Q })
   assert.deepEqual(intervalTenta(7 * Q, 7 * Q), { lo: 6 * Q, hi: 8 * Q })
+  // Aerul de afară intră în scară (recenzia t.2a, L4-4: pe M10, 53 din 53 de niveluri aveau sub 2 °C între încăperi, deci
+  // totul cădea lângă mijlocul rampei). Pe hârtie: încăperile [14, 15] °C cu afară 5 °C → [5, 15]; [3, 4] cu afară 15 →
+  // [3, 15]; [14, 14,5] cu afară 15 → [14, 15], lărgit la 2 °C în jurul lui 14,5 → [13,5, 15,5]; afară între ele nu schimbă.
+  assert.deepEqual(intervalCuAfara(14 * Q, 15 * Q, 5 * Q), { lo: 5 * Q, hi: 15 * Q })
+  assert.deepEqual(intervalCuAfara(3 * Q, 4 * Q, 15 * Q), { lo: 3 * Q, hi: 15 * Q })
+  assert.deepEqual(intervalCuAfara(14 * Q, 14.5 * Q, 15 * Q), { lo: 13.5 * Q, hi: 15.5 * Q })
+  assert.deepEqual(intervalCuAfara(0, 10 * Q, 5 * Q), { lo: 0, hi: 10 * Q })
+  // Două încăperi la 14,49 și 14,88 °C, afară 5 °C: amândouă la capătul cald, nu lângă mijloc.
+  const s = intervalCuAfara(Math.round(14.49 * Q), Math.round(14.88 * Q), 5 * Q)
+  assert.ok((Math.round(14.49 * Q) - s.lo) / (s.hi - s.lo) > 0.95)
 })
 
 // --- 4. overlay-ul și tasta ----------------------------------------------------------
 
-/** Culoarea (liniară) a pătratului `i` din tenta overlay-ului. */
+/** Culoarea (liniară) a pătratului `i` din tenta overlay-ului: 6 vârfuri × (r, g, b, alfa). */
 function culoareaPatratului(o: OverlayTemperatura, i: number): number[] {
   const m = o.group.children[0] as THREE.Mesh
-  return Array.from((m.geometry.getAttribute('color').array as Float32Array).slice(i * 18, i * 18 + 3))
+  return Array.from((m.geometry.getAttribute('color').array as Float32Array).slice(i * 24, i * 24 + 3))
+}
+/** Alfa celor 6 vârfuri ale pătratului `i` (0 = nu se desenează: încă fără valoare). */
+function alfaPatratului(o: OverlayTemperatura, i: number): number[] {
+  const m = o.group.children[0] as THREE.Mesh
+  const a = m.geometry.getAttribute('color').array as Float32Array
+  return [0, 1, 2, 3, 4, 5].map((k) => a[(i * 6 + k) * 4 + 3]!)
 }
 function liniar(c: readonly number[]): number[] {
   const x = new THREE.Color().setRGB(c[0]!, c[1]!, c[2]!, THREE.SRGBColorSpace)
@@ -570,6 +587,7 @@ test('TERMIC ECRAN overlay-ul U: geometria la amprenta noua, regimul cel mult o 
   const o = createTemperaturaOverlay()
   o.visible = true
   const z = g + 1
+  assert.ok(o.material.alphaTest > 0 && o.material.alphaTest < 0.7, 'patratele cu alfa 0 se arunca (nici culoare, nici adancime); cele cu valoare (alfa 0,7) raman')
   const casaId = componentaLa(w.camere, wx + 2, wy + 2, z)!.id
   const T = (): number => { const r = regimPermanent(w, R, w.tick); assert.ok(r.ok); return temperaturaComponentei(r.value, casaId)! }
   actualizeazaTemperaturaOverlay(o, w, R, z, 0)
@@ -577,9 +595,11 @@ test('TERMIC ECRAN overlay-ul U: geometria la amprenta noua, regimul cel mult o 
   assert.equal(o.valori.get(casaId), T())
   assert.equal(o.quadComp.length, 9, 'un patrat pe celula de aer a casei')
   assert.deepEqual(o.ancore.map((a) => [a.x - wx, a.y - wy, a.comp]), [[2, 2, casaId]])
-  // O singură valoare: mijlocul intervalului.
-  const { lo, hi } = intervalTenta(o.min, o.max)
+  // Scara: valoarea casei ȘI aerul de afară de la tickul regimului.
+  assert.equal(o.tAfara, tAfara(w.seed, w.tick, R))
+  const { lo, hi } = intervalCuAfara(o.min, o.max, o.tAfara)
   assert.deepEqual(culoareaPatratului(o, 0), liniar(culoareTemperatura(o.valori.get(casaId)!, lo, hi)))
+  assert.deepEqual(alfaPatratului(o, 0), [1, 1, 1, 1, 1, 1])
   // Lumea merge: sub o secundă, aceleași valori; la o secundă, regimul la tickul de acum.
   const v0 = o.valori.get(casaId)
   ruleaza(w, 1680)
@@ -606,8 +626,10 @@ test('TERMIC ECRAN overlay-ul U: geometria la amprenta noua, regimul cel mult o 
   assert.notEqual(w.camere.epoca, ep, 'fixtura: epoca noua')
   actualizeazaTemperaturaOverlay(o, w, R, z, 5300)
   assert.deepEqual([o.reconstructii, o.regimuri], [3, 4])
-  // A doua casă pe același nivel, sub o secundă: geometrie nouă, colorată cu valorile vechi; ea e gri și fără cifră
-  // până la regimul următor.
+  // A doua casă pe același nivel, sub o secundă: geometrie nouă, colorată cu valorile vechi; ea NU se desenează (alfa 0)
+  // și n-are cifră până la regimul următor — nu un gri care se confundă cu mijlocul rampei.
+  const vVeche = o.valori.get(casaId)
+  assert.ok(vVeche !== undefined)
   casa(w, wx + 8, wy, g)
   sincronizeazaCamere(w.camere, w.terrain)
   const ancoreVechi = o.ancore
@@ -617,10 +639,18 @@ test('TERMIC ECRAN overlay-ul U: geometria la amprenta noua, regimul cel mult o 
   assert.notEqual(o.ancore, ancoreVechi, 'ancore noi: semnalul pentru stratul DOM')
   assert.equal(o.valori.get(noua), undefined)
   const iNoua = [...o.quadComp].indexOf(noua)
-  assert.deepEqual(culoareaPatratului(o, iNoua), liniar([0.5, 0.5, 0.5]))
+  assert.deepEqual(alfaPatratului(o, iNoua), [0, 0, 0, 0, 0, 0])
+  // Casa veche: reconstrucția indexului i-a rotit id-ul, iar valoarea ei a trecut pe id-ul nou prin celule — rămâne
+  // desenată, cu culoarea și cifra de dinainte (cheiate pe id-ul vechi, tot nivelul ar fi rămas fără valoare).
+  const veche = componentaLa(w.camere, wx + 2, wy + 2, z)!.id
+  assert.notEqual(veche, casaId, 'fixtura: id-ul casei vechi s-a rotit')
+  assert.equal(o.valori.get(veche), vVeche, 'casa veche: valoarea de dinainte, pe id-ul nou')
+  assert.deepEqual(alfaPatratului(o, [...o.quadComp].indexOf(veche)), [1, 1, 1, 1, 1, 1], 'casa veche: desenata')
+  assert.ok(o.ancore.some((a) => a.comp === veche && o.valori.has(a.comp)), 'casa veche: cifra ramane')
   actualizeazaTemperaturaOverlay(o, w, R, z, 6300)
   assert.equal(o.regimuri, 5)
   assert.ok(o.valori.has(noua))
+  assert.deepEqual(alfaPatratului(o, iNoua), [1, 1, 1, 1, 1, 1], 'cu valoarea ei: desenata')
   // Fără nivel: nimic desenat.
   actualizeazaTemperaturaOverlay(o, w, R, null, 6400)
   assert.deepEqual([o.group.children.length, o.ancore.length, o.nivel], [0, 0, null])

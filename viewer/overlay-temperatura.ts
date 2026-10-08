@@ -17,8 +17,20 @@
  * - **Valorile** vin din `regimPermanent`, cel mult o dată pe secundă (§6), și numai dacă lumea s-a schimbat
  *   (tick, `epoca`, `epocaFete`): în pauză, niciun calcul. La un nivel nou sau la aprindere, imediat — e o
  *   acțiune a jucătorului. Culorile se rescriu pe loc (atributul de culoare), fără geometrie nouă.
- * - Între două regimuri, o geometrie nouă (o încăpere care tocmai a apărut) se colorează cu valorile vechi;
- *   ce n-are încă valoare primește gri și nicio cifră, cel mult o secundă.
+ * - Între două regimuri, o geometrie nouă se colorează cu valorile vechi, mutate pe noile id-uri prin CELULE: orice
+ *   reconstrucție a indexului rotește id-urile componentelor, deci, cheiate pe id, valorile vechi nu mai prindeau nimic
+ *   și tot nivelul rămânea fără valoare până la regimul următor. O celulă care avea valoare o dă componentei ei de
+ *   acum (la o unire, cea întâlnită prima; ≤ 1 s). Doar o încăpere care tocmai a apărut n-are încă valoare;
+ *   ce n-are încă valoare NU se desenează (alfa 0 pe vârf) și n-are cifră, cel mult o secundă. Înainte primea gri,
+ *   iar gri-ul cădea chiar în mijlocul rampei (0,55; 0,53; 0,52): pe M10, 62–94% din celulele cu valoare erau lângă
+ *   el, deci o încăpere cu valoare se citea „abia apărută" (recenzia t.2a, L4-4).
+ *
+ * ## Scara tentei
+ *
+ * De la cel mai rece la cel mai cald dintre spațiile de la nivel ȘI aerul de afară (`intervalCuAfara`), cel puțin
+ * `INTERVAL_MIN_Q16`: tenta spune și „mai rece / mai cald decât afară", nu doar ordinea încăperilor între ele (pe M10,
+ * 53 din 53 de niveluri aveau sub 2 °C între încăperi). Prețul: pivnițele dintre ele se deosebesc mai greu. E o
+ * decizie de design, cu implicitul ăsta (recenzia t.2a, L4-4).
  *
  * ## Unde stă cifra (panoul, L5-3)
  *
@@ -55,8 +67,6 @@ export const INTERVAL_MIN_Q16 = 2 * 65536
 /** Capetele tentei, în sRGB: fiecare canal crește de la rece la cald, deci și luminozitatea. */
 export const CULOARE_RECE: readonly [number, number, number] = [0.1, 0.15, 0.32]
 export const CULOARE_CALDA: readonly [number, number, number] = [1, 0.91, 0.72]
-/** O componentă fără valoare încă (geometrie nouă între două regimuri): gri, fără cifră. */
-const CULOARE_NECUNOSCUTA: readonly [number, number, number] = [0.5, 0.5, 0.5]
 
 // ---------------------------------------------------------------------------------------------
 // piesele și ancorele
@@ -211,6 +221,11 @@ export function intervalTenta(min: number, max: number): { lo: number; hi: numbe
   return { lo: mij - INTERVAL_MIN_Q16 / 2, hi: mij + INTERVAL_MIN_Q16 / 2 }
 }
 
+/** Intervalul tentei la nivel: temperaturile spațiilor [min, max] ȘI aerul de afară (vezi antetul, „Scara tentei"). */
+export function intervalCuAfara(min: number, max: number, tAfara: number): { lo: number; hi: number } {
+  return intervalTenta(Math.min(min, tAfara), Math.max(max, tAfara))
+}
+
 /** Culoarea (sRGB, 0..1) unei temperaturi în intervalul [lo, hi]: de la `CULOARE_RECE` la `CULOARE_CALDA`. */
 export function culoareTemperatura(t: number, lo: number, hi: number): [number, number, number] {
   const f = hi > lo ? Math.min(1, Math.max(0, (t - lo) / (hi - lo))) : 0.5
@@ -235,6 +250,8 @@ export interface OverlayTemperatura {
   comps: readonly number[]
   /** Componenta fiecărui pătrat al tentei, în ordinea vârfurilor: recolorarea fără geometrie nouă. */
   quadComp: Int32Array
+  /** Celula fiecărui pătrat (`y * WORLD_CELLS + x`): valorile trec prin ea pe id-urile unei geometrii noi. */
+  quadCelula: Int32Array
   /** Echilibrul componentelor de la nivel (Q16 °C), din ultimul regim. */
   readonly valori: Map<number, number>
   /** Minimul și maximul valorilor de la nivel (legenda); afară, la tickul regimului. */
@@ -257,9 +274,11 @@ export function createTemperaturaOverlay(): OverlayTemperatura {
   group.name = NUME_GRUP_TEMPERATURA
   group.visible = false
   group.renderOrder = 6
-  const material = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.7, depthTest: false, side: THREE.DoubleSide })
+  // Culoarea pe varf are ALFA (itemSize 4): un patrat fara valoare inca are alfa 0, iar `alphaTest` il arunca de tot
+  // (nici culoare, nici adancime) — nu mai e un gri care se confunda cu mijlocul rampei (recenzia t.2a, L4-4).
+  const material = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.7, alphaTest: 0.01, depthTest: false, side: THREE.DoubleSide })
   return {
-    group, visible: false, nivel: undefined, epoca: -1, amprenta: null, ancore: [], comps: [], quadComp: new Int32Array(0), valori: new Map(),
+    group, visible: false, nivel: undefined, epoca: -1, amprenta: null, ancore: [], comps: [], quadComp: new Int32Array(0), quadCelula: new Int32Array(0), valori: new Map(),
     min: 0, max: 0, tAfara: 0, regimLa: Number.NEGATIVE_INFINITY, regimCheie: '', eroare: '', material, reconstructii: 0, regimuri: 0,
   }
 }
@@ -280,42 +299,74 @@ function reconstruieste(o: OverlayTemperatura, w: World, z: number | null, ampre
   o.ancore = []
   o.comps = []
   o.quadComp = new Int32Array(0)
+  o.quadCelula = new Int32Array(0)
   if (z === null) return
   const pos: number[] = []
   const comp: number[] = []
+  const cel: number[] = []
   const y0 = z + 0.03
   celuleLaNivel(w.camere, z, (x, y, c) => {
     const a = x + 0.06, b = x + 0.94, p = y + 0.06, q = y + 0.94
     pos.push(a, y0, p, b, y0, p, b, y0, q, a, y0, p, b, y0, q, a, y0, q)
     comp.push(c.id)
+    cel.push(y * WORLD_CELLS + x)
   })
   o.quadComp = Int32Array.from(comp)
+  o.quadCelula = Int32Array.from(cel)
   o.comps = [...new Set(comp)].sort((a, b) => a - b)
   o.ancore = ancoreLaNivel(w.camere, z)
   if (pos.length === 0) return
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
-  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.length), 3))
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array((pos.length / 3) * 4), 4))
   const m = new THREE.Mesh(geo, o.material)
   m.renderOrder = 6
   o.group.add(m)
 }
 
+/** Valorile de acum pe celulele geometriei de acum (înaintea unei geometrii noi pe același nivel). */
+function valoriPeCelula(o: OverlayTemperatura): Map<number, number> {
+  const out = new Map<number, number>()
+  for (let i = 0; i < o.quadComp.length; i++) {
+    const v = o.valori.get(o.quadComp[i]!)
+    if (v !== undefined) out.set(o.quadCelula[i]!, v)
+  }
+  return out
+}
+
+/** După o geometrie nouă pe același nivel: fiecare componentă primește valoarea unei celule a ei care avea una. */
+function mutaValorile(o: OverlayTemperatura, peCelula: Map<number, number>): void {
+  o.valori.clear()
+  for (let i = 0; i < o.quadComp.length; i++) {
+    const c = o.quadComp[i]!
+    if (o.valori.has(c)) continue
+    const v = peCelula.get(o.quadCelula[i]!)
+    if (v !== undefined) o.valori.set(c, v)
+  }
+}
+
 const c3 = new THREE.Color()
 
-/** Culorile pătratelor din valorile de acum, pe loc (atributul de culoare), fără geometrie nouă. */
+/**
+ * Culorile pătratelor din valorile de acum, pe loc (atributul de culoare), fără geometrie nouă. Scara cuprinde și aerul
+ * de afară (`intervalCuAfara`); un pătrat fără valoare are alfa 0 (nu se desenează).
+ */
 function recoloreaza(o: OverlayTemperatura): void {
   const m = o.group.children[0] as THREE.Mesh | undefined
   if (m === undefined) return
   const atr = m.geometry.getAttribute('color') as THREE.BufferAttribute
   const arr = atr.array as Float32Array
-  const { lo, hi } = intervalTenta(o.min, o.max)
+  const { lo, hi } = intervalCuAfara(o.min, o.max, o.tAfara)
   for (let i = 0; i < o.quadComp.length; i++) {
     const t = o.valori.get(o.quadComp[i]!)
-    const [r, g, b] = t === undefined ? CULOARE_NECUNOSCUTA : culoareTemperatura(t, lo, hi)
+    if (t === undefined) {
+      for (let k = 0; k < 6; k++) arr.set([0, 0, 0, 0], (i * 6 + k) * 4)
+      continue
+    }
+    const [r, g, b] = culoareTemperatura(t, lo, hi)
     // Vârfurile sunt în spațiul liniar: culoarea sRGB trece prin THREE.Color, ca la tenta lui I.
     c3.setRGB(r, g, b, THREE.SRGBColorSpace)
-    for (let k = 0; k < 6; k++) arr.set([c3.r, c3.g, c3.b], (i * 6 + k) * 3)
+    for (let k = 0; k < 6; k++) arr.set([c3.r, c3.g, c3.b, 1], (i * 6 + k) * 4)
   }
   atr.needsUpdate = true
 }
@@ -363,7 +414,11 @@ export function actualizeazaTemperaturaOverlay(o: OverlayTemperatura, w: World, 
     geometrie = o.amprenta === null || !aceeasiAmprenta(o.amprenta, amprenta)
   }
   o.epoca = w.camere.epoca
-  if (geometrie) reconstruieste(o, w, z, z === null ? null : (amprenta ?? amprentaNivel(w.camere, z)))
+  if (geometrie) {
+    const peCelula = nivelNou ? null : valoriPeCelula(o)
+    reconstruieste(o, w, z, z === null ? null : (amprenta ?? amprentaNivel(w.camere, z)))
+    if (peCelula !== null) mutaValorile(o, peCelula)
+  }
   if (z === null) return
   const cheie = `${w.tick}|${w.camere.epoca}|${w.camere.epocaFete}`
   if (nivelNou || o.regimCheie === '' || (acumMs - o.regimLa >= PERIOADA_REGIM_MS && cheie !== o.regimCheie)) calculeazaRegim(o, w, rules, acumMs, cheie)

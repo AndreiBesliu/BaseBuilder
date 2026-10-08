@@ -6,6 +6,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DEFAULT_RULES as R } from '../src/sim/content.ts'
 import { baraDeSus, textGrade, textMinuteReale, textPesteZile, textTendinta } from '../viewer/ui/texte.ts'
+import { insigneBara, insigneDespliate } from '../viewer/ui/model.ts'
 
 const Q = 65536
 const ZI = 40320
@@ -50,4 +51,17 @@ test('tooltip-ul calendarului: „Iarna în 3 zile (≈ 41 min la 3×) · timp d
 test('textPesteZile si textMinuteReale: zile in jos, ore in sus, „de" de la 20, minute reale cu zero in fata', () => {
   assert.deepEqual([3.9 * ZI, 2 * ZI, 1.5 * ZI, 5 * 1680, 1680 - 1, 20 * ZI].map((t) => textPesteZile(t, ZI)), ['în 3 zile', 'în 2 zile', 'într-o zi', 'în 5 ore', 'într-o oră', 'în 20 de zile'])
   assert.deepEqual([0.4, 41.07, 59.6, 123.2, 134.4].map(textMinuteReale), ['< 1 min', '41 min', '1 h 00 min', '2 h 03 min', '2 h 14 min'])
+})
+test('bara de sus: insignele peste cate incap se pliaza in „N alerte", cu lista in tooltip — una la 1.100 px, trei de la 1.280', () => {
+  // Recenzia t.2a, L4-6: cinci insigne scoteau butoanele de viteza din bara; masurat (ui-fum, „bara-sus"), in cazul cel
+  // mai rau la 1.100 px incape una singura, la 1.280 trei.
+  const r = (flamanzi: number, obositi: number, nefericiti: number, plecati: number, jefuitori: number) => ({ flamanzi, obositi, nefericiti, plecati, jefuitori })
+  assert.deepEqual(insigneBara(r(0, 0, 0, 0, 0), 1100), [])
+  assert.deepEqual(insigneBara(r(12, 0, 0, 0, 0), 1100), [{ clasa: 'atentie', text: '12 flămânzi', titlu: '' }])
+  assert.deepEqual(insigneBara(r(3, 2, 0, 0, 0), 1100), [{ clasa: 'atentie', text: '2 alerte', titlu: '3 flămânzi · 2 obosiți' }])
+  assert.deepEqual(insigneBara(r(12, 12, 12, 12, 12), 1100), [{ clasa: 'critic', text: '5 alerte', titlu: '12 flămânzi · 12 obosiți · 12 refuză munca · 12 plecați · 12 jefuitori' }])
+  assert.deepEqual(insigneBara(r(0, 1, 0, 0, 4), 1279), [{ clasa: 'atentie', text: '2 alerte', titlu: '1 obosiți · 4 jefuitori' }])
+  assert.deepEqual(insigneBara(r(3, 2, 1, 0, 0), 1280).map((x) => x.text), ['3 flămânzi', '2 obosiți', '1 refuză munca'])
+  assert.deepEqual(insigneBara(r(3, 2, 1, 1, 0), 1920), [{ clasa: 'critic', text: '4 alerte', titlu: '3 flămânzi · 2 obosiți · 1 refuză munca · 1 plecați' }])
+  assert.deepEqual([1100, 1279, 1280, 2560].map(insigneDespliate), [1, 1, 3, 3])
 })

@@ -19,7 +19,7 @@ import { CATEGORII, Faction, Item, Piesa } from '../../src/sim/state.ts'
 import { Zona } from '../../src/sim/zone.ts'
 import { ascuns, attr, clasa, h, text } from './dom.ts'
 import { ICON } from './iconite.ts'
-import { cauzaGolirii, creeazaMemorieTermica, creeazaPrevizualizare, golita, inspecteazaCelula, refacePrevizualizarea, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte } from './model.ts'
+import { cauzaGolirii, creeazaMemorieTermica, creeazaPrevizualizare, golita, insigneBara, inspecteazaCelula, refacePrevizualizarea, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte } from './model.ts'
 import { cheieInspectorCelula, creeazaMemorieIncapere, usilePropuse } from './memorie-incapere.ts'
 import type { UsilePropuse } from './memorie-incapere.ts'
 import type { Bara, IncapereLa, InspectieCelula, NormalaFetei, Previz, RandOm } from './model.ts'
@@ -164,8 +164,7 @@ const LEGENDE: Readonly<Record<Overlay, { titlu: string; randuri: readonly { c: 
     titlu: 'Temperatură (U)',
     randuri: [
       { c: '#ffe8b8', t: 'Deschis: mai cald — cifra e unde ar ajunge temperatura acolo, cu vremea și solul de acum' },
-      { c: '#1a2652', t: 'Închis: mai rece (scara merge de la cel mai rece la cel mai cald spațiu de pe nivel)' },
-      { c: '#808080', t: 'Gri: abia apărut — valoarea vine într-o secundă' },
+      { c: '#1a2652', t: 'Închis: mai rece (scara merge de la cel mai rece la cel mai cald dintre spațiile de pe nivel și aerul de afară)' },
     ],
     fara: 'Temperatura se vede pe un nivel.',
   },
@@ -333,6 +332,8 @@ export function monteazaUI(ctx: ContextUI): UI {
   // v2, §6; panoul, L5-4): marca ramane pe ecranul de titlu, timpul total in tooltip si in numele
   // salvarilor. Masurat pe bara reala (ui-fum, „bara-sus"), la 1.100 px cu 2 insigne si cu calendarul
   // la latimea celui mai lat text al lui (153 px): raman 5 px. Cu marca si timpul total, depasea cu 46.
+  // Cazul cel mai rau (recenzia t.2a, L4-6: hrana „~12 h 59 min", indicatorul de viteza, insigne de doua cifre):
+  // la 1.100 px incape o singura insigna (raman 18 px), deci peste ea se pliaza in „N alerte" (insigneBara, model.ts).
   const btnMeniu = iconBtn(ICON.meniu, '', '', 'Meniu (Esc)')
   const calendar = h('span', { class: 'ui-calendar' }, '')
   const resurse = new Map<number, { rad: HTMLElement; val: HTMLElement }>()
@@ -402,6 +403,13 @@ export function monteazaUI(ctx: ContextUI): UI {
   const legenda = h('div', { class: 'ui-insula ui-legenda', hidden: true })
   radacina.append(legenda)
   let legendaScrisa = ''
+  /**
+   * Cifrele legendei: un element facut O DATA si scris PE LOC, inaintea comparatiei cheii (ca temperatura din
+   * inspector, L5-2). In cheie, ele refaceau legenda — si butonul „Ce înseamnă culorile" — la fiecare schimbare: cu U
+   * aprins la 3×, ~0,6 refaceri pe secunda, iar 5–6 clicuri din 30 cadeau intre mousedown si mouseup (recenzia
+   * t.2a, L4-3). La o redesenare, acelasi element e mutat in corpul nou.
+   */
+  const cifreLegenda = h('div', { class: 'cifre' })
   /**
    * Legenda e PLIATA implicit: Planul e aprins tot jocul, iar cele zece randuri ale lui acopereau
    * scena din coltul stang la 1280×720. Pliata arata titlul si cifrele; culorile, la cerere.
@@ -1107,16 +1115,13 @@ export function monteazaUI(ctx: ContextUI): UI {
     clasa(prognoza, 'atentie', min < 30 && min >= 10)
     clasa(prognoza, 'critic', min < 10)
     text(oameniVal, String(r.colonisti))
-    const ins: string[] = []
-    if (r.flamanzi) ins.push(`atentie|${cant(r.flamanzi, 'flămânzi')}`)
-    if (r.obositi) ins.push(`atentie|${cant(r.obositi, 'obosiți')}`)
-    if (r.nefericiti) ins.push(`critic|${r.nefericiti} refuză munca`)
-    if (r.plecati) ins.push(`critic|${cant(r.plecati, 'plecați')}`)
-    if (r.jefuitori) ins.push(`atentie|${cant(r.jefuitori, 'jefuitori')}`)
-    const cheie = ins.join(',')
+    // Peste cate incap (insigneDespliate: una la 1.100 px, trei de la 1.280), insignele se pliaza in „N alerte", cu
+    // lista in tooltip: cinci insigne scoteau butoanele de viteza din fereastra (recenzia t.2a, L4-6).
+    const ins = insigneBara(r, window.innerWidth / marimeaActuala())
+    const cheie = ins.map((x) => `${x.clasa}|${x.text}|${x.titlu}`).join(',')
     if (insigne.dataset.cheie !== cheie) {
       insigne.dataset.cheie = cheie
-      insigne.replaceChildren(...ins.map((x) => { const [c, t] = x.split('|'); return h('span', { class: `ui-insigna ${c}` }, t!) }))
+      insigne.replaceChildren(...ins.map((x) => h('span', { class: `ui-insigna ${x.clasa}`, title: x.titlu || null }, x.text)))
     }
     const pauza = ctx.pauza()
     attr(btnPauza, 'aria-pressed', pauza ? 'true' : 'false')
@@ -1152,7 +1157,9 @@ export function monteazaUI(ctx: ContextUI): UI {
     const L = LEGENDE[pornit]
     const cifre = ctx.cifreOverlay(pornit)
     const vechi = pornit === 'S' && ctx.stabilitateInvechita()
-    const cheie = `${pornit}|${faraNivel}|${cifre}|${vechi}|${legendaDeschisa}`
+    text(cifreLegenda, cifre)
+    ascuns(cifreLegenda, cifre === '')
+    const cheie = `${pornit}|${faraNivel}|${cifre !== ''}|${vechi}|${legendaDeschisa}`
     if (cheie === legendaScrisa) return
     legendaScrisa = cheie
     const comuta = butonText(legendaDeschisa ? 'Ascunde culorile' : 'Ce înseamnă culorile', () => {
@@ -1172,7 +1179,7 @@ export function monteazaUI(ctx: ContextUI): UI {
     } else {
       copii.push(h('ul', {}, ...L.randuri.map((r) => h('li', {}, h('span', { class: `mostra${r.diag ? ' diag' : ''}`, style: `background-color:${r.c}` }), h('span', {}, r.t)))))
     }
-    if (cifre) copii.push(h('div', { class: 'cifre' }, cifre))
+    copii.push(cifreLegenda)
     if (vechi) copii.push(h('div', { class: 'ui-actiuni' }, h('span', { class: 'sub' }, 'Previzualizarea e de mai devreme (e scumpă pe planuri mari).'), butonText('Refă', () => ctx.refaStabilitatea())))
     legenda.replaceChildren(...copii)
   }
