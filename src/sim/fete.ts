@@ -105,6 +105,16 @@
  * (panoul t.2b, IDX-1: C' greșit pe 7 din 10 salvări pe M10 lărgit). Indexul nu știe masele (ele țin de
  * content): contoarele sunt numărători, C' = Σ contoare × mase (`capacitateMu`).
  *
+ * ## Evidența maselor pe lot (t.2b §3, proveniența C3)
+ *
+ * `evidentaMaselor` spune, pentru fiecare componentă nouă, ce masă PERSISTĂ din fiecare componentă veche, ce sol
+ * (și apă) intră, pe adâncimea fiecărei fețe, și ce altă masă apare; pentru fiecare veche, ce persistă, ce sol iese
+ * și ce altă masă iese — exact, în contoare. Evaluarea e LOCALĂ: doar articolele celulelor editate, ale rulajelor de
+ * sub ele și ale vecinilor celor editate își pot schimba masa; acolo se citesc fețele vechi (materialele de dinainte
+ * de lot, din jurnalul terenului) și cele noi. În rest masa persistă și doar își schimbă componenta: celulă cu
+ * celulă în feliile refăcute, pe înregistrarea bucății în cele supraviețuitoare. Identitățile (Σ = capacitatea, pe
+ * fiecare componentă nouă și veche) se verifică la rulare și se numără în `abateri`.
+ *
  * ## Importul circular cu camere.ts
  *
  * `camere.ts` cheamă de aici întreținerea, iar de aici se citesc cititorul de coloane și indexul. Ciclul e
@@ -116,7 +126,7 @@ import { eSolNatural, Material, MATERIAL_MAX, VOXEL_LEVELS } from './terrain/chu
 import type { Terrain } from './terrain/terrain.ts'
 import { WORLD_CELLS } from './terrain/terrain.ts'
 import type { CititorCamere, Coloana, Componenta, Felie, IndexCamere } from './camere.ts'
-import { bucataLa, cheieCelula, cititorCamere, coloana, decodeazaCelula, decodeazaFelie, FELIE } from './camere.ts'
+import { bucataLa, cheieCelula, cheieFelie, cititorCamere, coloana, decodeazaCelula, decodeazaFelie, FELIE } from './camere.ts'
 import type { Outcome } from './result.ts'
 import { accept, Reason, refuse } from './result.ts'
 import type { MaseTermice } from './content.ts'
@@ -358,6 +368,14 @@ export type MaterialeVechi = ReadonlyMap<number, number> | null
  * pe materialele de dinainte de lot.
  */
 export function clasaFetei(r: CititorCamere, x: number, y: number, z: number, dir: number, dSolMasiv: number, vechi: MaterialeVechi): ClasaMaseiId {
+  return (fataCuAdancime(r, x, y, z, dir, dSolMasiv, vechi) & 7) as ClasaMaseiId
+}
+
+/**
+ * Clasa de masă a feței (biții 0..2) și adâncimea primei celule (de la bitul 3): o singură citire a vecinului,
+ * pentru evidența provenienței, care are nevoie de amândouă (masa de sol intră și iese la `T_sol(d)`).
+ */
+function fataCuAdancime(r: CititorCamere, x: number, y: number, z: number, dir: number, dSolMasiv: number, vechi: MaterialeVechi): number {
   const nx = x + DX[dir]!
   const ny = y + DY[dir]!
   const nz = z + DZ[dir]!
@@ -368,7 +386,8 @@ export function clasaFetei(r: CititorCamere, x: number, y: number, z: number, di
     const v = vechi.get(cheieCelula(nx, ny, nz))
     if (v !== undefined) m = v
   }
-  return clasaMasei(m, adancimeIn(col, nz), dSolMasiv)
+  const d = adancimeIn(col, nz)
+  return clasaMasei(m, d, dSolMasiv) | (d << 3)
 }
 
 /** Contoare mutabile, adunate celulă cu celulă. */
@@ -622,9 +641,10 @@ function potrivire(vechi: Felie, nou: Felie): Map<number, number> | null {
  *
  * `lot`: câte 4 numere pe editare — x, y, z și capătul de jos al rulajului de aer de sub ea, citit după lot
  * (rulajul = [jos, z − 1]). `felii`: cheile feliilor refăcute, sortate; `vechi`: obiectele `Felie` de
- * dinaintea lotului, aliniate cu `felii` (`undefined` = felia nu exista). Întoarce câte bucăți a marcat D+.
+ * dinaintea lotului, aliniate cu `felii` (`undefined` = felia nu exista). Întoarce bucățile marcate de D+ și
+ * înregistrările de DINAINTE ale sloturilor rescrise (proveniența, t.2b §3: C' vechi al componentelor atinse).
  */
-export function actualizeazaFete(idx: IndexCamere, r: CititorCamere, lot: readonly number[], felii: readonly number[], vechi: readonly (Felie | undefined)[]): number {
+export function actualizeazaFete(idx: IndexCamere, r: CititorCamere, lot: readonly number[], felii: readonly number[], vechi: readonly (Felie | undefined)[]): RezultatFete {
   const c = idx.fete
   const marcate = new Set<number>()
   if (idx.felii.size === 0) c.stat.loturiSarite++
@@ -634,11 +654,13 @@ export function actualizeazaFete(idx: IndexCamere, r: CititorCamere, lot: readon
   }
   c.stat.bucatiMarcate += marcate.size
   if (marcate.size > 0) idx.epocaFete++
-  if (felii.length === 0 && marcate.size === 0) return 0
+  // Slot → înregistrarea lui de dinainte de lot, pentru fiecare slot pe care lotul îl golește sau îl rescrie.
+  const inregVechi = new Map<number, InregistrareFete | undefined>()
+  if (felii.length === 0 && marcate.size === 0) return { marcate, inregVechi }
 
   // 1. Înregistrările bucăților vechi ale feliilor refăcute, luate ÎNAINTE de orice scriere: un slot eliberat
   //    poate fi deja al unei bucăți noi.
-  const vechiRanduri = new Map<number, InregistrareFete | undefined>()
+  const vechiRanduri = inregVechi
   for (const fv of vechi) {
     if (fv === undefined) continue
     for (const b of fv.bucati) {
@@ -682,9 +704,19 @@ export function actualizeazaFete(idx: IndexCamere, r: CititorCamere, lot: readon
       peFelie.set(kf, s)
     }
     s.add(b)
+    // Bucata supraviețuiește lotului (felia ei nu s-a refăcut), iar rândurile ei se rescriu acum: cele de dinainte.
+    if (!inregVechi.has(b)) inregVechi.set(b, c.inreg[b])
   }
   for (const [kf, s] of [...peFelie].sort((a, b) => a[0] - b[0])) c.stat.bucatiRecalculate += scrieRanduri(c, r, idx.felii.get(kf)!, s)
-  return marcate.size
+  return { marcate, inregVechi }
+}
+
+/** Ce a făcut `actualizeazaFete` pe un lot. */
+export interface RezultatFete {
+  /** Bucățile marcate de D+ (pe indexul de după lot). */
+  readonly marcate: ReadonlySet<number>
+  /** Slot → înregistrarea de dinainte de lot, pentru fiecare slot golit sau rescris (`undefined`: slotul era liber). */
+  readonly inregVechi: ReadonlyMap<number, InregistrareFete | undefined>
 }
 
 /** Toate rândurile tuturor bucăților indexului, în `c` (gol). Blocul întâi, apoi z, ca în recalculul indexului. */
@@ -867,6 +899,687 @@ export function feteleCelulei(idx: IndexCamere, r: CititorCamere, x: number, y: 
     out.push({ directie: d, clasa: CLASA[d]!, fel, compozitie: tmp.compCheie[o.compozitie]!, prima: o.prima, adancime: o.adancime, dincolo: o.dincolo })
   }
   return out
+}
+
+// ---------------------------------------------------------------------------
+// evidența maselor pe lot — proveniența C3 (t.2b §3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Sursele de celule ale provenienței (`prov`), pe lângă id-urile componentelor vechi (≥ 0): aerul unei celule
+ * care n-a fost aer acoperit înainte de lot. CER = aer de sub cer acoperit acum; SOL(d) = `PROV_SOL0 − d`, o
+ * celulă plină săpată (d = adâncimea ei); NEC = recalculul (jurnalul pierdut), rezolvat după solul natural:
+ * `PROV_NEC_SOL0 − d` sub el, `PROV_NEC_CER` deasupra.
+ */
+export const PROV_CER = -2
+export const PROV_NEC_CER = -3
+export const PROV_SOL0 = -100
+export const PROV_NEC_SOL0 = -200
+
+/** Masa (pe clase) care intră sau iese la `T_sol(d)`. */
+export interface MasaPeAdancime {
+  readonly d: number
+  readonly masa: ContoareMasa
+}
+
+/** Masa unei componente vechi care persistă în cea nouă (în ambele geometrii, cu aceeași clasă). */
+export interface SursaPersistenta {
+  /** Id-ul componentei vechi (un slot al indexului de DINAINTE de lot). */
+  readonly id: number
+  /** Ancora ei de dinainte de lot: ordinea surselor în aritmetică. */
+  readonly ancora: number
+  readonly masa: ContoareMasa
+}
+
+/** Originea aerului celulelor care n-au fost aer acoperit înainte de lot: rezerva când nimic nu persistă. */
+export interface OrigineAer {
+  /** Celule de cer (și NEC deasupra solului natural): `T_afara`. */
+  readonly cer: number
+  /** Celule pline săpate (și NEC sub solul natural), pe adâncimea lor: `T_sol(d)`. */
+  readonly sol: readonly { readonly d: number; readonly celule: number }[]
+  /** Dintre ele, câte au fost NEC (recalculul). */
+  readonly nec: number
+}
+
+/**
+ * O componentă de DUPĂ lot a cărei masă s-a putut schimba (nouă, refăcută pe loc sau cu fețe atinse de D+):
+ * `capacitate` (contoarele ei) = Σ `surse` + Σ `solIntra` + `aparuta`, exact.
+ */
+export interface MaseComponentaNoua {
+  readonly id: number
+  readonly ancora: number
+  readonly capacitate: ContoareMasa
+  /** În ordinea ancorelor vechi. */
+  readonly surse: readonly SursaPersistenta[]
+  /** Sol natural și apă care intră, cu `d` al fiecărei fețe, crescător. */
+  readonly solIntra: readonly MasaPeAdancime[]
+  /** Orice altă masă apărută (construcția nouă, aerul celulelor noi): ia T-ul rezultat. */
+  readonly aparuta: ContoareMasa
+  readonly origine: OrigineAer
+}
+
+/**
+ * O componentă de DINAINTE de lot care a pierdut sau și-a mutat masă: `capacitate` = `persista` + Σ `solIese` +
+ * `altaIese` (exact pe un lot obișnuit; la recalcul `altaIese` e restul, fiindcă jurnalul s-a pierdut).
+ */
+export interface MaseComponentaVeche {
+  readonly id: number
+  readonly ancora: number
+  readonly capacitate: ContoareMasa
+  readonly persista: ContoareMasa
+  readonly solIese: readonly MasaPeAdancime[]
+  /** Altă masă care iese (aerul celulelor zidite, fețele construite care dispar): la T-ul sursei. */
+  readonly altaIese: ContoareMasa
+}
+
+/** Evidența C3 a unui lot (§3), în contoare (masele în μ le pun regulile: `capacitateMu`). */
+export interface EvidentaMase {
+  /** Pe ancoră. */
+  readonly noi: readonly MaseComponentaNoua[]
+  /** Pe ancora veche. */
+  readonly vechi: readonly MaseComponentaVeche[]
+  /**
+   * Componentele pe care identitățile nu țin (o bucată fără înregistrare, o celulă cu masa schimbată nemarcată
+   * de D+, o acoperire schimbată în afara rulajelor lotului). 0 pe orice lot; testele o asertează.
+   */
+  readonly abateri: number
+}
+
+/**
+ * Ce reține sincronizarea despre index ÎNAINTE să-l schimbe (camere.ts): componenta veche a fiecărei celule din
+ * feliile refăcute (luată în `refaFelie`, înainte de `stergeBucata`), componenta veche a bucăților supraviețuitoare
+ * reparcurse, obiectele componentelor vechi atinse și listele lotului.
+ */
+export interface CapturaLot {
+  /** Felia refăcută → componenta veche a fiecărei celule (−1: nu era aer acoperit). */
+  readonly compVecheCel: Map<number, Int32Array>
+  /** Bucată supraviețuitoare reparcursă de `componente()` → componenta ei veche. */
+  readonly compVecheBucata: Map<number, number>
+  /** Obiectele componentelor vechi atinse (id → obiectul de dinainte de lot). */
+  readonly compVechi: Map<number, Componenta>
+  /** Componentele create sau refăcute pe loc. */
+  readonly noi: number[]
+  /** Dintre ele, cele care și-au păstrat id-ul (calea rapidă). */
+  readonly peLoc: number[]
+  /** Id-urile vechi care nu mai există. */
+  readonly moarte: number[]
+}
+
+export function capturaGoala(): CapturaLot {
+  return { compVecheCel: new Map(), compVecheBucata: new Map(), compVechi: new Map(), noi: [], peLoc: [], moarte: [] }
+}
+
+/** Indexul de dinainte de un recalcul complet (luat ÎNAINTE de `golesteIndex`, nu prin `Object.assign`). */
+export interface InstantaneuIndex {
+  readonly felii: ReadonlyMap<number, Felie>
+  readonly bComp: Int32Array
+  readonly comp: ReadonlyMap<number, Componenta>
+  readonly inreg: readonly (InregistrareFete | undefined)[]
+}
+
+/** Ce întoarce evidența unui lot. */
+export interface RezultatEvidenta {
+  readonly mase: EvidentaMase
+  /** Id nou → (sursă → celule), pentru componentele din `noi`. */
+  readonly prov: Map<number, Map<number, number>>
+  /** Componentele ∉ `noi` cu bucăți marcate de D+, pe ancoră. */
+  readonly feteSchimbate: number[]
+}
+
+/** Acumulatorul unei evidențe (sume întregi; ordinea adunărilor nu contează). */
+interface LucruMase {
+  readonly dSolMasiv: number
+  readonly P: Map<number, Map<number, ContoareMasaMutabile>>
+  readonly solIn: Map<number, Map<number, ContoareMasaMutabile>>
+  readonly apare: Map<number, ContoareMasaMutabile>
+  readonly solOut: Map<number, Map<number, ContoareMasaMutabile>>
+  readonly altaOut: Map<number, ContoareMasaMutabile>
+  readonly orig: Map<number, { cer: number; nec: number; sol: Map<number, number> }>
+  readonly prov: Map<number, Map<number, number>>
+  /** Componentele noi pentru care se ține `prov` (cele din `noi`). */
+  readonly cuProv: ReadonlySet<number>
+  abateri: number
+}
+
+function lucruMase(dSolMasiv: number, cuProv: ReadonlySet<number>): LucruMase {
+  return { dSolMasiv, P: new Map(), solIn: new Map(), apare: new Map(), solOut: new Map(), altaOut: new Map(), orig: new Map(), prov: new Map(), cuProv, abateri: 0 }
+}
+
+function vec(m: Map<number, ContoareMasaMutabile>, k: number): ContoareMasaMutabile {
+  let v = m.get(k)
+  if (v === undefined) {
+    v = contoareGoale()
+    m.set(k, v)
+  }
+  return v
+}
+
+function vec2(m: Map<number, Map<number, ContoareMasaMutabile>>, k1: number, k2: number): ContoareMasaMutabile {
+  let m2 = m.get(k1)
+  if (m2 === undefined) {
+    m2 = new Map()
+    m.set(k1, m2)
+  }
+  return vec(m2, k2)
+}
+
+function adunaProv(L: LucruMase, y: number, sursa: number, n: number): void {
+  if (!L.cuProv.has(y)) return
+  let h = L.prov.get(y)
+  if (h === undefined) {
+    h = new Map()
+    L.prov.set(y, h)
+  }
+  h.set(sursa, (h.get(sursa) ?? 0) + n)
+}
+
+function adunaContoare(acc: ContoareMasaMutabile, k: ContoareMasa, s: number): void {
+  acc.nAer += s * k.nAer
+  acc.nConstr += s * k.nConstr
+  acc.nSolMasiv += s * k.nSolMasiv
+  acc.nApa += s * k.nApa
+}
+
+function egaleContoare(a: ContoareMasa, b: ContoareMasa): boolean {
+  return a.nAer === b.nAer && a.nConstr === b.nConstr && a.nSolMasiv === b.nSolMasiv && a.nApa === b.nApa
+}
+
+const FATA_VECHE = new Int32Array(6)
+const FATA_NOUA = new Int32Array(6)
+
+/**
+ * Evaluarea LOCALĂ a unei celule (§3): aerul ei și cele 6 fețe, în geometria veche (dacă a fost aer acoperit, în
+ * componenta `sv`; vecinii pe materialele de dinainte de lot) și în cea nouă (dacă e, în `yn`). Un articol care
+ * există în ambele cu aceeași clasă PERSISTĂ (`P[yn][sv]`); altfel cel vechi iese (solul la `T_sol(d)`, restul la
+ * T-ul sursei) și cel nou intră (solul) sau apare. `origine` = sursa aerului unei celule noi (PROV_*), sau 0.
+ * `scadeNou`: celula e într-o bucată supraviețuitoare, a cărei înregistrare întreagă a intrat deja în `P` — se scade
+ * partea nouă și se adaugă evaluarea. Întoarce false dacă nimic nu s-a schimbat (celula se poate sări).
+ */
+function evalueazaCelula(L: LucruMase, r: CititorCamere, x: number, y: number, z: number, sv: number, yn: number, vechi: MaterialeVechi, origine: number, scadeNou: boolean): boolean {
+  const ds = L.dSolMasiv
+  for (let d = 0; d < 6; d++) {
+    FATA_VECHE[d] = sv >= 0 ? fataCuAdancime(r, x, y, z, d, ds, vechi) : 0
+    FATA_NOUA[d] = yn >= 0 ? fataCuAdancime(r, x, y, z, d, ds, null) : 0
+  }
+  if (sv >= 0 && sv === yn) {
+    let la = true
+    for (let d = 0; d < 6 && la; d++) if ((FATA_VECHE[d]! & 7) !== (FATA_NOUA[d]! & 7)) la = false
+    if (la && scadeNou) return false
+  }
+  if (scadeNou) {
+    const p = vec2(L.P, yn, sv)
+    p.nAer--
+    for (let d = 0; d < 6; d++) adunaClasa(p, (FATA_NOUA[d]! & 7) as ClasaMaseiId, -1)
+  }
+  // Aerul celulei.
+  if (sv >= 0 && yn >= 0) vec2(L.P, yn, sv).nAer++
+  else if (sv >= 0) vec(L.altaOut, sv).nAer++
+  else if (yn >= 0) {
+    vec(L.apare, yn).nAer++
+    let o = L.orig.get(yn)
+    if (o === undefined) {
+      o = { cer: 0, nec: 0, sol: new Map() }
+      L.orig.set(yn, o)
+    }
+    if (origine === PROV_CER || origine === PROV_NEC_CER) o.cer++
+    else {
+      const dc = origine <= PROV_NEC_SOL0 ? PROV_NEC_SOL0 - origine : PROV_SOL0 - origine
+      o.sol.set(dc, (o.sol.get(dc) ?? 0) + 1)
+    }
+    if (origine === PROV_NEC_CER || origine <= PROV_NEC_SOL0) o.nec++
+  }
+  // Fețele.
+  for (let d = 0; d < 6; d++) {
+    const kv = (FATA_VECHE[d]! & 7) as ClasaMaseiId
+    const kn = (FATA_NOUA[d]! & 7) as ClasaMaseiId
+    if (kv === kn && kv !== ClasaMasei.NIMIC) {
+      adunaClasa(vec2(L.P, yn, sv), kv, 1)
+      continue
+    }
+    if (kv !== ClasaMasei.NIMIC) {
+      if (eClasaDeSol(kv)) adunaClasa(vec2(L.solOut, sv, FATA_VECHE[d]! >> 3), kv, 1)
+      else adunaClasa(vec(L.altaOut, sv), kv, 1)
+    }
+    if (kn !== ClasaMasei.NIMIC) {
+      if (eClasaDeSol(kn)) adunaClasa(vec2(L.solIn, yn, FATA_NOUA[d]! >> 3), kn, 1)
+      else adunaClasa(vec(L.apare, yn), kn, 1)
+    }
+  }
+  return true
+}
+
+/** Sursa aerului unei celule care n-a fost aer acoperit: cer dacă materialul ei de dinainte era aer, altfel sol. */
+function origineCelulei(r: CititorCamere, x: number, y: number, z: number, vechi: MaterialeVechi): number {
+  const v = vechi === null ? undefined : vechi.get(cheieCelula(x, y, z))
+  // Needitată în lot: era aer și acum (acoperirea s-a schimbat), deci cer.
+  if (v === undefined || v === Material.AER) return PROV_CER
+  return PROV_SOL0 - adancimeIn(coloana(r, x, y), z)
+}
+
+/** Contoarele unei componente, pe înregistrările date de `inreg` (o funcție de slot). */
+function sumaInregistrari(bucati: readonly number[], inreg: (b: number) => InregistrareFete | undefined, L: LucruMase): ContoareMasaMutabile {
+  const acc = contoareGoale()
+  for (const b of bucati) {
+    const e = inreg(b)
+    if (e === undefined) {
+      L.abateri++
+      continue
+    }
+    adunaContoare(acc, e, 1)
+  }
+  return acc
+}
+
+function peAdancime(m: Map<number, ContoareMasaMutabile> | undefined): MasaPeAdancime[] {
+  if (m === undefined) return []
+  const out: MasaPeAdancime[] = []
+  // determinism-ok: se sortează pe adâncime.
+  for (const [d, masa] of m) out.push({ d, masa: { ...masa } })
+  return out.sort((a, b) => a.d - b.d)
+}
+
+function sumaPeAdancime(xs: readonly MasaPeAdancime[], acc: ContoareMasaMutabile): void {
+  for (const x of xs) adunaContoare(acc, x.masa, 1)
+}
+
+/**
+ * Asamblează evidența: componentele noi `A` (pe ancoră) și cele vechi atinse (pe ancora veche), cu verificarea
+ * identităților. `capNoua(y)` / `capVeche(s)` = contoarele lor; `obVechi(s)` = obiectul vechi; `restVechi`: la
+ * recalcul `altaIese` e restul (identitatea veche nu se verifică).
+ */
+function asambleaza(L: LucruMase, idx: IndexCamere, A: ReadonlySet<number>, moarte: readonly number[], obVechi: (s: number) => Componenta | undefined, capNoua: (y: number, c: Componenta) => ContoareMasa, capVeche: (c: Componenta) => ContoareMasa, restVechi: boolean): EvidentaMase {
+  const noi: MaseComponentaNoua[] = []
+  const persista = new Map<number, ContoareMasaMutabile>()
+  // determinism-ok: A se sortează pe ancoră mai jos; aici doar se adună.
+  for (const y of A) {
+    const comp = idx.comp.get(y)
+    if (comp === undefined) {
+      L.abateri++
+      continue
+    }
+    const cap = capNoua(y, comp)
+    const surse: SursaPersistenta[] = []
+    const sum = contoareGoale()
+    const ps = L.P.get(y)
+    if (ps !== undefined) {
+      // determinism-ok: sursele se sortează pe ancora veche.
+      for (const [s, masa] of ps) {
+        const ov = obVechi(s)
+        if (ov === undefined) {
+          L.abateri++
+          continue
+        }
+        adunaContoare(vec(persista, s), masa, 1)
+        // O masă persistentă negativă: o celulă scăzută din bucata ei fără să fi fost numărată acolo.
+        if (masa.nAer < 0 || masa.nConstr < 0 || masa.nSolMasiv < 0 || masa.nApa < 0) L.abateri++
+        if (masa.nAer === 0 && masa.nConstr === 0 && masa.nSolMasiv === 0 && masa.nApa === 0) continue
+        surse.push({ id: s, ancora: ov.ancora, masa: { ...masa } })
+        adunaContoare(sum, masa, 1)
+      }
+    }
+    surse.sort((a, b) => a.ancora - b.ancora)
+    const solIntra = peAdancime(L.solIn.get(y))
+    sumaPeAdancime(solIntra, sum)
+    const aparuta = { ...(L.apare.get(y) ?? contoareGoale()) }
+    adunaContoare(sum, aparuta, 1)
+    if (!egaleContoare(sum, cap)) L.abateri++
+    const o = L.orig.get(y)
+    const sol: { d: number; celule: number }[] = []
+    if (o !== undefined) {
+      // determinism-ok: se sortează pe adâncime.
+      for (const [d, n] of o.sol) sol.push({ d, celule: n })
+      sol.sort((a, b) => a.d - b.d)
+    }
+    noi.push({ id: y, ancora: comp.ancora, capacitate: cap, surse, solIntra, aparuta, origine: { cer: o?.cer ?? 0, sol, nec: o?.nec ?? 0 } })
+  }
+  noi.sort((a, b) => a.ancora - b.ancora)
+
+  // Componentele vechi atinse: sursele, cele din care a ieșit masă, cele moarte.
+  const B = new Set<number>(moarte)
+  // determinism-ok: B se sortează pe ancora veche mai jos.
+  for (const s of persista.keys()) B.add(s)
+  // determinism-ok: idem.
+  for (const s of L.solOut.keys()) B.add(s)
+  // determinism-ok: idem.
+  for (const s of L.altaOut.keys()) B.add(s)
+  const vechi: MaseComponentaVeche[] = []
+  // determinism-ok: rezultatul se sortează pe ancora veche.
+  for (const s of B) {
+    const ov = obVechi(s)
+    if (ov === undefined) {
+      L.abateri++
+      continue
+    }
+    const cap = capVeche(ov)
+    const pers = { ...(persista.get(s) ?? contoareGoale()) }
+    const solIese = peAdancime(L.solOut.get(s))
+    const alta = { ...(L.altaOut.get(s) ?? contoareGoale()) }
+    const sum = contoareGoale()
+    adunaContoare(sum, pers, 1)
+    sumaPeAdancime(solIese, sum)
+    if (restVechi) {
+      // Recalculul: altaIese = ce rămâne din capacitatea veche (editările pierdute din inel nu se pot evalua).
+      const r2 = { ...cap }
+      adunaContoare(r2, sum, -1)
+      vechi.push({ id: s, ancora: ov.ancora, capacitate: cap, persista: pers, solIese, altaIese: r2 })
+      continue
+    }
+    adunaContoare(sum, alta, 1)
+    if (!egaleContoare(sum, cap)) L.abateri++
+    vechi.push({ id: s, ancora: ov.ancora, capacitate: cap, persista: pers, solIese, altaIese: alta })
+  }
+  vechi.sort((a, b) => a.ancora - b.ancora)
+  return { noi, vechi, abateri: L.abateri }
+}
+
+/**
+ * Evidența C3 a unui lot obișnuit (§3), pe indexul de DUPĂ el. Masa se schimbă doar pe articolele (aerul și
+ * fețele) celulelor din `X ∪ N6(E)`: `X` = celulele editate și rulajele de aer de sub ele (lema din antetul
+ * camere.ts: singurele a căror acoperire se poate schimba), `E` = cele editate (singurele al căror material se
+ * schimbă). Acolo evaluarea e LOCALĂ, pe materialele vechi din jurnal; în rest masa persistă și doar se mută de la
+ * componenta veche la cea nouă: celulă cu celulă în feliile refăcute, pe înregistrarea bucății în cele
+ * supraviețuitoare (citită DUPĂ `actualizeazaFete`, deci cu fețele de acum).
+ */
+export function evidentaMaselor(idx: IndexCamere, r: CititorCamere, lot: readonly number[], vechi: MaterialeVechi, cap: CapturaLot, rf: RezultatFete, felii: readonly number[]): RezultatEvidenta {
+  const noiSet = new Set(cap.noi)
+  const L = lucruMase(idx.fete.dSolMasiv, noiSet)
+  const refacute = new Set(felii)
+
+  // Componentele noi atinse: cele refăcute, plus cele cu bucăți marcate de D+ (fețele lor s-au putut schimba).
+  const A = new Set<number>(noiSet)
+  const feteSchimbate: number[] = []
+  for (const b of [...rf.marcate].sort((a, b2) => a - b2)) {
+    if (idx.bVecini[b] === undefined) continue
+    const c = idx.bComp[b]!
+    if (c < 0 || A.has(c)) continue
+    A.add(c)
+    feteSchimbate.push(c)
+  }
+
+  // Celulele de evaluat local: X ∪ N6(E), sortate (cheia (z, y, x)).
+  const aproape = new Set<number>()
+  for (let i = 0; i < lot.length; i += 4) {
+    const x = lot[i]!
+    const y = lot[i + 1]!
+    const z = lot[i + 2]!
+    for (let zz = lot[i + 3]!; zz <= z; zz++) aproape.add(cheieCelula(x, y, zz))
+    for (let d = 0; d < 6; d++) {
+      const nx = x + DX[d]!
+      const ny = y + DY[d]!
+      if (nx < 0 || ny < 0 || nx >= WORLD_CELLS || ny >= WORLD_CELLS) continue
+      aproape.add(cheieCelula(nx, ny, z + DZ[d]!))
+    }
+  }
+  const compVeche = (x: number, y: number, z: number): number => {
+    const kf = cheieFelie(Math.floor(x / FELIE), Math.floor(y / FELIE), z)
+    const s = (y - Math.floor(y / FELIE) * FELIE) * FELIE + (x - Math.floor(x / FELIE) * FELIE)
+    const arr = cap.compVecheCel.get(kf)
+    if (arr !== undefined) return arr[s]!
+    const b = bucataLa(idx, x, y, z)
+    if (b < 0) return -1
+    return cap.compVecheBucata.get(b) ?? idx.bComp[b]!
+  }
+  // Pe feliile refăcute, celulele de evaluat local ca mască (256 de celule): un Set pe celulă costa cât restul.
+  const masca = new Map<number, Uint8Array>()
+  for (const kc of [...aproape].sort((a, b) => a - b)) {
+    const { x, y, z } = decodeazaCelula(kc)
+    const bxc = Math.floor(x / FELIE)
+    const byc = Math.floor(y / FELIE)
+    const kfc = cheieFelie(bxc, byc, z)
+    const inRefacuta = refacute.has(kfc)
+    if (inRefacuta) {
+      let m = masca.get(kfc)
+      if (m === undefined) {
+        m = new Uint8Array(FELIE * FELIE)
+        masca.set(kfc, m)
+      }
+      m[(y - byc * FELIE) * FELIE + (x - bxc * FELIE)] = 1
+    }
+    const sv = compVeche(x, y, z)
+    const b = bucataLa(idx, x, y, z)
+    const yn = b < 0 ? -1 : idx.bComp[b]!
+    if (sv < 0 && yn < 0) continue
+    const origine = sv < 0 ? origineCelulei(r, x, y, z, vechi) : 0
+    const schimbata = evalueazaCelula(L, r, x, y, z, sv, yn, vechi, origine, !inRefacuta && yn >= 0)
+    if (inRefacuta && yn >= 0) adunaProv(L, yn, sv >= 0 ? sv : origine, 1)
+    // O celulă cu masa schimbată într-o componentă pe care D+ n-a marcat-o: cache-ul de fețe ar fi vechi.
+    if (schimbata && yn >= 0 && !A.has(yn)) {
+      L.abateri++
+      A.add(yn)
+    }
+  }
+
+  // Feliile refăcute, în afara celulelor de mai sus: masa persistă. O bucată nouă „curată" (toate celulele ei din
+  // aceeași componentă veche, niciuna de evaluat local) intră întreagă, pe înregistrarea ei; restul, celulă cu
+  // celulă (o singură evaluare: vecinii lor n-au fost editați).
+  for (const kf of felii) {
+    const arr = cap.compVecheCel.get(kf)
+    if (arr === undefined) continue
+    const fn = idx.felii.get(kf)
+    const { bx, by, z } = decodeazaFelie(kf)
+    const m = masca.get(kf)
+    // Bucata nouă → componenta veche comună a celulelor ei, sau −2 (amestecată, ori cu celule de evaluat local).
+    const curata = new Map<number, number>()
+    if (fn !== undefined) {
+      for (let s = 0; s < FELIE * FELIE; s++) {
+        const b = fn.cel[s]!
+        if (b < 0) continue
+        const sv = arr[s]!
+        const c = curata.get(b)
+        if (sv < 0 || (m !== undefined && m[s] === 1)) curata.set(b, -2)
+        else if (c === undefined) curata.set(b, sv)
+        else if (c !== sv) curata.set(b, -2)
+      }
+    }
+    // determinism-ok: doar sume întregi pe bucăți; ordinea adunării nu contează.
+    for (const [b, sv] of curata) {
+      if (sv < 0) continue
+      const e = idx.fete.inreg[b]
+      if (e === undefined) {
+        L.abateri++
+        continue
+      }
+      adunaContoare(vec2(L.P, idx.bComp[b]!, sv), e, 1)
+      adunaProv(L, idx.bComp[b]!, sv, idx.bCelule[b]!)
+    }
+    for (let s = 0; s < FELIE * FELIE; s++) {
+      const sv = arr[s]!
+      const b = fn === undefined ? -1 : fn.cel[s]!
+      if (b >= 0 && curata.get(b)! >= 0) continue
+      const yn = b < 0 ? -1 : idx.bComp[b]!
+      if (sv < 0 && yn < 0) continue
+      if (m !== undefined && m[s] === 1) continue
+      const x = bx * FELIE + (s % FELIE)
+      const y = by * FELIE + ((s / FELIE) | 0)
+      if (sv < 0 || yn < 0) {
+        // Acoperire schimbată în afara rulajelor lotului: lema ar fi greșită. Se evaluează local, ca să rămână
+        // evidența întreagă, și se numără.
+        L.abateri++
+        const origine = sv < 0 ? origineCelulei(r, x, y, z, vechi) : 0
+        evalueazaCelula(L, r, x, y, z, sv, yn, vechi, origine, false)
+        if (yn >= 0) adunaProv(L, yn, sv >= 0 ? sv : origine, 1)
+        continue
+      }
+      capacitateCelulei(r, x, y, z, L.dSolMasiv, null, vec2(L.P, yn, sv))
+      adunaProv(L, yn, sv, 1)
+    }
+  }
+
+  // Bucățile supraviețuitoare ale componentelor atinse: înregistrarea întreagă persistă din componenta lor veche. În
+  // aceeași trecere se adună capacitatea componentei noi (O(bucăți), ca volumul — hub-ul minei e în `noi` la aproape
+  // fiecare lot, cu ~1.550 de bucăți); bucățile noi și sloturile rescrise se recunosc după un marcaj, nu prin Set-uri.
+  const mk = marcaje(idx.bFelie.length)
+  for (const kf of felii) {
+    const fn = idx.felii.get(kf)
+    if (fn !== undefined) for (const b of fn.bucati) mk[b] = mk[b]! | 1
+  }
+  // determinism-ok: doar marchează sloturi; ordinea nu contează.
+  for (const b of rf.inregVechi.keys()) mk[b] = mk[b]! | 2
+  const capNoi = new Map<number, ContoareMasa>()
+  const faraReparcurse = cap.compVecheBucata.size === 0
+  for (const y of [...A].sort((a, b) => a - b)) {
+    const comp = idx.comp.get(y)
+    if (comp === undefined) continue
+    const tot = contoareGoale()
+    let svUltim = -1
+    let tinta: ContoareMasaMutabile | null = null
+    let celule = 0
+    for (const b of comp.bucati) {
+      const e = idx.fete.inreg[b]
+      if (e === undefined) {
+        L.abateri++
+        continue
+      }
+      tot.nAer += e.nAer
+      tot.nConstr += e.nConstr
+      tot.nSolMasiv += e.nSolMasiv
+      tot.nApa += e.nApa
+      if ((mk[b]! & 1) !== 0) continue
+      const sv = faraReparcurse ? y : (cap.compVecheBucata.get(b) ?? y)
+      if (sv !== svUltim || tinta === null) {
+        if (celule > 0) adunaProv(L, y, svUltim, celule)
+        tinta = vec2(L.P, y, sv)
+        svUltim = sv
+        celule = 0
+      }
+      tinta.nAer += e.nAer
+      tinta.nConstr += e.nConstr
+      tinta.nSolMasiv += e.nSolMasiv
+      tinta.nApa += e.nApa
+      celule += idx.bCelule[b]!
+    }
+    if (celule > 0) adunaProv(L, y, svUltim, celule)
+    capNoi.set(y, tot)
+  }
+
+  const obVechi = (s: number): Componenta | undefined => cap.compVechi.get(s) ?? idx.comp.get(s)
+  const capVeche = (c: Componenta): ContoareMasa => {
+    const acc = contoareGoale()
+    for (const b of c.bucati) {
+      const e = (mk[b]! & 2) !== 0 ? rf.inregVechi.get(b) : idx.fete.inreg[b]
+      if (e === undefined) {
+        L.abateri++
+        continue
+      }
+      acc.nAer += e.nAer
+      acc.nConstr += e.nConstr
+      acc.nSolMasiv += e.nSolMasiv
+      acc.nApa += e.nApa
+    }
+    return acc
+  }
+  const mase = asambleaza(L, idx, A, cap.moarte, obVechi, (y, c) => capNoi.get(y) ?? sumaInregistrari(c.bucati, (b) => idx.fete.inreg[b], L), capVeche, false)
+  // Marcajul se golește: e o zgârietură comună tuturor loturilor.
+  for (const kf of felii) {
+    const fn = idx.felii.get(kf)
+    if (fn !== undefined) for (const b of fn.bucati) mk[b] = 0
+  }
+  // determinism-ok: doar golește marcaje.
+  for (const b of rf.inregVechi.keys()) mk[b] = 0
+  feteSchimbate.sort((a, b) => idx.comp.get(a)!.ancora - idx.comp.get(b)!.ancora)
+  return { mase, prov: L.prov, feteSchimbate }
+}
+
+/** Zgârietura de marcaje pe sloturi de bucăți (TRANSIENTĂ, golită după fiecare lot), crescută la nevoie. */
+let MARCAJ = new Uint8Array(64)
+function marcaje(n: number): Uint8Array {
+  if (MARCAJ.length < n) MARCAJ = new Uint8Array(Math.max(n, 2 * MARCAJ.length))
+  return MARCAJ
+}
+
+/**
+ * Evidența unui RECALCUL complet (lot > JURNAL_CAP, alt teren): pe indexul nou și instantaneul celui vechi (null
+ * = alt teren, nicio suprapunere). Materialele vechi: `vechi` (partea validă a inelului, prima apariție), plus ce
+ * se știe sigur din cele două indexuri — o celulă care era aer acoperit era AER; o celulă acoperită acum, care
+ * nu era și nu e în inel, e NEC: sol natural sub `gNat`, cer deasupra (regula solului natural). Toate celulele
+ * se evaluează local; ce nu se poate ști (editările ieșite din inel) ajunge în `altaIese`, ca rest.
+ */
+export function evidentaRecalcul(idx: IndexCamere, r: CititorCamere, inst: InstantaneuIndex | null, vechi: Map<number, number>): RezultatEvidenta {
+  const noiSet = new Set<number>(idx.comp.keys())
+  const L = lucruMase(idx.fete.dSolMasiv, noiSet)
+  const compVeche = (x: number, y: number, z: number): number => {
+    if (inst === null) return -1
+    const bx = Math.floor(x / FELIE)
+    const by = Math.floor(y / FELIE)
+    const f = inst.felii.get(cheieFelie(bx, by, z))
+    if (f === undefined) return -1
+    const b = f.cel[(y - by * FELIE) * FELIE + (x - bx * FELIE)]!
+    return b < 0 ? -1 : inst.bComp[b]!
+  }
+  // Celulele: cele de aer acoperit acum, apoi cele care erau și nu mai sunt.
+  const celule: number[] = []
+  for (const kf of idx.chei) {
+    const f = idx.felii.get(kf)!
+    const { bx, by, z } = decodeazaFelie(kf)
+    for (let s = 0; s < FELIE * FELIE; s++) if (f.cel[s]! >= 0) celule.push(cheieCelula(bx * FELIE + (s % FELIE), by * FELIE + ((s / FELIE) | 0), z))
+  }
+  // Celulele de aer acoperit ale indexului vechi.
+  const vechiAcoperite = new Set<number>()
+  if (inst !== null) {
+    for (const kf of [...inst.felii.keys()].sort((a, b) => a - b)) {
+      const f = inst.felii.get(kf)!
+      const { bx, by, z } = decodeazaFelie(kf)
+      for (let s = 0; s < FELIE * FELIE; s++) {
+        if (f.cel[s]! < 0) continue
+        const x = bx * FELIE + (s % FELIE)
+        const y = by * FELIE + ((s / FELIE) | 0)
+        const kc = cheieCelula(x, y, z)
+        vechiAcoperite.add(kc)
+        if (bucataLa(idx, x, y, z) >= 0) continue
+        // Era aer acoperit și nu mai e: materialul ei de dinainte era AER, oricum ar spune inelul.
+        vechi.set(kc, Material.AER)
+        celule.push(kc)
+      }
+    }
+  }
+  // Acoperite acum, n-au fost aer acoperit, nu sunt în inel: NEC, după solul natural. Materialul presupus intră în
+  // `vechi` doar dacă o celulă veche are o față spre ea; originea se scrie direct.
+  const necunoscute = new Map<number, number>()
+  for (const kc of celule) {
+    if (vechi.has(kc) || vechiAcoperite.has(kc)) continue
+    const { x, y, z } = decodeazaCelula(kc)
+    const col = coloana(r, x, y)
+    const sub = z <= col.gNat
+    necunoscute.set(kc, sub ? PROV_NEC_SOL0 - adancimeIn(col, z) : PROV_NEC_CER)
+    let langaVeche = false
+    for (let d = 0; d < 6 && !langaVeche; d++) {
+      const nx = x + DX[d]!
+      const ny = y + DY[d]!
+      if (nx < 0 || ny < 0 || nx >= WORLD_CELLS || ny >= WORLD_CELLS) continue
+      langaVeche = vechiAcoperite.has(cheieCelula(nx, ny, z + DZ[d]!))
+    }
+    if (langaVeche) vechi.set(kc, sub ? Material.PAMANT : Material.AER)
+  }
+  celule.sort((a, b) => a - b)
+  const atinsa = (x: number, y: number, z: number): boolean => {
+    if (vechi.has(cheieCelula(x, y, z))) return true
+    for (let d = 0; d < 6; d++) {
+      const nx = x + DX[d]!
+      const ny = y + DY[d]!
+      if (nx < 0 || ny < 0 || nx >= WORLD_CELLS || ny >= WORLD_CELLS) continue
+      if (vechi.has(cheieCelula(nx, ny, z + DZ[d]!))) return true
+    }
+    return false
+  }
+  for (const kc of celule) {
+    const { x, y, z } = decodeazaCelula(kc)
+    const sv = compVeche(x, y, z)
+    const b = bucataLa(idx, x, y, z)
+    const yn = b < 0 ? -1 : idx.bComp[b]!
+    if (sv >= 0 && yn >= 0 && !atinsa(x, y, z)) {
+      // Nici ea, nici vecinii ei nu s-au schimbat (după ce se știe): masa ei persistă, o singură evaluare.
+      capacitateCelulei(r, x, y, z, L.dSolMasiv, null, vec2(L.P, yn, sv))
+      adunaProv(L, yn, sv, 1)
+      continue
+    }
+    const origine = sv >= 0 ? 0 : (necunoscute.get(kc) ?? origineCelulei(r, x, y, z, vechi))
+    evalueazaCelula(L, r, x, y, z, sv, yn, vechi, origine, false)
+    if (yn >= 0) adunaProv(L, yn, sv >= 0 ? sv : origine, 1)
+  }
+  const moarte = inst === null ? [] : [...inst.comp.keys()].sort((a, b) => a - b)
+  const obVechi = (s: number): Componenta | undefined => (inst === null ? undefined : inst.comp.get(s))
+  const mase = asambleaza(L, idx, noiSet, moarte, obVechi, (_y, c) => sumaInregistrari(c.bucati, (b) => idx.fete.inreg[b], L), (c) => sumaInregistrari(c.bucati, (b) => inst?.inreg[b], L), true)
+  return { mase, prov: L.prov, feteSchimbate: [] }
 }
 
 // ---------------------------------------------------------------------------

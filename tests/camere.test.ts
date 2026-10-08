@@ -318,14 +318,15 @@ test('depasirea jurnalului reconstruieste complet si da acelasi index', () => {
   }
   for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) fill(w.terrain, wx + dx, wy + dy, g + 4, Material.PAMANT)
   const rez = sincronizeazaCamere(w.camere, w.terrain)
-  assert.deepEqual(rez, { felii: [], recalcul: true }, 'contractul: depasirea e un recalcul')
+  assert.deepEqual({ felii: rez.felii, recalcul: rez.recalcul }, { felii: [], recalcul: true }, 'contractul: depasirea e un recalcul')
   assert.equal(w.camere.stat.recalculari, inainte + 1)
   assert.equal(w.camere.fete.stat.recalculari, feteInainte + 1, 'cache-ul de fete s-a refacut o data')
   egalCuRecalculul(w, 'dupa depasire')
   assert.equal(listaComponente(w.camere).length, 1)
   // Si un index al ALTUI teren: tot recalcul.
   const alta = sitPlat(777, 10).w
-  assert.deepEqual(sincronizeazaCamere(w.camere, alta.terrain), { felii: [], recalcul: true })
+  const rezAlta = sincronizeazaCamere(w.camere, alta.terrain)
+  assert.deepEqual({ felii: rezAlta.felii, recalcul: rezAlta.recalcul }, { felii: [], recalcul: true })
 })
 
 // --- punctele fixe ---------------------------------------------------------------

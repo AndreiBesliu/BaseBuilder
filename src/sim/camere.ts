@@ -95,15 +95,25 @@
  * ANCORA unei componente (cea mai mică celulă, ordonată (z, y, x)) e geometrică și independentă de
  * istorie; enumerarea e sortată pe ancoră. Ancora nu e identitate peste editări (o groapă în podea o
  * mută) — tăietura 2 transferă starea pe celule, în sincronizare, pe componentele aruncate.
+ *
+ * ## Proveniența (t.2b §3)
+ *
+ * `sincronizeazaCamere` întoarce `SchimbareCamere`: pe lângă feliile refăcute, componentele moarte, cele noi (pe
+ * ancoră), cele păstrate pe loc (`peLoc` = id păstrat, NU „aceeași încăpere"), sursele pe celule (`prov`) și
+ * EVIDENȚA C3 A MASELOR (fete.ts, `evidentaMaselor`) — pe orice lot, și pe ieșirea devreme (un `fill` pe apa de sub
+ * podeaua unei case schimbă masa fără nicio felie refăcută). Captura stării vechi: în `refaFelie`, ÎNAINTE de
+ * `stergeBucata` (componenta veche a fiecărei celule), în `componente()` (a bucăților reparcurse) și în
+ * `caleRapida`; materialele vechi, din jurnalul terenului (`jurnalMat`, prima apariție în lot); la recalcul,
+ * instantaneul indexului se ia înainte de `golesteIndex`. Temperatura (temperatura.ts) vine NUMAI din evidență.
  */
 
 import type { Terrain } from './terrain/terrain.ts'
 import { ensureChunk, JURNAL_CAP, WORLD_CELLS } from './terrain/terrain.ts'
 import { CHUNK_CELLS, cellHeightCm, decodeColumn, groundLevelFromCm, Material, promotedBaseM, surfaceMatAt, VOXEL_LEVELS } from './terrain/chunk.ts'
-import type { CacheFete } from './fete.ts'
+import type { CacheFete, CapturaLot, EvidentaMase, InstantaneuIndex } from './fete.ts'
 // Import circular (fete.ts citește de aici cititorul și indexul): sigur, fiindcă niciun modul nu folosește la
 // evaluarea lui o legătură venită din celălalt — vezi antetul din fete.ts.
-import { actualizeazaFete, cacheFete, D_SOL_MASIV_IMPLICIT, K_FETE_IMPLICIT, reconstruiesteFete } from './fete.ts'
+import { actualizeazaFete, cacheFete, capturaGoala, D_SOL_MASIV_IMPLICIT, evidentaMaselor, evidentaRecalcul, K_FETE_IMPLICIT, reconstruiesteFete } from './fete.ts'
 
 /** Latura unei felii — blocul regiunilor. */
 export const FELIE = 16
@@ -436,9 +446,23 @@ const coadaFelie = new Int32Array(FELIE_CELULE)
  *
  * `inChei` = fals doar în recalculul complet, care reface lista `chei` o singură dată, la final.
  */
-function refaFelie(idx: IndexCamere, r: CititorCamere, cheie: number, noi: number[], atinse: Set<number>, moarte: Set<number>, inChei = true): void {
+function refaFelie(idx: IndexCamere, r: CititorCamere, cheie: number, noi: number[], atinse: Set<number>, moarte: Set<number>, inChei = true, captura: CapturaLot | null = null): void {
   idx.stat.feliiRefacute++
   const veche = idx.felii.get(cheie)
+  // Proveniența (t.2b §3): componenta VECHE a fiecărei celule, înainte ca `stergeBucata` să pună bComp = −1.
+  if (captura !== null) {
+    const arr = new Int32Array(FELIE_CELULE).fill(-1)
+    if (veche) {
+      for (let s = 0; s < FELIE_CELULE; s++) {
+        const b = veche.cel[s]!
+        if (b < 0) continue
+        const c = idx.bComp[b]!
+        arr[s] = c
+        if (c >= 0 && !captura.compVechi.has(c)) captura.compVechi.set(c, idx.comp.get(c)!)
+      }
+    }
+    captura.compVecheCel.set(cheie, arr)
+  }
   if (veche) {
     for (const id of veche.bucati) stergeBucata(idx, id, atinse, moarte)
     idx.felii.delete(cheie)
@@ -526,7 +550,7 @@ function refaFelie(idx: IndexCamere, r: CititorCamere, cheie: number, noi: numbe
  * neatinse își păstrează id-ul și lista. Id-urile moarte se eliberează DUPĂ parcurgeri, ca un id nou
  * să nu poată fi confundat cu unul care tocmai a murit.
  */
-function componente(idx: IndexCamere, seminte: readonly number[], moarte: Set<number>): void {
+function componente(idx: IndexCamere, seminte: readonly number[], moarte: Set<number>, captura: CapturaLot | null = null): void {
   const vazut = new Set<number>()
   const coada: number[] = []
   for (const s of seminte) {
@@ -543,6 +567,10 @@ function componente(idx: IndexCamere, seminte: readonly number[], moarte: Set<nu
       const p = coada.pop()!
       idx.stat.bucatiVizitate++
       const vechi = idx.bComp[p]!
+      if (captura !== null && vechi >= 0 && !captura.compVecheBucata.has(p)) {
+        captura.compVecheBucata.set(p, vechi)
+        if (!captura.compVechi.has(vechi)) captura.compVechi.set(vechi, idx.comp.get(vechi)!)
+      }
       if (vechi >= 0 && vechi !== id) moarte.add(vechi)
       idx.bComp[p] = id
       bucati.push(p)
@@ -560,9 +588,13 @@ function componente(idx: IndexCamere, seminte: readonly number[], moarte: Set<nu
     bucati.sort((a, b) => a - b)
     idx.comp.set(id, { id, ancora, volum, deschise, bucati })
     moarte.delete(id)
+    if (captura !== null) captura.noi.push(id)
   }
   for (const c of [...moarte].sort((a, b) => a - b)) {
-    if (idx.comp.delete(c)) idx.cLibere.push(c)
+    if (idx.comp.delete(c)) {
+      idx.cLibere.push(c)
+      if (captura !== null) captura.moarte.push(c)
+    }
   }
 }
 
@@ -579,7 +611,7 @@ function componente(idx: IndexCamere, seminte: readonly number[], moarte: Set<nu
  * lor sunt toti in C. C isi pastreaza id-ul si se reface pe loc (lista, volumul, fetele, ancora), fara BFS.
  * Altfel, `false`, si sincronizarea cade pe `componente()`, ca inainte.
  */
-function caleRapida(idx: IndexCamere, noi: readonly number[], atinse: ReadonlySet<number>, moarte: Set<number>): boolean {
+function caleRapida(idx: IndexCamere, noi: readonly number[], atinse: ReadonlySet<number>, moarte: Set<number>, captura: CapturaLot | null = null): boolean {
   if (moarte.size > 1) return false
   let c = -1
   // determinism-ok: cel mult un element.
@@ -648,6 +680,12 @@ function caleRapida(idx: IndexCamere, noi: readonly number[], atinse: ReadonlySe
     volum += idx.bCelule[b]!
     deschise += idx.bDeschise[b]!
     if (idx.bAncora[b]! < ancora) ancora = idx.bAncora[b]!
+  }
+  if (captura !== null) {
+    // Id păstrat, celule schimbate: „peLoc" nu înseamnă „aceeași încăpere" (§3) — T vine din evidența maselor.
+    if (!captura.compVechi.has(c)) captura.compVechi.set(c, vechi)
+    captura.noi.push(c)
+    captura.peLoc.push(c)
   }
   idx.comp.set(c, { id: c, ancora, volum, deschise, bucati })
   moarte.clear()
@@ -725,27 +763,78 @@ export interface SincronizareCamere {
   readonly recalcul: boolean
 }
 
-const NIMIC: SincronizareCamere = { felii: [], recalcul: false }
-const RECALCUL: SincronizareCamere = { felii: [], recalcul: true }
+/**
+ * Contractul t.2b (§3): ce a făcut sincronizarea, cu proveniența. Id-urile vechi (`moarte`, sursele din `prov` și
+ * `mase`) sunt sloturi ale indexului de DINAINTE de lot; cele noi, ale indexului de după — valabile până la lotul
+ * următor (la recalcul un id nou poate fi chiar al unei surse moarte).
+ */
+export interface SchimbareCamere extends SincronizareCamere {
+  /** Id-urile vechi care nu mai există, crescător. */
+  readonly moarte: readonly number[]
+  /** Componentele noi sau refăcute (pe loc ori nu), pe ancoră. */
+  readonly noi: readonly number[]
+  /** Dintre `noi`, cele care și-au păstrat id-ul (calea rapidă): „id păstrat", NU „aceeași încăpere". */
+  readonly peLoc: readonly number[]
+  /** Id nou → (sursă → celule); sursa = id vechi sau `PROV_*` (fete.ts). Pentru componentele din `noi`. */
+  readonly prov: ReadonlyMap<number, ReadonlyMap<number, number>>
+  /** Evidența C3 a maselor (fete.ts, `evidentaMaselor`): din ea, și numai din ea, vine T-ul. */
+  readonly mase: EvidentaMase
+  /** Componentele ∉ `noi` ale căror fețe le-a atins D+ (masa lor s-a putut schimba cu aceleași celule), pe ancoră. */
+  readonly feteSchimbate: readonly number[]
+}
+
+// Evidența goală scrisă aici, nu importată: la evaluarea modulului, legăturile din fete.ts (importul circular) pot
+// să nu existe încă — antetul din fete.ts.
+const NIMIC: SchimbareCamere = { felii: [], recalcul: false, moarte: [], noi: [], peLoc: [], prov: new Map(), mase: { noi: [], vechi: [], abateri: 0 }, feteSchimbate: [] }
+
+/**
+ * Recalculul cu proveniență (lot > JURNAL_CAP, alt teren): INSTANTANEUL indexului vechi se ia ÎNAINTE de
+ * `golesteIndex` (care golește `felii` și `comp` pe loc, dar înlocuiește `bComp` și înregistrările fețelor), apoi
+ * `reconstruiesteCamere` normal — K-ul, `dSolMasiv`, `epocaFete` (monotonă) și contoarele rămân ale indexului; un
+ * `Object.assign` cu un index nou le-ar fi resetat (B2). Partea validă a inelului (ultimele JURNAL_CAP editări) dă
+ * materialele vechi, prima apariție; restul după solul natural (NEC). La alt teren nu se suprapune nimic.
+ */
+function recalculCuProvenienta(idx: IndexCamere, t: Terrain, suprapune: boolean): SchimbareCamere {
+  const inst: InstantaneuIndex | null = suprapune ? { felii: new Map(idx.felii), bComp: idx.bComp, comp: new Map(idx.comp), inreg: idx.fete.inreg } : null
+  const vechi = new Map<number, number>()
+  if (suprapune) {
+    for (let i = Math.max(idx.vazute, t.editari - JURNAL_CAP); i < t.editari; i++) {
+      const j = (i % JURNAL_CAP) * 3
+      const kc = cheieCelula(t.jurnal[j]!, t.jurnal[j + 1]!, t.jurnal[j + 2]!)
+      if (!vechi.has(kc)) vechi.set(kc, t.jurnalMat[i % JURNAL_CAP]!)
+    }
+  }
+  reconstruiesteCamere(idx, t)
+  const r = cititorCamere(t)
+  const ev = evidentaRecalcul(idx, r, inst, vechi)
+  idx.stat.coloaneCitite += r.citite
+  idx.stat.coloaneNepromovate += r.nepromovate
+  return {
+    felii: [],
+    recalcul: true,
+    moarte: inst === null ? [] : [...inst.comp.keys()].sort((a, b) => a - b),
+    noi: listaComponente(idx).map((c) => c.id),
+    peLoc: [],
+    prov: ev.prov,
+    mase: ev.mase,
+    feteSchimbate: [],
+  }
+}
 
 /**
  * Aduce indexul la zi cu jurnalul terenului. Se cheamă DOAR din punctele fixe ale simulării
  * (sfârșitul tickului, sfârșitul comenzilor de teren) — vezi antetul.
  */
-export function sincronizeazaCamere(idx: IndexCamere, t: Terrain): SincronizareCamere {
-  if (idx.teren !== t) {
-    reconstruiesteCamere(idx, t)
-    return RECALCUL
-  }
+export function sincronizeazaCamere(idx: IndexCamere, t: Terrain): SchimbareCamere {
+  if (idx.teren !== t) return recalculCuProvenienta(idx, t, false)
   const n = t.editari - idx.vazute
   if (n === 0) return NIMIC
-  if (n < 0 || n > JURNAL_CAP) {
-    reconstruiesteCamere(idx, t)
-    return RECALCUL
-  }
+  if (n < 0 || n > JURNAL_CAP) return recalculCuProvenienta(idx, t, n > 0)
   idx.stat.sincronizari++
   const r = cititorCamere(t)
   const murdare = new Set<number>()
+  // Materialul de DINAINTE de lot al fiecărei celule editate: prima ei apariție în lot (jurnalul terenului).
+  const matVechi = new Map<number, number>()
   // Editările lotului, pentru D+ (fete.ts): x, y, z și capătul de jos al rulajului de aer de sub ea.
   const lot: number[] = []
   const areFelie = (x: number, y: number, z: number): boolean => idx.felii.has(cheieFelie(Math.floor(x / FELIE), Math.floor(y / FELIE), z))
@@ -755,6 +844,8 @@ export function sincronizeazaCamere(idx: IndexCamere, t: Terrain): SincronizareC
     const x = t.jurnal[j]!
     const y = t.jurnal[j + 1]!
     const z = t.jurnal[j + 2]!
+    const kc = cheieCelula(x, y, z)
+    if (!matVechi.has(kc)) matVechi.set(kc, t.jurnalMat[i % JURNAL_CAP]!)
     // Celulele schimbate: e și rulajul de aer de sub ea, pe terenul de acum (lema din antet).
     let jos = z
     while (esteAer(r, x, y, jos - 1)) jos--
@@ -778,10 +869,13 @@ export function sincronizeazaCamere(idx: IndexCamere, t: Terrain): SincronizareC
   if (murdare.size === 0) {
     // Fețele se schimbă și fără nicio felie refăcută — pământ pe acoperiș, o podea pe sol peste o pivniță,
     // al doilea strat de acoperiș —, deci D+ rulează ÎNAINTEA ieșirii devreme (design-temperatura-v2 §4.4).
-    actualizeazaFete(idx, r, lot, [], [])
+    // Și masa se schimbă (un `fill` pe apa de sub podeaua unei case: C' cu epoca pe loc): evidența C3 rulează
+    // pe ORICE lot (t.2b §3).
+    const rf = actualizeazaFete(idx, r, lot, [], [])
+    const ev = evidentaMaselor(idx, r, lot, matVechi, capturaGoala(), rf, [])
     idx.stat.coloaneCitite += r.citite
     idx.stat.coloaneNepromovate += r.nepromovate
-    return NIMIC
+    return { felii: [], recalcul: false, moarte: [], noi: [], peLoc: [], prov: ev.prov, mase: ev.mase, feteSchimbate: ev.feteSchimbate }
   }
   const felii = [...murdare].sort((a, b) => a - b)
   // Obiectele `Felie` de dinainte: nu se modifică niciodată (antetul), deci rămân versiunea veche.
@@ -789,16 +883,20 @@ export function sincronizeazaCamere(idx: IndexCamere, t: Terrain): SincronizareC
   const noi: number[] = []
   const atinse = new Set<number>()
   const moarte = new Set<number>()
-  for (const cheie of felii) refaFelie(idx, r, cheie, noi, atinse, moarte)
+  const captura = capturaGoala()
+  for (const cheie of felii) refaFelie(idx, r, cheie, noi, atinse, moarte, true, captura)
   const seminte = [...noi, ...[...atinse].sort((a, b) => a - b)]
-  if (caleRapida(idx, noi, atinse, moarte)) idx.stat.caiRapide++
-  else componente(idx, seminte, moarte)
+  if (caleRapida(idx, noi, atinse, moarte, captura)) idx.stat.caiRapide++
+  else componente(idx, seminte, moarte, captura)
   // Fețele, pe indexul de după lot: drumurile D+ marchează bucățile de acum.
-  actualizeazaFete(idx, r, lot, felii, vechi)
+  const rf = actualizeazaFete(idx, r, lot, felii, vechi)
+  // Evidența maselor DUPĂ fețe: înregistrările bucăților supraviețuitoare sunt atunci cele de acum (IDX-3).
+  const ev = evidentaMaselor(idx, r, lot, matVechi, captura, rf, felii)
   idx.stat.coloaneCitite += r.citite
   idx.stat.coloaneNepromovate += r.nepromovate
   idx.epoca++
-  return { felii, recalcul: false }
+  const noiPeAncora = [...captura.noi].sort((a, b) => idx.comp.get(a)!.ancora - idx.comp.get(b)!.ancora)
+  return { felii, recalcul: false, moarte: [...captura.moarte].sort((a, b) => a - b), noi: noiPeAncora, peLoc: [...captura.peLoc].sort((a, b) => a - b), prov: ev.prov, mase: ev.mase, feteSchimbate: ev.feteSchimbate }
 }
 
 const VECINI_LATERALI = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const

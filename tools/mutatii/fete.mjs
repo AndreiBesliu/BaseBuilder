@@ -19,8 +19,8 @@ export const MUTATII = [
   {
     n: 'D+ dupa iesirea devreme: un lot fara nicio felie refacuta nu atinge fetele (pamantul pe acoperis ramane EXT)',
     f: C,
-    a: '    actualizeazaFete(idx, r, lot, [], [])\n',
-    b: '',
+    a: '    const rf = actualizeazaFete(idx, r, lot, [], [])\n',
+    b: '    const rf = { marcate: new Set<number>(), inregVechi: new Map() }\n',
     t: T, e: 'FETE D+: pamant pe acoperisul unei case',
   },
   {
@@ -141,15 +141,15 @@ export const MUTATII = [
   {
     n: 'depasirea jurnalului e raportata ca „nimic", nu ca recalcul',
     f: C,
-    a: '  if (n < 0 || n > JURNAL_CAP) {\n    reconstruiesteCamere(idx, t)\n    return RECALCUL',
-    b: '  if (n < 0 || n > JURNAL_CAP) {\n    reconstruiesteCamere(idx, t)\n    return NIMIC',
+    a: '  if (n < 0 || n > JURNAL_CAP) return recalculCuProvenienta(idx, t, n > 0)',
+    b: '  if (n < 0 || n > JURNAL_CAP) { reconstruiesteCamere(idx, t); return NIMIC }',
     t: TC, e: 'depasirea jurnalului reconstruieste complet',
   },
   {
     n: 'contractul: sincronizarea care reface felii le intoarce goale',
     f: C,
-    a: '  return { felii, recalcul: false }',
-    b: '  return NIMIC',
+    a: '  return { felii, recalcul: false, moarte:',
+    b: '  return { felii: [], recalcul: false, moarte:',
     t: TK, e: 'CONTRACT: sincronizeazaCamere intoarce cheile feliilor refacute',
   },
   // --- clasificarea (§4.1, §4.2): pe hartie, fiindca oracolul e autoconsistent aici

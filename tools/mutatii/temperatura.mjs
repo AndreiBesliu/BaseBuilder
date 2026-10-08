@@ -6,12 +6,17 @@
  * (τ pe scenele numite, valul de frig pe benzi). Contoarele ținute la zi le prinde oracolul fetelor (forma
  * canonica le poarta); clasificarea, fiind aceeasi in ambele parti ale oracolului, o prind testele pe HARTIE si
  * numaratoarea independenta (materialAt + groundLevelM + bazaVoxeli).
+ *
+ * Commit-ul 2, proveninta (§3): jurnalul cu materialul vechi (terrain.ts), evidenta C3 a maselor pe lot
+ * (fete.ts, camere.ts) si aritmetica (temperatura.ts). Le prinde oracolul pe forta bruta din
+ * tests/provenienta.test.ts (evidenta exacta, T, energia), poarta pompei si scenele de rezerva si de recalcul.
  */
 
 const TC = 'tests/capacitate.test.ts'
 const TCT = 'tests/content.test.ts'
 const F = 'src/sim/fete.ts'
 const K = 'src/sim/content.ts'
+const TP = 'tests/provenienta.test.ts'
 
 export const MUTATII = [
   // --- content (§1, §4)
@@ -121,5 +126,112 @@ export const MUTATII = [
     a: '    camere: construiesteCamere(terrain, rules.termic.kCelule, rules.termic.dSolMasivM),',
     b: '    camere: construiesteCamere(terrain, rules.termic.kCelule),',
     t: TC, e: 'CAPACITATE dSolMasivM vine din content',
+  },
+  // --- commit-ul 2: jurnalul cu materialul vechi si proveninta C3 (§3)
+  {
+    n: 't.2b §3: jurnalul nu tine materialul vechi (fetele vechi ale celulelor editate se evalueaza pe aer)',
+    f: 'src/sim/terrain/terrain.ts',
+    a: '  t.jurnalMat[t.editari % JURNAL_CAP] = current.value\n',
+    b: '',
+    t: TP, e: 'JURNAL: materialul VECHI al fiecarei editari',
+  },
+  {
+    n: 't.2b §3: materialul vechi din ULTIMA aparitie a celulei in lot (zidita si sapata la loc pare un zid care dispare)',
+    f: 'src/sim/camere.ts',
+    a: '    if (!matVechi.has(kc)) matVechi.set(kc, t.jurnalMat[i % JURNAL_CAP]!)',
+    b: '    matVechi.set(kc, t.jurnalMat[i % JURNAL_CAP]!)',
+    t: TP, e: 'JURNAL: materialul VECHI al fiecarei editari',
+  },
+  {
+    n: 't.2b §3, IDX-2: iesirea devreme nu face evidenta (fill pe apa de sub podea: C\' se schimba, T nu stie)',
+    f: 'src/sim/camere.ts',
+    a: '    const ev = evidentaMaselor(idx, r, lot, matVechi, capturaGoala(), rf, [])',
+    b: '    const ev = { mase: { noi: [], vechi: [], abateri: 0 }, prov: new Map(), feteSchimbate: [] }',
+    t: TP, e: 'PROVENIENTA oracol: pe un lot DOAR-FETE',
+  },
+  {
+    n: 't.2b §3: componentele cu fete marcate de D+ nu intra in evidenta (feteSchimbate fara mase)',
+    f: F,
+    a: '    A.add(c)\n    feteSchimbate.push(c)',
+    b: '    feteSchimbate.push(c)',
+    t: TP, e: 'PROVENIENTA oracol: pe un lot DOAR-FETE',
+  },
+  {
+    n: 't.2b §3, IDX-3: ponderile bucatilor supravietuitoare citite pe inregistrarea de DINAINTE de actualizeazaFete',
+    f: F,
+    a: '      const e = idx.fete.inreg[b]\n      if (e === undefined) {\n        L.abateri++\n        continue\n      }\n      tot.nAer += e.nAer',
+    b: '      const e = (mk[b]! & 2) !== 0 ? rf.inregVechi.get(b) : idx.fete.inreg[b]\n      if (e === undefined) {\n        L.abateri++\n        continue\n      }\n      tot.nAer += e.nAer',
+    t: TP, e: 'PROVENIENTA oracol: pe un lot DOAR-FETE',
+  },
+  {
+    n: 't.2b §3, B2: adancime+1 pe solul care intra (T_sol al celulei de sub fata)',
+    f: F,
+    a: '      if (eClasaDeSol(kn)) adunaClasa(vec2(L.solIn, yn, FATA_NOUA[d]! >> 3), kn, 1)',
+    b: '      if (eClasaDeSol(kn)) adunaClasa(vec2(L.solIn, yn, (FATA_NOUA[d]! >> 3) + 1), kn, 1)',
+    t: TP, e: 'PROVENIENTA oracol: casa peste pivnita',
+  },
+  {
+    n: 't.2b §3, B2: SOL↔CER la originea aerului (casa acoperita porneste de la T_sol, scobitura de la T_afara)',
+    f: F,
+    a: '  if (v === undefined || v === Material.AER) return PROV_CER\n  return PROV_SOL0 - adancimeIn(coloana(r, x, y), z)',
+    b: '  if (v === undefined || v === Material.AER) return PROV_SOL0 - adancimeIn(coloana(r, x, y), z)\n  return PROV_CER',
+    t: TP, e: 'PROVENIENTA rezerva',
+  },
+  {
+    n: 't.2b §3, verif-JOC-2: ponderile v1 — constructia noua pe o celula veche intra in ponderi la T-ul vechi (pompa cu PODEA)',
+    f: F,
+    a: '      else adunaClasa(vec(L.apare, yn), kn, 1)',
+    b: '      else adunaClasa(sv >= 0 ? vec2(L.P, yn, sv) : vec(L.apare, yn), kn, 1)',
+    t: TP, e: 'POARTA POMPEI',
+  },
+  {
+    n: 't.2b §3, JOC-2: regula B — solul iese la T-ul incaperii, nu la T_sol (sapat + astupat pompeaza)',
+    f: 'src/sim/temperatura.ts',
+    a: '  const ramas = capacitateMu(s.persista, rules.termic.mase) + masaSolului(s.solIese, rules)',
+    b: '  const ramas = capacitateMu(s.persista, rules.termic.mase)',
+    e2: [{ f: 'src/sim/temperatura.ts', a: '  return adun(peRamas, neg(energiaSolului(s.solIese, tick, rules, c)), c)', b: '  return peRamas' }],
+    t: TP, e: 'POARTA POMPEI',
+  },
+  {
+    n: 't.2b §3, IDX-7: peLoc pastreaza T (id pastrat luat drept „aceeasi incapere")',
+    f: 'src/sim/temperatura.ts',
+    a: '  for (const y of sch.mase.noi) {\n    const c: Calcul = { big: totulPeBigInt, promovat: false }',
+    b: '  for (const y of sch.mase.noi) {\n    if (sch.peLoc.includes(y.id)) continue\n    const c: Calcul = { big: totulPeBigInt, promovat: false }',
+    t: TP, e: 'PROVENIENTA oracol: casa peste pivnita',
+  },
+  {
+    n: 't.2b §3, IDX-10: consumatorul intercalat — scrie valoarea noua pe slot inainte sa fi citit toate sursele',
+    f: 'src/sim/temperatura.ts',
+    a: '    valori.push({ id: y.id, t: v.t, rest: v.rest })',
+    b: '    stare.t[y.id] = v.t\n    stare.rest[y.id] = v.rest\n    stare.are[y.id] = 1\n    valori.push({ id: y.id, t: v.t, rest: v.rest })',
+    t: TP, e: 'PROVENIENTA depasirea',
+  },
+  {
+    n: 't.2b §3, B2: id-urile moarte nu se golesc (T ramas pe sloturi moarte)',
+    f: 'src/sim/temperatura.ts',
+    a: '  for (const s of sch.moarte) {\n    if (s >= n) continue',
+    b: '  for (const s of sch.moarte.slice(0, 0)) {\n    if (s >= n) continue',
+    t: TP, e: 'PROVENIENTA oracol: usa dintre doua pivnite',
+  },
+  {
+    n: 't.2b §3, NUM-9: produsul peste 2^53 ramane pe Number (rotunjit tacut)',
+    f: 'src/sim/temperatura.ts',
+    a: '    if (Number.isSafeInteger(p)) return p + 0',
+    b: '    return p + 0',
+    t: TP, e: 'PROVENIENTA aritmetica',
+  },
+  {
+    n: 't.2b §3, B2: recalculul fara instantaneul indexului vechi (bComp luat dupa golire: nimic nu persista)',
+    f: 'src/sim/camere.ts',
+    a: 'bComp: idx.bComp, comp: new Map(idx.comp)',
+    b: 'bComp: new Int32Array(idx.bComp.length).fill(-1), comp: new Map(idx.comp)',
+    t: TP, e: 'PROVENIENTA depasirea',
+  },
+  {
+    n: 't.2b §3: recalculul nu citeste partea valida a inelului (tunelul din ultimele editari iese NEC)',
+    f: 'src/sim/camere.ts',
+    a: '    for (let i = Math.max(idx.vazute, t.editari - JURNAL_CAP); i < t.editari; i++) {',
+    b: '    for (let i = t.editari; i < t.editari; i++) {',
+    t: TP, e: 'PROVENIENTA depasirea',
   },
 ]

@@ -59,6 +59,13 @@ export interface Terrain {
    * pionii sapa la 300 m de o constructie.
    */
   readonly jurnal: Int32Array
+  /**
+   * TRANSIENT, paralel cu `jurnal`: materialul de DINAINTE al fiecarei editari (editarea n la `n % JURNAL_CAP`),
+   * 64 KB. Prima aparitie a unei celule intr-un lot da materialul ei de dinainte de lot — proveninta temperaturii
+   * (t.2b §3) evalueaza din el fetele VECHI ale celulelor din jur: fara el, o celula de cer zidita si sapata
+   * in acelasi lot iesea „sol" (B2: 1 celula din 18).
+   */
+  readonly jurnalMat: Uint8Array
 }
 
 /**
@@ -221,7 +228,7 @@ export function chunkKey(cx: number, cy: number): number {
 }
 
 export function createTerrain(seed: number, radius: number): Terrain {
-  return { seed, chunks: new Map(), keys: [], focusCx: 0, focusCy: 0, radius, grinzi: new Map(), editari: 0, jurnal: new Int32Array(JURNAL_CAP * 3) }
+  return { seed, chunks: new Map(), keys: [], focusCx: 0, focusCy: 0, radius, grinzi: new Map(), editari: 0, jurnal: new Int32Array(JURNAL_CAP * 3), jurnalMat: new Uint8Array(JURNAL_CAP) }
 }
 
 function insertKey(t: Terrain, key: number): void {
@@ -410,6 +417,9 @@ function editAt(t: Terrain, wx: number, wy: number, z: number, material: Materia
   t.jurnal[j] = wx
   t.jurnal[j + 1] = wy
   t.jurnal[j + 2] = z
+  // `current` e citit inainte de scriere, prin `materialAt`, care spune exact ce ar spune promovarea (si sub
+  // baza nu se editeaza: `setVoxel` refuza mai sus).
+  t.jurnalMat[t.editari % JURNAL_CAP] = current.value
   t.editari++
   return accept()
 }

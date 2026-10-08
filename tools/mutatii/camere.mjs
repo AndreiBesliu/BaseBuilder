@@ -91,15 +91,15 @@ export const MUTATII = [
   {
     n: 'depasirea jurnalului nu reconstruieste (citeste intrari suprascrise)',
     f: C,
-    a: '  if (n < 0 || n > JURNAL_CAP) {',
-    b: '  if (n < 0 || n > JURNAL_CAP * 2) {',
+    a: '  if (n < 0 || n > JURNAL_CAP) return recalculCuProvenienta(idx, t, n > 0)',
+    b: '  if (n < 0 || n > JURNAL_CAP * 2) return recalculCuProvenienta(idx, t, n > 0)',
     t: T, e: 'depasirea jurnalului reconstruieste complet',
   },
   {
     n: 'fiecare sincronizare reconstruieste complet (K05: recalculari in regim)',
     f: C,
-    a: '  if (n < 0 || n > JURNAL_CAP) {',
-    b: '  if (n < 0 || n > 0) {',
+    a: '  if (n < 0 || n > JURNAL_CAP) return recalculCuProvenienta(idx, t, n > 0)',
+    b: '  if (n < 0 || n > 0) return recalculCuProvenienta(idx, t, n > 0)',
     t: T, e: 'K05: o lume incarcata reconstruieste o data',
   },
   {
@@ -150,8 +150,8 @@ export const MUTATII = [
     // taierea galeriei in doua, care il cere.
     n: 'IDX-3: componentele atinse se reparcurg de doua ori pe sincronizare (acelasi index, costul dublu; oracolul e orb)',
     f: C,
-    a: '  else componente(idx, seminte, moarte)',
-    b: '  else { componente(idx, seminte, moarte); componente(idx, seminte, moarte) }',
+    a: '  else componente(idx, seminte, moarte, captura)',
+    b: '  else { componente(idx, seminte, moarte, captura); componente(idx, seminte, moarte) }',
     t: T, e: 'K05: o galerie lunga, acoperita si deschisa la gura',
   },
   // --- recenzia incaperilor: calea rapida a sincronizarii (IDX-1) — conditiile de iesire
