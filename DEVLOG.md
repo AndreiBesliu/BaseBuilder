@@ -4874,3 +4874,16 @@ remedierea 1,04 M = **11,74 M**.
 **La owner:** OWNER_VERIFY 17 — opt decizii, cu implicitul în față și proba pe ecran.
 
 **Ce urmează:** t.2b (inerția, starea salvată, schema 8), apoi t.3 (hrana sub 5 °C).
+
+## Task Started — 08.10.2026 — S24-27, tăietura 2b: inerția, starea salvată, căldura oamenilor
+
+**Prompt:** „continua" (după livrarea t.2a)
+**Model:** Claude Opus 5.5 (claude-opus-5-5), Claude Code, Ultracode.
+
+t.2a arată unde AR ajunge temperatura fiecărei încăperi (regimul permanent), fără stare și fără efect asupra
+simulării. Tăietura asta face temperatura să EXISTE: T pe fiecare încăpere, salvată (schema 8), integrată la
+1 Hz cu capacitatea pereților și a solului (o casă se încălzește în ore, o pivniță în zile), căldura oamenilor,
+proveniența la unirile și despărțirile de încăperi, un singur punct de sincronizare pentru index și
+temperaturi, migrarea 7 → 8 și hash-urile noi. Reparațiile panoului pentru partea asta sunt în
+`research/temperatura-t2.md` §9; registrul t.2a e în intrarea precedentă. Metoda, ca la t.1 și t.2a: hartă și
+măsurători pe HEAD → design → panou adversarial → cod → probe → recenzie a codului.
