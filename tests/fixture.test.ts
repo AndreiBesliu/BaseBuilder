@@ -105,8 +105,10 @@ test('nimeni in afara fixturii nu zideste M10 direct: viewer-ul si harnasamentel
   const gasite: string[] = []
   const umbla = (dir: URL, rel: string): void => {
     for (const nume of readdirSync(dir).sort()) {
-      // tools/mutatii/ tine tiparele probelor ca DATE (proba IDX-5 scrie exact apelul interzis).
-      if (nume === 'node_modules' || nume.startsWith('.') || `${rel}${nume}` === 'tools/mutatii') continue
+      // tools/mutatii/ tine tiparele probelor ca DATE (proba IDX-5 scrie exact apelul interzis). `__*` sunt
+      // probele temporare ale testului de disciplina, create si sterse in src/sim chiar in timp ce umblam:
+      // o rulare din sase dadea ENOENT (cursa intre fisierele de test, gasita de recenzia t.2a).
+      if (nume === 'node_modules' || nume.startsWith('.') || nume.startsWith('__') || `${rel}${nume}` === 'tools/mutatii') continue
       const u = new URL(nume, dir)
       if (statSync(u).isDirectory()) { umbla(new URL(nume + '/', dir), `${rel}${nume}/`); continue }
       if (!/\.(ts|mjs|js)$/.test(nume) || `${rel}${nume}` === 'src/harness/fixture-m10.ts') continue
