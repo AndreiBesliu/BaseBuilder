@@ -414,8 +414,8 @@ export const MUTATII = [
   {
     n: 'canale: temperatura incaperilor vecine luata de afara, nu din echilibrul lor',
     f: F,
-    a: '      tD = r.t[j]!',
-    b: '      tD = r.tRez[BIN_AFARA]!',
+    a: '    tv.set(v, tx)\n',
+    b: '    tv.set(v, tRez[BIN_AFARA]!)\n',
     t: T, e: 'TERMIC canale: o galerie intre alte doua',
   },
 ]

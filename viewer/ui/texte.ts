@@ -519,7 +519,7 @@ export function textMinute(min: number): string {
   return `~${Math.floor(m / 60)} h ${m % 60} min`
 }
 
-// ---- temperatura pe incaperi: inspectorul si overlay-ul U (design temperatura v2, §6) ------------------
+// ---- temperatura pe incaperi: inspectorul si overlay-ul U (t.2a §6; t.2b §8: temperatura e stare) ---------
 
 /**
  * Q16 °C cu o zecimala si minusul tipografic: „4,5", „−0,3". Rotunjirea e simetrica (jumatatea departe de
@@ -537,9 +537,45 @@ export function textGradeIntregi(q16: number): string {
   return q16 < 0 && g > 0 ? `−${g}` : `${g}`
 }
 
-/** Linia inspectorului: „~4,5 °C la echilibru (afară 12 °C)". Echilibrul = unde AR ajunge, fara inertie (t.2a). */
-export function textEchilibru(tQ16: number, tAfaraQ16: number): string {
-  return `~${textZecimi(tQ16)} °C la echilibru (afară ${textGradeIntregi(tAfaraQ16)} °C)`
+/** Randul 1 al inspectorului (t.2b §8): „6,2 °C · afară 12 °C" — T-ul de ACUM, din stare, si aerul de afara la tickul lumii. */
+export function textTemperaturaAcum(tQ16: number, tAfaraQ16: number): string {
+  return `${textZecimi(tQ16)} °C · afară ${textGradeIntregi(tAfaraQ16)} °C`
+}
+
+/** Randul 1 cand componenta n-are T (un invariant incalcat; §8, UI-6): pe un rand, fara cifre inventate. */
+export const TEXT_TEMPERATURA_NECUNOSCUTA = 'Temperatura nu se știe (eroare internă)'
+
+/**
+ * Randul 2 (§8, UI-2): „trage spre 4,8 °C ↘", sau „stabil" cand zecimile lui X_tot sunt chiar ale lui T — pragul e
+ * TEXTUL, nu o diferenta: „stabil" langa „4,4 °C" inseamna ca si tinta se scrie „4,4". X_tot = X + P/ΣG (oamenii
+ * aratati), deci sageata arata incotro merge T si cu oameni inauntru.
+ */
+export function textTragere(tQ16: number, xTotQ16: number): string {
+  const x = textZecimi(xTotQ16)
+  if (x === textZecimi(tQ16)) return 'stabil'
+  return `trage spre ${x} °C ${xTotQ16 < tQ16 ? '↘' : '↗'}`
+}
+
+/** Randul 2 cand linia grafului nu se poate citi (un invariant: graful nu e la zi); scurt, pe un rand. */
+export const TEXT_TRAGERE_NECUNOSCUTA = 'trage spre: nu se știe'
+
+/**
+ * Randul 3 (§8, JOC-6): CATI oameni sunt inauntru, nu „+X °C" — P/ΣG ar arata efectul ca si cum ar sta acolo permanent,
+ * de 2–76 de ori peste cel real (panoul, JOC-6).
+ */
+export function textOameni(n: number): string {
+  return n === 0 ? 'oameni: niciunul' : `oameni: ${n} înăuntru`
+}
+
+/** Alerta erorii interne a temperaturii (§5.3, UI-6): textul existent al invariantului, cu locul lui. */
+export function textEroareTemperatura(): string {
+  const t = textGeneric(Reason.INVARIANT_INCALCAT)
+  return `Temperatura: ${t.titlu} ${t.actiune}`
+}
+
+/** Alerta unei exceptii din simulare (§5.3, UI-6): jocul se pune pe pauza, randarea si UI-ul merg mai departe. */
+export function textEroareSimulare(): string {
+  return `Simularea s-a oprit: eroare internă. ${textGeneric(Reason.INVARIANT_INCALCAT).actiune} Spațiu o pornește din nou.`
 }
 
 /** Cifra unei piese de incapere pe overlay-ul Temperatura: „4,5°". */
@@ -637,9 +673,9 @@ export function textCanale(c: { readonly randuri: readonly CanalTermic[]; readon
   return bucati.join(' · ')
 }
 
-/** Cifrele legendei overlay-ului Temperatura (U): „−1,2 … 4,5 °C la echilibru · afară 12 °C". `n` = componente la nivel. */
+/** Cifrele legendei overlay-ului Temperatura (U): „−1,2 … 4,5 °C · afară 12 °C" — temperaturile de ACUM (t.2b §8). `n` = componente la nivel. */
 export function textIntervalTemperatura(n: number, min: number, max: number, tAfaraQ16: number): string {
   if (n === 0) return `Nimic acoperit pe nivelul ăsta · afară ${textGradeIntregi(tAfaraQ16)} °C`
   const interval = textZecimi(min) === textZecimi(max) ? `~${textZecimi(min)} °C` : `${textZecimi(min)} … ${textZecimi(max)} °C`
-  return `${interval} la echilibru · afară ${textGradeIntregi(tAfaraQ16)} °C`
+  return `${interval} · afară ${textGradeIntregi(tAfaraQ16)} °C`
 }

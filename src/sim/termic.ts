@@ -127,6 +127,10 @@
  * destinație, iar pe o casă cu golul ușii neînchis golul e 87% din ΣG, citit „pereți 93%" (recenzia ECRAN,
  * L4-1). O față cu g = 0 (gDeschis 0 e content valid) nu poartă nimic și nu intră în niciun grup — un grup numai
  * din ele ar fi împărțit la 0 (recenzia GRAF, L3-1).
+ *
+ * Două trepte (t.2b, valul 2): `geometriaCanalelor` (grupurile, ponderile, sursele — funcție de index și reguli, deci
+ * memorabilă pe `epoca` / `epocaFete`) și `canaleDinGeometrie` (temperaturile destinațiilor și X din rânduri, pe toate
+ * sursele). `canaleTermice` le leagă de regimul permanent (t.2a), `canaleAcum` din temperatura.ts de starea de acum.
  */
 
 import type { ReguliTermic, Rules } from './content.ts'
@@ -1523,7 +1527,7 @@ export interface CanalTermic {
   readonly pondereQ16: number
   /** Σ g al grupului, Q16 W/K. */
   readonly gQ16: number
-  /** Temperatura destinației, medie ponderată pe g, Q16 °C (vecinele: la echilibrul lor). */
+  /** Temperatura destinației, medie ponderată pe g, Q16 °C (vecinele: la echilibrul lor în t.2a, la T-ul din stare în t.2b). */
   readonly tDestQ16: number
   /** Compoziția dominantă (cel mai mare g în grup): cheia canonică, de ex. `6x1` (fete.ts). */
   readonly compozitie: string
@@ -1536,15 +1540,58 @@ export interface CanalTermic {
 
 export interface CanaleTermice {
   readonly comp: number
-  /** Echilibrul componentei (regimul permanent), Q16 °C. */
+  /**
+   * Temperatura componentei, Q16 °C: echilibrul ei (regimul permanent) în `canaleTermice` (t.2a), T-ul din stare în
+   * `canaleAcum` (temperatura.ts, t.2b).
+   */
   readonly tQ16: number
   readonly tAfaraQ16: number
-  /** ΣG al componentei, Q16 W/K (= numitorul regimului). */
+  /** ΣG al componentei, Q16 W/K (= numitorul regimului și al liniei grafului). */
   readonly sumaG: number
+  /**
+   * Echilibrul LOCAL din rânduri: Σ g·T_dest / ΣG pe TOATE grupurile (nu doar pe cele 3 arătate), cu temperaturile
+   * destinațiilor de aici (rezervoarele la tick, vecinele la temperatura lor). Oracolul §8 (t.2b): == X din linia
+   * grafului simulării; cu vecinele la regim, e regimul însuși (punctul fix).
+   */
+  readonly xQ16: number
   /** Cel mult 3, după pondere (descrescător), apoi după (clasă, destinație, ușă, gol). */
   readonly randuri: readonly CanalTermic[]
   /** Ce n-a încăput în cele 3 rânduri. */
   readonly rest: { readonly pondereQ16: number; readonly grupuri: number }
+}
+
+/** Un rând al canalelor fără temperatura destinației: partea GEOMETRICĂ și sursele lui de temperatură. */
+export interface RandGeometric {
+  readonly clasa: ClasaDirId
+  readonly destinatie: DestinatieId
+  readonly usa: boolean
+  readonly deschis: boolean
+  readonly pondereQ16: number
+  readonly gQ16: number
+  readonly compozitie: string
+  readonly grosime: number
+  readonly material: number
+  readonly fete: number
+  /** Σg pe binul rezervorului (`BIN_*`), Q16 W/K. */
+  readonly binuri: ReadonlyMap<number, number>
+  /** Σg pe vecină (id-ul componentei din index), Q16 W/K. */
+  readonly vecine: ReadonlyMap<number, number>
+}
+
+/**
+ * Canalele unei componente FĂRĂ temperaturi: ce depinde doar de index și de reguli — grupurile, ordinea, ponderile,
+ * compoziția dominantă — plus sursele de temperatură, pe rând și pe toată componenta (X din rânduri). Valabilă cât
+ * (OBIECTUL indexului, `epoca`, `epocaFete`, regulile): inspectorul o memorează și pune temperaturile la fiecare
+ * reîmprospătare (`canaleDinGeometrie`), fără să mai agrege fețele (1,4–2,1 ms pe hub-ul M10, B6).
+ */
+export interface GeometrieCanale {
+  readonly comp: number
+  readonly sumaG: number
+  readonly randuri: readonly RandGeometric[]
+  readonly rest: { readonly pondereQ16: number; readonly grupuri: number }
+  /** Toate sursele componentei, pe toate grupurile: Σg pe bin și pe vecină. */
+  readonly binuri: ReadonlyMap<number, number>
+  readonly vecine: ReadonlyMap<number, number>
 }
 
 /** Câte rânduri arată canalele (§5): restul se adună într-un „rest". */
@@ -1556,28 +1603,27 @@ interface Grup {
   usa: boolean
   deschis: boolean
   g: number
-  gt: bigint
   fete: number
   peCompozitie: Map<string, { g: number; num: readonly number[]; celule: number }>
+  readonly binuri: Map<number, number>
+  readonly vecine: Map<number, number>
 }
 
 /**
- * Canalele componentei `compId` la `tick` (§5): pe ce stă temperatura ei de echilibru. Rândurile vin din
- * cache-ul de fețe al simulării (agregate pe bucățile componentei), nu dintr-un mers al fețelor.
+ * Geometria canalelor componentei `compId` (§5): rândurile vin din cache-ul de fețe al simulării (agregate pe
+ * bucățile componentei), nu dintr-un mers al fețelor. Nicio temperatură aici: o funcție de (index, reguli).
  */
-export function canaleTermice(w: World, rules: Rules, compId: number, tick: number): Outcome<CanaleTermice> {
-  const reg = regimPermanent(w, rules, tick)
-  if (!reg.ok) return reg
-  const r = reg.value
-  const i = r.graf.nodDupaComp[compId] ?? -1
-  const c = w.camere.comp.get(compId)
-  if (i < 0 || c === undefined) return refuse(Reason.ENTITATE_INEXISTENTA, { camp: 'componenta', id: compId })
-  const ag = agregaComponenta(w.camere, c)
+export function geometriaCanalelor(idx: IndexCamere, rules: Rules, compId: number): Outcome<GeometrieCanale> {
+  const c = idx.comp.get(compId)
+  if (c === undefined) return refuse(Reason.ENTITATE_INEXISTENTA, { camp: 'componenta', id: compId })
+  const ag = agregaComponenta(idx, c)
   if (!ag.ok) return ag
   const t = rules.termic
   const grupuri = new Map<number, Grup>()
+  const binuri = new Map<number, number>()
+  const vecine = new Map<number, number>()
   for (const x of ag.value.randuri) {
-    const cmp = w.camere.fete.compNumarari[x.compozitie]!
+    const cmp = idx.fete.compNumarari[x.compozitie]!
     const g1 = conductantaFetei(t, x.clasa, x.fel, cmp)
     if (g1 < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'fata fara conductanta', compozitie: x.compozitie, fel: x.fel })
     const G = x.fete * g1
@@ -1585,21 +1631,19 @@ export function canaleTermice(w: World, rules: Rules, compId: number, tick: numb
     // împărți la 0 la temperatura destinației (antetul).
     if (G === 0) continue
     let dest: DestinatieId
-    let tD: number
+    // Binul rezervorului; −1 = o vecină (muchie), a cărei temperatură vine de la apelant.
+    let bin = -1
     if (x.fel === FelFata.MUCHIE) {
       dest = Destinatie.INCAPERI
-      const j = r.graf.nodDupaComp[x.vecina] ?? -1
-      if (j < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'vecina unei muchii nu e un nod al grafului', vecina: x.vecina })
-      tD = r.t[j]!
     } else if (x.fel === FelFata.DESCHISA || x.fel === FelFata.EXT) {
       dest = Destinatie.AFARA
-      tD = r.tRez[BIN_AFARA]!
+      bin = BIN_AFARA
     } else if (x.fel === FelFata.APA) {
       dest = Destinatie.APA
-      tD = r.tRez[BIN_APA + x.adancime]!
+      bin = BIN_APA + x.adancime
     } else {
       dest = x.fel === FelFata.ADANC ? Destinatie.ADANC : Destinatie.SOL
-      tD = r.tRez[BIN_SOL + x.adancime]!
+      bin = BIN_SOL + x.adancime
     }
     const usa = (cmp[Material.USA] ?? 0) > 0
     const deschis = x.fel === FelFata.DESCHISA
@@ -1607,13 +1651,19 @@ export function canaleTermice(w: World, rules: Rules, compId: number, tick: numb
     const k = ((x.clasa * 8 + dest) * 2 + (usa ? 1 : 0)) * 2 + (deschis ? 1 : 0)
     let gr = grupuri.get(k)
     if (gr === undefined) {
-      gr = { clasa: x.clasa, destinatie: dest, usa, deschis, g: 0, gt: 0n, fete: 0, peCompozitie: new Map() }
+      gr = { clasa: x.clasa, destinatie: dest, usa, deschis, g: 0, fete: 0, peCompozitie: new Map(), binuri: new Map(), vecine: new Map() }
       grupuri.set(k, gr)
     }
     gr.g += G
-    gr.gt += BigInt(G) * BigInt(tD)
     gr.fete += x.fete
-    const cheie = w.camere.fete.compCheie[x.compozitie]!
+    if (bin < 0) {
+      adaugaLa(gr.vecine, x.vecina, G)
+      adaugaLa(vecine, x.vecina, G)
+    } else {
+      adaugaLa(gr.binuri, bin, G)
+      adaugaLa(binuri, bin, G)
+    }
+    const cheie = idx.fete.compCheie[x.compozitie]!
     const pc = gr.peCompozitie.get(cheie)
     if (pc === undefined) {
       let celule = 0
@@ -1630,7 +1680,7 @@ export function canaleTermice(w: World, rules: Rules, compId: number, tick: numb
   const Q = BigInt(PONDERE_TOTALA)
   // Ponderile pe sume cumulate rotunjite: se adună EXACT la 65536, iar fiecare e la ±1 de valoarea ei.
   const cumulat = (g: number): number => rotunjitBig(BigInt(g) * Q, S)
-  const randuri: CanalTermic[] = []
+  const randuri: RandGeometric[] = []
   let cum = 0
   let prec = 0
   for (let k = 0; k < lista.length && k < RANDURI_CANALE; k++) {
@@ -1656,20 +1706,88 @@ export function canaleTermice(w: World, rules: Rules, compId: number, tick: numb
       deschis: gr.deschis,
       pondereQ16: acum - prec,
       gQ16: gr.g,
-      tDestQ16: rotunjitBig(gr.gt, BigInt(gr.g)),
       compozitie: dom,
       grosime: pc.celule,
       material,
       fete: gr.fete,
+      binuri: gr.binuri,
+      vecine: gr.vecine,
     })
     prec = acum
   }
   return accept({
     comp: compId,
-    tQ16: r.t[i]!,
-    tAfaraQ16: r.tAfaraQ16,
     sumaG: suma,
     randuri,
     rest: { pondereQ16: PONDERE_TOTALA - prec, grupuri: Math.max(0, lista.length - RANDURI_CANALE) },
+    binuri,
+    vecine,
   })
+}
+
+/** Σ g·T pe surse (Q16 W/K × Q16 °C), exact, pe BigInt. `tv` = temperaturile vecinelor, rezolvate o dată. */
+function sumaPeSurse(binuri: ReadonlyMap<number, number>, vecine: ReadonlyMap<number, number>, tRez: ArrayLike<number>, tv: ReadonlyMap<number, number>): bigint {
+  let s = 0n
+  // determinism-ok: sumă întreagă exactă pe BigInt, ordinea nu contează.
+  for (const [b, g] of binuri) s += BigInt(g) * BigInt(tRez[b]!)
+  // determinism-ok: idem.
+  for (const [v, g] of vecine) s += BigInt(g) * BigInt(tv.get(v)!)
+  return s
+}
+
+/**
+ * Canalele din geometrie și temperaturi: rezervoarele (`tRez`, pe bin, la tickul cerut) și temperatura fiecărei vecine
+ * (`tVecina`; null = vecina n-are temperatură: refuz `INVARIANT_INCALCAT`). `tQ16` e temperatura arătată a componentei
+ * (echilibrul în t.2a, starea în t.2b); X din rânduri se calculează aici, pe toate sursele.
+ */
+export function canaleDinGeometrie(geo: GeometrieCanale, tRez: ArrayLike<number>, tVecina: (comp: number) => number | null, tQ16: number, tAfaraQ16: number): Outcome<CanaleTermice> {
+  if (geo.sumaG <= 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'componenta fara conductanta', comp: geo.comp })
+  const tv = new Map<number, number>()
+  // determinism-ok: fiecare vecină se rezolvă separat; refuzul e oricum unul.
+  for (const v of geo.vecine.keys()) {
+    const tx = tVecina(v)
+    if (tx === null) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'vecina unei muchii n-are temperatura (nu e un nod al grafului sau n-are T)', vecina: v })
+    tv.set(v, tx)
+  }
+  const randuri: CanalTermic[] = geo.randuri.map((r) => ({
+    clasa: r.clasa,
+    destinatie: r.destinatie,
+    usa: r.usa,
+    deschis: r.deschis,
+    pondereQ16: r.pondereQ16,
+    gQ16: r.gQ16,
+    tDestQ16: rotunjitBig(sumaPeSurse(r.binuri, r.vecine, tRez, tv), BigInt(r.gQ16)),
+    compozitie: r.compozitie,
+    grosime: r.grosime,
+    material: r.material,
+    fete: r.fete,
+  }))
+  return accept({
+    comp: geo.comp,
+    tQ16,
+    tAfaraQ16,
+    sumaG: geo.sumaG,
+    xQ16: rotunjitBig(sumaPeSurse(geo.binuri, geo.vecine, tRez, tv), BigInt(geo.sumaG)),
+    randuri,
+    rest: geo.rest,
+  })
+}
+
+/**
+ * Canalele componentei `compId` la `tick` (§5, t.2a): pe ce stă temperatura ei de ECHILIBRU — regimul permanent, cu
+ * vecinele la echilibrul lor. Ecranul t.2b nu le mai cere (citește starea: `canaleAcum`, temperatura.ts); rămân
+ * referința regimului în teste.
+ */
+export function canaleTermice(w: World, rules: Rules, compId: number, tick: number): Outcome<CanaleTermice> {
+  const reg = regimPermanent(w, rules, tick)
+  if (!reg.ok) return reg
+  const r = reg.value
+  const i = r.graf.nodDupaComp[compId] ?? -1
+  if (i < 0 || !w.camere.comp.has(compId)) return refuse(Reason.ENTITATE_INEXISTENTA, { camp: 'componenta', id: compId })
+  const geo = geometriaCanalelor(w.camere, rules, compId)
+  if (!geo.ok) return geo
+  return canaleDinGeometrie(geo.value, r.tRez, (v) => {
+    const j = r.graf.nodDupaComp[v] ?? -1
+    return j < 0 ? null : r.t[j]!
+  }, r.t[i]!, r.tAfaraQ16)
 }

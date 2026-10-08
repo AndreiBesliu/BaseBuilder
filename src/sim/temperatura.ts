@@ -66,6 +66,12 @@
  * (1) toate valorile noi, din cele VECHI; (2) sloturile moarte se golesc; (3) se scriu cele noi. La recalcul un id
  * nou e adesea chiar al unei surse moarte: un consumator care scrie pe loc în timp ce citește ar da altei
  * componente T-ul deja amestecat.
+ *
+ * ## Ce vede jucătorul (§8)
+ *
+ * Citiri PURE pentru ecran, la capătul fișierului (nu scriu nimic, nu cer graful t.2a): `temperaturaAcum` (T din stare),
+ * `tragerea` (X din linia grafului simulării), `tragereCuOameni` (X_tot = X + P/ΣG), `canaleAcum` (descompunerea de
+ * acum, peste `geometriaCanalelor` din termic.ts) și `oameniPeComponente` (regula oamenilor a pasului).
  */
 
 import type { Rules } from './content.ts'
@@ -74,8 +80,8 @@ import { componentaLa, construiesteCamere, listaComponente, sincronizeazaCamere 
 import type { ContoareMasa, MaseComponentaNoua, MaseComponentaVeche, MasaPeAdancime } from './fete.ts'
 import { capacitateMu, PROV_CER, PROV_NEC_CER, PROV_NEC_SOL0, PROV_SOL0 } from './fete.ts'
 import { tAfara, tSol } from './clima.ts'
-import type { GrafIncremental, NodTermic } from './termic.ts'
-import { actualizeazaGraful, BIN_AFARA, comparaGrafulCuIntegral, grafTermic, grafulIncremental, refaGrafulDeUrgenta, rezolvaRegim, temperaturiRezervoare } from './termic.ts'
+import type { CanaleTermice, GeometrieCanale, GrafIncremental, NodTermic } from './termic.ts'
+import { actualizeazaGraful, BIN_AFARA, canaleDinGeometrie, comparaGrafulCuIntegral, grafTermic, grafulIncremental, refaGrafulDeUrgenta, rezolvaRegim, temperaturiRezervoare } from './termic.ts'
 import { Hasher } from './hash.ts'
 import { cellOf } from './drumuri.ts'
 import type { World } from './state.ts'
@@ -1121,4 +1127,102 @@ export function pasTermic(w: World, rules: Rules, o: OptiuniPas = {}): RaportPas
   }
   st.stat.pasi++
   return r
+}
+
+// ---------------------------------------------------------------------------
+// ce vede jucătorul (§8): citiri PURE ale stării, pentru ecran (valul 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * T-ul componentei din stare (Q16 °C; partea întreagă — restul e sub 1/65.536 °C, sub orice zecimală afișată), sau null:
+ * componenta n-are T sau starea nu e a indexului de acum (ștampila) — un invariant încălcat, pe care ecranul îl arată
+ * „Temperatura nu se știe (eroare internă)" (§8, UI-6), iar pasul următor îl numără. Nu scrie nimic.
+ */
+export function temperaturaAcum(w: World, compId: number): number | null {
+  const sl = w.temperatura.slot
+  if (!w.camere.comp.has(compId) || compId >= sl.are.length || sl.are[compId] !== 1) return null
+  if (!verificaStampila(w).ok) return null
+  return sl.t[compId]!
+}
+
+/** „Trage spre" (§8): linia nodului componentei în graful SIMULĂRII. */
+export interface Tragere {
+  readonly comp: number
+  /** Σ g_r·T_r(tick) + Σ g_ij·T_j, Q16 W/K × Q16 °C, exact. */
+  readonly numarator: bigint
+  /** ΣG al nodului, Q16 W/K. */
+  readonly sumaG: number
+  /** X = rs(numărător / ΣG), Q16 °C: echilibrul LOCAL — rezervoarele la `w.tick`, vecinele la T-ul lor de ACUM, fără oameni. */
+  readonly xQ16: number
+}
+
+/**
+ * X al componentei din linia grafului incremental al simulării (§8, B6: 8,6–9,1 µs pe hub-ul M10): rezervoarele la tickul
+ * lumii, vecinele la T-ul lor din stare — nu la echilibrul lor (graful t.2a nu se cere). Refuz dacă graful nu e la zi
+ * (`grafulIncremental`), dacă starea nu e a indexului sau dacă o vecină n-are T; nu reface nimic (asta e treaba pasului).
+ */
+export function tragerea(w: World, rules: Rules, compId: number): Outcome<Tragere> {
+  const s = verificaStampila(w)
+  if (!s.ok) return s
+  const go = grafulIncremental(w.camere, rules)
+  if (!go.ok) return go
+  const g = go.value
+  const et = g.nodComp.get(compId)
+  const nod = et === undefined ? undefined : g.noduri.get(et)
+  if (nod === undefined) return refuse(Reason.ENTITATE_INEXISTENTA, { camp: 'nodul componentei', id: compId })
+  const tRez = temperaturiRezervoare(w.seed, w.tick, rules)
+  let num = 0n
+  let S = 0
+  // determinism-ok: sumă întreagă exactă (BigInt) și o sumă de întregi sub 2^53; ordinea nu contează.
+  for (const [bin, G] of nod.bin) {
+    num += BigInt(G) * BigInt(tRez[bin]!)
+    S += G
+  }
+  // determinism-ok: idem.
+  for (const [e, G] of nod.vec) {
+    const v = g.noduri.get(e)
+    const t = v === undefined ? null : temperaturaAcum(w, v.comp)
+    if (t === null) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'vecina nodului n-are T', nod: e })
+    num += BigInt(G) * BigInt(t)
+    S += G
+  }
+  if (S <= 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'nod fara conductanta', comp: compId })
+  return accept({ comp: compId, numarator: num, sumaG: S, xQ16: Number(rsB(num, BigInt(S))) })
+}
+
+/**
+ * X_tot (§8, UI-2): X + P/ΣG, cu P = `watti` (W întregi) — încotro merge T cu oamenii de acum. P·2^32: W → Q16 W/K × Q16 °C.
+ * Cu P = 0 e chiar X.
+ */
+export function tragereCuOameni(t: Tragere, watti: number): number {
+  return Number(rsB(t.numarator + BigInt(watti) * 4294967296n, BigInt(t.sumaG)))
+}
+
+/**
+ * Descompunerea de ACUM (§8): geometria canalelor (memorată de ecran pe index, `epoca`, `epocaFete`, reguli) cu
+ * rezervoarele la `w.tick` și vecinele la T-ul lor din stare; temperatura arătată e T-ul componentei din stare. X din
+ * rânduri (`xQ16`) e oracolul liniei grafului (`tragerea`): același număr pe alt drum (agregarea fețelor).
+ */
+export function canaleAcum(w: World, rules: Rules, geo: GeometrieCanale): Outcome<CanaleTermice> {
+  const t = temperaturaAcum(w, geo.comp)
+  if (t === null) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'componenta fara T', comp: geo.comp })
+  const tRez = temperaturiRezervoare(w.seed, w.tick, rules)
+  return canaleDinGeometrie(geo, tRez, (v) => temperaturaAcum(w, v), t, tRez[BIN_AFARA]!)
+}
+
+/**
+ * Câți oameni stau ACUM în fiecare componentă (id → număr), după regula pasului (§5.2 (3), `pasPeGraf`): pionul viu, pe
+ * celula picioarelor (`cellOf(x)`, `cellOf(y)`, `z`); unul în tocul ușii sau afară nu e în nicio componentă. Ecranul o
+ * cheamă după tickul în care a rulat pasul — aceleași poziții ca ale pasului. E a doua scriere a regulii (pasul nu se
+ * atinge în valul 2); oracolul „oamenii ecranului == căldura pasului" (tests/viewer-termic.test.ts) le ține împreună.
+ */
+export function oameniPeComponente(w: World): Map<number, number> {
+  const out = new Map<number, number>()
+  const ag = w.agents
+  for (let s = 0; s < ag.count; s++) {
+    if (ag.alive[s] !== 1) continue
+    const c = componentaLa(w.camere, cellOf(ag.x[s]!), cellOf(ag.y[s]!), ag.z[s]!)
+    if (c !== null) out.set(c.id, (out.get(c.id) ?? 0) + 1)
+  }
+  return out
 }

@@ -22,7 +22,7 @@ import { ICON } from './iconite.ts'
 import { cauzaGolirii, creeazaMemorieTermica, creeazaPrevizualizare, golita, insigneBara, inspecteazaCelula, refacePrevizualizarea, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte } from './model.ts'
 import { cheieInspectorCelula, creeazaMemorieIncapere, usilePropuse } from './memorie-incapere.ts'
 import type { UsilePropuse } from './memorie-incapere.ts'
-import type { Bara, IncapereLa, InspectieCelula, NormalaFetei, Previz, RandOm } from './model.ts'
+import type { Bara, FiltruOameni, IncapereLa, InspectieCelula, NormalaFetei, Previz, RandOm } from './model.ts'
 import { actualizeaza, creeazaAlerte, eveniment, REGULI_ALERTE, Severitate } from './alerte.ts'
 import type { StareAlerta, Tinta } from './alerte.ts'
 import { baraDeSus, cant, NUME_ITEM, NUME_MATERIAL, NUME_PIESA, NUME_ZONA, textIncapere, textIndiciuUsa, textMinute, textNumar, textPrioritatePersonala, textTimp } from './texte.ts'
@@ -45,6 +45,8 @@ export interface ContextUI {
   readonly mesajPornire: string
   /** Bifele „Primii pasi" din salvare, daca s-a incarcat una. */
   readonly primiPasi: readonly boolean[] | null
+  /** Oamenii aratati de inspector pe fiecare componenta (t.2b §8): esantionul pasului, filtrat — main.ts il hraneste dupa fiecare tick. */
+  readonly filtruOameni: FiltruOameni
   pauza(): boolean
   seteazaPauza(p: boolean): void
   viteza(): number
@@ -97,6 +99,8 @@ export interface UI {
   inspecteazaPion(id: number): void
   pionSelectat(): number | null
   toast(mesaj: string, refuz?: boolean, actiune?: { eticheta: string; f: () => void }): void
+  /** O eroare interna (un invariant al temperaturii, o exceptie din simulare; t.2b §5.3, UI-6): in Jurnal si ca toast. */
+  eroare(text: string): void
   /** O fereastra (meniu, titlu, ajutor...) e deschisa: canvasul nu primeste comenzi. */
   modalDeschis(): boolean
   /** Esc, in ordinea din design; `false` = n-a avut ce face (main il trateaza mai departe). */
@@ -158,12 +162,13 @@ const LEGENDE: Readonly<Record<Overlay, { titlu: string; randuri: readonly { c: 
     ],
     fara: 'Încăperile se văd pe un nivel.',
   },
-  // Temperatura (design temperatura v2, §6): valoarea pe LUMINOZITATE (DESIGN §9 regula 9), cifra pe fiecare
-  // piesă a încăperii. Fără hașură și fără prag de 5 °C: pragul vine cu efectul (t.3).
+  // Temperatura (design temperatura v2, §6; t.2b §8): valoarea pe LUMINOZITATE (DESIGN §9 regula 9), cifra pe fiecare
+  // piesă a încăperii — temperatura de ACUM, din stare. Fără hașură, fără prag de 5 °C (pragul vine cu efectul, t.3)
+  // și fără săgeată (t.2b §8).
   U: {
     titlu: 'Temperatură (U)',
     randuri: [
-      { c: '#ffe8b8', t: 'Deschis: mai cald — cifra e unde ar ajunge temperatura acolo, cu vremea și solul de acum' },
+      { c: '#ffe8b8', t: 'Deschis: mai cald — cifra e temperatura de acum' },
       { c: '#1a2652', t: 'Închis: mai rece (scara merge de la cel mai rece la cel mai cald dintre spațiile de pe nivel și aerul de afară)' },
     ],
     fara: 'Temperatura se vede pe un nivel.',
@@ -316,6 +321,11 @@ export function monteazaUI(ctx: ContextUI): UI {
     inspecteazaPion: (id) => { selectie = { fel: 'pion', id }; noteaza('pion'); arataSertar('inspector'); scrieInspector(true); scrieOameni(true) },
     pionSelectat: () => (selectie?.fel === 'pion' ? selectie.id : null),
     toast,
+    eroare: (mesaj) => {
+      eveniment(alerte, 'eroare-interna', mesaj, w.tick)
+      text(btnJurnal, `Jurnal (${alerte.jurnal.length})`)
+      toast(mesaj, true)
+    },
     modalDeschis: () => !voal.hidden,
     esc,
     comutaOameni: () => arataSertar(sertar === 'oameni' && !panouSertar.hidden ? 'inspector' : 'oameni'),
@@ -389,9 +399,13 @@ export function monteazaUI(ctx: ContextUI): UI {
     S: iconBtn(ICON.stabilitate, 'Stabilitate', 'S', 'Ce ține și ce cade, pe nivelul ales (S)'),
     G: iconBtn(ICON.regiuni, 'Regiuni', 'G', 'Pe unde se poate ajunge (G)'),
     I: iconBtn(ICON.incaperi, 'Încăperi', 'I', 'Încăperile închise și pe unde iese aerul, pe nivelul ales (I)'),
-    U: iconBtn(ICON.temperatura, 'Temperatură', 'U', 'Unde ar ajunge temperatura fiecărei încăperi, pe nivelul ales (U)'),
+    U: iconBtn(ICON.temperatura, 'Temperatură', 'U', 'Temperatura fiecărei încăperi, pe nivelul ales (U)'),
   }
-  for (const o of ['J', 'S', 'I', 'U', 'G'] as const) btnOv[o].addEventListener('click', () => ctx.comutaOverlay(o))
+  // `data-harta`: proba de pe ecran (ui-fum) cauta butonul dupa harta, nu dupa titlu — o corectura de text nu rupe bifele (B6).
+  for (const o of ['J', 'S', 'I', 'U', 'G'] as const) {
+    btnOv[o].dataset.harta = o
+    btnOv[o].addEventListener('click', () => ctx.comutaOverlay(o))
+  }
   const listaPasi = h('ol')
   const hranaPasi = h('div', { class: 'hrana' })
   const btnInchidePasi = iconBtn(ICON.inchide, '', '', 'Ascunde')
@@ -571,24 +585,35 @@ export function monteazaUI(ctx: ContextUI): UI {
   /** Încăperea celulei selectate: memorată pe celulă + amprenta pe jurnal, cu frână (memorie-incapere.ts). */
   const memorieIncapere = creeazaMemorieIncapere(() => performance.now())
   /**
-   * Temperatura încăperii (design temperatura v2, §6; panoul, L5-2): elemente făcute O DATĂ și scrise PE LOC, la
-   * fiecare reîmprospătare, ÎNAINTEA comparației cheii. Explicația rămâne în memoria ei, neschimbată și fără nimic
-   * termic (memoria întoarce același obiect cât nu se editează lângă componentă: temperatura ar fi înghețat); iar
-   * în cheie, temperatura ar fi refăcut tot corpul — cu „Arată nivelul" / „Pune ușa" — la fiecare schimbare, și un
-   * clic căzut între mousedown și mouseup s-ar fi pierdut. La o redesenare, același element e mutat în corpul nou.
+   * Temperatura încăperii (t.2b §8; panoul t.2a, L5-2): elemente făcute O DATĂ și scrise PE LOC, la fiecare
+   * reîmprospătare, ÎNAINTEA comparației cheii. Explicația rămâne în memoria ei, neschimbată și fără nimic termic
+   * (memoria întoarce același obiect cât nu se editează lângă componentă: temperatura ar fi înghețat); iar în cheie,
+   * temperatura ar fi refăcut tot corpul — cu „Arată nivelul" / „Pune ușa" — la fiecare schimbare, și un clic căzut între
+   * mousedown și mouseup s-ar fi pierdut. La o redesenare, același element e mutat în corpul nou.
+   *
+   * Trei rânduri FIXE (T și afară · „trage spre" · oamenii), fiecare pe un rând (`nowrap` în ui.css e plasa, nu calea:
+   * cazul cel mai lat e măsurat), iar descompunerea are cel puțin 3 rânduri (verif-UI-1): când intră un om sau textul
+   * descompunerii trece de la 2 la 3 rânduri, nimic de dedesubt nu se mută.
    */
   const memorieTermica = creeazaMemorieTermica()
   const termicLinie = h('div', { class: 'ui-termic-t num' })
+  const termicTragere = h('div', { class: 'ui-termic-x num' })
+  const termicOameni = h('div', { class: 'ui-termic-o' })
   const termicCanale = h('div', { class: 'sub ui-termic-canale' })
-  const termicEl = h('div', { class: 'ui-termic', title: 'La echilibru: unde ar ajunge temperatura cu vremea și solul de acum. Încăperea nu e încă acolo — inerția vine mai târziu.' }, termicLinie, termicCanale)
+  const termicEl = h('div', { class: 'ui-termic', title: 'Temperatura de acum. „Trage spre": unde ar ajunge dacă vremea, solul, vecinii și oamenii ar rămâne ca acum.' }, termicLinie, termicTragere, termicOameni, termicCanale)
   function scrieTermic(inc: IncapereLa | null): void {
-    // Ceasul viewer-ului: cu jocul mergand, cel mult un calcul (si o refacere de graf) pe secunda (recenzia t.2a, L4-2).
-    const t = memorieTermica.ia(w, rules, inc === null ? null : inc.celula, performance.now())
+    // T și X se citesc din stare la fiecare reîmprospătare (O(1) și o linie a grafului); memoria ține doar geometria
+    // descompunerii, pe (index, epocă, fețe, componentă).
+    const t = memorieTermica.ia(w, rules, inc === null ? null : inc.celula, ctx.filtruOameni)
     ascuns(termicEl, t === null)
     if (t === null) return
     text(termicLinie, t.linie)
+    // Fără T, textul erorii e în fontul obișnuit: în monospațiat (bold) ar avea 297 px, peste cei 293 ai sertarului cu
+    // bara de derulare (V1, latime.mjs); cifrele rămân în monospațiat, ca să nu sară la fiecare zecime.
+    clasa(termicLinie, 'num', t.tQ16 !== null)
+    text(termicTragere, t.tragere)
+    text(termicOameni, t.oameniText)
     text(termicCanale, t.canale)
-    ascuns(termicCanale, t.canale === '')
   }
   function scrieInspector(fortat = false): void {
     if (panouSertar.hidden || sertar !== 'inspector') return

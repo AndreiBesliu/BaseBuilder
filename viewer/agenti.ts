@@ -140,6 +140,29 @@ export function stepSim(
   return rulate
 }
 
+/**
+ * `stepSim` care nu arunca (t.2b §5.3; panoul t.2b, UI-6): o exceptie din simulare se da lui `raporteaza`, datoria de
+ * timp se arunca, iar cadrul merge mai departe — randarea, UI-ul, salvarea automata. Fara asta, un `tick()` care arunca
+ * ingheta tot ecranul fara niciun mesaj (UI-6, masurat: ceasul oprit, `pauza` false, ~30 de erori pe secunda in consola).
+ * Cine raporteaza decide ce face lumea (main.ts o pune pe pauza: tickul esuat s-ar relua la fiecare cadru).
+ */
+export function stepSimSigur(
+  layer: AgentLayer,
+  world: World,
+  rules: Rules,
+  dtMs: number,
+  simTick: (w: World, r: Rules) => void,
+  raporteaza: (e: unknown) => void,
+): number {
+  try {
+    return stepSim(layer, world, rules, dtMs, simTick)
+  } catch (e) {
+    layer.rest = 0
+    raporteaza(e)
+    return 0
+  }
+}
+
 // Trei culori pentru ai nostri, dupa STARE, nu doar dupa factiune: un pion care
 // merge 90 de celule la lucru si unul care se plimba la intamplare aratau la fel,
 // iar research-ul e explicit — „lipsa unei stari Idle vizibile: jucatorul

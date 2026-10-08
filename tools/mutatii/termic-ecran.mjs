@@ -1,21 +1,18 @@
 /**
- * Mutatii: temperatura pe ecran — S24-27 t.2a, commit-ul 4 (design-temperatura-v2 §6; panoul, L5-1/L5-2/L5-3).
- * Inspectorul (memoria termica, cheia de redesenare, textele pe hartie), overlay-ul Temperatura (U): ancorele pe
- * piese, densitatea, tenta pe luminozitate, ritmul regimului; tasta U.
+ * Mutatii: temperatura pe ecran — t.2a commit-ul 4 (ancorele, densitatea, tenta, tasta U) si t.2b valul 2
+ * (research/temperatura-t2b.md §8, §5.3): inspectorul cu trei randuri fixe din STARE (T, „trage spre X_tot", oamenii
+ * filtrati), descompunerea pe geometria memorata, oracolul „X din randuri == X din linia grafului", oamenii ecranului ==
+ * caldura pasului, overlay-ul U din stare (fara cheie de tick), erorile (monitorul invariantilor, `stepSimSigur`).
+ *
+ * Probele t.2a ale mecanismului care a disparut (memoria termica cheiata pe tick, fereastra de o secunda L4-2, regimul
+ * lui U cel mult o data pe secunda, valorile mutate prin celule, geometria necolorata pana la regimul urmator) au fost
+ * INLOCUITE cu probe pe comportamentul nou: T citit din echilibru in loc de stare, X fara oameni, vecinele la echilibru
+ * in loc de T-ul lor, pragul gresit pentru „stabil", U pe cheia de tick, filtrul scos, randul 3 cu „+X °C", alerta
+ * neemisa.
  *
  * Ce NU e aici: scrisul PE LOC in DOM, inaintea comparatiei cheii (panouri.ts), stratul DOM al cifrelor
- * (etichete-temperatura.ts) si excluderea I/U (main.ts) — in node nu exista DOM. Le probeaza ui-fum:
- * - „temperatura-fara-clic": butonul „Arată nivelul" ramane acelasi nod (rulat pe codul vechi si cu temperatura pusa
- *   in cheie: rosu);
- * - „temperatura-etichete-la-zi": dupa ore de joc sarite in pauza, fiecare cifra vizibila == textEticheta(valoarea
- *   overlay-ului). „temperatura-etichete" citeste cifra O DATA, la aprindere: cu cifra scrisa o singura data
- *   (`if (e.textContent === '') text(e, …)`), ui-fum iesea 59/59 verde, cu 20 din 24 de cifre gresite pe ecran
- *   (recenzia t.2a, L4-5). Antetul de aici spunea ca stratul e probat; nu era;
- * - „temperatura-exclude-I": I si U se exclud in ambele sensuri (pasul stingea I inainte de U, tocmai ca sa n-o
- *   exercite; fara cele doua linii din comutaI / comutaU, ui-fum iesea tot verde);
- * - „temperatura-legenda-clic": cifrele legendei scrise PE LOC — un clic tinut apasat peste o schimbare a lor reuseste
- *   (cu cifrele in cheia legendei, se pierdea).
- * Fiecare dintre cele trei noi e masurata ROSIE pe mutantul ei, cu ui-fum (08.10; recenzia t.2a, L4-3/L4-5).
+ * (etichete-temperatura.ts), excluderea I/U, hranirea filtrului dupa fiecare tick si pauza la exceptie (main.ts) — in
+ * node nu exista DOM si nici bucla de cadre. Le probeaza ui-fum (bench/ui-fum.mjs), pasul „temperatura".
  */
 
 const T = 'tests/viewer-termic.test.ts'
@@ -23,30 +20,161 @@ const M = 'viewer/ui/model.ts'
 const X = 'viewer/ui/texte.ts'
 const O = 'viewer/overlay-temperatura.ts'
 const K = 'viewer/ui/taste.ts'
+const S = 'src/sim/temperatura.ts'
+const F = 'src/sim/termic.ts'
+const A = 'viewer/agenti.ts'
 
 const E1 = 'TERMIC ECRAN inspectorul: N tickuri fara editari'
 const E2 = 'TERMIC ECRAN inspectorul pe hartie: casa 5x5x2 cu usa'
 const E3 = 'TERMIC ECRAN inspectorul: fata ADANC in sus'
 const E4 = 'TERMIC ECRAN textele: zecimile si gradele'
+const E4R = 'TERMIC ECRAN textele randurilor pe hartie'
 const E5 = 'TERMIC ECRAN textele: descompunerea contopeste'
-const E6 = 'TERMIC ECRAN memoria termica'
-const E6R = 'TERMIC ECRAN ritmul memoriei termice'
+const EG = 'TERMIC ECRAN inspectorul pe hartie: casa 5x5x2 cu golul usii'
+const EX = 'TERMIC ECRAN X_tot cu oameni'
+const EF = 'TERMIC ECRAN filtrul oamenilor pe hartie'
+const EP = 'TERMIC ECRAN oamenii ecranului == caldura pasului'
+const EO = 'TERMIC ECRAN oracolul X'
+const EN = 'TERMIC ECRAN viewer-ul nu cere graful t.2a'
+const ED = 'TERMIC ECRAN descompunerea: geometria memorata'
+const ET = 'TERMIC ECRAN componenta fara T'
+const ES = 'TERMIC ECRAN stepSimSigur'
 const E7 = 'TERMIC ECRAN ancorele pe hartie'
 const E8 = 'TERMIC ECRAN ancorele pe M10'
 const E10 = 'TERMIC ECRAN densitatea'
 const E11 = 'TERMIC ECRAN tenta'
-const E12 = 'TERMIC ECRAN overlay-ul U'
+const E12 = 'TERMIC ECRAN overlay-ul U din stare'
 const E13 = 'TERMIC ECRAN tasta U'
 
+/** T-ul unei vecine la ECHILIBRU (regimul permanent t.2a), scris cu ce importa deja temperatura.ts: graful t.2a + Gauss–Seidel. */
+const VECINA_LA_REGIM = (comp) => `(() => { const gr = grafTermic(w.camere, rules); if (!gr.ok) return null; const tz = temperaturiRezervoare(w.seed, w.tick, rules); const sol = rezolvaRegim(gr.value, tz, tz[BIN_AFARA]!); const i = gr.value.nodDupaComp[${comp}] ?? -1; return i < 0 ? null : sol.t[i]! })()`
+
 export const MUTATII = [
-  // --- L5-2: inspectorul — temperatura NU sta in memoria explicatiei si nu intra in cheia de redesenare
+  // --- t.2b §8, randul 1: T din STARE, la fiecare cerere
   {
-    n: 'L5-2: memoria termica fara tick in cheie — temperatura ramane cea de la primul clic',
+    n: 'T citit din echilibru (X, ca in t.2a), nu din stare',
     f: M,
-    a: '      if (k !== null && k.tick === w.tick && k.epoca === w.camere.epoca',
-    b: '      if (k !== null && k.epoca === w.camere.epoca',
-    t: T, e: E1,
+    a: '  const t = temperaturaAcum(w, c.id)\n',
+    b: '  const tr0 = tragerea(w, rules, c.id)\n  const t = tr0.ok ? tr0.value.xQ16 : null\n',
+    t: T, e: E2,
   },
+  {
+    n: 'UI-6: componenta fara T scrisa ca T (randul 1 cu „0,0 °C", fara „nu se știe")',
+    f: M,
+    a: "  if (t === null) return { comp: c.id, tQ16: null, xTotQ16: null, oameni: 0, linie: TEXT_TEMPERATURA_NECUNOSCUTA, tragere: '', oameniText: '', canale: '' }\n",
+    b: '',
+    t: T, e: ET,
+  },
+  {
+    n: 'temperaturaAcum fara stampila: dupa un lot sincronizat pe langa punctul unic, ecranul arata T-ul altei componente',
+    f: S,
+    a: '  if (!verificaStampila(w).ok) return null\n',
+    b: '',
+    t: T, e: ET,
+  },
+  // --- t.2b §8, randul 2: X din linia grafului (vecinele la T-ul de acum), X_tot cu oamenii aratati
+  {
+    n: 'X: vecinele la echilibrul lor (regimul t.2a), nu la T-ul lor de acum',
+    f: S,
+    a: '    const t = v === undefined ? null : temperaturaAcum(w, v.comp)\n',
+    b: `    const t = v === undefined ? null : ${VECINA_LA_REGIM('v.comp')}\n`,
+    t: T, e: EO,
+  },
+  {
+    n: 'descompunerea: vecinele la echilibru, nu la T-ul de acum (X din randuri != X din linia grafului)',
+    f: S,
+    a: '  return canaleDinGeometrie(geo, tRez, (v) => temperaturaAcum(w, v), t, tRez[BIN_AFARA]!)',
+    b: `  return canaleDinGeometrie(geo, tRez, (v) => ${VECINA_LA_REGIM('v')}, t, tRez[BIN_AFARA]!)`,
+    t: T, e: EO,
+  },
+  {
+    n: 'X: rezervoarele la tickul 0, nu la tickul lumii',
+    f: S,
+    a: '  const tRez = temperaturiRezervoare(w.seed, w.tick, rules)\n  let num = 0n\n',
+    b: '  const tRez = temperaturiRezervoare(w.seed, 0, rules)\n  let num = 0n\n',
+    t: T, e: E2,
+  },
+  {
+    n: 'X din randuri fara vecine (doar primele grupuri / doar rezervoarele)',
+    f: F,
+    a: '      adaugaLa(gr.vecine, x.vecina, G)\n      adaugaLa(vecine, x.vecina, G)\n',
+    b: '      adaugaLa(gr.vecine, x.vecina, G)\n',
+    t: T, e: EO,
+  },
+  {
+    n: 'UI-2: X fara oameni (X_tot = X): sageata arata invers fata de T cu oameni inauntru',
+    f: M,
+    a: '  const x = tr.ok ? tragereCuOameni(tr.value, oameni * rules.termic.omW) : null',
+    b: '  const x = tr.ok ? tr.value.xQ16 : null',
+    t: T, e: EX,
+  },
+  {
+    n: 'UI-2: P/ΣG fara 2^32 (wati la numarator ca Q16)',
+    f: S,
+    a: 'BigInt(watti) * 4294967296n',
+    b: 'BigInt(watti) * 65536n',
+    t: T, e: EX,
+  },
+  // --- F4: P-ul afisat FILTRAT (stare tranzitorie a ecranului)
+  {
+    n: 'F4: oamenii de acum, nu cei filtrati (fiecare trecere muta „trage spre")',
+    f: M,
+    a: '  const oameni = filtru === null ? (oameniPeComponente(w).get(c.id) ?? 0) : filtru.oameni(w, c.id)',
+    b: '  const oameni = oameniPeComponente(w).get(c.id) ?? 0',
+    t: T, e: EX,
+  },
+  {
+    n: 'F4: filtrul scos (se arata ultimul esantion)',
+    f: M,
+    a: '  return { ultime, afisat: egale ? n : s.afisat }',
+    b: '  return { ultime, afisat: n }',
+    t: T, e: EF,
+  },
+  {
+    n: 'F4: filtrul pe 2 esantioane, nu pe 3',
+    f: M,
+    a: '  const egale = ultime.length === 3 && ultime[0] === n && ultime[1] === n',
+    b: '  const egale = ultime[ultime.length - 2] === n',
+    t: T, e: EF,
+  },
+  {
+    n: 'F4: esantionul la fiecare tick, nu la pasul termic',
+    f: M,
+    a: '      if (st.pasi === pasi) return\n',
+    b: '',
+    t: T, e: EX,
+  },
+  // --- oamenii ecranului == caldura pasului (a doua scriere a regulii, tinuta de oracol)
+  {
+    n: 'oamenii ecranului: celula de sub picioare (z − 1), nu a picioarelor',
+    f: S,
+    a: '    const c = componentaLa(w.camere, cellOf(ag.x[s]!), cellOf(ag.y[s]!), ag.z[s]!)\n    if (c !== null) out.set(c.id, (out.get(c.id) ?? 0) + 1)\n',
+    b: '    const c = componentaLa(w.camere, cellOf(ag.x[s]!), cellOf(ag.y[s]!), ag.z[s]! - 1)\n    if (c !== null) out.set(c.id, (out.get(c.id) ?? 0) + 1)\n',
+    t: T, e: EP,
+  },
+  {
+    n: 'oamenii ecranului: si pionii morti',
+    f: S,
+    a: '    if (ag.alive[s] !== 1) continue\n    const c = componentaLa(w.camere, cellOf(ag.x[s]!), cellOf(ag.y[s]!), ag.z[s]!)\n    if (c !== null) out.set',
+    b: '    const c = componentaLa(w.camere, cellOf(ag.x[s]!), cellOf(ag.y[s]!), ag.z[s]!)\n    if (c !== null) out.set',
+    t: T, e: EP,
+  },
+  // --- descompunerea: geometria memorata pe (index, epoca, epocaFete, componenta, reguli)
+  {
+    n: 'memoria geometriei fara epocaFete: pamantul pe acoperis lasa ponderile vechi',
+    f: M,
+    a: ' || k.epocaFete !== w.camere.epocaFete || k.comp !== c.id',
+    b: ' || k.comp !== c.id',
+    t: T, e: ED,
+  },
+  {
+    n: 'memoria geometriei fara componenta: alta casa primeste descompunerea celei dinainte',
+    f: M,
+    a: ' || k.comp !== c.id || k.rules !== rules) {',
+    b: ' || k.rules !== rules) {',
+    t: T, e: EN,
+  },
+  // --- L5-2 (t.2a, ramane): temperatura NU intra in cheia de redesenare
   {
     n: 'L5-2: temperatura intra in cheia de redesenare (InspectieCelula poarta tickul): butoanele s-ar recrea',
     f: M,
@@ -54,71 +182,78 @@ export const MUTATII = [
     b: '  return { wx, wy, z, material: mat.ok ? mat.value : null, materialDeasupra: sus.ok ? sus.value : null, desemnari, morman, zona, tick: w.tick }',
     t: T, e: E1,
   },
+  // --- §5.3, UI-6: monitorul invariantilor (o alerta si un console.error pe TIP nou), stepSimSigur
   {
-    n: 'L5-2: temperatura la tickul 0, nu la tickul lumii',
+    n: 'UI-6: alerta neemisa (tipul nou nu se raporteaza)',
     f: M,
-    a: '  const o = canaleTermice(w, rules, c.id, w.tick)',
-    b: '  const o = canaleTermice(w, rules, c.id, 0)',
-    t: T, e: E2,
-  },
-  {
-    n: 'memoria termica: fara memorie — un calcul la fiecare reimprospatare, si in pauza',
-    f: M,
-    a: '      const k = cheie\n',
-    b: '      const k = null as typeof cheie\n',
-    t: T, e: E6,
-  },
-  {
-    n: 'memoria termica: componenta scoasa din cheie — alta incapere primeste raspunsul celei dinainte',
-    f: M,
-    a: ' && k.epocaFete === w.camere.epocaFete && k.comp === c.id && k.rules === rules) return raspuns',
-    b: ' && k.epocaFete === w.camere.epocaFete && k.rules === rules) return raspuns',
-    t: T, e: E6,
-  },
-  // --- recenzia t.2a, L4-2: cu jocul mergand, cel mult un calcul (si o refacere de graf) pe secunda
-  {
-    n: 'L4-2: fara fereastra de o secunda — un calcul (si o refacere de graf) la fiecare reimprospatare cu jocul mergand',
-    f: M,
-    a: '      const proaspat = k !== null && k.rules === rules && acumMs - la < PERIOADA_TERMIC_MS\n',
-    b: '      const proaspat = false as boolean\n',
-    t: T, e: E6R,
-  },
-  {
-    n: 'L4-2: perioada de 250 ms (graful de 4 ori pe secunda, ca inainte)',
-    f: M,
-    a: 'export const PERIOADA_TERMIC_MS = 1000',
-    b: 'export const PERIOADA_TERMIC_MS = 250',
-    t: T, e: E6R,
-  },
-  {
-    n: 'L4-2: momentul ultimului calcul nememorat (fereastra nu se deschide niciodata)',
-    f: M,
-    a: '      la = acumMs\n',
+    a: '        tipuriNoi.push(st.ultimulInvariant)\n',
     b: '',
-    t: T, e: E6R,
+    t: T, e: ET,
   },
   {
-    n: 'L4-2: fara fereastra pe ACEEASI celula — id-ul rotit de o sapatura in felie reface graful la fiecare reimprospatare',
+    n: 'UI-6: monitorul nu vede invariantii (noi = 0)',
     f: M,
-    a: '      if (proaspat && celLa !== null && celLa.x === celula.x && celLa.y === celula.y && celLa.z === celula.z) return raspuns\n',
-    b: '',
-    t: T, e: E6R,
+    a: '      const noi = total - vazute\n',
+    b: '      const noi = 0 as number\n',
+    t: T, e: ET,
   },
   {
-    n: 'L4-2: fara fereastra pe componenta — alt clic in aceeasi incapere recalculeaza',
+    n: 'UI-6: o alerta (si un console.error) la fiecare crestere, nu una pe tip',
     f: M,
-    a: '      if (proaspat && k.comp === c.id && k.epoca === w.camere.epoca) return raspuns\n',
-    b: '',
-    t: T, e: E6R,
+    a: '      if (noi > 0 && !tipuri.has(st.ultimulInvariant)) {',
+    b: '      if (noi > 0) {',
+    t: T, e: ET,
   },
   {
-    n: 'L4-2: fereastra pe componenta fara epoca — alta casa, cu id-ul refolosit, primeste raspunsul celei dinainte',
-    f: M,
-    a: '      if (proaspat && k.comp === c.id && k.epoca === w.camere.epoca) return raspuns\n',
-    b: '      if (proaspat && k.comp === c.id) return raspuns\n',
-    t: T, e: E6R,
+    n: 'UI-6: stepSimSigur fara catch — o exceptie din tick ingheata cadrul',
+    f: A,
+    a: '  try {\n    return stepSim(layer, world, rules, dtMs, simTick)\n  } catch (e) {\n    layer.rest = 0\n    raporteaza(e)\n    return 0\n  }\n',
+    b: '  return stepSim(layer, world, rules, dtMs, simTick)\n',
+    t: T, e: ES,
   },
-  // --- textele inspectorului (pe hartie)
+  {
+    n: 'UI-6: datoria de timp pastrata dupa exceptie (cadrul urmator reia o rafala)',
+    f: A,
+    a: '    layer.rest = 0\n    raporteaza(e)\n',
+    b: '    raporteaza(e)\n',
+    t: T, e: ES,
+  },
+  // --- textele randurilor (pe hartie)
+  {
+    n: '„stabil" pe pragul gresit (|X − T| < 0,05 °C, nu zecimile textului)',
+    f: X,
+    a: "  if (x === textZecimi(tQ16)) return 'stabil'",
+    b: "  if (Math.abs(xTotQ16 - tQ16) < 3277) return 'stabil'",
+    t: T, e: E4R,
+  },
+  {
+    n: 'sageata inversata',
+    f: X,
+    a: "${xTotQ16 < tQ16 ? '↘' : '↗'}",
+    b: "${xTotQ16 < tQ16 ? '↗' : '↘'}",
+    t: T, e: E4R,
+  },
+  {
+    n: 'JOC-6: randul 3 cu „+X °C" (efectul permanent al omului), nu numarul',
+    f: X,
+    a: "  return n === 0 ? 'oameni: niciunul' : `oameni: ${n} înăuntru`",
+    b: "  return n === 0 ? 'oameni: niciunul' : `oameni +${(0.77 * n).toFixed(1).replace('.', ',')} °C (${n} înăuntru)`",
+    t: T, e: E4R,
+  },
+  {
+    n: 'legenda lui U iar cu „la echilibru"',
+    f: X,
+    a: '  return `${interval} · afară ${textGradeIntregi(tAfaraQ16)} °C`',
+    b: '  return `${interval} la echilibru · afară ${textGradeIntregi(tAfaraQ16)} °C`',
+    t: T, e: E4R,
+  },
+  {
+    n: 'UI-6: alerta fara textul existent al invariantului',
+    f: X,
+    a: '  return `Temperatura: ${t.titlu} ${t.actiune}`',
+    b: '  return `Temperatura: eroare.`',
+    t: T, e: E4R,
+  },
   {
     n: 'zecimile: trunchiate, nu rotunjite (0,25 °C → „0,2")',
     f: X,
@@ -194,7 +329,7 @@ export const MUTATII = [
     f: X,
     a: "  if (deschis) return 'gol deschis'\n",
     b: '',
-    t: T, e: 'TERMIC ECRAN inspectorul pe hartie: casa 5x5x2 cu golul usii',
+    t: T, e: EG,
   },
   {
     n: 'descompunerea: SUS e „tavan" si spre cer (nu „acoperiș")',
@@ -290,13 +425,41 @@ export const MUTATII = [
     b: '  return { lo: min, hi: max }',
     t: T, e: E11,
   },
-  // --- recenzia t.2a, L4-4: necunoscutul iese de pe rampa, aerul de afara intra in scara
   {
     n: 'L4-4: aerul de afara scos din intervalul tentei (totul cade iar langa mijlocul rampei)',
     f: O,
     a: '  return intervalTenta(Math.min(min, tAfara), Math.max(max, tAfara))',
     b: '  return intervalTenta(min, max)',
     t: T, e: E11,
+  },
+  // --- overlay-ul U din STARE (t.2b §8, UI-3)
+  {
+    n: 'UI-3: U pe cheia de tick floor(tick/tps) — cifrele raman un pas in urma (cheia se schimba inaintea pasului)',
+    f: O,
+    a: '  const citite = citesteValorile(o, w)\n',
+    b: '  const cheieTick = Math.floor(w.tick / rules.ticksPerSecond)\n  const vechi = (o as unknown as { cheieTick?: number }).cheieTick\n  ;(o as unknown as { cheieTick?: number }).cheieTick = cheieTick\n  const citite = cheieTick !== vechi ? citesteValorile(o, w) : false\n',
+    t: T, e: E12,
+  },
+  {
+    n: 'U inghetat: valorile citite din stare doar la geometrie noua',
+    f: O,
+    a: '  const citite = citesteValorile(o, w)\n',
+    b: '  const citite = geometrie ? citesteValorile(o, w) : false\n',
+    t: T, e: E12,
+  },
+  {
+    n: 'U: recolorarea la fiecare cadru (si in pauza), nu doar la schimbare',
+    f: O,
+    a: '  if (geometrie || citite || textZecimi(afara) !== textZecimi(o.tAfara)) {',
+    b: '  if (true as boolean) {',
+    t: T, e: E12,
+  },
+  {
+    n: 'U: aerul de afara al scarii nu se mai reimprospateaza',
+    f: O,
+    a: '    o.tAfara = afara\n',
+    b: '',
+    t: T, e: E12,
   },
   {
     n: 'L4-4: recolorarea pe intervalul fara aerul de afara',
@@ -306,10 +469,24 @@ export const MUTATII = [
     t: T, e: E12,
   },
   {
-    n: 'L4-4: patratul fara valoare iar desenat, gri, in mijlocul rampei',
+    n: 'UI-6: componenta fara T desenata (alfa 1, culoarea capatului rece)',
     f: O,
-    a: '      for (let k = 0; k < 6; k++) arr.set([0, 0, 0, 0], (i * 6 + k) * 4)\n',
-    b: '      for (let k = 0; k < 6; k++) arr.set([0.5, 0.5, 0.5, 1], (i * 6 + k) * 4)\n',
+    a: '      culori.set(id, [0, 0, 0, 0])\n',
+    b: '      culori.set(id, [0.1, 0.15, 0.32, 1])\n',
+    t: T, e: ET,
+  },
+  {
+    n: 'UI-6: componenta ramasa fara T pastreaza valoarea veche (cifra si culoarea unei stari pierdute)',
+    f: O,
+    a: '      if (o.valori.delete(id)) schimbat = true\n',
+    b: '',
+    t: T, e: ET,
+  },
+  {
+    n: 'U: geometria noua nu goleste valorile (raman pe id-uri vechi, rotite)',
+    f: O,
+    a: '  o.valori.clear()\n  o.faraT = 0\n',
+    b: '  o.faraT = 0\n',
     t: T, e: E12,
   },
   {
@@ -320,32 +497,10 @@ export const MUTATII = [
     t: T, e: E12,
   },
   {
-    n: 'L4-4: geometria noua pe acelasi nivel fara valorile mutate prin celule (id-urile rotite lasa tot nivelul fara valoare)',
+    n: 'overlay: nivelul nou nu reface geometria (cifrele altui nivel)',
     f: O,
-    a: '    if (peCelula !== null) mutaValorile(o, peCelula)\n',
-    b: '',
-    t: T, e: E12,
-  },
-  // --- ritmul overlay-ului
-  {
-    n: 'overlay: regimul la fiecare cadru cu lume noua (fara secunda)',
-    f: O,
-    a: '(acumMs - o.regimLa >= PERIOADA_REGIM_MS && cheie !== o.regimCheie)',
-    b: '(cheie !== o.regimCheie)',
-    t: T, e: E12,
-  },
-  {
-    n: 'overlay: regimul si in pauza (lumea neschimbata)',
-    f: O,
-    a: '(acumMs - o.regimLa >= PERIOADA_REGIM_MS && cheie !== o.regimCheie)',
-    b: '(acumMs - o.regimLa >= PERIOADA_REGIM_MS)',
-    t: T, e: E12,
-  },
-  {
-    n: 'overlay: nivel nou fara regim imediat (cifrele vechi pana la secunda urmatoare)',
-    f: O,
-    a: '  if (nivelNou || o.regimCheie === \'\' || ',
-    b: '  if (o.regimCheie === \'\' || ',
+    a: '  const nivelNou = o.nivel !== z\n',
+    b: '  const nivelNou = o.nivel === undefined\n',
     t: T, e: E12,
   },
   {
@@ -353,13 +508,6 @@ export const MUTATII = [
     f: O,
     a: '    geometrie = o.amprenta === null || !aceeasiAmprenta(o.amprenta, amprenta)',
     b: '    geometrie = true',
-    t: T, e: E12,
-  },
-  {
-    n: 'overlay: geometria noua necolorata pana la regimul urmator',
-    f: O,
-    a: '  else if (geometrie) recoloreaza(o)\n',
-    b: '',
     t: T, e: E12,
   },
   // --- tasta

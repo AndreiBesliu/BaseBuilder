@@ -37,8 +37,9 @@ import { cellKey } from '../src/sim/path.ts'
 import { createDensePanel, densePanelReport, PANEL_HZ, tickDensePanel } from './panel-dens.ts'
 import { isWalkable, rebuildDirty } from '../src/sim/regions.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
+import type { Rules } from '../src/sim/content.ts'
 import { meshHeightfield } from '../src/render/heightfield.ts'
-import { createAgentLayer, spawnNear, stepSim, updateAgentLayer } from './agenti.ts'
+import { createAgentLayer, spawnNear, stepSimSigur, updateAgentLayer } from './agenti.ts'
 import { buildM10PeLume } from '../src/harness/fixture-m10.ts'
 import { SDIG_MAX_INCERCARI, SDIG_OFFSET_INCALZIRE, SDIG_SPAN_INCALZIRE, sapaturaUrmatoare } from '../src/harness/sdig.ts'
 import { decode, encode } from '../src/sim/save.ts'
@@ -54,8 +55,8 @@ import { actiuneTasta, tintaEditabila } from './ui/taste.ts'
 import type { Actiune } from './ui/taste.ts'
 import { normalizeaza, planDreptunghi, textPlan, Unealta } from './ui/dreptunghi.ts'
 import type { Lumea, PlanDreptunghi, UnealtaId } from './ui/dreptunghi.ts'
-import { textIntervalTemperatura, textMotiv } from './ui/texte.ts'
-import { cifreDinReguli } from './ui/model.ts'
+import { textEroareSimulare, textEroareTemperatura, textIntervalTemperatura, textMotiv } from './ui/texte.ts'
+import { cifreDinReguli, creeazaFiltruOameni, creeazaMonitorTermic } from './ui/model.ts'
 import { citesteSalvare, listaSalvari, scrieSalvare, stergeSalvare } from './ui/salvari-idb.ts'
 import { FORMAT_SALVARE, numeFisier, valideazaSalvare } from './ui/salvari-plic.ts'
 import type { Salvare } from './ui/salvari-plic.ts'
@@ -820,9 +821,48 @@ scene.add(stabOverlay.group)
 // Incaperile (I): aerul acoperit de la nivelul activ. Vezi overlay-camere.ts.
 const camereOverlay = createCamereOverlay()
 scene.add(camereOverlay.group)
-// Temperatura (U): echilibrul spatiilor acoperite de la nivelul activ, tenta + cifre DOM. Vezi overlay-temperatura.ts.
+// Temperatura (U): temperatura de ACUM (starea) a spatiilor acoperite de la nivelul activ, tenta + cifre DOM. Vezi
+// overlay-temperatura.ts.
 const tempOverlay = createTemperaturaOverlay()
 scene.add(tempOverlay.group)
+/**
+ * Oamenii aratati de inspector (t.2b §8, verif-UI-2 F4): esantionul fiecarui pas termic, filtrat — stare a ECRANULUI,
+ * nu a lumii. Se hraneste dupa FIECARE tick (`tickObservat`), ca sa vada exact pozitiile pe care le-a folosit pasul.
+ */
+const filtruOameni = creeazaFiltruOameni()
+/** Tickul simularii, urmat de esantionul oamenilor (daca a rulat pasul). Orice avans al lumii din viewer trece pe aici. */
+function tickObservat(w: World, r: Rules): void {
+  simTick(w, r)
+  filtruOameni.dupaTick(w)
+}
+/** Erorile temperaturii (§5.3, UI-6): invariantii numarati de simulare, cititi la fiecare cadru. */
+const monitorTermic = creeazaMonitorTermic()
+/** Exceptii prinse din simulare (randul „temperatura" din F3) si mesajele deja raportate. */
+let exceptiiSim = 0
+const exceptiiVazute = new Set<string>()
+/**
+ * O exceptie din `tick()` (§5.3, UI-6): jocul trece pe pauza — altfel tickul esuat s-ar relua la fiecare cadru (cu
+ * `stepAgents` pe jumatate, pe acelasi tick), iar ecranul ar spune ca jocul merge. Randarea si UI-ul merg mai departe;
+ * alerta in Jurnal la fiecare oprire, UN `console.error` pe mesaj, contorul in F3. Spatiu porneste din nou.
+ */
+function raporteazaExceptia(e: unknown): void {
+  exceptiiSim++
+  seteazaPauza(true)
+  const mesaj = e instanceof Error ? e.message : String(e)
+  if (!exceptiiVazute.has(mesaj)) {
+    exceptiiVazute.add(mesaj)
+    console.error('[simulare] exceptie in tick — jocul e pe pauza', e)
+  }
+  ui?.eroare(textEroareSimulare())
+}
+/** La fiecare cadru: un tip NOU de invariant al temperaturii da o alerta si un `console.error` (monitorul, model.ts). */
+function verificaTemperatura(): void {
+  const m = monitorTermic.verifica(world)
+  for (const tip of m.tipuriNoi) {
+    console.error(`[temperatura] invariant incalcat (${m.total} in total): ${tip}`)
+    ui?.eroare(textEroareTemperatura())
+  }
+}
 /** Cifrele lui U: stratul DOM se face la prima aprindere (o pagina de gate nu-l are niciodata). */
 let stratEtichete: StratEtichete | null = null
 /**
@@ -1656,10 +1696,10 @@ function comutaI(): void {
 function comutaU(): void {
   tempOverlay.visible = !tempOverlay.visible
   tempOverlay.group.visible = tempOverlay.visible
-  // Aprinderea e o actiune a jucatorului: geometria si regimul se fac acum, nu la secunda urmatoare.
+  // Aprinderea e o actiune a jucatorului: geometria si valorile se fac acum, nu la cadrul urmator.
   tempOverlay.nivel = undefined
   if (tempOverlay.visible && stratEtichete === null) stratEtichete = creeazaStratEtichete(document.body)
-  actualizeazaTemperaturaOverlay(tempOverlay, world, DEFAULT_RULES, sliceLevel === null ? null : sliceLevel - 1, performance.now())
+  actualizeazaTemperaturaOverlay(tempOverlay, world, DEFAULT_RULES, sliceLevel === null ? null : sliceLevel - 1)
   if (tempOverlay.visible && camereOverlay.visible) comutaI()
 }
 
@@ -2176,7 +2216,8 @@ function stepFrame(ts: number): void {
     // variantei „doar cei in LUCREAZA la inceputul cadrului".
     // In pauza (Spatiu) simularea nu avanseaza deloc: nicio comanda nu se pierde, doar nu se misca nimeni.
     if (!simPauza) {
-      noteazaTickuri(stepSim(agentLayer, world, DEFAULT_RULES, dt * viteza, simTick), dt)
+      // O exceptie din simulare nu ingheata cadrul (§5.3, UI-6): se raporteaza, jocul trece pe pauza.
+      noteazaTickuri(stepSimSigur(agentLayer, world, DEFAULT_RULES, dt * viteza, tickObservat, raporteazaExceptia), dt)
       remeshDinJurnal()
     }
     // Si in pauza: pornit cu `?pauza=1`, stratul pionilor n-ar fi fost desenat niciodata (HUD: „0").
@@ -2187,8 +2228,8 @@ function stepFrame(ts: number): void {
     if (stratUsi !== null) actualizeazaStratUsi(stratUsi, world.terrain)
     // Incaperile: indexul e la zi dupa fiecare tick; overlay-ul se reface doar la alta epoca sau alt nivel.
     if (camereOverlay.visible) rebuildCamereOverlay(camereOverlay, world, sliceLevel === null ? null : sliceLevel - 1)
-    // Temperatura: geometria la amprenta noua a nivelului, valorile (regimul permanent) cel mult o data pe secunda.
-    if (tempOverlay.visible) actualizeazaTemperaturaOverlay(tempOverlay, world, DEFAULT_RULES, sliceLevel === null ? null : sliceLevel - 1, now)
+    // Temperatura: geometria la amprenta noua a nivelului; valorile din stare la fiecare cadru, culorile doar la schimbare.
+    if (tempOverlay.visible) actualizeazaTemperaturaOverlay(tempOverlay, world, DEFAULT_RULES, sliceLevel === null ? null : sliceLevel - 1)
     if (jobOverlay.visible && frameIndex % 6 === 0) rebuildJobOverlay(jobOverlay, world)
     // Mult mai rar decat overlay-ul de joburi. Cererea nu reporneste trecerea din curs,
     // nici una terminata pe acelasi teren (vezi `ceFacCuTrecerea`): o celula ajunsa la
@@ -2200,6 +2241,8 @@ function stepFrame(ts: number): void {
     // sapaturile pionilor si acoperirea desemnarilor il schimba fara niciun click.
     if (regionOverlay.visible && world.regions.epoca !== epocaDesenata) refreshOverlay()
   }
+  // Invariantii temperaturii (si dupa comenzile din UI, nu doar dupa tickuri): un tip nou → alerta si console.error.
+  verificaTemperatura()
   // Trecerea de stabilitate, feliata: cel mult bugetul pe cadru, si doar cu overlay-ul pornit.
   avanseazaStabilitate(stabOverlay, world, DEFAULT_RULES, BUGET_STABILITATE_MS, ui === null)
   // UI-ul de joc: nimic din asta nu exista intr-o rulare de gate (`ui === null`).
@@ -2288,6 +2331,12 @@ function stepFrame(ts: number): void {
       el('jobs').className = r.faraMuncitori || r.faraCarausi ? 'warn' : ''
       if (r.faraMuncitori) el('jobs').textContent += ' · NIMENI NU SAPA'
       if (r.faraCarausi) el('jobs').textContent += ' · NIMENI NU CARA'
+    }
+    {
+      // Temperatura (§5.3, UI-6): pasii, invariantii incalcati (cu motivul ultimului) si exceptiile prinse din simulare.
+      const st = world.temperatura.stat
+      el('termic').textContent = `pasi ${st.pasi} · invarianti ${st.invarianti}${st.invarianti > 0 ? ` (ultimul: ${st.ultimulInvariant})` : ''}${exceptiiSim > 0 ? ` · exceptii ${exceptiiSim}` : ''}`
+      el('termic').className = st.invarianti > 0 || exceptiiSim > 0 ? 'warn' : ''
     }
     if (probe.invalid) {
       el('spot').textContent = `INVALID · ${probe.invalid}`
@@ -2404,6 +2453,7 @@ if (!MOD.faraUI && MOD_JOC !== 'gate') {
     mod: modUI,
     mesajPornire: mesajPornireUI,
     primiPasi: salvareIncarcata?.meta.primiPasi ?? null,
+    filtruOameni,
     pauza: () => simPauza,
     seteazaPauza,
     viteza: () => viteza,
@@ -2486,4 +2536,4 @@ if (!MOD.faraUI && MOD_JOC !== 'gate') {
 requestAnimationFrame(tick)
 
 // Expus pentru masuratori din consola, nu pentru joc.
-Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport, fantoma, jobOverlay, stabOverlay, tempOverlay, etichete: () => stratEtichete, ui, mod: MOD_JOC, agentLayer, tintaLa, suprafata, stratResurse, stare: () => ({ viteza, pauza: simPauza }) } })
+Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport, fantoma, jobOverlay, stabOverlay, tempOverlay, etichete: () => stratEtichete, ui, mod: MOD_JOC, agentLayer, tintaLa, suprafata, stratResurse, stare: () => ({ viteza, pauza: simPauza }), filtruOameni, tickObservat, monitorTermic } })

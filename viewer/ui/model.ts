@@ -27,11 +27,15 @@ import { cellKey } from '../../src/sim/path.ts'
 import { materialAt } from '../../src/sim/terrain/terrain.ts'
 import { Material } from '../../src/sim/terrain/chunk.ts'
 import { cititorCamere, componentaLa, esteAer, esteAerAcoperit } from '../../src/sim/camere.ts'
-import { canaleTermice } from '../../src/sim/termic.ts'
+import { geometriaCanalelor } from '../../src/sim/termic.ts'
+import type { GeometrieCanale } from '../../src/sim/termic.ts'
+import { canaleAcum, oameniPeComponente, temperaturaAcum, tragerea, tragereCuOameni } from '../../src/sim/temperatura.ts'
+import { tAfara } from '../../src/sim/clima.ts'
+import type { Outcome } from '../../src/sim/result.ts'
 import { explicaCelula } from '../../src/sim/camere-explica.ts'
 import type { Celula, Explicatie } from '../../src/sim/camere-explica.ts'
 import { numePion } from './nume.ts'
-import { cant, NUME_GAND, NUME_ITEM_MIC, NUME_PIESA, textActivitate, textCanale, textEchilibru, textGeneric, textMinute, textMotiv, textRatiunePion } from './texte.ts'
+import { cant, NUME_GAND, NUME_ITEM_MIC, NUME_PIESA, TEXT_TEMPERATURA_NECUNOSCUTA, TEXT_TRAGERE_NECUNOSCUTA, textActivitate, textCanale, textMinute, textMotiv, textOameni, textRatiunePion, textTemperaturaAcum, textTragere } from './texte.ts'
 import type { Cifre, TextMotiv } from './texte.ts'
 import type { Semnal, Tinta } from './alerte.ts'
 
@@ -666,84 +670,200 @@ export function aerulIntrebat(w: World, wx: number, wy: number, z: number, n: No
 }
 
 // ---------------------------------------------------------------------------------------------
-// temperatura încăperii de la celula inspectată (design temperatura v2, §6)
+// temperatura încăperii de la celula inspectată (t.2b §8: temperatura e STARE)
 // ---------------------------------------------------------------------------------------------
 
-/** Ce scrie inspectorul despre temperatura componentei: echilibrul și pe ce stă el. */
+/**
+ * Ce scrie inspectorul despre temperatura componentei (research/temperatura-t2b.md §8): trei rânduri FIXE — fiecare pe
+ * un singur rând în cazul cel mai lat (măsurat în ui.css), deci butoanele de sub ele nu sar — și descompunerea.
+ */
 export interface TermicLa {
-  /** Componenta (id-ul din index) pentru care s-a calculat. */
+  /** Componenta (id-ul din index). */
   readonly comp: number
-  /** Echilibrul, Q16 °C; null = nu s-a putut calcula (graful a refuzat). */
+  /** T din stare (Q16 °C); null = componenta n-are T (invariant încălcat). */
   readonly tQ16: number | null
-  /** „~4,5 °C la echilibru (afară 12 °C)". */
+  /** X_tot = X + P/ΣG (Q16 °C), cu P-ul arătat (`FiltruOameni`); null = linia grafului nu se poate citi. */
+  readonly xTotQ16: number | null
+  /** Oamenii arătați: eșantionul pasului, filtrat (F4). */
+  readonly oameni: number
+  /** Rândul 1: „6,2 °C · afară 12 °C" sau „Temperatura nu se știe (eroare internă)". */
   readonly linie: string
-  /** „66% sol (pereți 42%, podea 24%, ~4 °C) · 31% aer de afară prin acoperiș (…)"; '' la refuz. */
+  /** Rândul 2: „trage spre 4,8 °C ↘" / „stabil" / „trage spre: nu se știe"; '' fără T. */
+  readonly tragere: string
+  /** Rândul 3: „oameni: niciunul" / „oameni: 1 înăuntru"; '' fără T. */
+  readonly oameniText: string
+  /** „66% sol (pereți 42%, podea 24%, ~4 °C) · 31% aer de afară prin acoperiș (…)" — vecinele la T-ul lor de acum; '' la refuz. */
   readonly canale: string
 }
 
 /**
- * Temperatura componentei care conține celula de aer `celula` (cea întrebată de explicație, `IncapereLa.celula`),
- * la tickul lumii de ACUM. NU stă în `IncapereLa` și nu trece prin memoria explicației: aceea întoarce același
- * obiect cât nu se editează lângă componentă, deci temperatura ar fi rămas cea de la primul clic (panoul, L5-2: 400
- * din 400 de reîmprospătări, abatere de 8,7 °C în 20 de minute). Canalele vin din graful simulării (cache-ul de
- * fețe, agregat pe bucățile componentei), nu dintr-un mers al fețelor în viewer (30–250 ms pe componentele mari).
+ * Temperatura componentei care conține celula de aer `celula` (cea întrebată de explicație, `IncapereLa.celula`), din
+ * starea de ACUM, la fiecare cerere (§8): T din `w.temperatura` (fără fereastra de o secundă a lui t.2a), X din linia
+ * grafului simulării (`tragerea`: rezervoarele la tick, vecinele la T-ul lor de acum) plus oamenii arătați de filtru
+ * (`filtru`; fără el, cei de acum), descompunerea din geometria canalelor (`geo`, memorată de apelant; fără ea, calculată
+ * acum). NU stă în `IncapereLa` și nu trece prin memoria explicației (aceea întoarce același obiect cât nu se editează
+ * lângă componentă: temperatura ar îngheța — panoul t.2a, L5-2). Nu scrie nimic și nu cere graful t.2a.
  */
-export function termicLa(w: World, rules: Rules, celula: Celula): TermicLa | null {
+export function termicLa(w: World, rules: Rules, celula: Celula, filtru: FiltruOameni | null = null, geo?: Outcome<GeometrieCanale>): TermicLa | null {
   const c = componentaLa(w.camere, celula.x, celula.y, celula.z)
   if (c === null) return null
-  const o = canaleTermice(w, rules, c.id, w.tick)
-  if (!o.ok) return { comp: c.id, tQ16: null, linie: `Temperatura nu se poate calcula: ${textGeneric(o.reason).titlu}`, canale: '' }
-  return { comp: c.id, tQ16: o.value.tQ16, linie: textEchilibru(o.value.tQ16, o.value.tAfaraQ16), canale: textCanale(o.value) }
+  const t = temperaturaAcum(w, c.id)
+  if (t === null) return { comp: c.id, tQ16: null, xTotQ16: null, oameni: 0, linie: TEXT_TEMPERATURA_NECUNOSCUTA, tragere: '', oameniText: '', canale: '' }
+  const oameni = filtru === null ? (oameniPeComponente(w).get(c.id) ?? 0) : filtru.oameni(w, c.id)
+  const tr = tragerea(w, rules, c.id)
+  const x = tr.ok ? tragereCuOameni(tr.value, oameni * rules.termic.omW) : null
+  const g = geo ?? geometriaCanalelor(w.camere, rules, c.id)
+  const k = g.ok ? canaleAcum(w, rules, g.value) : g
+  return {
+    comp: c.id,
+    tQ16: t,
+    xTotQ16: x,
+    oameni,
+    linie: textTemperaturaAcum(t, tAfara(w.seed, w.tick, rules)),
+    tragere: x === null ? TEXT_TRAGERE_NECUNOSCUTA : textTragere(t, x),
+    oameniText: textOameni(oameni),
+    canale: k.ok ? textCanale(k.value) : '',
+  }
 }
 
 /**
- * Memoria temperaturii din inspector. Același (tick, epocă, epocaFete, componentă, reguli) ⇒ același răspuns, fără
- * calcul (în pauză, 0 calcule la 4 Hz). Cu jocul mergând, cel mult un calcul pe `PERIOADA_TERMIC_MS` (design §5:
- * graful „la cerere, cel mult o dată pe secundă"; recenzia t.2a, L4-2): cheiată doar pe tick, memoria recalcula la
- * fiecare reîmprospătare (4 Hz), iar orice săpătură lângă aer acoperit, oriunde în așezare, mută ștampila grafului —
- * deci graful se reface de până la 4 ori pe secundă (2,35/s măsurat la 3×, cadre de 11–16 ms pe M10).
- *
- * Sub o secundă de la ultimul calcul se întoarce răspunsul de atunci pentru:
- * - ACEEAȘI celulă, chiar dacă id-ul componentei s-a rotit: o săpătură în felia comună reface și componenta
- *   întrebată (hub-ul M10: 68 de id-uri noi în 20 s). Prețul: la o unire reală, ≤ 1 s se arată T-ul componentei
- *   vechi;
- * - aceeași componentă (alt clic în aceeași încăpere), dar numai în ACEEAȘI epocă a indexului: după o reconstrucție
- *   id-urile se refolosesc (o casă poate primi id-ul celeilalte), iar un clic pe altă casă se calculează imediat.
- * Ceasul e al viewer-ului (`performance.now()` în panouri.ts), injectat ca testele să-l aleagă; e OBLIGATORIU, ca
- * un apelant să nu-l poată uita (fără el, fereastra n-ar exista).
+ * Memoria inspectorului (§8): DOAR geometria canalelor (agregarea fețelor: 1,4–2,1 ms pe hub-ul M10, B6), valabilă pe
+ * (OBIECTUL indexului, `epoca`, `epocaFete`, regulile, componenta). T, X, oamenii și temperaturile destinațiilor se citesc
+ * la fiecare cerere — temperatura e stare, citirea ei e O(1), iar linia grafului 8,6–9,1 µs pe hub (B6). Fereastra de o
+ * secundă a lui t.2a (L4-2) nu mai are de ce exista: ecranul nu mai cere graful.
  */
 export interface MemorieTermica {
-  ia(w: World, rules: Rules, celula: Celula | null, acumMs: number): TermicLa | null
-  calcule(): number
+  ia(w: World, rules: Rules, celula: Celula | null, filtru: FiltruOameni | null): TermicLa | null
+  /** Geometrii calculate (agregări de fețe). */
+  geometrii(): number
 }
 
-/** Cel mult atât de des (ms, ceasul viewer-ului) se recalculează temperatura din inspector și regimul lui U (§5–6). */
-export const PERIOADA_TERMIC_MS = 1000
-
 export function creeazaMemorieTermica(): MemorieTermica {
-  let cheie: { tick: number; epoca: number; epocaFete: number; comp: number; rules: Rules } | null = null
-  let raspuns: TermicLa | null = null
-  let la = Number.NEGATIVE_INFINITY
-  let celLa: Celula | null = null
-  let calcule = 0
+  let cheie: { idx: World['camere']; epoca: number; epocaFete: number; comp: number; rules: Rules } | null = null
+  let geo: Outcome<GeometrieCanale> | null = null
+  let geometrii = 0
   return {
-    ia(w, rules, celula, acumMs) {
+    ia(w, rules, celula, filtru) {
       if (celula === null) return null
       const c = componentaLa(w.camere, celula.x, celula.y, celula.z)
       if (c === null) return null
       const k = cheie
-      if (k !== null && k.tick === w.tick && k.epoca === w.camere.epoca && k.epocaFete === w.camere.epocaFete && k.comp === c.id && k.rules === rules) return raspuns
-      const proaspat = k !== null && k.rules === rules && acumMs - la < PERIOADA_TERMIC_MS
-      if (proaspat && celLa !== null && celLa.x === celula.x && celLa.y === celula.y && celLa.z === celula.z) return raspuns
-      if (proaspat && k.comp === c.id && k.epoca === w.camere.epoca) return raspuns
-      raspuns = termicLa(w, rules, celula)
-      cheie = { tick: w.tick, epoca: w.camere.epoca, epocaFete: w.camere.epocaFete, comp: c.id, rules }
-      la = acumMs
-      celLa = { x: celula.x, y: celula.y, z: celula.z }
-      calcule++
-      return raspuns
+      if (geo === null || k === null || k.idx !== w.camere || k.epoca !== w.camere.epoca || k.epocaFete !== w.camere.epocaFete || k.comp !== c.id || k.rules !== rules) {
+        geo = geometriaCanalelor(w.camere, rules, c.id)
+        cheie = { idx: w.camere, epoca: w.camere.epoca, epocaFete: w.camere.epocaFete, comp: c.id, rules }
+        geometrii++
+      }
+      return termicLa(w, rules, celula, filtru, geo)
     },
-    calcule: () => calcule,
+    geometrii: () => geometrii,
+  }
+}
+
+/** Starea filtrului oamenilor pe o componentă: ultimele (cel mult 3) eșantioane ale pasului și ce se arată. */
+export interface StareFiltru {
+  readonly ultime: readonly number[]
+  readonly afisat: number
+}
+
+/**
+ * Un eșantion nou în filtru (§8, verif-UI-2 F4): ce se arată se schimbă doar când ultimele 3 eșantioane sunt egale; fără
+ * istorie, eșantionul însuși. Un om care trece prin casă (1–3 pași) nu mută nici „trage spre", nici rândul oamenilor —
+ * salturile rândului 2 scad la jumătate (verif-UI-2: 18,1–22,3 → 8,7–10,0 pe zi cu 4 locatari).
+ */
+export function pasFiltru(s: StareFiltru | undefined, n: number): StareFiltru {
+  if (s === undefined) return { ultime: [n], afisat: n }
+  const ultime = [...s.ultime, n].slice(-3)
+  const egale = ultime.length === 3 && ultime[0] === n && ultime[1] === n
+  return { ultime, afisat: egale ? n : s.afisat }
+}
+
+/**
+ * Oamenii arătați de inspector (§8, UI-2 / F4): starea e TRANZITORIE, a ecranului — nimic în simulare, nimic salvat.
+ * `dupaTick` se cheamă după FIECARE tick (main.ts împachetează `tick`): când pasul a rulat (`stat.pasi` a crescut),
+ * eșantionează oamenii pe componente cu regula pasului (`oameniPeComponente`), din pozițiile pe care le-a folosit pasul
+ * (pionii nu se mai mișcă după pas, în același tick). Ținut pe ANCORA componentei: id-urile se rotesc la orice epocă nouă
+ * (o săpătură în mină), ancora nu. O componentă fără eșantion încă (închisă în pauză) arată oamenii de acum.
+ */
+export interface FiltruOameni {
+  dupaTick(w: World): void
+  oameni(w: World, compId: number): number
+  /** Eșantioane luate (pași văzuți). */
+  esantioane(): number
+}
+
+export function creeazaFiltruOameni(): FiltruOameni {
+  let stari = new Map<number, StareFiltru>()
+  let stat: World['temperatura']['stat'] | null = null
+  let pasi = 0
+  let esantioane = 0
+  return {
+    dupaTick(w) {
+      const st = w.temperatura.stat
+      if (st !== stat) {
+        // Altă lume (o încărcare): istoria veche nu e a ei.
+        stat = st
+        pasi = st.pasi
+        stari = new Map()
+        return
+      }
+      if (st.pasi === pasi) return
+      pasi = st.pasi
+      const cate = oameniPeComponente(w)
+      const noi = new Map<number, StareFiltru>()
+      for (const c of w.camere.comp.values()) noi.set(c.ancora, pasFiltru(stari.get(c.ancora), cate.get(c.id) ?? 0))
+      stari = noi
+      esantioane++
+    },
+    oameni(w, compId) {
+      const c = w.camere.comp.get(compId)
+      if (c === undefined) return 0
+      const s = stari.get(c.ancora)
+      return s !== undefined ? s.afisat : (oameniPeComponente(w).get(compId) ?? 0)
+    },
+    esantioane: () => esantioane,
+  }
+}
+
+/** Ce a văzut monitorul la o citire. */
+export interface CitireMonitor {
+  /** Invarianți noi de la citirea de dinainte. */
+  readonly noi: number
+  /** Tipuri (motive) văzute ACUM prima dată: câte un `console.error` și o alertă pe fiecare. */
+  readonly tipuriNoi: readonly string[]
+  readonly total: number
+  readonly ultimul: string
+}
+
+/**
+ * Monitorizarea erorilor temperaturii pe ecran (§5.3, UI-6): simularea nu aruncă din `tick()`, ci numără invarianții
+ * încălcați (`statTermic(w).invarianti`, cu motivul ultimului). Viewer-ul citește contorul la fiecare cadru; un tip nou
+ * (motivul) dă o alertă în Jurnal și UN `console.error` — nu unul pe cadru, nici unul pe pas —, iar contorul stă în F3.
+ */
+export interface MonitorTermic {
+  verifica(w: World): CitireMonitor
+}
+
+export function creeazaMonitorTermic(): MonitorTermic {
+  let stat: World['temperatura']['stat'] | null = null
+  let vazute = 0
+  const tipuri = new Set<string>()
+  return {
+    verifica(w) {
+      const st = w.temperatura.stat
+      if (st !== stat) {
+        stat = st
+        vazute = 0
+      }
+      const total = st.invarianti
+      const noi = total - vazute
+      vazute = total
+      const tipuriNoi: string[] = []
+      if (noi > 0 && !tipuri.has(st.ultimulInvariant)) {
+        tipuri.add(st.ultimulInvariant)
+        tipuriNoi.push(st.ultimulInvariant)
+      }
+      return { noi: Math.max(0, noi), tipuriNoi, total, ultimul: st.ultimulInvariant }
+    },
   }
 }
 
