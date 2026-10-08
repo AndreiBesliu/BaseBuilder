@@ -39,7 +39,7 @@ import { isWalkable, rebuildDirty } from '../src/sim/regions.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { meshHeightfield } from '../src/render/heightfield.ts'
-import { createAgentLayer, spawnNear, stepSimSigur, updateAgentLayer } from './agenti.ts'
+import { avanseazaSigur, createAgentLayer, spawnNear, stepSimSigur, updateAgentLayer } from './agenti.ts'
 import { buildM10PeLume } from '../src/harness/fixture-m10.ts'
 import { SDIG_MAX_INCERCARI, SDIG_OFFSET_INCALZIRE, SDIG_SPAN_INCALZIRE, sapaturaUrmatoare } from '../src/harness/sdig.ts'
 import { decode, encode } from '../src/sim/save.ts'
@@ -55,7 +55,7 @@ import { actiuneTasta, tintaEditabila } from './ui/taste.ts'
 import type { Actiune } from './ui/taste.ts'
 import { normalizeaza, planDreptunghi, textPlan, Unealta } from './ui/dreptunghi.ts'
 import type { Lumea, PlanDreptunghi, UnealtaId } from './ui/dreptunghi.ts'
-import { textEroareSimulare, textEroareTemperatura, textIntervalTemperatura, textMotiv } from './ui/texte.ts'
+import { textEroareSimulare, textEroareTemperatura, textMotiv } from './ui/texte.ts'
 import { cifreDinReguli, creeazaFiltruOameni, creeazaMonitorTermic } from './ui/model.ts'
 import { citesteSalvare, listaSalvari, scrieSalvare, stergeSalvare } from './ui/salvari-idb.ts'
 import { FORMAT_SALVARE, numeFisier, valideazaSalvare } from './ui/salvari-plic.ts'
@@ -66,7 +66,7 @@ import { actualizeazaStratResurse, creeazaStratResurse } from './strat-resurse.t
 import { actualizeazaStratUsi, creeazaStratUsi, impacturiUsi, plaseUsi } from './strat-usi.ts'
 import { celuleUsiiInPlan, celuleUsiiPlan, golulTintit, grupUsa, MESAJ_FARA_GOL } from './usi.ts'
 import { createCamereOverlay, rebuildCamereOverlay } from './overlay-camere.ts'
-import { actualizeazaTemperaturaOverlay, createTemperaturaOverlay } from './overlay-temperatura.ts'
+import { actualizeazaTemperaturaOverlay, cifreLegenda, createTemperaturaOverlay } from './overlay-temperatura.ts'
 import { actualizeazaEtichete, creeazaStratEtichete } from './etichete-temperatura.ts'
 import type { StratEtichete } from './etichete-temperatura.ts'
 
@@ -854,6 +854,21 @@ function raporteazaExceptia(e: unknown): void {
     console.error('[simulare] exceptie in tick — jocul e pe pauza', e)
   }
   ui?.eroare(textEroareSimulare())
+}
+/**
+ * `__kinstead.avanseaza(n)` (t.2b §8, B6 rec. 9): n tickuri REALE pe aceeasi cale ca `stepSim` — `tickObservat` (tickul
+ * simularii + esantionul filtrului), cu exceptia prinsa ca in `stepSimSigur` (raportata, jocul pe pauza; `avanseazaSigur`,
+ * agenti.ts) —, apoi mesh-urile refacute din jurnalul terenului. Pentru proba de pe ecran (bench/ui-fum.mjs). Merge si in
+ * pauza (cine o cheama decide cat timp trece); pauza si viteza raman ale jucatorului, iar ecranul (overlay-urile, cifrele,
+ * inspectorul) se reimprospateaza la cadrul urmator, ca dupa `stepSim`. Intoarce tickul lumii, cate tickuri au rulat (mai
+ * putine doar la o exceptie) si cat au costat (ms, informativ).
+ */
+function avanseaza(n: number): { tick: number; rulate: number; simMs: number; remeshMs: number } {
+  const t0 = performance.now()
+  const rulate = avanseazaSigur(world, DEFAULT_RULES, n, tickObservat, raporteazaExceptia)
+  const t1 = performance.now()
+  remeshDinJurnal()
+  return { tick: world.tick, rulate, simMs: t1 - t0, remeshMs: performance.now() - t1 }
 }
 /** La fiecare cadru: un tip NOU de invariant al temperaturii da o alerta si un `console.error` (monitorul, model.ts). */
 function verificaTemperatura(): void {
@@ -2404,12 +2419,7 @@ function navigheaza(cautare: string): void {
 }
 
 function cifreOverlay(o: 'J' | 'S' | 'G' | 'I' | 'U'): string {
-  if (o === 'U') {
-    const t = tempOverlay
-    if (!t.visible || t.nivel === null || t.nivel === undefined) return ''
-    if (t.eroare !== '') return t.eroare
-    return textIntervalTemperatura(t.valori.size, t.min, t.max, t.tAfara)
-  }
+  if (o === 'U') return cifreLegenda(tempOverlay, world, DEFAULT_RULES)
   if (o === 'I') {
     const c = camereOverlay
     if (!c.visible || c.nivel === null) return ''
@@ -2536,4 +2546,4 @@ if (!MOD.faraUI && MOD_JOC !== 'gate') {
 requestAnimationFrame(tick)
 
 // Expus pentru masuratori din consola, nu pentru joc.
-Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport, fantoma, jobOverlay, stabOverlay, tempOverlay, etichete: () => stratEtichete, ui, mod: MOD_JOC, agentLayer, tintaLa, suprafata, stratResurse, stare: () => ({ viteza, pauza: simPauza }), filtruOameni, tickObservat, monitorTermic } })
+Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport, fantoma, jobOverlay, stabOverlay, tempOverlay, etichete: () => stratEtichete, ui, mod: MOD_JOC, agentLayer, tintaLa, suprafata, stratResurse, stare: () => ({ viteza, pauza: simPauza }), filtruOameni, tickObservat, monitorTermic, avanseaza, rules: DEFAULT_RULES } })

@@ -14,7 +14,8 @@
  * luminozitate. Ecranul NU cere graful t.2a (contoarele lui rămân 0) și nu mișcă contoarele grafului incremental.
  *
  * ERORILE (§5.3, UI-6): monitorul invarianților (o alertă și un `console.error` pe tip nou) și `stepSimSigur` (o excepție
- * din tick se raportează, cadrul nu aruncă).
+ * din tick se raportează, cadrul nu aruncă). AVANSUL DE PROBĂ (`avanseazaSigur`, al lui `__kinstead.avanseaza`): tickuri
+ * reale prin funcția dată, nu timp sărit. LEGENDA lui U: aerul de afară de la tickul lumii, ca inspectorul.
  */
 
 import test from 'node:test'
@@ -53,11 +54,13 @@ import {
 } from '../viewer/ui/texte.ts'
 import type { CanalTermic } from '../src/sim/termic.ts'
 import { actiuneTasta } from '../viewer/ui/taste.ts'
-import { stepSimSigur } from '../viewer/agenti.ts'
+import { avanseazaSigur, stepSimSigur } from '../viewer/agenti.ts'
+import { hashWorld } from '../src/sim/hash.ts'
 import type { AgentLayer } from '../viewer/agenti.ts'
 import {
   actualizeazaTemperaturaOverlay,
   alegeEtichete,
+  cifreLegenda,
   ancoreLaNivel,
   CULOARE_CALDA,
   CULOARE_RECE,
@@ -572,6 +575,42 @@ test('TERMIC ECRAN stepSimSigur: o exceptie din tick se raporteaza, cadrul nu ar
   assert.equal(strat.rest, 0, 'datoria de timp se arunca: cadrul urmator nu reia o rafala')
 })
 
+test('TERMIC ECRAN avanseazaSigur: n tickuri REALE prin functia data (tickObservat) — pasii termici ruleaza, filtrul vede fiecare pas, lumea == tickurile scrise aici; o exceptie se raporteaza si opreste avansul; n nevalid refuzat', () => {
+  // Doua lumi identice: casa fara usa cu un pion in ea. Una avanseaza prin `avanseazaSigur` (ca `__kinstead.avanseaza`), alta
+  // prin `tick` scris aici. Proba de pe ecran (ui-fum) sarea timpul cu `world.tick +=`: T, care e stare, statea pe loc.
+  const lume = (): { w: World; x: number; y: number; z: number } => {
+    const { w, wx, wy, g } = sitPlat(12345, 12)
+    casa(w, wx, wy, g, false)
+    bun(sincronizeazaLumea(w, R), 'sincronizeazaLumea')
+    assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (wx + 2) * 1000 + 500, y: (wy + 2) * 1000 + 500, z: g + 1, faction: Faction.ASEZARE }, R).ok)
+    return { w, x: wx + 2, y: wy + 2, z: g + 1 }
+  }
+  const a = lume()
+  const b = lume()
+  const f = creeazaFiltruOameni()
+  const erori: unknown[] = []
+  const tickObservat = (w: World, r: typeof R): void => { tick(w, r); f.dupaTick(w) }
+  const id = componentaLa(a.w.camere, a.x, a.y, a.z)!.id
+  const t0 = temperaturaAcum(a.w, id)
+  assert.ok(t0 !== null)
+  // 61 de tickuri de la tickul 0: pasii la 0, 20, 40, 60 (4); filtrul ii esantioneaza pe ultimii 3 (primul tick doar ii
+  // arata lumea — testul „X_tot cu oameni").
+  assert.equal(avanseazaSigur(a.w, R, 61, tickObservat, (e) => erori.push(e)), 61)
+  for (let i = 0; i < 61; i++) tick(b.w, R)
+  assert.deepEqual([a.w.tick, statTermic(a.w).pasi, f.esantioane(), erori.length], [61, 4, 3, 0])
+  assert.equal(hashWorld(a.w), hashWorld(b.w), 'aceeasi lume (cu temperatura) ca tickurile scrise aici')
+  assert.equal(f.oameni(a.w, id), 1)
+  assert.notEqual(temperaturaAcum(a.w, id), t0, 'avansul real muta T (timpul sarit nu l-ar misca)')
+  // O exceptie la al 5-lea tick: raportata o data, avansul se opreste dupa 4, nimic nu arunca.
+  let k = 0
+  const n = avanseazaSigur(a.w, R, 10, (w, r) => { if (++k === 5) throw new Error('invariant de proba'); tick(w, r) }, (e) => erori.push(e))
+  assert.deepEqual([n, a.w.tick, erori.length], [4, 65, 1])
+  assert.match(String(erori[0]), /invariant de proba/)
+  // n nevalid: refuzat inainte de orice tick (un n fractionar ar rula ceil(n) tickuri, NaN niciunul, tacut).
+  for (const rau of [-1, 1.5, Number.NaN, 2 ** 53]) assert.throws(() => avanseazaSigur(a.w, R, rau, tick, () => {}), RangeError, String(rau))
+  assert.deepEqual([avanseazaSigur(a.w, R, 0, tick, () => {}), a.w.tick], [0, 65])
+})
+
 // --- 2. ancorele cifrelor ------------------------------------------------------------
 
 /** Piesele 4-conexe pe componentă la nivel, numărate AICI, independent de overlay: Map comp → seturi de chei. */
@@ -899,6 +938,34 @@ test('TERMIC ECRAN overlay-ul U din stare: valorile == T din stare dupa FIECARE 
   // Fără nivel: nimic desenat.
   actualizeazaTemperaturaOverlay(o, w, R, null)
   assert.deepEqual([o.group.children.length, o.ancore.length, o.nivel, o.valori.size], [0, 0, null, 0])
+})
+
+test('TERMIC ECRAN legenda lui U: aerul de afara de la tickul lumii (acelasi grad ca inspectorul), nu aerul scarii', () => {
+  // Scara lui U tine aerul de afara de la ultima recolorare (o recolorare la o zecime noua); gradele intregi ale legendei
+  // se scriu din tickul lumii, ca randul 1 al inspectorului si bara de sus. Masurat la valul 2: pe aerul scarii, in 4,5%
+  // din tickuri legenda spunea alt grad decat inspectorul (ferestre de pana la 80 s la 1×).
+  const { w, wx, wy, g } = sitPlat(12345, 12)
+  casa(w, wx, wy, g)
+  bun(sincronizeazaLumea(w, R), 'sincronizeazaLumea')
+  const o = createTemperaturaOverlay()
+  o.visible = true
+  const z = g + 1
+  const celula = { x: wx + 2, y: wy + 2, z }
+  actualizeazaTemperaturaOverlay(o, w, R, z)
+  let gasit = false
+  for (let i = 0; i < 8000 && !gasit; i++) {
+    tick(w, R)
+    actualizeazaTemperaturaOverlay(o, w, R, z)
+    gasit = textGradeIntregi(o.tAfara) !== textGradeIntregi(tAfara(w.seed, w.tick, R))
+  }
+  assert.ok(gasit, 'fixtura: un tick la care scara si tickul dau grade diferite')
+  const afara = textGradeIntregi(tAfara(w.seed, w.tick, R))
+  assert.equal(cifreLegenda(o, w, R), textIntervalTemperatura(o.valori.size, o.min, o.max, tAfara(w.seed, w.tick, R)))
+  assert.ok(cifreLegenda(o, w, R).endsWith(` · afară ${afara} °C`))
+  assert.ok(termicLa(w, R, celula)!.linie.endsWith(` · afară ${afara} °C`), 'acelasi grad ca randul 1 al inspectorului')
+  // Fara nivel, nimic.
+  actualizeazaTemperaturaOverlay(o, w, R, null)
+  assert.equal(cifreLegenda(o, w, R), '')
 })
 
 test('TERMIC ECRAN tasta U: overlay-ul Temperatura, doar cu UI; nu dintr-un camp de text', () => {

@@ -163,6 +163,30 @@ export function stepSimSigur(
   }
 }
 
+/**
+ * Avansul de proba al viewer-ului (`__kinstead.avanseaza(n)`, t.2b §8; B6 rec. 9): n tickuri REALE prin `simTick` —
+ * aceeasi functie pe care main.ts o da lui `stepSim` (`tickObservat`: tickul simularii + esantionul filtrului oamenilor)
+ * —, cu exceptia prinsa ca in `stepSimSigur`: se da lui `raporteaza`, iar avansul se opreste acolo. Fara acumulatorul de
+ * timp si fara plafonul pe cadru: cine il cheama (bench/ui-fum.mjs, in pauza) decide cat timp trece. Inainte, proba sarea
+ * timpul cu `world.tick +=`, fara niciun pas — iar temperatura, care e stare, statea pe loc. Intoarce cate tickuri au rulat.
+ */
+export function avanseazaSigur(
+  world: World,
+  rules: Rules,
+  n: number,
+  simTick: (w: World, r: Rules) => void,
+  raporteaza: (e: unknown) => void,
+): number {
+  if (!Number.isSafeInteger(n) || n < 0) throw new RangeError(`avanseaza: n trebuie sa fie un intreg >= 0, nu ${String(n)}`)
+  let rulate = 0
+  try {
+    for (; rulate < n; rulate++) simTick(world, rules)
+  } catch (e) {
+    raporteaza(e)
+  }
+  return rulate
+}
+
 // Trei culori pentru ai nostri, dupa STARE, nu doar dupa factiune: un pion care
 // merge 90 de celule la lucru si unul care se plimba la intamplare aratau la fel,
 // iar research-ul e explicit — „lipsa unei stari Idle vizibile: jucatorul

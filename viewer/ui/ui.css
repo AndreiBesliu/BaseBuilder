@@ -163,8 +163,15 @@
 .ui-oameni td { padding: 3px 4px; border-top: 1px solid var(--ui-line); white-space: nowrap; }
 .ui-oameni td.act { white-space: normal; max-width: 150px; }
 /* Cu fila Oameni, sertarul se lateste: la 330 px, coloanele de munca si distanta erau ascunse dupa o
-   bara de derulare (masurat: scrollWidth 421 in 312 — recenzia UI-ului, ECR-2). */
-.ui-dreapta:has(.ui-oameni:not([hidden])) { width: 470px; }
+   bara de derulare (masurat: scrollWidth 421 in 312 — recenzia UI-ului, ECR-2).
+   Bara VERTICALA rezervata mereu si 485 px (t.2b, verif-UI-5): cu „Stă: lipsește materialul pentru construit",
+   coloana `td.act` se rupe pe doua linii, randurile cresc la ~90 px, apare bara verticala de 15 px, iar la 470 px
+   tabelul (446) nu mai incapea in 437 — bara orizontala, in DOM, in 11 din 14 cazuri (6 si 12 oameni). Doar
+   `scrollbar-gutter` la 470 nu ajunge (12 din 14); impreuna, 0 din 14. Cu reparatia, pe ecran (6 randuri lungi,
+   bara verticala de fata): tabelul 452 in 452, la 1.280 si la 1.100 px, unde sertarul incepe la 605 px, dupa coloana
+   stanga (148 px) si legenda (458 px). Proba: „sertar-oameni-lung" din bench/ui-fum.mjs. */
+.ui-oameni { scrollbar-gutter: stable; }
+.ui-dreapta:has(.ui-oameni:not([hidden])) { width: 485px; }
 .ui-oameni tr.ales td { background: rgba(99, 174, 192, .16); }
 .ui-oameni tbody tr { cursor: pointer; }
 .ui-oameni tbody tr:hover td { background: var(--ui-bg-3); }

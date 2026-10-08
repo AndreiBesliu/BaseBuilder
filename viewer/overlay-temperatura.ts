@@ -55,7 +55,7 @@ import { temperaturaAcum } from '../src/sim/temperatura.ts'
 import { WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 import { aceeasiAmprenta, amprentaNivel } from './overlay-camere.ts'
 import type { AmprentaNivel } from './overlay-camere.ts'
-import { TEXT_TEMPERATURA_NECUNOSCUTA, textZecimi } from './ui/texte.ts'
+import { TEXT_TEMPERATURA_NECUNOSCUTA, textIntervalTemperatura, textZecimi } from './ui/texte.ts'
 
 /** Numele grupului în scenă: proba de pe ecran (bench/ui-fum.mjs) îl caută după el. */
 export const NUME_GRUP_TEMPERATURA = 'overlay-temperatura'
@@ -420,4 +420,16 @@ export function actualizeazaTemperaturaOverlay(o: OverlayTemperatura, w: World, 
     o.tAfara = afara
     recoloreaza(o)
   }
+}
+
+/**
+ * Cifrele legendei lui U: intervalul T-urilor desenate si aerul de afara la TICKUL LUMII — acelasi „afară N °C" ca
+ * inspectorul (randul 1) si bara de sus. `o.tAfara` e aerul SCARII (culorile), reimprospatat doar cand i se schimba
+ * zecimile: scrisa din el, legenda spunea alt grad decat inspectorul in 4,5% din tickurile unui an (seed-urile 7, 12345,
+ * 20260913; ferestre de pana la 80 s la 1×; masurat la valul 2 al t.2b). Fara nivel: nimic; cu eroare: eroarea.
+ */
+export function cifreLegenda(o: OverlayTemperatura, w: World, rules: Rules): string {
+  if (!o.visible || o.nivel === null || o.nivel === undefined) return ''
+  if (o.eroare !== '') return o.eroare
+  return textIntervalTemperatura(o.valori.size, o.min, o.max, tAfara(w.seed, w.tick, rules))
 }

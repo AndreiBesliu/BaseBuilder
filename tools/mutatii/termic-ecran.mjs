@@ -12,7 +12,8 @@
  *
  * Ce NU e aici: scrisul PE LOC in DOM, inaintea comparatiei cheii (panouri.ts), stratul DOM al cifrelor
  * (etichete-temperatura.ts), excluderea I/U, hranirea filtrului dupa fiecare tick si pauza la exceptie (main.ts) — in
- * node nu exista DOM si nici bucla de cadre. Le probeaza ui-fum (bench/ui-fum.mjs), pasul „temperatura".
+ * node nu exista DOM si nici bucla de cadre. Le probeaza ui-fum (bench/ui-fum.mjs), pe pagina termica (`paginaTermica`). Aici:
+ * bucla avansului de proba (`avanseazaSigur`, agenti.ts), pe care `__kinstead.avanseaza` o leaga de `tickObservat`.
  */
 
 const T = 'tests/viewer-termic.test.ts'
@@ -39,6 +40,8 @@ const EN = 'TERMIC ECRAN viewer-ul nu cere graful t.2a'
 const ED = 'TERMIC ECRAN descompunerea: geometria memorata'
 const ET = 'TERMIC ECRAN componenta fara T'
 const ES = 'TERMIC ECRAN stepSimSigur'
+const EA = 'TERMIC ECRAN avanseazaSigur'
+const EL = 'TERMIC ECRAN legenda lui U: aerul de afara'
 const E7 = 'TERMIC ECRAN ancorele pe hartie'
 const E8 = 'TERMIC ECRAN ancorele pe M10'
 const E10 = 'TERMIC ECRAN densitatea'
@@ -217,6 +220,35 @@ export const MUTATII = [
     a: '    layer.rest = 0\n    raporteaza(e)\n',
     b: '    raporteaza(e)\n',
     t: T, e: ES,
+  },
+  // --- §8 (B6 rec. 9): avansul de proba al viewer-ului, `__kinstead.avanseaza(n)` = `avanseazaSigur` + remesh
+  {
+    n: 'avanseaza: un tick lipsa (bucla pana la n - 1)',
+    f: A,
+    a: '    for (; rulate < n; rulate++) simTick(world, rules)\n',
+    b: '    for (; rulate < n - 1; rulate++) simTick(world, rules)\n',
+    t: T, e: EA,
+  },
+  {
+    n: 'avanseaza: timpul sarit (world.tick++, fara pas — ce facea ui-fum in t.2a)',
+    f: A,
+    a: '    for (; rulate < n; rulate++) simTick(world, rules)\n',
+    b: '    for (; rulate < n; rulate++) world.tick++\n',
+    t: T, e: EA,
+  },
+  {
+    n: 'avanseaza: fara catch — o exceptie din tick scapa in pagina (jocul nu trece pe pauza, nu se raporteaza)',
+    f: A,
+    a: '  try {\n    for (; rulate < n; rulate++) simTick(world, rules)\n  } catch (e) {\n    raporteaza(e)\n  }\n',
+    b: '  for (; rulate < n; rulate++) simTick(world, rules)\n',
+    t: T, e: EA,
+  },
+  {
+    n: 'avanseaza: n nevalidat (doar NaN refuzat: un n fractionar ruleaza ceil(n) tickuri, unul negativ niciunul, tacut)',
+    f: A,
+    a: '  if (!Number.isSafeInteger(n) || n < 0) throw new RangeError(',
+    b: '  if (n !== n) throw new RangeError(',
+    t: T, e: EA,
   },
   // --- textele randurilor (pe hartie)
   {
@@ -460,6 +492,20 @@ export const MUTATII = [
     a: '    o.tAfara = afara\n',
     b: '',
     t: T, e: E12,
+  },
+  {
+    n: 'legenda lui U pe aerul SCARII (o.tAfara): alt grad decat inspectorul in 4,5% din tickuri',
+    f: O,
+    a: '  return textIntervalTemperatura(o.valori.size, o.min, o.max, tAfara(w.seed, w.tick, rules))',
+    b: '  return textIntervalTemperatura(o.valori.size, o.min, o.max, o.tAfara)',
+    t: T, e: EL,
+  },
+  {
+    n: 'legenda lui U scrie cifre si fara nivel',
+    f: O,
+    a: "  if (!o.visible || o.nivel === null || o.nivel === undefined) return ''",
+    b: "  if (!o.visible) return ''",
+    t: T, e: EL,
   },
   {
     n: 'L4-4: recolorarea pe intervalul fara aerul de afara',

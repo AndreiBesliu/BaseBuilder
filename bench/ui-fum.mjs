@@ -7,12 +7,16 @@
  * vazuta, la 30 de cadre pe secunda), care trimite taste si mouse prin `sendInputEvent` si citeste
  * lumea din `__kinstead`. Fiecare pas e o bifa cu NUME si cu cifra ei.
  *
- * Proba negativa: `--proba-negativa[=<bifa>]` saboteaza pasul unei bife anume (sapa: oracolul cere
+ * Proba negativa: `--proba-negativa[=<proba>]` saboteaza pasul unei bife anume (sapa: oracolul cere
  * 26; pauza: Spatiu nu se apasa; salvare: Ctrl+S nu se apasa; desen: casa zidita din JS nu primeste
  * clipa fara pauza in care se redeseneaza — „casa-desenata" rosie; exceptie: pasul „joc-nou" arunca —
- * bifa pasului rosie SI rularea ajunge la „depozit"), iar rularea iese cu 0 DOAR daca exact bifa aceea
- * e rosie. Inainte, orice rosu trecea proba — si o bifa care nu putea iesi rosie (pauza) nu se vedea
- * (recenzia UI-ului, T-02).
+ * bifa pasului rosie SI rularea ajunge la „depozit"; plus cele ale temperaturii si ale sertarului, in
+ * `TINTE_NEGATIVE`), iar rularea iese cu 0 DOAR daca bifa aceea e rosie si NICIO alta (t.2b: inainte se
+ * cerea doar ca ea sa fie printre cele rosii). Inainte, orice rosu trecea proba — si o bifa care nu putea
+ * iesi rosie (pauza) nu se vedea (recenzia UI-ului, T-02).
+ *
+ * Temperatura (t.2b §8) ruleaza pe PAGINA EI, la final, pe o lume cu contract scris (vezi `paginaTermica`): timpul trece
+ * doar prin `__kinstead.avanseaza(n)` (tickuri reale) sau cu jocul pornit, niciodata prin `world.tick +=`.
  *
  * Fiecare pas ruleaza in `pas()`: o exceptie e o bifa ROSIE cu numele pasului, nu sfarsitul rularii
  * (recenzia incaperilor, ECR-10).
@@ -21,7 +25,7 @@
  * facea bifele Ctrl+S si incarcarea verzi si cu salvarea stricata (recenzia UI-ului, T-01).
  *
  *   npm run viewer            (in alt terminal; sau `npm run viewer:preview` pe build)
- *   node_modules/electron/dist/electron.exe bench/ui-fum.mjs http://localhost:5175/ [--proba-negativa[=sapa|pauza|salvare|desen|exceptie]] [--poze=<dosar>]
+ *   node_modules/electron/dist/electron.exe bench/ui-fum.mjs http://localhost:5175/ [--proba-negativa[=<una din TINTE_NEGATIVE>]] [--poze=<dosar>]
  *
  * NU e o masuratoare de cadre si nu intra in gate: offscreen + fara throttling e exact ce protocolul
  * de gate interzice (bench/GATE.md §5b). E o proba de COMPORTAMENT.
@@ -38,7 +42,21 @@ const REPO = fileURLToPath(new URL('..', import.meta.url)).replaceAll('\\', '/')
 const BAZA = (argv.find((a) => /^https?:\/\//.test(a)) ?? 'http://localhost:5175/').replace(/\/?$/, '/')
 const NEG = argv.find((a) => a.startsWith('--proba-negativa'))
 const NEGATIVA = NEG === undefined ? null : NEG.includes('=') ? NEG.slice(NEG.indexOf('=') + 1) : 'sapa'
-if (NEGATIVA !== null && !['sapa', 'pauza', 'salvare', 'desen', 'exceptie'].includes(NEGATIVA)) { console.log(`proba negativa necunoscuta: ${NEGATIVA}`); process.exit(2) }
+/**
+ * Proba negativa → bifa pe care o face rosie. Ale temperaturii (t.2b §8) si ale sertarului saboteaza GESTUL bifei, nu
+ * produsul: se-misca — timpul sarit (`world.tick +=`) in locul avansului real; inertie — gaura din acoperis nu se
+ * sapa; temperatura-pauza — a doua apasare pe Spatiu lipseste (jocul merge cele 3 s); incapere-noua — Alt+clic-ul pe bloc
+ * lipseste; U-la-3x — cifrele lui U se citesc la 400 ms DUPA starea cu care se compara (o cifra ramasa un pas in urma ar
+ * arata asa, UI-3); alerta — invariantul nu se provoaca; incarca-m5 — lumea incarcata avanseaza 1686 de tickuri, nu 1687;
+ * sertar — reparatia sertarului (485 px, `scrollbar-gutter`) e anulata in pagina printr-un stil.
+ */
+const TINTE_NEGATIVE = {
+  sapa: 'sapa', pauza: 'pauza', salvare: 'salvare', desen: 'casa-desenata', exceptie: 'joc-nou',
+  'se-misca': 'temperatura-se-misca', inertie: 'temperatura-inertie', 'temperatura-pauza': 'temperatura-pauza',
+  'incapere-noua': 'temperatura-incapere-noua', 'U-la-3x': 'temperatura-U-la-3x', alerta: 'alerta-termica',
+  'incarca-m5': 'incarca-m5', sertar: 'sertar-oameni-lung',
+}
+if (NEGATIVA !== null && !Object.hasOwn(TINTE_NEGATIVE, NEGATIVA)) { console.log(`proba negativa necunoscuta: ${NEGATIVA} (sunt: ${Object.keys(TINTE_NEGATIVE).join(', ')})`); process.exit(2) }
 const POZE = argv.find((a) => a.startsWith('--poze='))?.slice('--poze='.length) ?? null
 const W = 1280
 const H = 720
@@ -84,11 +102,13 @@ app.whenReady().then(async () => {
   if (cod === 0) {
     if (NEGATIVA === null) cod = rosii.length > 0 ? 1 : 0
     else {
-      // „exceptie": bifa pasului e rosie SI rularea a mers mai departe (a ajuns la „depozit").
-      const id = NEGATIVA === 'exceptie' ? 'joc-nou' : NEGATIVA === 'desen' ? 'casa-desenata' : NEGATIVA
+      // „exceptie": bifa pasului e rosie SI rularea a mers mai departe (a ajuns la „depozit"). EXACT ea: o alta bifa rosie
+      // inseamna ca sabotajul a stricat si altceva (proba nu mai spune ce masoara bifa) — sau ca rularea are un rosu al ei.
+      const id = TINTE_NEGATIVE[NEGATIVA]
       const tinta = rosii.some((b) => b.id === id) && (NEGATIVA !== 'exceptie' || bife.some((b) => b.id === 'depozit'))
-      console.log(`proba negativa „${NEGATIVA}": bifa ei (${id}) ${tinta ? 'E rosie (instrumentul poate produce rosu acolo)' : 'NU e rosie — instrumentul e orb acolo'}; rosii: ${rosii.map((b) => b.id).join(', ') || 'niciuna'}`)
-      cod = tinta ? 0 : 1
+      const altele = rosii.filter((b) => b.id !== id)
+      console.log(`proba negativa „${NEGATIVA}": bifa ei (${id}) ${tinta ? 'E rosie (instrumentul poate produce rosu acolo)' : 'NU e rosie — instrumentul e orb acolo'}; alte rosii: ${altele.map((b) => b.id).join(', ') || 'niciuna'}`)
+      cod = tinta && altele.length === 0 ? 0 : 1
     }
   }
   app.exit(cod)
@@ -835,197 +855,9 @@ async function ruleaza() {
     bifa('pune-usa', b5 !== null && bPune !== null && usi.length === 2 && usi.every((u) => u.prioritate === 5) && /Ușa e desemnată — o zidesc oamenii/.test(dupa.text) && !dupa.pune && dupa.arataUsa,
       'inspectorul pe o casa cu golul deschis: „Pune ușa" pune usa intreaga cu prioritatea barei (5), apoi spune „Ușa e desemnată", fara buton', JSON.stringify({ inainte, usi, dupa }))
   })
-  // --- 6g. temperatura (design temperatura v2, §6; panoul, L5-2 / L5-3): overlay-ul U din tasta si din butonul din
-  // „Hărți", tenta si cifra pe casa de proba; inspectorul pe podeaua ei arata echilibrul si descompunerea; textul
-  // temperaturii se schimba FARA clic, iar butonul „Arată nivelul" ramane acelasi nod (scris pe loc, nu redesenat).
-  await pas('temperatura', async () => {
-    if (casaI === null) { bifa('temperatura-tasta', false, 'fara casa de proba (6c)'); return }
-    const { x0: hx, y0: hy, s: hs } = casaI
-    if (!(await p.js('__kinstead.stare().pauza'))) await p.tasta(' ')
-    await p.tasta('r')
-    await p.tasta('v')
-    if (await p.js(`document.querySelector('button[title^="Încăperile închise"]')?.getAttribute('aria-pressed') === 'true'`)) await p.tasta('i')
-    await p.js(`__f.centreaza(${hx + 2.5}, ${hy + 2.5}, ${hs + 1}, 9)`)
-    await astepta(250)
-    // Nivelul: aerul casei (sol +1), ca la 6c — dupa fiecare tasta se ASTEAPTA eticheta noua.
-    const eticheta = () => p.js(`document.querySelector('.ui-nivel .rel')?.textContent ?? ''`)
-    const tastaNivel = async (k) => {
-      const inainte = await eticheta()
-      await p.tasta(k)
-      for (let j = 0; j < 30 && (await eticheta()) === inainte; j++) await astepta(50)
-    }
-    await tastaNivel('q')
-    for (let i = 0; i < 8; i++) {
-      const rel = await eticheta()
-      if (rel === 'sol +1') break
-      await tastaNivel(/sol \+[2-9]/.test(rel) ? 'q' : 'e')
-    }
-    const stare = () => p.js(`(() => {
-      const K = __kinstead, o = K.tempOverlay, s = K.etichete ? K.etichete() : null
-      if (!o) return { lipsa: true }
-      const g = K.scene.getObjectByName('overlay-temperatura')
-      const casa = o.ancore.filter((a) => a.x >= ${hx + 1} && a.x <= ${hx + 3} && a.y >= ${hy + 1} && a.y <= ${hy + 3})
-      const spanuri = s ? s.spanuri.map((e) => ({ vizibil: !e.hidden && !s.radacina.hidden, text: e.textContent })) : []
-      const i = casa.length ? o.ancore.indexOf(casa[0]) : -1
-      const leg = document.querySelector('.ui-legenda')
-      return {
-        vizibil: o.visible, nivel: o.nivel ?? null, grup: g ? g.visible : null,
-        plase: g ? g.children.map((c) => ({ tip: c.type, varfuri: c.geometry?.getAttribute('position')?.count ?? 0, culori: !!c.geometry?.getAttribute('color') })) : [],
-        ancoreCasa: casa.length, eticheta: i >= 0 && spanuri[i] ? spanuri[i] : null, etichete: spanuri.filter((x) => x.vizibil).length,
-        buton: document.querySelector('button[title^="Unde ar ajunge temperatura"]')?.getAttribute('aria-pressed') ?? null,
-        legenda: leg && !leg.hidden ? (leg.querySelector('h3 span')?.textContent ?? '') + ' | ' + (leg.querySelector('.cifre')?.textContent ?? '') : '',
-      }
-    })()`)
-    const s0 = await stare()
-    await p.tasta('u')
-    await astepta(500)
-    const s1 = await stare()
-    bifa('temperatura-tasta', s0.vizibil === false && s1.vizibil === true && s1.buton === 'true' && s1.nivel === hs + 1, 'tasta U aprinde overlay-ul Temperatura pe nivelul casei (butonul din „Hărți" apasat)', JSON.stringify({ s0: { vizibil: s0.vizibil, buton: s0.buton, lipsa: s0.lipsa }, s1: { vizibil: s1.vizibil, nivel: s1.nivel, buton: s1.buton }, hs }))
-    bifa('temperatura-tenta', s1.grup === true && (s1.plase ?? []).some((c) => c.tip === 'Mesh' && c.culori && c.varfuri >= 9 * 6), 'overlay-ul U: tenta e in scena (o plasa cu culori pe varf, cel putin cele 9 celule ale casei)', JSON.stringify(s1.plase))
-    bifa('temperatura-etichete', s1.ancoreCasa === 1 && s1.eticheta !== null && s1.eticheta.vizibil && /^−?\d+,\d°$/.test(s1.eticheta.text), 'overlay-ul U: o cifra pe casa de proba, ancorata in interiorul ei si vizibila („4,5°")', JSON.stringify({ ancoreCasa: s1.ancoreCasa, eticheta: s1.eticheta, etichete: s1.etichete }))
-    bifa('temperatura-legenda', /^Temperatură \(U\) \| /.test(s1.legenda ?? '') && /°C la echilibru · afară −?\d+ °C$/.test(s1.legenda ?? ''), 'legenda lui U: intervalul de la nivel si aerul de afara', String(s1.legenda))
-    await p.poza('7-temperatura-overlay.png')
-    // Cifrele DOM urmaresc LUMEA, nu doar aprinderea (recenzia t.2a, L4-5): bifa de mai sus citea cifra o singura data,
-    // deci un strat care scrie textul o singura data trecea. Lumea sta pe pauza si i se sare tickul cu cate o ora, pana
-    // cand macar o cifra ASTEPTATA se schimba (altfel bifa n-ar avea dinti); apoi, dupa regimul nou (cheia lui poarta
-    // tickul) si un cadru, fiecare cifra vizibila == textEticheta(valoarea overlay-ului pentru ancora ei).
-    const cifreAcum = () => p.js(`(async () => {
-      const K = __kinstead, o = K.tempOverlay, s = K.etichete ? K.etichete() : null
-      const T = await import('/@fs/${REPO}/viewer/ui/texte.ts')
-      if (!s) return { lipsa: true }
-      const out = []
-      s.spanuri.forEach((e, i) => {
-        const a = o.ancore[i]
-        const v = a ? o.valori.get(a.comp) : undefined
-        out.push({ vizibil: !e.hidden && !s.radacina.hidden, text: e.textContent, asteptat: v === undefined ? '' : T.textEticheta(v) })
-      })
-      return { tick: K.world.tick, regim: o.regimCheie, pauza: K.stare().pauza, cifre: out }
-    })()`)
-    const c0 = await cifreAcum()
-    const tickInainte = c0.tick
-    let c1 = c0
-    for (let salt = 0; salt < 4; salt++) {
-      const tinta = await p.js('__kinstead.world.tick += 1680; __kinstead.world.tick')
-      for (let j = 0; j < 40; j++) {
-        await astepta(100)
-        c1 = await cifreAcum()
-        if (String(c1.regim).startsWith(`${tinta}|`)) break
-      }
-      await astepta(150)
-      c1 = await cifreAcum()
-      if (c1.cifre.some((x, i) => x.asteptat !== '' && x.asteptat !== c0.cifre[i]?.asteptat)) break
-    }
-    const vizibile = (c1.cifre ?? []).filter((x) => x.vizibil)
-    const gresite = vizibile.filter((x) => x.text !== x.asteptat)
-    const mutate = (c1.cifre ?? []).filter((x, i) => x.asteptat !== '' && x.asteptat !== c0.cifre?.[i]?.asteptat).length
-    bifa('temperatura-etichete-la-zi', !c1.lipsa && c1.pauza && vizibile.length >= 1 && gresite.length === 0 && mutate >= 1,
-      'cifrele lui U urmaresc lumea: dupa ore de joc sarite in pauza (valorile s-au mutat), fiecare cifra vizibila == textEticheta(valoarea overlay-ului)', JSON.stringify({ tick0: c0.tick, tick1: c1.tick, vizibile: vizibile.length, mutate, gresite: gresite.slice(0, 4), cifre: vizibile.slice(0, 4) }))
-    // Un clic pe „Ce înseamnă / Ascunde culorile" cu o reimprospatare a cifrelor INTRE mousedown si mouseup (recenzia
-    // t.2a, L4-3): cu cifrele in cheia legendei, legenda — si butonul — se refacea la fiecare schimbare a lor (U aprins,
-    // 3×: ~0,6/s), iar clicul al carui mousedown cadea pe nodul vechi se pierdea (5–6 din 30). Aici, determinist: butonul
-    // e tinut apasat cat se sar trei ore de joc si cat cifrele legendei se schimba pe ecran; abia apoi se elibereaza. Sase
-    // clicuri (numar par: starea legendei, tinuta in localStorage, ramane cea de dinainte).
-    const legendaAcum = () => p.js(`(() => {
-      const L = document.querySelector('.ui-legenda'), b = L?.querySelector('h3 button')
-      if (!b) return null
-      const r = b.getBoundingClientRect(), x = r.x + r.width / 2, y = r.y + r.height / 2
-      return { x, y, buton: b.textContent, peButon: document.elementFromPoint(x, y)?.closest('button') === b, cifre: L.querySelector('.cifre')?.textContent ?? '' }
-    })()`)
-    let reusite = 0
-    let reimprospatate = 0
-    const clicuri = []
-    for (let k = 0; k < 6; k++) {
-      const l0 = await legendaAcum()
-      if (l0 === null || !l0.peButon) { clicuri.push({ k, l0 }); continue }
-      await p.muta(l0.x, l0.y)
-      await p.apasa(l0.x, l0.y)
-      await p.js('__kinstead.world.tick += 3 * 1680; true')
-      let l1 = l0
-      for (let j = 0; j < 40 && l1 !== null && l1.cifre === l0.cifre; j++) { await astepta(100); l1 = await legendaAcum() }
-      if (l1 !== null && l1.cifre !== l0.cifre) reimprospatate++
-      await p.elibereaza(l0.x, l0.y)
-      await astepta(300)
-      const l2 = await legendaAcum()
-      if (l2 !== null && l2.buton !== l0.buton) reusite++
-      clicuri.push({ k, inainte: l0.buton, dupa: l2?.buton ?? null, cifre: [l0.cifre, l1?.cifre ?? null] })
-    }
-    bifa('temperatura-legenda-clic', reusite === 6 && reimprospatate === 6,
-      'legenda lui U: 6 din 6 clicuri pe „Ce înseamnă / Ascunde culorile" reusesc, fiecare cu cifrele legendei schimbate intre mousedown si mouseup', JSON.stringify({ reusite, reimprospatate, clicuri: clicuri.slice(0, 3) }))
-    // I si U tenteaza amandoua podeaua nivelului: aprinse impreuna, culorile s-ar amesteca (main.ts, comutaI / comutaU).
-    // Pasul de mai sus stingea I inainte de U, tocmai ca sa n-o exercite; acum, in ambele sensuri (recenzia t.2a, L4-5).
-    const iu = () => p.js(`({ I: document.querySelector('button[title^="Încăperile închise"]')?.getAttribute('aria-pressed') ?? null, U: document.querySelector('button[title^="Unde ar ajunge temperatura"]')?.getAttribute('aria-pressed') ?? null, tu: __kinstead.tempOverlay.visible })`)
-    const iu0 = await iu()
-    await p.tasta('i')
-    await astepta(400)
-    const iu1 = await iu()
-    await p.tasta('u')
-    await astepta(400)
-    const iu2 = await iu()
-    bifa('temperatura-exclude-I', iu0.U === 'true' && iu0.I === 'false' && iu1.I === 'true' && iu1.U === 'false' && !iu1.tu && iu2.U === 'true' && iu2.I === 'false' && iu2.tu,
-      'I si U se exclud in ambele sensuri: cu U aprins, I stinge U; cu I aprins, U stinge I', JSON.stringify({ iu0, iu1, iu2 }))
-    // Orele sarite mai sus se completeaza pana la zile intregi: pasii de mai jos gasesc ora din zi de dinainte. Altfel,
-    // „temperatura-fara-clic" cadea pe 03:00, in valea zilei, unde o ora de joc nu muta echilibrul casei cu 0,05 °C.
-    await p.js(`(async () => {
-      const R = __kinstead.rules ?? (await import('/@fs/${REPO}/src/sim/content.ts')).DEFAULT_RULES
-      const w = __kinstead.world, zi = R.calendar.ziTicks
-      w.tick += (zi - ((w.tick - ${tickInainte}) % zi)) % zi
-      return w.tick
-    })()`)
-    await astepta(1300)
-    // Butonul din „Hărți": U stins din tasta, aprins din buton.
-    await p.tasta('u')
-    await astepta(300)
-    const s2 = await stare()
-    const bT = await p.js(`(() => { const b = document.querySelector('button[title^="Unde ar ajunge temperatura"]'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
-    if (bT) await p.click(bT.x, bT.y)
-    await astepta(400)
-    const s3 = await stare()
-    bifa('temperatura-buton', s2.vizibil === false && bT !== null && s3.vizibil === true && s3.buton === 'true' && s3.eticheta?.vizibil === true, 'butonul „Temperatură" din „Hărți" aprinde overlay-ul (dupa ce U l-a stins), cu cifra casei', JSON.stringify({ s2: s2.vizibil, bT, s3: { vizibil: s3.vizibil, buton: s3.buton, eticheta: s3.eticheta } }))
-    // Inspectorul pe podeaua casei (sub planul de taiere, proiectata direct, ca la 6c).
-    const pPodea = await p.js(`(() => {
-      const K = __kinstead, q = __f.proj(${hx + 2.5}, ${hs + 1}, ${hy + 2.5})
-      for (let r = 0; r <= 20; r++) for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
-        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue
-        const x = Math.round(q.x) + dx, y = Math.round(q.y) + dy
-        if (document.elementFromPoint(x, y) !== K.renderer.domElement) continue
-        const t = K.tintaLa(x, y, { ctrl: false, shift: false, alt: false })
-        if (t.ok && t.wx === ${hx + 2} && t.wy === ${hy + 2}) return { x, y, z: t.z }
-      }
-      return null
-    })()`)
-    if (pPodea !== null) await p.click(pPodea.x, pPodea.y)
-    await astepta(500)
-    const insp = await p.js(`({ inc: document.querySelector('.ui-incapere')?.textContent ?? '', linie: document.querySelector('.ui-termic-t')?.textContent ?? '', canale: document.querySelector('.ui-termic-canale')?.textContent ?? '' })`)
-    bifa('temperatura-inspector', /Încăpere · 18 m³/.test(insp.inc) && /^~−?\d+,\d °C la echilibru \(afară −?\d+ °C\)$/.test(insp.linie)
-      && /^\d+% aer de afară \(pereți \d+%, acoperiș \d+%, ~−?\d+ °C\) · \d+% sol prin podea \(~−?\d+ °C\)/.test(insp.canale) && !/pierde|câștigă/.test(insp.inc),
-      'inspectorul pe podeaua casei: „~X °C la echilibru (afară Y °C)" si descompunerea („…% aer de afară (pereți …, acoperiș …) · …% sol prin podea"), fara „pierde/câștigă"', JSON.stringify({ insp, pPodea }))
-    await p.poza('8-temperatura-inspector.png')
-    // Fara clic: textul temperaturii se schimba cu lumea, iar „Arată nivelul" e ACELASI nod. Lumea sta pe pauza si i se
-    // sare tickul (ca la „titlu-fara-automata"): echilibrul e o functie de tick, deci textul se schimba, dar nimeni nu
-    // sapa langa casa — o editare acolo ar reface explicatia, deci si corpul inspectorului (legitim, nu ce se masoara
-    // aici). Prima varianta lasa jocul sa mearga cu prioritatile pionilor puse pe 0: le ramanea motivul „n-are voie la
-    // munca" in sertarul Oameni, iar „sertar-oameni" iesea rosie cand fereastra se lungea (7 px de text in plus).
-    if (!(await p.js('__kinstead.stare().pauza'))) await p.tasta(' ')
-    const citeste = () => p.js(`(() => {
-      const b = [...document.querySelectorAll('.ui-inspector button')].find((x) => /Arată nivelul/.test(x.textContent))
-      const l = document.querySelector('.ui-termic-t')
-      if (!globalThis.__tempBtn) { globalThis.__tempBtn = b ?? null; globalThis.__tempLinie = l }
-      return { buton: !!b, acelasi: b === globalThis.__tempBtn, liniaAceeasi: l === globalThis.__tempLinie, linie: l?.textContent ?? '', editari: __kinstead.world.terrain.editari, tick: __kinstead.world.tick, pauza: __kinstead.stare().pauza }
-    })()`)
-    await p.js('globalThis.__tempBtn = null; true')
-    const inainte = await citeste()
-    // O ora de joc: casa urmeaza aerul de afara, deci echilibrul ei se muta cu zecimi de grad.
-    await p.js('__kinstead.world.tick += 1680; true')
-    let dupa = inainte
-    for (let i = 0; i < 20 && dupa.linie === inainte.linie; i++) {
-      await astepta(250)
-      dupa = await citeste()
-    }
-    bifa('temperatura-fara-clic', inainte.buton && inainte.linie !== '' && dupa.linie !== inainte.linie && dupa.acelasi && dupa.liniaAceeasi && dupa.pauza && dupa.editari === inainte.editari,
-      'fara niciun clic, textul temperaturii din inspector se schimba cu lumea, iar butonul „Arată nivelul" ramane ACELASI nod (scris pe loc, nu redesenat)', JSON.stringify({ inainte, dupa }))
-    await p.tasta('u')
-    await p.tasta('r')
-  })
+  // --- 6g. temperatura: pe pagina ei, la final (`paginaTermica`, t.2b §8). Aici lumea jocului nu avanseaza pentru
+  // temperatura: avansul real ar lasa pionii sa lucreze ore intregi, iar bifele de dupa (sertarul, depozitul, salvarea)
+  // ar primi alta lume (verif-UI-5).
   // --- 6f. zona moarta a barei de jos: cu trei toasturi, coloana .ui-jos nu prinde clicuri pe teren (ECR-4) ---
   await pas('zona-moarta', async () => {
     await p.tasta('d')
@@ -1131,6 +963,39 @@ async function ruleaza() {
     await astepta(500)
     const lat = await p.js(`(() => { const c = document.querySelector('.ui-oameni'); return { sw: c.scrollWidth, cw: c.clientWidth } })()`)
     bifa('sertar-oameni', lat.sw <= lat.cw, 'sertarul Oameni: toate coloanele se vad, fara derulare orizontala', JSON.stringify(lat))
+    // Cazul cel mai lat, nu textele de acum (t.2b, verif-UI-5): cu „Stă: lipsește materialul pentru construit" (orice plan
+    // mai mare decat piatra din mormane) coloana `td.act` se rupe pe doua linii, apare bara verticala, iar la 470 px tabelul
+    // nu mai incapea — bifa de mai sus era verde doar fiindca proba nu lasa pionii fara material. Textul lung se scrie DOAR
+    // in DOM, pe fiecare rand, si se pune la loc in aceeasi evaluare (lumea nu se atinge); la 1.280 si la 1.100 px
+    // (LATIME_UI). Cu bara verticala de fata (altfel cazul nu e exercitat); la 1.100, sertarul nu acopera nimic din
+    // stanga (coloana, legenda, Primii pasi) si nici randurile barei de jos. Toasturile NU intra in conditie: sunt trecatoare
+    // si centrate, iar la 1.100 px unul de 278 px intra in sertar cu 84 px (si la 470 px, cu 69) — scrise in cifra bifei.
+    if (NEGATIVA === 'sertar') await p.js(`(() => { const st = document.createElement('style'); st.id = 'neg-sertar'; st.textContent = '.ui-oameni { scrollbar-gutter: auto !important } .ui-dreapta:has(.ui-oameni:not([hidden])) { width: 470px !important }'; document.head.appendChild(st); return true })()`)
+    const masoaraLung = () => p.js(`(() => {
+      const c = document.querySelector('.ui-oameni'), dr = document.querySelector('.ui-dreapta')
+      const celule = [...c.querySelectorAll('tbody td.act')]
+      const vechi = celule.map((td) => td.textContent)
+      celule.forEach((td) => { td.textContent = 'Stă: lipsește materialul pentru construit' })
+      const r = dr.getBoundingClientRect()
+      // offsetParent e null pentru elementele „position: fixed" (coloana stanga, legenda, Primii pasi): vizibil = are cutie.
+      const vizibil = (e) => e !== null && !e.hidden && e.getClientRects().length > 0 && e.getBoundingClientRect().width > 0 && getComputedStyle(e).visibility !== 'hidden'
+      const altele = [['stanga', '.ui-stanga'], ['legenda', '.ui-legenda'], ['pasi', '.ui-pasi'], ['sus', '.ui-sus'], ...[...document.querySelectorAll('.ui-jos > .ui-sub, .ui-jos > .ui-unelte, .ui-jos > .ui-indiciu')].map((e, i) => ['jos' + i, e]), ...[...document.querySelectorAll('.ui-jos .ui-toast')].map((e, i) => ['toast' + i, e])]
+        .map(([n, s]) => [n, typeof s === 'string' ? document.querySelector(s) : s]).filter(([, e]) => vizibil(e))
+      const peste = altele.map(([n, e]) => { const q = e.getBoundingClientRect(); return { n, cls: e.className, text: e.textContent.slice(0, 40), cutie: [q.left, q.top, q.right, q.bottom].map(Math.round), x: Math.max(0, Math.min(r.right, q.right) - Math.max(r.left, q.left)), y: Math.max(0, Math.min(r.bottom, q.bottom) - Math.max(r.top, q.top)) } }).filter((o) => o.x > 0 && o.y > 0)
+      const out = { latime: innerWidth, randuri: celule.length, sw: c.scrollWidth, cw: c.clientWidth, sh: c.scrollHeight, ch: c.clientHeight, sertar: [Math.round(r.left), Math.round(r.right), Math.round(r.bottom)], verificate: altele.map(([n]) => n), peste }
+      celule.forEach((td, i) => { td.textContent = vechi[i] })
+      return out
+    })()`)
+    const lung = []
+    for (const latime of [W, 1100]) {
+      if (latime !== W) { p.win.setContentSize(latime, H); await astepta(700) }
+      lung.push(await masoaraLung())
+    }
+    p.win.setContentSize(W, H)
+    await astepta(500)
+    await p.js(`document.getElementById('neg-sertar')?.remove(); true`)
+    bifa('sertar-oameni-lung', lung.every((m) => m.randuri >= 6 && m.sh > m.ch && m.sw <= m.cw && m.peste.every((o) => o.n.startsWith('toast'))) && lung[1].latime === 1100 && lung.every((m) => m.verificate.includes('stanga') && m.verificate.some((n) => n.startsWith('jos'))),
+      'sertarul Oameni cu „Stă: lipsește materialul pentru construit" pe fiecare rand (bara verticala de fata), la 1.280 si 1.100 px: fara derulare orizontala, si nu acopera coloana stanga, legenda, Primii pasi sau bara de jos', JSON.stringify(lung))
     // Randurile pe rand, pana la primul om care nu e cel urmarit (jocul e in pauza: nimeni nu se misca).
     const bid = await p.js(`(async () => { for (const tr of document.querySelectorAll('.ui-oameni tbody tr')) { tr.click(); await new Promise((r) => setTimeout(r, 60)); const s = __kinstead.ui.pionSelectat(); if (s !== null && s !== ${pion.id}) return s } return null })()`)
     const b = bid === null ? null : await p.js(`(() => { const a = __kinstead.world.agents; for (let i = 0; i < a.count; i++) if (a.alive[i] && a.id[i] === ${bid}) return { id: ${bid}, slot: i }; return null })()`)
@@ -1162,11 +1027,27 @@ async function ruleaza() {
   })
   const desInainte = await p.js('__f.des().length')
   const pioniInainte = await p.js('__f.pioni()')
+  // --- 9a. M5 pe ecran (t.2b §8, UI-4): lumea de dupa Ctrl+S merge 1687 de tickuri REALE (nu un multiplu de 20: trece si
+  // peste faza pasului termic), iar hash-ul ei se compara cu al lumii incarcate, avansate la fel. Hash-ul schemei 8 cuprinde
+  // (ancora, T, rest) ale fiecarei componente (§7), deci vede si mutantii M5 pe care T-ul de la incarcare nu-i vede (restul
+  // nescris, faza socotita de la incarcare, resetul lenes — UI-4). DUPA capturile de mai sus: pionii lucreaza in avans, iar
+  // „incarca-desemnari" iesea rosie cu avansul inaintea lor (UI-4). Pe o lume fara componente hash-ul n-ar vedea temperatura.
+  const hashDupaAvans = (k) => `(async () => {
+    const H = await import('/@fs/${REPO}/src/sim/hash.ts')
+    const K = __kinstead, t0 = K.world.tick, r = K.avanseaza(${k})
+    return { t0, tick: r.tick, rulate: r.rulate, hash: H.hashWorld(K.world), componente: K.world.camere.comp.size, pasi: K.world.temperatura.stat.pasi, simMs: Math.round(r.simMs) }
+  })()`
+  let m5Joc = null
+  if (salvare !== null) await pas('incarca-m5', async () => { m5Joc = await p.js(hashDupaAvans(1687)) })
+  /** Erorile din consola ale jocului nou: `pagina()` le goleste la fiecare pagina noua, deci se iau INAINTE de plecare. */
+  let eroriJoc = null
   // --- 9b. plecarea dintr-un joc nesalvat cere confirmare (INT-6): tick-ul inaintat dupa salvare ---
   await pas('plecare', async () => {
     await p.tasta(' ')
     await astepta(800)
     await p.tasta(' ')
+    // Pana acum, „consola-joc-nou" citea la final erorile ULTIMEI pagini (cea incarcata): ale jocului nou se pierdeau aici.
+    eroriJoc = [...p.erori]
     const inainte = plecariOprite
     const t = await pagina('?verificare=1&pauza=1')
     bifa('plecare', plecariOprite === inainte + 1, 'plecarea dintr-un joc cu tickuri nesalvate cere confirmare (beforeunload)', `${inainte} → ${plecariOprite}`)
@@ -1181,6 +1062,10 @@ async function ruleaza() {
     await astepta(1000)
     const r2 = await q.js(`({ tick: __kinstead.world.tick, stare: __kinstead.stare ? __kinstead.stare() : null })`)
     bifa('incarca-pauza', r2.stare?.pauza === true && r2.stare?.viteza === 3 && r2.tick === salvare.tick, 'incarcarea porneste in pauza, cu viteza salvata (3×)', JSON.stringify(r2))
+    // M5 (9a): aceleasi 1687 de tickuri reale pe lumea incarcata → acelasi tick, acelasi hash.
+    const m5 = await q.js(hashDupaAvans(NEGATIVA === 'incarca-m5' ? 1686 : 1687))
+    bifa('incarca-m5', m5Joc !== null && m5.t0 === salvare.tick && m5Joc.t0 === salvare.tick && m5.rulate === m5.tick - m5.t0 && m5.tick === m5Joc.tick && m5.hash === m5Joc.hash && m5.componente >= 1 && m5Joc.pasi > 0 && m5.pasi > 0,
+      'M5 pe ecran: dupa 1687 de tickuri reale, lumea incarcata are acelasi tick si acelasi hash (cu temperaturile componentelor) ca lumea care a mers mai departe dupa Ctrl+S', JSON.stringify({ joc: m5Joc, incarcat: m5 }))
     // --- 10. tastele tastate intr-un camp nu comanda nimic ---
     await q.tasta('Escape')
     const deschis = await q.js(`!!document.querySelector('.ui-fereastra')`)
@@ -1223,5 +1108,481 @@ async function ruleaza() {
     bifa('automata-pe-lume', auto.length === 1 && auto[0] === 'auto-7', 'salvarea automata a jocului incarcat: slotul lumii lui (auto-7)', JSON.stringify(auto))
     if (q.erori.length) bifa('consola-incarcat', false, 'fara erori in consola (pagina incarcata)', q.erori.join(' | '))
   })
-  if (p.erori.length) bifa('consola-joc-nou', false, 'fara erori in consola (jocul nou)', p.erori.join(' | '))
+  // Jocul nou: erorile luate la plecare (9b); fara plecare (o exceptie inainte), cele de acum.
+  const ej = eroriJoc ?? p.erori
+  if (ej.length) bifa('consola-joc-nou', false, 'fara erori in consola (jocul nou)', ej.join(' | '))
+  // --- 11. temperatura, pe pagina ei ---
+  await paginaTermica()
+}
+
+/**
+ * Temperatura pe ecran (t.2b §8; panoul t.2b: UI-3, UI-4, UI-5, UI-7, UI-8; verif-UI-5), pe PAGINA EI, ultima: ui-fum are
+ * o singura fereastra, iar o pagina noua pierde lumea celei vechi, deci pagina termica sta dupa incarcare (verif-UI-5).
+ *
+ * CONTRACTUL LUMII. `?joc=nou&seed=7&oameni=1&piatra=0&hrana=230`, pusa pe pauza cu Spatiu (`pauza=1` e ignorat pe un joc
+ * nou: verif-UI-5). Prin comenzile simularii, in pauza: casa A — 5×5×2 de piatra, SIGILATA (fara usa), acoperita inel cu
+ * inel ca la 6c — si casa B, 3×3×2, la 3 celule de ea, cu acoperisul fara celula din mijloc. Pionul TINUT in casa A e pus
+ * in mijlocul ei cu `spawnAgent`; MECANISMUL care il tine e incaperea sigilata: fara usa nu iese, iar pionul liber al
+ * jocului nou nu intra. (Masurat in node la valul 2 al t.2b, aceeasi casa: pionul e inauntru la fiecare din primele 20
+ * de ore, apoi pleaca din colonie intre ora 19 si 20 — de aceea randul oamenilor se citeste PRIMUL, iar asteptarile se
+ * fac pe sferturi de ora.) Nicio desemnare, nicio piatra: nimeni n-are
+ * de lucru; fiecare avans numara editarile din AMPRENTA caselor (±1), citite din `terrain.jurnal`, iar bifa
+ * „temperatura-fara-clic" le cere 0. Timpul trece doar prin `__kinstead.avanseaza(n)` (tickuri reale, aceeasi cale ca
+ * `stepSim`) sau cu jocul pornit — niciun `world.tick +=` (sabotajul „se-misca" il foloseste tocmai ca sa iasa rosu).
+ * Conditiile se scriu pe Q16, citite prin `__kinstead` din stare, cu preconditii (|T_afara − T| ≥ 1 °C) asteptate cel mult
+ * 12 h de joc (cu pionul inauntru, X_tot sta la ~1,7 °C peste X: ziua, „trage spre" e chiar aerul de afara) si bucle de
+ * cel mult 4 h de joc pana la o schimbare, pe CASA: o pivnita si-ar schimba textul o data la ~14 min reale (B6).
+ */
+async function paginaTermica() {
+  let pT = null
+  let casa = null
+  await pas('pagina-termica', async () => {
+    pT = await pagina('?joc=nou&seed=7&oameni=1&piatra=0&hrana=230')
+    if (!(await pT.js('__kinstead.stare().pauza'))) await pT.tasta(' ')
+    // Ajutoarele paginii termice: modulele simularii (ACELEASI instante ca ale aplicatiei — src/ se serveste pe /@fs/,
+    // verificat mai jos pe graful incremental, care sta intr-un WeakMap de modul) si citirile pe Q16.
+    await pT.js(`(async () => {
+      const imp = (f) => import('/@fs/${REPO}/' + f)
+      const [T, S, C, Cl, Te, Cmd] = await Promise.all(['viewer/ui/texte.ts', 'src/sim/temperatura.ts', 'src/sim/camere.ts', 'src/sim/clima.ts', 'src/sim/termic.ts', 'src/sim/commands.ts'].map(imp))
+      globalThis.__t = {
+        T, S, C, Cl, Te, Cmd, casa: null, editariAmprenta: 0,
+        comp(x, y, z) { return C.componentaLa(__kinstead.world.camere, x, y, z) },
+        compA() { const c = this.casa; return this.comp(c.x0 + 1, c.y0 + 1, c.s + 1) },
+        // T, X (fara oameni), X_tot (cu oamenii aratati de filtru, ca inspectorul), afara, oamenii — Q16, din stare.
+        termic(id) {
+          const K = __kinstead, w = K.world, R = K.rules
+          const t = S.temperaturaAcum(w, id), tr = S.tragerea(w, R, id), n = K.filtruOameni.oameni(w, id)
+          return { comp: id, t, x: tr.ok ? tr.value.xQ16 : null, xTot: tr.ok ? S.tragereCuOameni(tr.value, n * R.termic.omW) : null, n, afara: Cl.tAfara(w.seed, w.tick, R), tick: w.tick, refuz: tr.ok ? null : String(tr.params?.motiv ?? tr.reason) }
+        },
+        casaA() { const c = this.compA(); return c === null ? null : { ...this.termic(c.id), volum: c.volum, deschise: c.deschise } },
+        // Cifrele lui U: span-ul fiecarei ancore, valoarea overlay-ului, T-ul din stare si textul asteptat din el.
+        cifre() {
+          const K = __kinstead, o = K.tempOverlay, s = K.etichete ? K.etichete() : null, w = K.world
+          if (!s) return null
+          return s.spanuri.map((e, i) => {
+            const a = o.ancore[i], st = a ? S.temperaturaAcum(w, a.comp) : null
+            return { comp: a ? a.comp : null, x: a ? a.x : null, y: a ? a.y : null, vizibil: !e.hidden && !s.radacina.hidden, text: e.textContent, valoare: a ? (o.valori.get(a.comp) ?? null) : null, stare: st, asteptat: st === null ? '' : T.textEticheta(st) }
+          })
+        },
+        cifraLa(x0, y0, x1, y1) { return (this.cifre() ?? []).find((q) => q.x !== null && q.x >= x0 && q.x <= x1 && q.y >= y0 && q.y <= y1) ?? null },
+        cifraCasei() { const c = this.casa; return this.cifraLa(c.x0 + 1, c.y0 + 1, c.x0 + 3, c.y0 + 3) },
+        legenda() {
+          const L = document.querySelector('.ui-legenda')
+          if (!L || L.hidden) return null
+          const b = L.querySelector('h3 button'), r = b ? b.getBoundingClientRect() : null
+          const x = r ? r.x + r.width / 2 : null, y = r ? r.y + r.height / 2 : null
+          return { titlu: L.querySelector('h3 span')?.textContent ?? '', cifre: L.querySelector('.cifre')?.textContent ?? '', buton: b ? b.textContent : null, x, y, peButon: r ? document.elementFromPoint(x, y)?.closest('button') === b : false }
+        },
+        // Ce TREBUIE sa scrie legenda: intervalul T-urilor din STARE ale componentelor desenate, aerul de afara la tickul lumii.
+        legendaAsteptata() {
+          const K = __kinstead, w = K.world
+          let n = 0, mn = Infinity, mx = -Infinity
+          for (const id of K.tempOverlay.valori.keys()) { const t = S.temperaturaAcum(w, id); if (t === null) continue; n++; mn = Math.min(mn, t); mx = Math.max(mx, t) }
+          return T.textIntervalTemperatura(n, mn, mx, Cl.tAfara(w.seed, w.tick, K.rules))
+        },
+        randuri() {
+          const g = (s) => document.querySelector(s)
+          return { inc: g('.ui-incapere')?.textContent ?? '', h2: g('.ui-sertar h2')?.textContent ?? '', linie: g('.ui-termic-t')?.textContent ?? '', num: g('.ui-termic-t')?.classList.contains('num') ?? false, tragere: g('.ui-termic-x')?.textContent ?? '', oameni: g('.ui-termic-o')?.textContent ?? '', canale: g('.ui-termic-canale')?.textContent ?? '' }
+        },
+        // Avansul REAL (sau, doar pentru sabotajul „se-misca", timpul sarit), cu editarile din amprenta caselor A si B.
+        avans(n, sari = false) {
+          const K = __kinstead, t = K.world.terrain, e0 = t.editari, c = this.casa
+          let r
+          if (sari) { K.world.tick += n; r = { tick: K.world.tick, rulate: 0, simMs: 0, remeshMs: 0 } } else r = K.avanseaza(n)
+          const e1 = t.editari
+          let inAmprenta = 0
+          for (let m = Math.max(e0, e1 - 65536); m < e1; m++) {
+            const j = (m % 65536) * 3, x = t.jurnal[j], y = t.jurnal[j + 1]
+            if ((x >= c.x0 - 1 && x <= c.x0 + 5 && y >= c.y0 - 1 && y <= c.y0 + 5) || (x >= c.bx - 1 && x <= c.bx + 3 && y >= c.by - 1 && y <= c.by + 3)) inAmprenta++
+          }
+          this.editariAmprenta += inAmprenta
+          return { tick: r.tick, rulate: r.rulate, simMs: Math.round(r.simMs), editari: e1 - e0, inAmprenta }
+        },
+        cadre(n) { return new Promise((ok) => { let k = 0; const f = () => { if (++k >= n) ok(k); else requestAnimationFrame(f) }; requestAnimationFrame(f) }) },
+        // Pixelul pe care clicul cu modificatorii dati chiar tinteste celula (x, y, z; z null = orice cota), in jurul punctului proiectat.
+        pixelPe(x, y, z, px, py, pz, m, raza = 30) {
+          const K = __kinstead, q = __f.proj(px, py, pz)
+          for (let r = 0; r <= raza; r++) for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue
+            const sx = Math.round(q.x) + dx, sy = Math.round(q.y) + dy
+            if (document.elementFromPoint(sx, sy) !== K.renderer.domElement) continue
+            const t = K.tintaLa(sx, sy, m)
+            if (t.ok && t.wx === x && t.wy === y && (z === null || t.z === z)) return { x: sx, y: sy }
+          }
+          return null
+        },
+      }
+      return true
+    })()`)
+    const loc = await pT.js(`(() => { const a = __kinstead.world.agents; return { x: Math.floor(a.x[0] / 1000), y: Math.floor(a.y[0] / 1000), z: a.z[0] } })()`)
+    casa = await pT.js(`(() => {
+      const K = __kinstead, w = K.world, Cmd = __t.Cmd
+      const tx = ${loc.x}, ty = ${loc.y}
+      const liber = (x0, y0) => {
+        const a = w.agents; for (let i = 0; i < a.count; i++) if (a.alive[i]) { const x = Math.floor(a.x[i] / 1000), y = Math.floor(a.y[i] / 1000); if (x >= x0 - 3 && x <= x0 + 14 && y >= y0 - 3 && y <= y0 + 8) return false }
+        const it = w.iteme; for (let i = 0; i < it.count; i++) if (it.alive[i] && it.wx[i] >= x0 - 3 && it.wx[i] <= x0 + 14 && it.wy[i] >= y0 - 3 && it.wy[i] <= y0 + 8) return false
+        return w.desemnari.vii === 0
+      }
+      for (let r = 8; r < 80; r++) for (let dx = -r; dx <= r; dx++) for (const dy of [-r, r]) {
+        const x0 = tx + dx, y0 = ty + dy, s = K.suprafata(x0, y0)
+        if (s === null || !liber(x0, y0)) continue
+        let plat = true
+        for (let a = -1; a <= 12 && plat; a++) for (let b = -1; b <= 5; b++) if (K.suprafata(x0 + a, y0 + b) !== s) { plat = false; break }
+        if (!plat) continue
+        const fill = (x, y, z) => Cmd.applyCommand(w, { kind: 'fill', wx: x, wy: y, z, material: 6 }).ok
+        let ok = true
+        // Casa A: zidurile FARA usa, apoi acoperisul inel cu inel (ca la 6c).
+        for (let z = s + 1; z <= s + 2; z++) for (let a = 0; a < 5; a++) for (let b = 0; b < 5; b++) if (a === 0 || a === 4 || b === 0 || b === 4) ok = fill(x0 + a, y0 + b, z) && ok
+        for (let inel = 0; inel < 3; inel++) for (let a = 0; a < 5; a++) for (let b = 0; b < 5; b++) if (Math.min(a, b, 4 - a, 4 - b) === inel) ok = fill(x0 + a, y0 + b, s + 3) && ok
+        // Casa B, la 3 celule spre est: 3×3×2 de piatra (o celula de aer, cat o camara), acoperisul FARA celula din
+        // mijloc — coloana ei e inca cer, deci nu e nicio componenta acolo; „temperatura-incapere-noua" o inchide.
+        const bx = x0 + 8, by = y0 + 1
+        for (let z = s + 1; z <= s + 2; z++) for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) if (a !== 1 || b !== 1) ok = fill(bx + a, by + b, z) && ok
+        for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) if (a !== 1 || b !== 1) ok = fill(bx + a, by + b, s + 3) && ok
+        // Pionul TINUT: in mijlocul casei sigilate.
+        const pion = Cmd.applyCommand(w, { kind: 'spawnAgent', x: (x0 + 2) * 1000 + 500, y: (y0 + 2) * 1000 + 500, z: s + 1, faction: 0 })
+        return { x0, y0, s, bx, by, ok, pion: pion.ok }
+      }
+      return null
+    })()`)
+    if (casa === null || !casa.ok || !casa.pion) { bifa('pagina-termica', false, 'pagina termica: casele A si B, pionul tinut', JSON.stringify(casa)); casa = null; return }
+    await pT.js(`__t.casa = ${JSON.stringify(casa)}; true`)
+    // Trei pasi termici (filtrul are 3 esantioane cu pionul inauntru) si casa desenata (remesh din jurnal), tot in pauza.
+    const a0 = await pT.js('__t.avans(60)')
+    await astepta(300)
+    const r = await pT.js(`(() => {
+      const K = __kinstead, w = K.world, c = __t.casa, A = __t.compA()
+      const oameniA = A === null ? null : (__t.S.oameniPeComponente(w).get(A.id) ?? 0)
+      const graf = __t.Te.grafulIncremental(w.camere, K.rules)
+      return { pauza: K.stare().pauza, A: A === null ? null : { volum: A.volum, deschise: A.deschise, T: __t.S.temperaturaAcum(w, A.id) }, oameniA, aratati: A === null ? null : K.filtruOameni.oameni(w, A.id),
+        casaB: __t.comp(c.bx + 1, c.by + 1, c.s + 1) === null, desemnari: w.desemnari.vii, grafAcelasiModul: graf.ok, invarianti: w.temperatura.stat.invarianti, pasi: w.temperatura.stat.pasi }
+    })()`)
+    bifa('pagina-termica', r.pauza && r.A !== null && r.A.volum === 18 && r.A.deschise === 0 && r.A.T !== null && r.oameniA === 1 && r.aratati === 1 && r.casaB && r.desemnari === 0 && r.grafAcelasiModul && r.invarianti === 0 && r.pasi >= 3 && a0.inAmprenta === 0,
+      'pagina termica (contractul lumii): pauza, casa A sigilata de 18 m³ cu pionul tinut inauntru (si aratat de filtru), casa B inca deschisa spre cer (nicio componenta), nicio desemnare; modulele simularii din proba sunt ale aplicatiei (graful incremental vazut), 0 invarianti', JSON.stringify({ casa, avans: a0, ...r }))
+  })
+  if (pT === null || casa === null) return
+  const { x0: hx, y0: hy, s: hs, bx, by } = casa
+  const eticheta = () => pT.js(`document.querySelector('.ui-nivel .rel')?.textContent ?? ''`)
+  const tastaNivel = async (k) => {
+    const inainte = await eticheta()
+    await pT.tasta(k)
+    for (let j = 0; j < 30 && (await eticheta()) === inainte; j++) await astepta(50)
+  }
+  /** Nivelul aerului casei (sol +1), ca la 6c: dupa fiecare tasta se ASTEAPTA eticheta noua. */
+  const laNivelulCasei = async () => {
+    await pT.js(`__f.centreaza(${hx + 2.5}, ${hy + 2.5}, ${hs + 1}, 9)`)
+    await astepta(250)
+    await tastaNivel('q')
+    for (let i = 0; i < 8; i++) {
+      const rel = await eticheta()
+      if (rel === 'sol +1') break
+      await tastaNivel(/sol \+[2-9]/.test(rel) ? 'q' : 'e')
+    }
+  }
+  const casaA = () => pT.js('__t.casaA()')
+  const Q = 65536
+  const grade = (q) => (q === null || q === undefined ? null : +(q / Q).toFixed(3))
+
+  // --- 11a. U: tasta, tenta, cifra, legenda ---
+  await pas('temperatura', async () => {
+    await pT.tasta('v')
+    await laNivelulCasei()
+    const stare = () => pT.js(`(() => {
+      const K = __kinstead, o = K.tempOverlay, g = K.scene.getObjectByName('overlay-temperatura'), leg = __t.legenda()
+      return {
+        vizibil: o.visible, nivel: o.nivel ?? null, grup: g ? g.visible : null,
+        plase: g ? g.children.map((c) => ({ tip: c.type, varfuri: c.geometry?.getAttribute('position')?.count ?? 0, culori: !!c.geometry?.getAttribute('color') })) : [],
+        cifra: __t.cifraCasei(), buton: document.querySelector('button[data-harta="U"]')?.getAttribute('aria-pressed') ?? null,
+        legenda: leg === null ? null : leg.titlu + ' | ' + leg.cifre, legendaAsteptata: __t.legendaAsteptata(),
+      }
+    })()`)
+    const s0 = await stare()
+    await pT.tasta('u')
+    await astepta(500)
+    const s1 = await stare()
+    bifa('temperatura-tasta', s0.vizibil === false && s1.vizibil === true && s1.buton === 'true' && s1.nivel === hs + 1, 'tasta U aprinde overlay-ul Temperatura pe nivelul casei (butonul `data-harta="U"` din „Hărți" apasat)', JSON.stringify({ s0: { vizibil: s0.vizibil, buton: s0.buton }, s1: { vizibil: s1.vizibil, nivel: s1.nivel, buton: s1.buton }, hs }))
+    bifa('temperatura-tenta', s1.grup === true && (s1.plase ?? []).some((c) => c.tip === 'Mesh' && c.culori && c.varfuri >= 9 * 6), 'overlay-ul U: tenta e in scena (o plasa cu culori pe varf, cel putin cele 9 celule ale casei)', JSON.stringify(s1.plase))
+    bifa('temperatura-etichete', s1.cifra !== null && s1.cifra.vizibil && /^−?\d+,\d°$/.test(s1.cifra.text) && s1.cifra.text === s1.cifra.asteptat && s1.cifra.valoare === s1.cifra.stare,
+      'overlay-ul U: o cifra pe casa, ancorata in interiorul ei, vizibila si EGALA cu T-ul ei din stare („13,2°" == textEticheta(T))', JSON.stringify(s1.cifra))
+    bifa('temperatura-legenda', /^Temperatură \(U\) \| /.test(s1.legenda ?? '') && /^(~−?\d+,\d|−?\d+,\d … −?\d+,\d) °C · afară −?\d+ °C$/.test((s1.legenda ?? '').split(' | ')[1] ?? '') && (s1.legenda ?? '').endsWith(' | ' + s1.legendaAsteptata),
+      'legenda lui U: intervalul T-urilor de la nivel (din stare) si aerul de afara, fara „la echilibru"', JSON.stringify({ legenda: s1.legenda, asteptat: s1.legendaAsteptata }))
+    await pT.poza('7-temperatura-overlay.png')
+  })
+
+  // --- 11b. inspectorul pe podeaua casei, cu pionul tinut inauntru: cele trei randuri din stare ---
+  await pas('temperatura-inspector', async () => {
+    // Clicul pe podea, pe celula cea mai departe de pion (un clic la PION_PX de el il selecteaza pe el).
+    const tinta = await pT.js(`(() => {
+      const K = __kinstead, a = K.world.agents, c = __t.casa
+      let pp = null
+      for (let i = 0; i < a.count; i++) if (a.alive[i]) { const x = a.x[i] / 1000, y = a.y[i] / 1000; if (x >= c.x0 + 1 && x < c.x0 + 4 && y >= c.y0 + 1 && y < c.y0 + 4) pp = __f.proj(x, a.z[i] + 0.7, y) }
+      const celule = []
+      for (let x = c.x0 + 1; x <= c.x0 + 3; x++) for (let y = c.y0 + 1; y <= c.y0 + 3; y++) { const q = __f.proj(x + 0.5, c.s + 1, y + 0.5); celule.push({ x, y, d: pp === null ? 0 : Math.hypot(q.x - pp.x, q.y - pp.y) }) }
+      celule.sort((u, v) => v.d - u.d)
+      for (const e of celule) { const px = __t.pixelPe(e.x, e.y, null, e.x + 0.5, c.s + 1, e.y + 0.5, { ctrl: false, shift: false, alt: false }, 20); if (px !== null && (pp === null || Math.hypot(px.x - pp.x, px.y - pp.y) > 30)) return { ...px, celula: [e.x, e.y], pion: pp } }
+      return null
+    })()`)
+    if (tinta !== null) await pT.click(tinta.x, tinta.y)
+    await astepta(600)
+    const r = await pT.js(`(() => {
+      const A = __t.casaA(), R = __t.randuri()
+      return { R, A, linie: A === null || A.t === null ? null : __t.T.textTemperaturaAcum(A.t, A.afara), tragere: A === null || A.xTot === null ? null : __t.T.textTragere(A.t, A.xTot), oameni: A === null ? null : __t.T.textOameni(A.n) }
+    })()`)
+    const R = r.R
+    bifa('temperatura-inspector', tinta !== null && /Încăpere · 18 m³/.test(R.inc)
+      && /^−?\d+,\d °C · afară −?\d+ °C$/.test(R.linie) && R.linie === r.linie && R.num
+      && /^(trage spre −?\d+,\d °C [↘↗]|stabil)$/.test(R.tragere) && R.tragere === r.tragere
+      && R.oameni === 'oameni: 1 înăuntru' && r.oameni === R.oameni && r.A.xTot > r.A.x
+      && /^\d+% aer de afară \(pereți \d+%, acoperiș \d+%, ~−?\d+ °C\) · \d+% sol prin podea \(~−?\d+ °C\)/.test(R.canale) && !/pierde|câștigă|la echilibru/.test(R.inc),
+      'inspectorul pe podeaua casei cu pionul tinut: „T °C · afară N °C" (din stare), „trage spre X_tot" (linia grafului + omul aratat, X_tot > X), „oameni: 1 înăuntru", descompunerea; fara „la echilibru"',
+      JSON.stringify({ tinta, randuri: R, asteptat: { linie: r.linie, tragere: r.tragere, oameni: r.oameni }, T: grade(r.A?.t), X: grade(r.A?.x), Xtot: grade(r.A?.xTot), afara: grade(r.A?.afara) }))
+    await pT.poza('8-temperatura-inspector.png')
+  })
+
+  // --- 11c. avansul real muta T-ul casei (spre „trage spre"), iar cifra lui U urmeaza starea ---
+  await pas('temperatura-se-misca', async () => {
+    let A = await casaA()
+    const pre = []
+    for (let k = 0; k < 48 && !(Math.abs(A.afara - A.t) >= Q && Math.abs(A.xTot - A.t) >= Q); k++) { pre.push(await pT.js('__t.avans(420)')); A = await casaA() }
+    const c0 = await pT.js('__t.cifraCasei()')
+    const pasi = []
+    let A1 = A
+    let c1 = c0
+    for (let h = 0; h < 4; h++) {
+      pasi.push(await pT.js(`__t.avans(1680, ${NEGATIVA === 'se-misca'})`))
+      await pT.js('__t.cadre(2)')
+      A1 = await casaA()
+      c1 = await pT.js('__t.cifraCasei()')
+      if (c1 !== null && c0 !== null && c1.text !== c0.text) break
+    }
+    const spre = Math.sign(A.xTot - A.t)
+    bifa('temperatura-se-misca', Math.abs(A.afara - A.t) >= Q && pasi[0].rulate === 1680 && A1.t !== A.t && Math.sign(A1.t - A.t) === spre && c0 !== null && c1 !== null && c1.text !== c0.text && c1.text === c1.asteptat && c1.valoare === A1.t,
+      'avansul REAL (tickuri, nu timp sarit) muta T-ul casei spre „trage spre" (precondiții: |afară − T| ≥ 1 °C, |X_tot − T| ≥ 1 °C), iar cifra lui U se schimba si e textul T-ului din stare',
+      JSON.stringify({ inainte: { T: grade(A.t), Xtot: grade(A.xTot), afara: grade(A.afara), tick: A.tick, cifra: c0?.text }, dupa: { T: grade(A1.t), tick: A1.tick, cifra: c1?.text, asteptat: c1?.asteptat }, preconditie: pre.length, avansuri: pasi }))
+  })
+
+  // --- 11d. cifrele lui U la zi cu STAREA, dupa ore de joc reale ---
+  await pas('temperatura-etichete-la-zi', async () => {
+    const c0 = await pT.js('__t.cifraCasei()')
+    const pasi = []
+    let toate = null
+    for (let k = 0; k < 16; k++) {
+      pasi.push(await pT.js('__t.avans(420)'))
+      await pT.js('__t.cadre(2)')
+      toate = await pT.js(`({ cifre: __t.cifre(), casa: __t.cifraCasei(), pauza: __kinstead.stare().pauza })`)
+      if (toate.casa !== null && c0 !== null && toate.casa.text !== c0.text) break
+    }
+    const vizibile = (toate?.cifre ?? []).filter((x) => x.vizibil)
+    const gresite = vizibile.filter((x) => x.text !== x.asteptat || x.valoare !== x.stare)
+    bifa('temperatura-etichete-la-zi', toate !== null && toate.pauza && vizibile.length >= 1 && gresite.length === 0 && toate.casa !== null && c0 !== null && toate.casa.text !== c0.text,
+      'cifrele lui U urmaresc lumea: dupa avans REAL (sferturi de ora, cel mult 4 h), cifra casei s-a schimbat, iar fiecare cifra vizibila == textEticheta(T-ul din STARE al componentei ei), cu valoarea overlay-ului == starea',
+      JSON.stringify({ inainte: c0?.text, dupa: toate?.casa?.text, avansuri: pasi.length, vizibile: vizibile.length, gresite: gresite.slice(0, 4) }))
+  })
+
+  // --- 11e. fara clic: randurile inspectorului se schimba cu lumea, nodurile raman ---
+  await pas('temperatura-fara-clic', async () => {
+    const citeste = () => pT.js(`(() => {
+      const b = [...document.querySelectorAll('.ui-inspector button')].find((x) => /Arată nivelul/.test(x.textContent))
+      const l = document.querySelector('.ui-termic-t')
+      if (!globalThis.__tempBtn) { globalThis.__tempBtn = b ?? null; globalThis.__tempLinie = l }
+      return { buton: !!b, acelasi: b === globalThis.__tempBtn, liniaAceeasi: l === globalThis.__tempLinie, randuri: __t.randuri(), editariAmprenta: __t.editariAmprenta, pauza: __kinstead.stare().pauza }
+    })()`)
+    await pT.js('globalThis.__tempBtn = null; true')
+    const inainte = await citeste()
+    let dupa = inainte
+    const pasi = []
+    for (let k = 0; k < 16 && dupa.randuri.linie === inainte.randuri.linie && dupa.randuri.tragere === inainte.randuri.tragere; k++) {
+      pasi.push(await pT.js('__t.avans(420)'))
+      for (let i = 0; i < 4; i++) { await astepta(150); dupa = await citeste(); if (dupa.randuri.linie !== inainte.randuri.linie || dupa.randuri.tragere !== inainte.randuri.tragere) break }
+    }
+    await astepta(300)
+    dupa = await citeste()
+    const asteptat = await pT.js(`(() => { const A = __t.casaA(); return { linie: __t.T.textTemperaturaAcum(A.t, A.afara), tragere: __t.T.textTragere(A.t, A.xTot) } })()`)
+    const inCasa = pasi.reduce((s, x) => s + x.inAmprenta, 0)
+    bifa('temperatura-fara-clic', inainte.buton && inainte.randuri.linie !== '' && (dupa.randuri.linie !== inainte.randuri.linie || dupa.randuri.tragere !== inainte.randuri.tragere) && dupa.acelasi && dupa.liniaAceeasi && dupa.pauza && inCasa === 0 && dupa.randuri.linie === asteptat.linie && dupa.randuri.tragere === asteptat.tragere,
+      'fara niciun clic, randurile temperaturii din inspector se schimba cu lumea (avans real) si raman textele starii, iar butonul „Arată nivelul" e ACELASI nod; 0 editari in amprenta casei (terrain.jurnal)',
+      JSON.stringify({ inainte: inainte.randuri, dupa: dupa.randuri, asteptat, acelasi: dupa.acelasi, liniaAceeasi: dupa.liniaAceeasi, editariInAmprenta: inCasa, editari: pasi.reduce((s, x) => s + x.editari, 0), avansuri: pasi.length }))
+  })
+
+  // --- 11f. clicul pe legenda nu se pierde cand intervalul ei se schimba intre mousedown si mouseup (L4-3) ---
+  await pas('temperatura-legenda-clic', async () => {
+    let reusite = 0
+    let reimprospatate = 0
+    const clicuri = []
+    const interval = (l) => (l?.cifre ?? '').split(' · afară')[0]
+    for (let k = 0; k < 6; k++) {
+      const l0 = await pT.js('__t.legenda()')
+      if (l0 === null || !l0.peButon) { clicuri.push({ k, l0 }); continue }
+      await pT.muta(l0.x, l0.y)
+      await pT.apasa(l0.x, l0.y)
+      let l1 = l0
+      let avansuri = 0
+      for (let j = 0; j < 16 && l1 !== null && interval(l1) === interval(l0); j++) {
+        await pT.js('__t.avans(420)')
+        avansuri++
+        for (let i = 0; i < 6; i++) { await astepta(100); l1 = await pT.js('__t.legenda()'); if (interval(l1) !== interval(l0)) break }
+      }
+      if (l1 !== null && interval(l1) !== interval(l0)) reimprospatate++
+      await pT.elibereaza(l0.x, l0.y)
+      await astepta(300)
+      const l2 = await pT.js('__t.legenda()')
+      if (l2 !== null && l2.buton !== l0.buton) reusite++
+      clicuri.push({ k, inainte: l0.buton, dupa: l2?.buton ?? null, cifre: [l0.cifre, l1?.cifre ?? null], avansuri })
+    }
+    bifa('temperatura-legenda-clic', reusite === 6 && reimprospatate === 6,
+      'legenda lui U: 6 din 6 clicuri pe „Ce înseamnă / Ascunde culorile" reusesc, fiecare cu INTERVALUL legendei schimbat (avans real, nu doar „afară") intre mousedown si mouseup', JSON.stringify({ reusite, reimprospatate, clicuri }))
+  })
+
+  // --- 11g. I si U se exclud; butonul din „Hărți" (selectorii pe `data-harta`, nu pe titlu) ---
+  await pas('temperatura-exclude-I', async () => {
+    const iu = () => pT.js(`({ I: document.querySelector('button[data-harta="I"]')?.getAttribute('aria-pressed') ?? null, U: document.querySelector('button[data-harta="U"]')?.getAttribute('aria-pressed') ?? null, tu: __kinstead.tempOverlay.visible })`)
+    const iu0 = await iu()
+    await pT.tasta('i')
+    await astepta(400)
+    const iu1 = await iu()
+    await pT.tasta('u')
+    await astepta(400)
+    const iu2 = await iu()
+    bifa('temperatura-exclude-I', iu0.U === 'true' && iu0.I === 'false' && iu1.I === 'true' && iu1.U === 'false' && !iu1.tu && iu2.U === 'true' && iu2.I === 'false' && iu2.tu,
+      'I si U se exclud in ambele sensuri: cu U aprins, I stinge U; cu I aprins, U stinge I', JSON.stringify({ iu0, iu1, iu2 }))
+    await pT.tasta('u')
+    await astepta(300)
+    const s2 = await pT.js('__kinstead.tempOverlay.visible')
+    const bT = await pT.js(`(() => { const b = document.querySelector('button[data-harta="U"]'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, titlu: b.title } })()`)
+    if (bT) await pT.click(bT.x, bT.y)
+    await astepta(400)
+    const s3 = await pT.js(`({ vizibil: __kinstead.tempOverlay.visible, buton: document.querySelector('button[data-harta="U"]')?.getAttribute('aria-pressed') ?? null, cifra: __t.cifraCasei() })`)
+    bifa('temperatura-buton', s2 === false && bT !== null && s3.vizibil === true && s3.buton === 'true' && s3.cifra?.vizibil === true && s3.cifra.text === s3.cifra.asteptat,
+      'butonul „Temperatură" din „Hărți" (`data-harta="U"`) aprinde overlay-ul dupa ce U l-a stins, cu cifra casei == T-ul din stare', JSON.stringify({ s2, bT, s3 }))
+  })
+
+  // --- 11h. pauza: contoarele SIMULARII nu se misca (0 pasi termici, 0 refaceri de graf), nici ce arata ecranul ---
+  await pas('temperatura-pauza', async () => {
+    const inst = () => pT.js(`(() => {
+      const K = __kinstead, w = K.world, A = __t.compA()
+      return { tick: w.tick, pauza: K.stare().pauza, pasi: w.temperatura.stat.pasi, stat: JSON.stringify(w.temperatura.stat), graf: JSON.stringify(__t.Te.statGraf(w.camere)), casa: A === null ? null : JSON.stringify(__t.termic(A.id)),
+        ecran: JSON.stringify({ valori: [...K.tempOverlay.valori].sort((a, b) => a[0] - b[0]), recolorari: K.tempOverlay.recolorari, cifre: (__t.cifre() ?? []).map((x) => x.text), randuri: __t.randuri() }) }
+    })()`)
+    const p0 = await inst()
+    // La 1× un pas termic vine la 20 de tickuri (1 s): 1,5 s pornit cuprinde cel putin unul.
+    await pT.tasta(' ')
+    await astepta(1500)
+    const p1 = await inst()
+    if (NEGATIVA !== 'temperatura-pauza') await pT.tasta(' ')
+    await astepta(400)
+    const a = await inst()
+    await astepta(3000)
+    const b = await inst()
+    if (NEGATIVA === 'temperatura-pauza') { await pT.tasta(' '); await astepta(300) }
+    bifa('temperatura-pauza', p0.pauza && !p1.pauza && p1.pasi > p0.pasi && a.pauza && b.pauza && a.tick === b.tick && a.stat === b.stat && a.graf === b.graf && a.casa === b.casa && a.ecran === b.ecran,
+      'pauza (Spatiu): 3 s fara niciun pas termic si fara refacere de graf (contoarele simularii identice), T si X ale casei identice pe Q16, la fel cifrele lui U, recolorarile si randurile inspectorului; cu jocul pornit, pasii cresc (contorul e viu)',
+      JSON.stringify({ pornit: { pasi: [p0.pasi, p1.pasi], pauza: [p0.pauza, p1.pauza] }, pauza: { tick: [a.tick, b.tick], pasi: [a.pasi, b.pasi], statEgal: a.stat === b.stat, grafEgal: a.graf === b.graf, casaEgala: a.casa === b.casa, ecranEgal: a.ecran === b.ecran } }))
+  })
+
+  // --- 11i. cu jocul pornit la 3×: fiecare cifra a lui U == T-ul din stare, la fiecare citire (UI-3) ---
+  await pas('temperatura-U-la-3x', async () => {
+    const citire = () => pT.js(NEGATIVA === 'U-la-3x'
+      // Sabotajul: starea se citeste, iar cifrele lui U abia la 400 ms dupa — cum ar arata o cifra ramasa un pas in urma.
+      ? `(async () => { const w = __kinstead.world, st = new Map((__t.cifre() ?? []).map((x) => [x.comp, x.stare])), tick = w.tick; await new Promise((r) => setTimeout(r, 400)); return { tick, cifre: (__t.cifre() ?? []).map((x) => ({ ...x, stare: st.get(x.comp) ?? null, asteptat: st.get(x.comp) == null ? '' : __t.T.textEticheta(st.get(x.comp)) })) } })()`
+      : `({ tick: __kinstead.world.tick, cifre: __t.cifre() ?? [] })`)
+    await pT.tasta('3')
+    await astepta(500)
+    const esantioane = []
+    for (let k = 0; k < 30; k++) { esantioane.push(await citire()); await astepta(170) }
+    await pT.tasta(' ')
+    await astepta(300)
+    const pauza = await pT.js('__kinstead.stare().pauza')
+    const casei = esantioane.map((e) => e.cifre.find((x) => x.x !== null && x.x >= hx + 1 && x.x <= hx + 3 && x.y >= hy + 1 && x.y <= hy + 3) ?? null)
+    const gresite = esantioane.flatMap((e) => e.cifre.filter((x) => x.vizibil && (x.valoare !== x.stare || x.text !== x.asteptat)).map((x) => ({ tick: e.tick, ...x }))).slice(0, 4)
+    const valori = new Set(casei.map((c) => c?.stare ?? null))
+    bifa('temperatura-U-la-3x', pauza && esantioane.length === 30 && esantioane[29].tick - esantioane[0].tick >= 150 && casei.every((c) => c !== null && c.vizibil) && valori.size >= 5 && gresite.length === 0,
+      'cu jocul pornit la 3×: la fiecare din 30 de citiri, fiecare cifra vizibila a lui U == textEticheta(T din stare) si valoarea overlay-ului == starea (nicio cifra cu un pas in urma); T-ul casei a luat ≥ 5 valori',
+      JSON.stringify({ tickuri: [esantioane[0].tick, esantioane[29].tick], valoriCasa: valori.size, gresite }))
+  })
+
+  // --- 11j. o incapere noua, in pauza: cifra din cadrul urmator, cu T-ul provenientei ---
+  // Casa B se inchide cu ultima celula de acoperis, prin comanda simularii (ca toate casele din ui-fum): planul de taiere
+  // al nivelului la care U arata casa ascunde acoperisul, deci un Shift+clic nu-l poate atinge de acolo (`alegeTinta` ia
+  // doar fete vazute sub plan) — iar ce se masoara aici e U, din cadrul urmator, fara niciun pas (jocul e pe pauza).
+  await pas('temperatura-incapere-noua', async () => {
+    await pT.js(`__f.centreaza(${bx + 1.5}, ${by + 1.5}, ${hs + 1}, 9)`)
+    await astepta(400)
+    const pre = await pT.js(`({ pauza: __kinstead.stare().pauza, nivel: __kinstead.tempOverlay.nivel, comp: __t.comp(${bx + 1}, ${by + 1}, ${hs + 1}) === null, cifra: __t.cifraLa(${bx}, ${by}, ${bx + 2}, ${by + 2}), pasi: __kinstead.world.temperatura.stat.pasi })`)
+    const r = await pT.js(`(async () => {
+      const K = __kinstead, w = K.world
+      const inchisa = ${NEGATIVA === 'incapere-noua' ? 'false' : `__t.Cmd.applyCommand(w, { kind: 'fill', wx: ${bx + 1}, wy: ${by + 1}, z: ${hs + 3}, material: 6 }).ok`}
+      const tick = w.tick, tSol0 = __t.Cl.tSol(0, tick, K.rules)
+      // Doua cadre: cel in care overlay-ul vede indexul nou, si inca unul (cifrele DOM se scriu dupa overlay, in acelasi cadru).
+      await __t.cadre(2)
+      const C = __t.comp(${bx + 1}, ${by + 1}, ${hs + 1})
+      if (C === null) return { inchisa, comp: null }
+      const t = __t.S.temperaturaAcum(w, C.id)
+      const cifra = (__t.cifre() ?? []).find((x) => x.comp === C.id) ?? null
+      return { inchisa, comp: C.id, volum: C.volum, deschise: C.deschise, t, tSol0, valoare: K.tempOverlay.valori.get(C.id) ?? null, cifra, pauza: K.stare().pauza, pasi: w.temperatura.stat.pasi, tick, tickDupa: w.tick }
+    })()`)
+    globalThis.__casaB = r.comp
+    bifa('temperatura-incapere-noua', pre.pauza && pre.comp && pre.cifra === null && pre.nivel === hs + 1 && r.inchisa && r.comp !== null && r.volum === 2 && r.deschise === 0 && r.pauza && r.pasi === pre.pasi && r.tickDupa === r.tick && r.t === r.tSol0 && r.valoare === r.t && r.cifra !== null && r.cifra.vizibil && r.cifra.text === r.cifra.asteptat,
+      'casa B inchisa in pauza (ultima celula de acoperis): fara niciun pas, din cadrul urmator are cifra pe U == T din stare, iar T-ul e al provenientei (C3: singura masa persistenta e solul podelei → T_sol(0) la tickul inchiderii; zidurile, acoperisul si aerul de sub cer apar si iau T-ul rezultat)',
+      JSON.stringify({ pre, ...r, T: grade(r.t), tSol0: grade(r.tSol0) }))
+  })
+
+  // --- 11k. un invariant provocat: alerta in Jurnal, toast, console.error, F3 ---
+  await pas('alerta-termica', async () => {
+    const tinta = globalThis.__casaB ?? (await pT.js('__t.compA()?.id ?? null'))
+    const inainte = await pT.js(`({ inv: __kinstead.world.temperatura.stat.invarianti, jurnal: document.querySelector('.ui-alerte-antet button')?.textContent ?? '', f3: document.getElementById('termic')?.textContent ?? '' })`)
+    const n0 = pT.erori.length
+    // Componenta fara T (`are` golit): un invariant pe care pasul urmator il numara si il repara (T-ul ei de la echilibru).
+    if (NEGATIVA !== 'alerta') await pT.js(`(() => { __kinstead.world.temperatura.slot.are[${tinta}] = 0; return true })()`)
+    await pT.js('__t.cadre(2)')
+    const faraT = await pT.js('__kinstead.tempOverlay.faraT')
+    const pasul = await pT.js('__t.avans(20)')
+    await pT.js('__t.cadre(3)')
+    await astepta(700)
+    const dupa = await pT.js(`({ inv: __kinstead.world.temperatura.stat.invarianti, ultimul: __kinstead.world.temperatura.stat.ultimulInvariant, jurnal: document.querySelector('.ui-alerte-antet button')?.textContent ?? '', f3: document.getElementById('termic')?.textContent ?? '', f3warn: document.getElementById('termic')?.className === 'warn', toast: [...document.querySelectorAll('.ui-toast')].some((e) => e.textContent === __t.T.textEroareTemperatura()), asteptat: __t.T.textEroareTemperatura(), T: __t.S.temperaturaAcum(__kinstead.world, ${tinta}) })`)
+    const noi = pT.erori.slice(n0)
+    // Jurnalul, deschis din butonul lui (clic real), apoi inchis.
+    const bJ = await pT.js(`(() => { const b = document.querySelector('.ui-alerte-antet button'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
+    if (bJ) await pT.click(bJ.x, bJ.y)
+    await astepta(300)
+    const jurnal = await pT.js(`document.querySelector('.ui-jurnal')?.textContent ?? ''`)
+    for (let i = 0; i < 3 && await pT.js('__kinstead.ui.modalDeschis()'); i++) await pT.tasta('Escape')
+    const nr = (s) => Number(/\((\d+)\)/.exec(s)?.[1] ?? 0)
+    bifa('alerta-termica', inainte.inv === 0 && faraT >= 1 && pasul.rulate === 20 && dupa.inv >= 1 && /componenta fara T/.test(dupa.ultimul) && noi.length === 1 && noi[0].startsWith('[temperatura] invariant incalcat')
+      && nr(dupa.jurnal) >= nr(inainte.jurnal) + 1 && jurnal.includes(dupa.asteptat) && dupa.toast && dupa.f3warn && /invarianti [1-9]/.test(dupa.f3) && dupa.T !== null,
+      'un invariant provocat prin __kinstead (componenta fara T): U n-o deseneaza, pasul il numara si il repara, iar ecranul il spune — o intrare in Jurnal cu textul erorii interne, toastul, UN console.error „[temperatura] invariant incalcat", randul F3 rosu',
+      JSON.stringify({ tinta, faraT, inainte, dupa, consola: noi, jurnal: jurnal.slice(0, 200) }))
+    // Erorile ASTEPTATE ies din lista: „consola-termica" de la final vede doar ce n-a provocat proba.
+    for (let i = pT.erori.length - 1; i >= n0; i--) if (pT.erori[i].startsWith('[temperatura] invariant incalcat')) pT.erori.splice(i, 1)
+  })
+
+  // --- 11l. inertia (ULTIMA: dupa gaura, casa e un spatiu deschis): T nu sare spre X, X se muta; dupa o ora, T e langa X ---
+  await pas('temperatura-inertie', async () => {
+    let A = await casaA()
+    const pre = []
+    for (let k = 0; k < 48 && !(Math.abs(A.afara - A.t) >= Q && Math.abs(A.afara - A.xTot) >= Q); k++) { pre.push(await pT.js('__t.avans(420)')); A = await casaA() }
+    await pT.tasta('r')
+    await pT.js(`__f.centreaza(${hx + 2.5}, ${hy + 2.5}, ${hs + 3}, 9)`)
+    await astepta(400)
+    const e0 = await pT.js('__kinstead.world.terrain.editari')
+    const px = await pT.js(`__t.pixelPe(${hx + 2}, ${hy + 2}, ${hs + 3}, ${hx + 2.5}, ${hs + 4}, ${hy + 2.5}, { ctrl: false, shift: false, alt: true })`)
+    if (px !== null && NEGATIVA !== 'inertie') await pT.click(px.x, px.y, ['alt'])
+    for (let j = 0; j < 20 && (await pT.js('__kinstead.world.terrain.editari')) === e0; j++) await astepta(50)
+    await pT.js('__t.cadre(2)')
+    const A1 = await casaA()
+    // Pe hartie (C3, §3): gaura scoate 2 celule de aer si fata acoperisului (ies la T-ul casei) si fata podelei de sub ea
+    // (solul, d = 0, iese la T_sol(0)); raman 16 celule de aer si 40 de fete de masa cConstr (24 de ziduri, 8 de acoperis, 8
+    // de podea). Deci T-ul casei se muta DOAR cu cConstr·(T − T_sol(0)) / (16·cAer + 40·cConstr) — zecimi de grad, nu spre X.
+    const h = await pT.js(`(() => { const R = __kinstead.rules.termic; return { cA: R.cAerJPeK, cC: R.cConstrJPeK, ts: __t.Cl.tSol(0, __kinstead.world.tick, __kinstead.rules) } })()`)
+    const tHartie = A.t + Math.round(h.cC * (A.t - h.ts) / (16 * h.cA + 40 * h.cC))
+    const pasi = await pT.js('__t.avans(1680)')
+    const A2 = await casaA()
+    const ok = A1 !== null && A2 !== null && A1.t !== null && A1.xTot !== null
+      && Math.abs(A1.t - tHartie) <= Q / 200 && Math.abs(A1.t - A.t) < Math.abs(A1.xTot - A.t) / 2
+      && Math.abs(A1.xTot - A1.afara) < Math.abs(A.xTot - A.afara) && Math.abs(A1.xTot - A.xTot) >= Q / 2
+      && pasi.rulate === 1680 && Math.abs(A2.t - A2.xTot) < Math.abs(A1.t - A1.xTot)
+    bifa('temperatura-inertie', Math.abs(A.afara - A.t) >= Q && Math.abs(A.afara - A.xTot) >= Q && px !== null && ok,
+      'gaura in acoperis (Alt+clic, in pauza; precondiții |afară − T| ≥ 1 °C si |afară − X| ≥ 1 °C): T-ul casei NU sare spre X — se muta doar cu masa podelei care iese, pe hartie (±0,005 °C) —, „trage spre" se muta spre aerul de afara; dupa o ora de avans real, T e mai aproape de X',
+      JSON.stringify({ px, preconditie: pre.length, inainte: { T: grade(A.t), Xtot: grade(A.xTot), afara: grade(A.afara), volum: A.volum }, gaura: { T: grade(A1?.t), hartie: grade(tHartie), Xtot: grade(A1?.xTot), afara: grade(A1?.afara), volum: A1?.volum, deschise: A1?.deschise, tSol0: grade(h.ts) }, oOraDupa: { T: grade(A2?.t), Xtot: grade(A2?.xTot) } }))
+  })
+  if (pT.erori.length) bifa('consola-termica', false, 'fara erori in consola (pagina termica)', pT.erori.join(' | '))
 }
