@@ -69,7 +69,7 @@ export const MUTATII = [
     f: 'src/sim/save.ts',
     a: '  const echilibru = temperaturaLaEchilibru(w, rules, w.tick)',
     b: '  const echilibru = { ok: true }',
-    t: TS, e: 'STARE incarcarea',
+    t: TS, e: 'STARE migrarea',
   },
   {
     n: 't.2b §7, SAV-11: buildM10PeLume fara echilibru (asezarea ramane pe proveninta NEC a recalculului)',
@@ -340,7 +340,7 @@ export const MUTATII = [
     f: 'src/sim/hash.ts',
     a: '  const lista = listaComponente(w.camere)',
     b: '  const lista = [...w.camere.comp.values()]',
-    t: TSV, e: 'SALVARE M5-faze pe S+',
+    t: TSV, e: 'SALVARE scena S+',
   },
   // --- acceptanțele (§9)
   {

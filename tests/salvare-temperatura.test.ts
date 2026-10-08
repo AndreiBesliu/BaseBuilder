@@ -93,13 +93,14 @@ test('SALVARE scena S+ (literalul dedicat, §7, SAV-5): hash-ul la tickul 1.600 
   assert.ok(st.adunariOameni > 0, 'caldura umana')
   assert.equal(st.invarianti, 0)
   assert.ok(listaComponente(w.camere).some((c) => c.deschise > 0), 'o componenta deschisa (sopronul)')
+  assert.notDeepEqual([...w.camere.comp.values()].map((c) => c.ancora), listaComponente(w.camere).map((c) => c.ancora), 'ordinea din index nu e a ancorelor')
   assert.ok(tPeAncora(w).some((l) => !l.endsWith(':0')), 'rest nenul')
   const d = incarca(encode(w))
   const idc = new Map(listaComponente(d.camere).map((x) => [x.ancora, x.id]))
   assert.ok(listaComponente(w.camere).some((x) => idc.get(x.ancora) !== x.id), 'cel putin un id diferit dupa decode')
   // Pionul a rămas în B (căldura lui e în literal).
   assert.equal(componentaLa(w.camere, Math.floor(w.agents.x[0]! / 1000), Math.floor(w.agents.y[0]! / 1000), w.agents.z[0]!)?.id, componentaLa(w.camere, ...s.rep.B)!.id)
-  assert.equal(hashWorld(w), 'b7172d73')
+  assert.equal(hashWorld(w), '84d14adc')
   assert.equal(hashWorld(d), hashWorld(w))
 })
 

@@ -9,7 +9,9 @@
  *   la nivelul ei nu e aer acoperit, deci nicio felie nu se reface, iar masa feței trece din sol în construcție (epoca pe
  *   loc). Varianta designului, `fill` pe apa de sub o podea, cere apă naturală (terenul nu umple cu APA): o face M5-fețe,
  *   pe iazul de la seed 4242;
- * - un șopron acoperit, cu laturile deschise (o componentă deschisă la final; acoperișul pus dintr-un lot: sursa CER).
+ * - un șopron acoperit, cu laturile deschise (o componentă deschisă la final; acoperișul pus dintr-un lot: sursa CER);
+ * - la urmă, o scobitură închisă sub pământ (o componentă NOUĂ cu ancora sub ale caselor): ordinea în care componentele
+ *   au intrat în index nu mai e ordinea ancorelor (un hash sau o salvare pe ordinea sloturilor s-ar vedea).
  */
 
 import assert from 'node:assert/strict'
@@ -90,6 +92,11 @@ export function scenaSPlus(): ScenaSPlus {
   const sx = ax + 12
   for (const [dx, dy] of [[0, 0], [2, 0], [0, 2], [2, 2]] as const) for (const z of [g + 1, g + 2]) assert.ok(fill(t, sx + dx, ay + 1 + dy, z, P).ok)
   for (let dx = 0; dx <= 2; dx++) for (let dy = 0; dy <= 2; dy++) assert.ok(fill(t, sx + dx, ay + 1 + dy, g + 3, P).ok)
+  tick(w, R)
+  // Scobitura: 2 celule sub sol, închise (o componentă nouă, cu ancora între pivniță și case).
+  panaLa(w, 1500)
+  assert.ok(dig(t, sx + 3, ay + 2, g - 2).ok)
+  assert.ok(dig(t, sx + 3, ay + 2, g - 3).ok)
   tick(w, R)
   panaLa(w, 1600)
   return { w, ax, ay, g, bx, rep: { A: [ax + 2, ay + 2, g + 1], B: [ax + 7, ay + 2, g + 1], pivnita: [ax + 2, ay + 2, g - 3], sopron: [sx + 1, ay + 2, g + 1] } }
