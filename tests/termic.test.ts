@@ -9,17 +9,23 @@
  * (fuzz-ul de cutii, fuzz-ul de suprafață, casa ridicată de pioni peste o pivniță). EXACTITATEA: un nod sintetic
  * pe care Number ar greși, mina de 192×192×3 pe BigInt. ACCEPTANȚA: calibrarea de la §7, pe un an de joc.
  * K05: graful se reface doar la ștampila schimbată.
+ *
+ * Recenzia t.2a: VENTILAȚIA pe hârtie (casa cu golul ușii, în regim și în canale) și invariantul fețelor DESCHISE;
+ * CONVERGENȚA pe un graf lent (hotelul 10x10x4, la ±3 Q16 de soluția în float) și refuzul la plafon; MEMORIILE
+ * (contribuția pe bucată, regimul pe (graf, tick)) pe contoarele lor și pe oracol, inclusiv la o epocă nouă.
  */
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { buildM10PeLume } from '../src/harness/fixture-m10.ts'
 import { runScenario, standardScenario } from '../src/harness/scenario.ts'
 import type { IndexCamere } from '../src/sim/camere.ts'
-import { bucataLa, cheieCelula, componentaLa, construiesteCamere, sincronizeazaCamere } from '../src/sim/camere.ts'
+import { bucataLa, cheieCelula, componentaLa, construiesteCamere, listaComponente, sincronizeazaCamere } from '../src/sim/camere.ts'
 import { Anotimp, momentul, tickuriPeAn, tickuriPeOra } from '../src/sim/calendar.ts'
 import { tAfara, tSol, ziuaValului } from '../src/sim/clima.ts'
 import { applyCommand } from '../src/sim/commands.ts'
+import { parseRules } from '../src/sim/content.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { agregaComponenta, ClasaDir, FelFata, formaCanonicaFete, K_FETE_IMPLICIT, NUME_CLASA, NUME_FEL } from '../src/sim/fete.ts'
 import type { ClasaDirId, FelFataId } from '../src/sim/fete.ts'
@@ -45,6 +51,7 @@ import {
   regimPermanent,
   rezolvaRegim,
   statGraf,
+  statMemorieTermica,
   temperaturaComponentei,
 } from '../src/sim/termic.ts'
 import { createWorld } from '../src/sim/world.ts'
@@ -108,6 +115,65 @@ function donjon(t: Terrain, x: number, y: number, g: number): void {
 }
 
 const cuK = (k: number): Rules => ({ ...R, termic: { ...R.termic, kCelule: k } })
+
+/** Casa 5×5×2 de piatră cu golul ușii NEÎNCHIS: inelul fără (2, 0) pe ambele niveluri, acoperișul întreg. */
+function casaCuGol(t: Terrain, x0: number, y0: number, g: number): void {
+  for (let z = g + 1; z <= g + 2; z++) for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) {
+    if (dx !== 0 && dx !== 4 && dy !== 0 && dy !== 4) continue
+    if (dx === 2 && dy === 0) continue // golul de 1x2, fără ușă
+    assert.ok(fill(t, x0 + dx, y0 + dy, z, P).ok)
+  }
+  for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) assert.ok(fill(t, x0 + dx, y0 + dy, g + 3, P).ok)
+}
+
+/**
+ * Hotelul recenziei GRAF (L3-3): un bloc de piatră (2N+1)×(2N+1)×(2H+1) peste sol, cu o cameră de o celulă la
+ * fiecare (impar, impar, par) — N²·H încăperi interioare, legate între ele prin 1 m de piatră. Gauss–Seidel cere
+ * aici zeci de treceri (diametrul grafului), nu cele 7–9 ale M10.
+ */
+function hotel(N: number, H: number): World {
+  const s = sitPlat(777, 10)
+  const t = s.w.terrain
+  const x0 = s.wx + 2, y0 = s.wy + 2
+  // Fundația de piatră până la cel mai înalt sol de sub bloc.
+  let g = Number.NEGATIVE_INFINITY
+  for (let x = 0; x <= 2 * N; x++) for (let y = 0; y <= 2 * N; y++) {
+    const gg = groundLevelM(t, x0 + x, y0 + y)
+    assert.ok(gg.ok)
+    g = Math.max(g, gg.value)
+  }
+  for (let x = 0; x <= 2 * N; x++) for (let y = 0; y <= 2 * N; y++) {
+    const gg = groundLevelM(t, x0 + x, y0 + y)
+    assert.ok(gg.ok)
+    for (let z = gg.value + 1; z <= g; z++) assert.ok(fill(t, x0 + x, y0 + y, z, P).ok)
+  }
+  for (let z = 1; z <= 2 * H + 1; z++) for (let x = 0; x <= 2 * N; x++) for (let y = 0; y <= 2 * N; y++) {
+    if (x % 2 === 1 && y % 2 === 1 && z % 2 === 0) continue // camera
+    assert.ok(fill(t, x0 + x, y0 + y, g + z, P).ok)
+  }
+  sincronizeazaCamere(s.w.camere, t)
+  return s.w
+}
+
+/** Soluția sistemului grafului în float64 (iterată până la 1e-9 Q16): referința din afara întregilor. */
+function solutieExacta(gr: GrafTermic, tRez: ArrayLike<number>): Float64Array {
+  const n = gr.n
+  const num0 = new Float64Array(n)
+  for (let i = 0; i < n; i++) for (let k = gr.rezStart[i]!; k < gr.rezStart[i + 1]!; k++) num0[i] += gr.rezG[k]! * tRez[gr.rezBin[k]!]!
+  const T = new Float64Array(n).fill(tRez[BIN_AFARA]!)
+  for (let iter = 0; iter < 1_000_000; iter++) {
+    let maxd = 0
+    for (let i = 0; i < n; i++) {
+      let s = num0[i]!
+      for (let k = gr.vecStart[i]!; k < gr.vecStart[i + 1]!; k++) s += gr.vecG[k]! * T[gr.vecNod[k]!]!
+      const v = s / gr.sumaG[i]!
+      maxd = Math.max(maxd, Math.abs(v - T[i]!))
+      T[i] = v
+    }
+    if (maxd < 1e-9) return T
+  }
+  assert.fail('referinta in float nu converge')
+}
 
 // --- 1. K din content -----------------------------------------------------------------
 
@@ -327,6 +393,62 @@ test('TERMIC invariantul muchiei: o muchie spre o celula care nu e aer acoperit 
   graf(idx)
 })
 
+test('TERMIC muchia vazuta doar din capatul MIC: un rand MUCHIE spre o pivnita departata, in bucata pivnitei cu ancora mai mica, se refuza — nu o cuplare fantoma pe care celalalt capat n-o are', () => {
+  // Recenzia GRAF, L3-4: testul de mai sus prinde asimetria din capătul MARE; o muchie văzută numai din capătul cu
+  // ancora MICĂ o prinde doar numărătoarea muchiilor verificate. Fără ea, CSR-ul o pune în ambele sensuri, iar
+  // vara pivnița de la suprafață coboară de la 4,4 la 2,2 °C fără nicio față spre cealaltă.
+  const { w, wx, wy, g } = sitPlat(12345, 16)
+  const t = w.terrain
+  for (const x of [1, 2]) for (const z of [g - 2, g - 1]) assert.ok(dig(t, wx + x, wy + 2, z).ok)
+  for (const x of [14, 15]) for (const z of [g - 12, g - 11]) assert.ok(dig(t, wx + x, wy + 2, z).ok)
+  sincronizeazaCamere(w.camere, t)
+  const A = componentaLa(w.camere, wx + 1, wy + 2, g - 1)!, B = componentaLa(w.camere, wx + 14, wy + 2, g - 11)!
+  assert.ok(B.ancora < A.ancora, 'fixtura: B e capatul mic')
+  graf(w.camere)
+  const b = bucataLa(w.camere, wx + 14, wy + 2, g - 11)
+  const vechi = w.camere.fete.randuri[b]!
+  try {
+    w.camere.fete.randuri[b] = [...vechi, { clasa: ClasaDir.LAT, fel: FelFata.MUCHIE, compozitie: 0, prima: Material.ROCA, adancime: -1, dincolo: cheieCelula(wx + 1, wy + 2, g - 1), fete: 40 }]
+    w.camere.epocaFete++
+    const o = grafTermic(w.camere, R)
+    assert.ok(!o.ok && o.reason === Reason.INVARIANT_INCALCAT && o.params.motiv === 'muchie vazuta dintr-un singur capat', JSON.stringify(o))
+  } finally {
+    w.camere.fete.randuri[b] = vechi
+    w.camere.epocaFete++
+  }
+  graf(w.camere)
+})
+
+test('TERMIC invariantul fetelor DESCHISE: un rand DESCHISA scris EXT in cache se refuza cu INVARIANT_INCALCAT, in graf si in agregare — nu o ventilatie pierduta tacut', () => {
+  // Recenzia FETE, L1-1: oracolul grafului e autoconsistent pe clasificare, iar ventilația (200 W/K pe față) luată
+  // drept perete EXT (~5,9 W/K) mută temperatura oricărei componente deschise. Fețele DESCHISA din rânduri se
+  // compară cu `deschise` al componentei, numărat de index (camere.ts) pe altă cale.
+  const { w, wx, wy, g } = sitPlat(12345, 12)
+  casaCuGol(w.terrain, wx, wy, g)
+  sincronizeazaCamere(w.camere, w.terrain)
+  const idx = w.camere
+  const c = componentaLa(idx, wx + 2, wy + 2, g + 1)!
+  assert.equal(c.deschise, 2, 'fixtura: golul de 1x2')
+  graf(idx)
+  assert.ok(agregaComponenta(idx, c).ok)
+  const b = bucataLa(idx, wx + 2, wy, g + 1)
+  const vechi = idx.fete.randuri[b]!
+  const d = vechi.find((x) => x.fel === FelFata.DESCHISA)
+  assert.ok(d, 'fixtura: bucata golului are un rand DESCHISA')
+  try {
+    idx.fete.randuri[b] = vechi.map((x) => (x === d ? { ...x, fel: FelFata.EXT } : x))
+    idx.epocaFete++
+    const o = grafTermic(idx, R)
+    assert.ok(!o.ok && o.reason === Reason.INVARIANT_INCALCAT && o.params.motiv === 'fetele DESCHISA nu sunt fetele deschise ale componentei', JSON.stringify(o))
+    const a = agregaComponenta(idx, c)
+    assert.ok(!a.ok && a.reason === Reason.INVARIANT_INCALCAT && a.params.motiv === 'fetele DESCHISA nu sunt fetele deschise ale componentei', JSON.stringify(a))
+  } finally {
+    idx.fete.randuri[b] = vechi
+    idx.epocaFete++
+  }
+  graf(idx)
+})
+
 test('TERMIC lema e o garda: cu R-uri in afara domeniului din content (g = 0 prin piatra si prin usa), etajele casei raman fara nicio fata conductiva — refuz, nu NaN', () => {
   const { w } = casa3()
   const material = [...R.termic.material]
@@ -401,6 +523,30 @@ test('TERMIC 2^53: marginea temperaturilor e o margine — niciun rezervor nu ie
   }
 })
 
+test('TERMIC 2^53: fiecare termen al marginii e necesar — intr-o clima in care el singur domina, |T| ajunge la 3 °C de M, pe toate adancimile 0..64', () => {
+  // Recenzia GRAF, L3-5: clima „extremă" de mai sus are toți termenii deodată și M iese larg (45,6 °C față de un
+  // |T| real de 26,8 °C), deci M rămâne margine și fără un termen. Aici fiecare termen e singur (plus media, unde
+  // el e o abatere de la ea): fără el, |T| trece de M.
+  const c = R.clima
+  const zero = { ...c, tMedieMc: 0, amplitudineAnMc: 0, amplitudineZiMc: 0, valFrig: { ...c.valFrig, amplitudineMc: 0 }, deltaAdancMc: 0 }
+  const clime: [string, Rules][] = [
+    ['deltaAdanc', { ...R, clima: { ...zero, tMedieMc: -50000, deltaAdancMc: -50000 } }],
+    ['amplitudineZi', { ...R, clima: { ...zero, amplitudineZiMc: 50000 } }],
+    ['amplitudineAn', { ...R, clima: { ...zero, amplitudineAnMc: 50000 } }],
+    ['valFrig', { ...R, clima: { ...zero, valFrig: { ...c.valFrig, amplitudineMc: -50000 } } }],
+  ]
+  for (const [nume, rules] of clime) {
+    const M = margineTemperaturi(rules)
+    let max = 0
+    for (let tick = 0; tick < tickuriPeAn(rules); tick += tickuriPeOra(rules) / 4) {
+      max = Math.max(max, Math.abs(tAfara(12345, tick, rules)))
+      for (let d = 0; d <= 64; d++) max = Math.max(max, Math.abs(tSol(d, tick, rules)))
+    }
+    assert.ok(max <= M, `${nume}: max ${max / Q} °C > M ${M / Q} °C`)
+    assert.ok(max > M - 3 * Q, `${nume}: termenul nu domina (max ${max / Q} °C, M ${M / Q} °C)`)
+  }
+})
+
 test('TERMIC 2^53: mina de 192x192x3 — Σg ≈ 2^34, nodul e pe BigInt, iar regimul e acelasi cu cel calculat totul pe BigInt si cu cel pe Number', () => {
   // Mina panoului (NUM, geom.ts): 192×192 cu stâlpi de 1×1 la fiecare 4 m, la 2–4 m sub sol, săpată dintr-un lot.
   const s = sitPlat(12345, 8)
@@ -449,9 +595,29 @@ test('TERMIC M10: 677 de noduri si 1.776 de muchii (cifrele hartii), hub-ul pe B
     assert.ok(r.ok)
     assert.ok(r.value.convergent && r.value.treceri <= 9, `tickul ${tick}: ${r.value.treceri} treceri`)
     assert.deepEqual([...r.value.t], [...rezolvaRegim(gr, r.value.tRez, r.value.tAfaraQ16, true).t])
-    // Punctul fix nu depinde de pornire.
-    assert.deepEqual([...r.value.t], [...rezolvaRegim(gr, r.value.tRez, 0).t])
+    // Punctul fix pe întregi NU e unic (recenzia GRAF, L3-3: pe un hotel, 1–5 Q16 între porniri), deci pornit din 0
+    // regimul nu e cerut identic, ci la ±1 Q16 pe fiecare nod.
+    const din0 = rezolvaRegim(gr, r.value.tRez, 0).t
+    for (let i = 0; i < gr.n; i++) assert.ok(Math.abs(r.value.t[i]! - din0[i]!) <= 1, `tickul ${tick}, nodul ${i}: ${r.value.t[i]} fata de ${din0[i]}`)
   }
+})
+
+test('TERMIC convergenta: hotelul 10x10x4 (400 de camere interioare) cere zeci de treceri — regimul converge si fiecare nod e la ±3 Q16 de solutia in float; la plafon, refuz CAPACITATE_DEPASITA, nu cifre neconvergente', () => {
+  // Recenzia GRAF, L3-3: cea mai lentă scenă din suite era M10 (7–9 treceri), deci plafonul putea coborî la 10 cu
+  // toate testele verzi, iar un regim neconvergent ajungea pe ecran (la plafonul 20, 3,9 °C eroare pe 30x30x10).
+  const w = hotel(10, 4)
+  const tick = 576240
+  const r = regimPermanent(w, R, tick)
+  assert.ok(r.ok, JSON.stringify(r))
+  assert.equal(r.value.graf.n, 400)
+  assert.ok(r.value.treceri > 40, `fixtura: doar ${r.value.treceri} treceri`)
+  assert.ok(r.value.convergent)
+  const ex = solutieExacta(r.value.graf, r.value.tRez)
+  for (let i = 0; i < r.value.graf.n; i++) assert.ok(Math.abs(r.value.t[i]! - ex[i]!) <= 3, `nodul ${i}: ${r.value.t[i]} fata de ${ex[i]}`)
+  // Plafonul: 5 treceri nu ajung la punctul fix — refuz, cu trecerile făcute; plafonul e în cheia memoriei regimului.
+  const p = regimPermanent(w, R, tick, 5)
+  assert.ok(!p.ok && p.reason === Reason.CAPACITATE_DEPASITA && p.params.treceri === 5, JSON.stringify(p))
+  assert.ok(regimPermanent(w, R, tick).ok, 'cu plafonul obisnuit, tot convergent')
 })
 
 // --- 5. canalele ---------------------------------------------------------------------
@@ -464,7 +630,7 @@ function canale(w: World, compId: number, tick: number): { text: string[]; c: Re
   for (const r of c.value.randuri) suma += r.pondereQ16
   assert.equal(suma, PONDERE_TOTALA, 'ponderile + restul = 100%')
   assert.ok(c.value.randuri.length <= 3)
-  return { text: c.value.randuri.map((r) => `${NUME_CLASA[r.clasa]} ${NUME_DESTINATIE[r.destinatie]}${r.usa ? '+usa' : ''} ${r.pondereQ16} [${r.compozitie}] g${r.grosime}`), c }
+  return { text: c.value.randuri.map((r) => `${NUME_CLASA[r.clasa]} ${NUME_DESTINATIE[r.destinatie]}${r.usa ? '+usa' : ''}${r.deschis ? '+gol' : ''} ${r.pondereQ16} [${r.compozitie}] g${r.grosime}`), c }
 }
 
 test('TERMIC canale pe hartie: pivnita 5x5x2 sub IARBA — podeaua, peretii, tavanul, cu ponderile in ΣG si solul fiecaruia', () => {
@@ -505,6 +671,63 @@ test('TERMIC canale pe hartie: casa 5x5x2 cu usa — peretii, podeaua, acoperisu
   const doi = canale(w, c.id, 400000)
   assert.deepEqual(doi.text, unu.text)
   assert.ok(doi.c.ok && doi.c.value.tQ16 !== unu.c.value.tQ16, 'fixtura: temperatura s-a schimbat intre cele doua tickuri')
+})
+
+test('TERMIC pe hartie: casa 5x5x2 cu golul usii NEINCHIS — cele 2 fete ale golului sunt ventilatie (G_deschis 200 W/K fiecare) spre AFARA, in regim si in canale, grupul lor (nu al peretilor)', () => {
+  // Recenzia FETE, L1-1 (verificatorul): nicio probă nu conținea o față DESCHISA, deci ventilația clasificată EXT (în
+  // fețe) sau dusă pe ramura solului (în canale) trecea toată suita. Recenzia ECRAN, L4-1: golul e grupul lui.
+  const { w, wx, wy, g } = sitPlat(12345, 12)
+  casaCuGol(w.terrain, wx, wy, g)
+  sincronizeazaCamere(w.camere, w.terrain)
+  const c = componentaLa(w.camere, wx + 2, wy + 2, g + 1)!
+  assert.equal(c.deschise, 2, 'fixtura: golul de 1x2 e deschis')
+  // Pe hârtie (R în miimi: R_si lat 130, sus 100, jos 170; R_se 40; piatra 590; pământul 850): golul 2 fețe DESCHISA
+  // · 200 W/K = 2 · 13.107.200; pereții 22 · 86.231 (2R = 260 + 1.180 + 80 = 1.520); laturile golului prin 2 m de zid
+  // 4 · 48.545 (2R = 260 + 2.360 + 80 = 2.700); acoperișul 10 · 89.775; podeaua 10 · 110.144 (2R = 340 + 850 =
+  // 1.190). G_afara = 29.203.412, G_sol(0) = 1.101.440, Σ 30.304.852.
+  const an = tickuriPeAn(R)
+  for (let tick = 0; tick < an; tick += an / 8 + 777) {
+    const r = regimPermanent(w, R, tick)
+    assert.ok(r.ok)
+    const asteptat = rot(29203412n * BigInt(tAfara(w.seed, tick, R)) + 1101440n * BigInt(tSol(0, tick, R)), 30304852n)
+    assert.equal(temperaturaComponentei(r.value, c.id), asteptat, `tickul ${tick}`)
+  }
+  // Canalele: golul (26.214.400) e grupul lui, cu drumul gol; pereții spre aer (2.091.262) alt grup. Cumulat:
+  // rot(26.214.400 · 65.536 / Σ) = 56.690; + pereții → 61.213 (4.523); + podeaua → 63.595 (2.382); restul, acoperișul, 1.941.
+  const k = canale(w, c.id, 100000)
+  assert.deepEqual(k.text, ['LAT AFARA+gol 56690 [] g0', 'LAT AFARA 4523 [6x1] g1', 'JOS SOL 2382 [3x1] g1'])
+  assert.ok(k.c.ok)
+  const gol = k.c.value.randuri[0]!
+  assert.deepEqual([gol.gQ16, gol.fete, gol.material, gol.tDestQ16], [26214400, 2, -1, tAfara(w.seed, 100000, R)])
+  assert.deepEqual(k.c.value.rest, { pondereQ16: 1941, grupuri: 1 })
+})
+
+test('TERMIC canale: un sopron (acoperis pe un stalp) cu gDeschis 0, content valid — fetele DESCHISE nu poarta nimic si nu intra in niciun grup; canalele raspund, nu arunca', () => {
+  // Recenzia GRAF, L3-1: cu gDeschis 0 grupul golului avea g = 0, iar temperatura destinației lui împărțea la 0n
+  // (RangeError în inspector, la fiecare reîmprospătare). Specificația termică permite minimul 0.
+  const brut = JSON.parse(readFileSync(new URL('../content/rules.json', import.meta.url), 'utf8'))
+  brut.termic.gDeschisMilliWPeK = 0
+  const pr = parseRules(brut)
+  assert.ok(pr.ok, `gDeschis 0 e content valid: ${JSON.stringify(pr)}`)
+  const R0 = pr.value
+  const { w, wx, wy, g } = sitPlat(12345, 12)
+  const t = w.terrain
+  for (let z = g + 1; z <= g + 2; z++) assert.ok(fill(t, wx + 1, wy + 1, z, P).ok)
+  for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) assert.ok(fill(t, wx + dx, wy + dy, g + 3, P).ok)
+  sincronizeazaCamere(w.camere, t)
+  const c = componentaLa(w.camere, wx, wy, g + 1)!
+  // 8 celule pe nivel: 12 fețe laterale spre cer pe nivel (DESCHISA), 4 spre stâlp (SINE).
+  assert.deepEqual([c.volum, c.deschise], [16, 24], 'fixtura: sopronul')
+  const o = canaleTermice(w, R0, c.id, 1000)
+  assert.ok(o.ok, JSON.stringify(o))
+  // Pe hârtie: podeaua 8 · 110.144 = 881.152 spre sol, acoperișul 8 · 89.775 = 718.200 spre aer; Σ 1.599.352, iar
+  // golul, cu g 0, nu e nici rând, nici „rest".
+  assert.deepEqual(o.value.randuri.map((r) => [NUME_CLASA[r.clasa], NUME_DESTINATIE[r.destinatie], r.deschis, r.gQ16, r.fete]), [
+    ['JOS', 'SOL', false, 881152, 8],
+    ['SUS', 'AFARA', false, 718200, 8],
+  ])
+  assert.deepEqual(o.value.rest, { pondereQ16: 0, grupuri: 0 })
+  assert.equal(o.value.sumaG, 1599352)
 })
 
 test('TERMIC canale: o galerie intre alte doua, prin 1 m de roca — vecinele se contopesc intr-un singur rand LAT INCAPERI, cu temperatura medie pe G', () => {
@@ -619,19 +842,118 @@ test('TERMIC K05: scenariul standard (0 componente) nu plateste nimic — simula
   assert.equal(reg.value.treceri, 1)
 })
 
+test('TERMIC slot liber: o pivnita astupata lasa un slot liber sub cUrmator — temperatura lui e null, nu a nodului 0', () => {
+  // Recenzia GRAF, L3-6: fără `fill(-1)` pe `nodDupaComp`, un id eliberat (dar sub cUrmator) primea nodul 0, iar
+  // overlay-ul ar fi colorat o încăpere cu temperatura alteia.
+  const { w, wx, wy, g } = sitPlat(12345, 16)
+  const t = w.terrain
+  for (const x of [1, 2]) for (const z of [g - 5, g - 4]) assert.ok(dig(t, wx + x, wy + 2, z).ok)
+  for (const x of [10, 11]) for (const z of [g - 5, g - 4]) assert.ok(dig(t, wx + x, wy + 2, z).ok)
+  sincronizeazaCamere(w.camere, t)
+  const A = componentaLa(w.camere, wx + 1, wy + 2, g - 4)!
+  for (const x of [1, 2]) for (const z of [g - 5, g - 4]) assert.ok(fill(t, wx + x, wy + 2, z, P).ok)
+  sincronizeazaCamere(w.camere, t)
+  assert.ok(!w.camere.comp.has(A.id) && A.id < w.camere.cUrmator, 'fixtura: slotul lui A e liber, sub cUrmator')
+  const r = regimPermanent(w, R, 0)
+  assert.ok(r.ok)
+  assert.equal(r.value.graf.n, 1)
+  assert.equal(temperaturaComponentei(r.value, A.id), null)
+})
+
+test('TERMIC memoria contributiilor: pamant pe acoperisul casei cu trei niveluri — la refacere se calculeaza doar bucatile cu randuri noi, iar graful == cel al unui index nou', () => {
+  // Recenzia GRAF, L3-2: refacerea grafului după o editare care schimbă doar fețele costa 7–18 ms pe M10, într-un
+  // singur cadru; contribuția fiecărei bucăți se memorează acum pe identitatea tabloului ei de rânduri.
+  const { w, x0, y0, g } = casa3()
+  const idx = w.camere
+  graf(idx)
+  let bucati = 0
+  for (const c of listaComponente(idx)) bucati += c.bucati.length
+  assert.equal(statMemorieTermica(idx).bucatiCalculate, bucati, 'prima refacere calculeaza fiecare bucata')
+  for (const [dx, dy] of [[4, 4], [1, 1], [7, 2]] as const) {
+    const inainte = [...idx.fete.randuri]
+    const st = statMemorieTermica(idx).bucatiCalculate
+    const epoca = idx.epoca
+    assert.ok(fill(w.terrain, x0 + dx, y0 + dy, g + 10, Material.PAMANT).ok)
+    sincronizeazaCamere(idx, w.terrain)
+    assert.equal(idx.epoca, epoca, 'fixtura: pamantul pe acoperis schimba doar fetele')
+    let noi = 0
+    for (const c of listaComponente(idx)) for (const b of c.bucati) if (idx.fete.randuri[b] !== inainte[b]) noi++
+    assert.ok(noi > 0 && noi < bucati, `fixtura: ${noi} din ${bucati} bucati cu randuri noi`)
+    egalCuGrafulNou(w, `pamant (${dx},${dy})`)
+    assert.equal(statMemorieTermica(idx).bucatiCalculate - st, noi, `pamant (${dx},${dy}): doar bucatile cu randuri noi`)
+  }
+})
+
+test('TERMIC memoria contributiilor tine cat epoca: doua galerii lungi, unite la un capat — capatul celalalt (aceleasi randuri) nu pastreaza vecina de dinainte', () => {
+  // Contribuția unei bucăți ține componenta de dincolo a muchiilor ei; la o epocă nouă componentele se renumerotează
+  // (unirea: amândouă mor, una nouă se naște), deși rândurile capătului departat rămân ACELAȘI tablou.
+  const { w, wx, wy, g } = sitPlat(12345, 16)
+  const t = w.terrain
+  for (const y of [2, 4]) for (let x = 1; x <= 18; x++) for (const z of [g - 5, g - 4]) assert.ok(dig(t, wx + x, wy + y, z).ok)
+  sincronizeazaCamere(w.camere, t)
+  const A = componentaLa(w.camere, wx + 18, wy + 2, g - 4)!, B = componentaLa(w.camere, wx + 18, wy + 4, g - 4)!
+  assert.notEqual(A.id, B.id)
+  egalCuGrafulNou(w, 'doua galerii')
+  assert.equal(graf(w.camere).muchieA.length, 1, 'fixtura: galeriile sunt legate printr-o muchie')
+  const departe = bucataLa(w.camere, wx + 18, wy + 2, g - 4)
+  const rr = w.camere.fete.randuri[departe]!
+  assert.ok(rr.some((x) => x.fel === FelFata.MUCHIE), 'fixtura: capatul departat are muchii spre galeria vecina')
+  const epoca = w.camere.epoca
+  for (const z of [g - 5, g - 4]) assert.ok(dig(t, wx + 1, wy + 3, z).ok)
+  sincronizeazaCamere(w.camere, t)
+  assert.ok(w.camere.epoca > epoca)
+  assert.equal(w.camere.fete.randuri[departe], rr, 'fixtura: randurile capatului departat sunt acelasi tablou')
+  const U = componentaLa(w.camere, wx + 18, wy + 2, g - 4)!
+  assert.equal(componentaLa(w.camere, wx + 18, wy + 4, g - 4)!.id, U.id, 'fixtura: galeriile s-au unit')
+  egalCuGrafulNou(w, 'galeriile unite')
+  // Pe hârtie: unite, drumurile prin zid se întorc în aceeași componentă (SINE) — niciun nod vecin, nicio muchie.
+  const gr = graf(w.camere)
+  assert.deepEqual([gr.n, gr.muchieA.length], [1, 0])
+})
+
+test('TERMIC un regim pe (graf, tick): overlay-ul si inspectorul (canaleTermice pe doua incaperi) impart o singura rezolvare; alt tick sau fete noi rezolva din nou', () => {
+  // Recenzia GRAF, L3-2: `canaleTermice` refăcea regimul întregii lumi pentru o singură încăpere, iar overlay-ul îl
+  // refăcea încă o dată pentru același tick.
+  const { w, x0, y0, g } = casa3()
+  const idx = w.camere
+  const deb = componentaLa(idx, x0 + 4, y0 + 4, g + 4)!, parter = componentaLa(idx, x0 + 2, y0 + 2, g + 1)!
+  const st = (): number[] => {
+    const s = statMemorieTermica(idx)
+    return [s.regimuriRezolvate, s.regimuriRefolosite]
+  }
+  const r = regimPermanent(w, R, 1000)
+  assert.ok(r.ok)
+  assert.deepEqual(st(), [1, 0])
+  assert.ok(canaleTermice(w, R, deb.id, 1000).ok)
+  assert.ok(canaleTermice(w, R, parter.id, 1000).ok)
+  assert.equal(regimPermanent(w, R, 1000), r, 'acelasi regim, acelasi obiect')
+  assert.deepEqual(st(), [1, 3])
+  // Rezolvarea împărțită e cea proaspătă (pornită din T_afara, nu din soluția altei cereri).
+  assert.deepEqual([...r.value.t], [...rezolvaRegim(r.value.graf, r.value.tRez, r.value.tAfaraQ16).t])
+  assert.ok(regimPermanent(w, R, 1001).ok)
+  assert.deepEqual(st(), [2, 3])
+  // Fețe noi (pământ pe acoperiș): alt graf, la același tick.
+  assert.ok(fill(w.terrain, x0 + 4, y0 + 4, g + 10, Material.PAMANT).ok)
+  sincronizeazaCamere(idx, w.terrain)
+  const dupa = regimPermanent(w, R, 1001)
+  assert.ok(dupa.ok && r.ok && dupa.value.graf !== r.value.graf)
+  assert.deepEqual(st(), [3, 3])
+})
+
 // --- 7. calibrarea ca acceptanță (§7) ------------------------------------------------
 
 /**
  * Casa de piatră 7×7 (interior 5×5×2), ușa 1×2 pe peretele de sud, acoperiș de piatră; opțional pivnița 3×3×2
  * sub mijlocul ei, cu 1 m de pământ deasupra (tavanul = celula de suprafață) și un chepeng USA într-un colț.
- * Scena verificatorului L3-1 (model.mjs), pe terenul jocului.
+ * Scena verificatorului L3-1 (model.mjs), pe terenul jocului. `cuUsa` = false: golul ușii lăsat NEÎNCHIS.
  */
-function scenaCalibrare(cuPivnita: boolean): { w: World; casaId: number; pivnitaId: number } {
+function scenaCalibrare(cuPivnita: boolean, cuUsa = true): { w: World; casaId: number; pivnitaId: number } {
   const { w, wx, wy, g } = sitPlat(12345, 12)
   const t = w.terrain
   const x0 = wx + 2, y0 = wy + 2
   for (let z = g + 1; z <= g + 2; z++) for (let dx = 0; dx < 7; dx++) for (let dy = 0; dy < 7; dy++) {
     if (dx !== 0 && dx !== 6 && dy !== 0 && dy !== 6) continue
+    if (!cuUsa && dx === 3 && dy === 0) continue
     assert.ok(fill(t, x0 + dx, y0 + dy, z, dx === 3 && dy === 0 ? Material.USA : P).ok)
   }
   for (let dx = 0; dx < 7; dx++) for (let dy = 0; dy < 7; dy++) assert.ok(fill(t, x0 + dx, y0 + dy, g + 3, P).ok)
@@ -647,8 +969,8 @@ function scenaCalibrare(cuPivnita: boolean): { w: World; casaId: number; pivnita
   return { w, casaId: casaC.id, pivnitaId: piv ? piv.id : -1 }
 }
 
-test('TERMIC acceptanta: pivnita 3x3x2 sub o casa de piatra, cu 1 m de pamant deasupra, sta sub 5 °C cel putin 85% din vara (regimul permanent, un an, la fiecare ora)', () => {
-  const { w, pivnitaId } = scenaCalibrare(true)
+/** Orele de vară (regimul permanent, un an, la fiecare oră) și câte dintre ele are pivnița sub 5 °C. */
+function oreDeVaraSub5(w: World, pivnitaId: number): { vara: number; sub: number } {
   const ora = tickuriPeOra(R)
   let vara = 0
   let sub = 0
@@ -659,9 +981,25 @@ test('TERMIC acceptanta: pivnita 3x3x2 sub o casa de piatra, cu 1 m de pamant de
     vara++
     if (temperaturaComponentei(r.value, pivnitaId)! < 5 * Q) sub++
   }
+  return { vara, sub }
+}
+
+test('TERMIC acceptanta: pivnita 3x3x2 sub o casa de piatra, cu 1 m de pamant deasupra, sta sub 5 °C cel putin 85% din vara (regimul permanent, un an, la fiecare ora) — cu USA in gol; cu golul usii neinchis NU tine (75%), verdict explicit', () => {
+  const cuUsa = scenaCalibrare(true)
+  const { vara, sub } = oreDeVaraSub5(cuUsa.w, cuUsa.pivnitaId)
   assert.equal(vara, 96)
   // Măsurat: 93 din 96 de ore (96,9%), între 3,53 și 5,02 °C (design §3: 89%, cu inerție).
   assert.ok(sub >= Math.ceil(0.85 * vara), `doar ${sub} din ${vara} ore de vara sub 5 °C`)
+  // Varianta golului (recenzia GRAF, L3-7): pivnița e legată de casă prin MUCHIE (1 m de iarbă și chepengul), iar
+  // casa cu golul neînchis (2 fețe DESCHISE, 2 × 200 W/K) urmărește aerul de afară. Pivnița stă sub 5 °C doar 72
+  // din 96 de ore — SUB ținta de 85%. Nu se calibrează aici: decizia 2 a lui Andrei spune „o pivniță sub casă ține
+  // hrana sub 5 °C vara" fără condiții, deci ori ținta numește ușa închisă, ori golul intră în calibrarea t.2b
+  // (designul are deja „casa cu golul ușii ≤ 1 h"). Testul fixează verdictul de azi: când se mișcă, se re-decide.
+  const gol = scenaCalibrare(true, false)
+  const vg = oreDeVaraSub5(gol.w, gol.pivnitaId)
+  assert.equal(vg.vara, 96)
+  assert.equal(vg.sub, 72, `golul usii: ${vg.sub} din 96 de ore sub 5 °C (masurat 72, 75%)`)
+  assert.ok(vg.sub < Math.ceil(0.85 * vg.vara), 'verdictul: cu golul usii neinchis pivnita NU tine tinta de 85%')
 })
 
 test('TERMIC acceptanta: casa de piatra 5x5x2 de la suprafata coboara iarna sub −8 °C doar in ziua valului de frig; fara val, niciodata', () => {

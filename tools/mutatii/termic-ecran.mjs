@@ -136,6 +136,13 @@ export const MUTATII = [
     t: T, e: E2,
   },
   {
+    n: 'recenzia ECRAN L4-1: descompunerea numeste iar golul (fata DESCHISA) „pereți"',
+    f: X,
+    a: "  if (deschis) return 'gol deschis'\n",
+    b: '',
+    t: T, e: 'TERMIC ECRAN inspectorul pe hartie: casa 5x5x2 cu golul usii',
+  },
+  {
     n: 'descompunerea: SUS e „tavan" si spre cer (nu „acoperiș")',
     f: X,
     a: "  return dest === Destinatie.AFARA ? 'acoperiș' : 'tavan'",

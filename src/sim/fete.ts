@@ -628,19 +628,22 @@ export interface AgregareFete {
 
 /**
  * Rândurile unei componente, agregate pe bucățile ei, cu MUCHIE rezolvată prin celula de dincolo → bucată →
- * componentă (§5). Refuz `INVARIANT_INCALCAT` dacă o bucată n-are rânduri sau dacă celula de dincolo a unei
- * muchii nu e aer acoperit în index — nu o muchie spre nimic (`bComp[−1]`), tăcută (panoul, L2-4).
+ * componentă (§5). Refuz `INVARIANT_INCALCAT` dacă o bucată n-are rânduri, dacă celula de dincolo a unei
+ * muchii nu e aer acoperit în index — nu o muchie spre nimic (`bComp[−1]`), tăcută (panoul, L2-4) — sau dacă
+ * fețele DESCHISA din rânduri nu sunt `deschise` ale componentei (recenzia FETE, L1-1).
  */
 export function agregaComponenta(idx: IndexCamere, comp: Componenta): Outcome<AgregareFete> {
   const c = idx.fete
   const acc = new Map<number, Map<number, RandMutabil & { vecina: number }>>()
   let sine = 0
   let total = 0
+  let deschise = 0
   for (const b of comp.bucati) {
     const rr = c.randuri[b]
     if (rr === undefined) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'bucata fara randuri de fete', bucata: b })
     for (const x of rr) {
       total += x.fete
+      if (x.fel === FelFata.DESCHISA) deschise += x.fete
       let vecina = -1
       if (x.fel === FelFata.MUCHIE) {
         const p = decodeazaCelula(x.dincolo)
@@ -668,6 +671,10 @@ export function agregaComponenta(idx: IndexCamere, comp: Componenta): Outcome<Ag
   // determinism-ok: inserare in ordinea bucatilor (sortate) si a randurilor (sortate); rezultatul se sorteaza.
   for (const m2 of acc.values()) for (const a of m2.values()) randuri.push({ clasa: a.clasa, fel: a.fel, compozitie: a.compozitie, prima: a.prima, adancime: a.adancime, vecina: a.vecina, fete: a.fete })
   randuri.sort((a, b) => a.clasa - b.clasa || a.fel - b.fel || a.compozitie - b.compozitie || a.prima - b.prima || a.adancime - b.adancime || a.vecina - b.vecina)
+  // Două implementări ale aceleiași mulțimi (`esteCer` în camere.ts, `clasifica` aici): fața DESCHISA e
+  // ventilația (gDeschis, ~34× conductanța unui perete EXT), deci o clasificare greșită mută tăcut temperatura
+  // oricărei componente deschise — oracolul cache == recalcul e autoconsistent pe clasificare (recenzia FETE, L1-1).
+  if (deschise !== comp.deschise) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'fetele DESCHISA nu sunt fetele deschise ale componentei', cache: deschise, index: comp.deschise })
   return accept({ randuri, sine, fete: total })
 }
 

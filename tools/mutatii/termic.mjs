@@ -7,6 +7,10 @@
  * (g-urile din R-urile content-ului, calculate de mana). Pe stampila grafului o prind oracolul (pamant pe
  * acoperis) si contoarele (K05); pe exactitate, nodul sintetic de la jumatate si mina de 192x192x3; pe
  * calibrare, acceptanta pe un an.
+ *
+ * Recenzia t.2a (FETE, GRAF, ECRAN): ventilatia (fetele DESCHISA) o probeaza casa cu golul usii pe hartie si
+ * invariantul fetelor deschise; convergenta, hotelul 10x10x4 (zeci de treceri, la ±3 Q16 de solutia in float);
+ * memoriile (contributia pe bucata, regimul pe (graf, tick)), contoarele lor si oracolul pe o epoca noua.
  */
 
 const T = 'tests/termic.test.ts'
@@ -125,9 +129,59 @@ export const MUTATII = [
   {
     n: 'L2-4: o muchie spre o celula care nu e aer acoperit se ignora tacut (bComp[-1])',
     f: F,
-    a: "      if (j < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'celula de dincolo a unei muchii nu e aer acoperit al unei componente'",
-    b: "      if (j < -1) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'celula de dincolo a unei muchii nu e aer acoperit al unei componente'",
+    a: "      if (vecina < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'celula de dincolo a unei muchii nu e aer acoperit al unei componente'",
+    b: "      if (vecina < -1) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'celula de dincolo a unei muchii nu e aer acoperit al unei componente'",
     t: T, e: 'TERMIC invariantul muchiei',
+  },
+  {
+    n: 'recenzia GRAF L3-4: muchia vazuta dintr-un singur capat nu se numara (cuplare fantoma din capatul MIC)',
+    f: F,
+    a: '  if (verificate !== muchieA.length) return refuse(',
+    b: '  if (false) return refuse(',
+    t: T, e: 'TERMIC muchia vazuta doar din capatul MIC',
+  },
+  {
+    n: 'recenzia FETE L1-1: graful fara invariantul fetelor DESCHISE (ventilatia clasificata EXT trece tacut)',
+    f: F,
+    a: '    if (l.deschise !== comps[i]!.deschise) return refuse(',
+    b: '    if (false) return refuse(',
+    t: T, e: 'TERMIC invariantul fetelor DESCHISE',
+  },
+  {
+    n: 'recenzia GRAF L3-6: nodDupaComp fara fill(-1) (un slot liber primeste temperatura nodului 0)',
+    f: F,
+    a: 'const nodDupaComp = new Int32Array(idx.cUrmator).fill(-1)',
+    b: 'const nodDupaComp = new Int32Array(idx.cUrmator)',
+    t: T, e: 'TERMIC slot liber',
+  },
+  // --- memoria contributiilor pe bucata (recenzia GRAF L3-2)
+  {
+    n: 'recenzia GRAF L3-2: memoria contributiilor dezactivata (fiecare refacere recalculeaza toate bucatile)',
+    f: F,
+    a: '  if (cb === undefined || cb.rr !== rr) {',
+    b: '  if (true) {',
+    t: T, e: 'TERMIC memoria contributiilor: pamant',
+  },
+  {
+    n: 'recenzia GRAF L3-2: memoria contributiilor ignora identitatea randurilor (bucata cu randuri noi pastreaza contributia veche)',
+    f: F,
+    a: '  if (cb === undefined || cb.rr !== rr) {',
+    b: '  if (cb === undefined) {',
+    t: T, e: 'TERMIC memoria contributiilor: pamant',
+  },
+  {
+    n: 'recenzia GRAF L3-2: memoria contributiilor tine peste o epoca noua (vecina renumerotata ramane cea veche)',
+    f: F,
+    a: '  if (e.epocaContributii !== idx.epoca || e.reguliContributii !== rules) {',
+    b: '  if (e.reguliContributii !== rules) {',
+    t: T, e: 'TERMIC memoria contributiilor tine cat epoca',
+  },
+  {
+    n: 'recenzia GRAF L3-2: memoria contributiilor tine peste alte reguli (conductantele vechi raman)',
+    f: F,
+    a: '  if (e.epocaContributii !== idx.epoca || e.reguliContributii !== rules) {',
+    b: '  if (e.epocaContributii !== idx.epoca) {',
+    t: T, e: 'TERMIC K05: graful se reface doar',
   },
   {
     n: 'L1-05: simetria nu se verifica (o muchie cu alte sume in cele doua capete trece)',
@@ -204,9 +258,59 @@ export const MUTATII = [
   {
     n: 'Gauss–Seidel se opreste dupa o trecere (debaraua nu e la punctul fix)',
     f: F,
-    a: '  while (schimbari > 0 && treceri < PLAFON_TRECERI) {',
+    a: '  while (schimbari > 0 && treceri < plafon) {',
     b: '  while (schimbari > 0 && treceri < 1) {',
     t: T, e: 'TERMIC lema: debaraua MUCHIE 24/24',
+  },
+  {
+    n: 'recenzia GRAF L3-3: plafonul Gauss–Seidel la 10 treceri',
+    f: F,
+    a: 'export const PLAFON_TRECERI = 1000',
+    b: 'export const PLAFON_TRECERI = 10',
+    t: T, e: 'TERMIC convergenta: hotelul 10x10x4',
+  },
+  {
+    n: 'recenzia GRAF L3-3: plafonul Gauss–Seidel la 20 de treceri',
+    f: F,
+    a: 'export const PLAFON_TRECERI = 1000',
+    b: 'export const PLAFON_TRECERI = 20',
+    t: T, e: 'TERMIC convergenta: hotelul 10x10x4',
+  },
+  {
+    n: 'recenzia GRAF L3-3: regimul neconvergent iese cu cifre (fara refuz la plafon)',
+    f: F,
+    a: '  if (!s.convergent) o = refuse(',
+    b: '  if (false) o = refuse(',
+    t: T, e: 'TERMIC convergenta: hotelul 10x10x4',
+  },
+  // --- un regim pe (graf, tick) (recenzia GRAF L3-2)
+  {
+    n: 'recenzia GRAF L3-2: regimul nu se memoreaza (inspectorul reface Gauss–Seidel pe toata lumea pentru o camera)',
+    f: F,
+    a: '  if (m !== null && m.graf === g && m.seed === w.seed',
+    b: '  if (false && m !== null && m.graf === g && m.seed === w.seed',
+    t: T, e: 'TERMIC un regim pe (graf, tick)',
+  },
+  {
+    n: 'recenzia GRAF L3-2: memoria regimului fara graful in cheie (dupa o editare, regimul vechi)',
+    f: F,
+    a: 'm !== null && m.graf === g && ',
+    b: 'm !== null && ',
+    t: T, e: 'TERMIC un regim pe (graf, tick)',
+  },
+  {
+    n: 'recenzia GRAF L3-2: memoria regimului fara tick in cheie (alt tick, aceleasi temperaturi)',
+    f: F,
+    a: ' && m.tick === tick && ',
+    b: ' && ',
+    t: T, e: 'TERMIC un regim pe (graf, tick)',
+  },
+  {
+    n: 'recenzia GRAF L3-3: memoria regimului fara plafon in cheie (un refuz la plafon mic ramane si la cel obisnuit)',
+    f: F,
+    a: ' && m.plafon === plafon) {',
+    b: ') {',
+    t: T, e: 'TERMIC convergenta: hotelul 10x10x4',
   },
   {
     n: '2^53: rezolvarea ignora marcajul nodului mare (Σ g·T pe Number, rotunjita in sus)',
@@ -229,20 +333,55 @@ export const MUTATII = [
     b: ' + abs(c.deltaAdancMc)) + GRAD_Q16',
     t: T, e: 'TERMIC 2^53: marginea temperaturilor',
   },
+  {
+    n: 'recenzia GRAF L3-5: marginea temperaturilor uita ΔT_adanc (solul adanc iese din margine)',
+    f: F,
+    a: ' + abs(c.deltaAdancMc)) + GRAD_Q16',
+    b: ') + GRAD_Q16',
+    t: T, e: 'TERMIC 2^53: fiecare termen al marginii',
+  },
+  {
+    n: 'recenzia GRAF L3-5: marginea temperaturilor uita amplitudinea zilei',
+    f: F,
+    a: ' + abs(c.amplitudineZiMc)',
+    b: '',
+    t: T, e: 'TERMIC 2^53: fiecare termen al marginii',
+  },
   // --- canalele (§5, §6)
   {
     n: 'canale: usa nu e in cheia grupului (usa se contopeste cu peretii)',
     f: F,
-    a: '    const k = (x.clasa * 8 + dest) * 2 + (usa ? 1 : 0)',
-    b: '    const k = (x.clasa * 8 + dest) * 2',
+    a: '    const k = ((x.clasa * 8 + dest) * 2 + (usa ? 1 : 0)) * 2 + (deschis ? 1 : 0)',
+    b: '    const k = ((x.clasa * 8 + dest) * 2) * 2 + (deschis ? 1 : 0)',
     t: T, e: 'TERMIC canale pe hartie: casa 5x5x2 cu usa',
   },
   {
     n: 'canale: incaperile vecine NU se contopesc (un rand pe vecina)',
     f: F,
-    a: '    const k = (x.clasa * 8 + dest) * 2 + (usa ? 1 : 0)',
-    b: '    const k = (x.clasa * 8 + dest) * 2 + (usa ? 1 : 0) + (x.vecina + 1) * 64',
+    a: '    const k = ((x.clasa * 8 + dest) * 2 + (usa ? 1 : 0)) * 2 + (deschis ? 1 : 0)',
+    b: '    const k = ((x.clasa * 8 + dest) * 2 + (usa ? 1 : 0)) * 2 + (deschis ? 1 : 0) + (x.vecina + 1) * 128',
     t: T, e: 'TERMIC canale: o galerie intre alte doua',
+  },
+  {
+    n: 'recenzia ECRAN L4-1: golul (DESCHISA) nu e in cheia grupului (se contopeste cu peretii si se numeste „pereți")',
+    f: F,
+    a: '    const k = ((x.clasa * 8 + dest) * 2 + (usa ? 1 : 0)) * 2 + (deschis ? 1 : 0)',
+    b: '    const k = ((x.clasa * 8 + dest) * 2 + (usa ? 1 : 0)) * 2',
+    t: 'tests/viewer-termic.test.ts', e: 'TERMIC ECRAN inspectorul pe hartie: casa 5x5x2 cu golul usii',
+  },
+  {
+    n: 'recenzia FETE L1-1: canalele duc fata DESCHISA pe ramura SOL (golul usii apare „sol" in inspector)',
+    f: F,
+    a: '    } else if (x.fel === FelFata.DESCHISA || x.fel === FelFata.EXT) {',
+    b: '    } else if (x.fel === FelFata.EXT) {',
+    t: T, e: 'TERMIC pe hartie: casa 5x5x2 cu golul usii NEINCHIS',
+  },
+  {
+    n: 'recenzia GRAF L3-1: o fata cu g 0 intra intr-un grup (gDeschis 0: temperatura destinatiei imparte la 0n)',
+    f: F,
+    a: '    if (G === 0) continue\n',
+    b: '',
+    t: T, e: 'TERMIC canale: un sopron',
   },
   {
     n: 'canale: ordinea dupa cheia grupului, nu dupa pondere',

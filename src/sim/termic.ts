@@ -36,11 +36,25 @@
  * (panoul, L1-05). Celula de dincolo a unei muchii e aer acoperit al unei componente vii; altfel refuz
  * `INVARIANT_INCALCAT` cu cauza, nu o muchie spre `bComp[−1]`.
  *
+ * Invariantul fețelor DESCHISE (recenzia FETE, L1-1): pe fiecare nod, Σ fețelor DESCHISA din rânduri ==
+ * `deschise` al componentei (camere.ts, din `esteCer`) — două implementări ale aceleiași convenții. Ventilația
+ * (gDeschis, 200 W/K pe față) clasificată drept EXT (~5,9 W/K) ar muta tăcut temperatura oricărei componente
+ * deschise (o galerie cu gură: vara 10,1 → 2,6 °C), iar oracolul grafului e autoconsistent pe clasificare. Refuz
+ * `INVARIANT_INCALCAT`.
+ *
  * Graful e TRANSIENT, legat de OBIECTUL indexului (WeakMap), nu de o variabilă de modul cheiată pe epocă:
  * `epoca` e 1 în orice lume nouă (panoul, L4-1). Se reface când (`epoca`, `epocaFete`, regulile) diferă de
  * ștampila lui — `epocaFete` fiindcă fețele se schimbă fără `epoca` nouă (pământ pe acoperiș: 169 din 169
  * de loturi de suprafață care schimbă fețe ies din sincronizare fără `epoca++`; panoul, L2-1/L1-02/L4-1).
  * Altfel se refolosește. Graful incremental cu noduri stabile e pentru t.2b.
+ *
+ * **Contribuția fiecărei bucăți** (Σg pe bin, Σg spre fiecare componentă de dincolo, fețele ei DESCHISE) se
+ * memorează pe identitatea TABLOULUI ei de rânduri: fete.ts nu modifică un tablou de rânduri, îl înlocuiește,
+ * deci un tablou neschimbat dă aceeași contribuție. Memoria e valabilă pe (`epoca`, regulile): componenta de
+ * dincolo a unei muchii (`bComp`) și sloturile bucăților se schimbă doar cu o epocă nouă (o felie refăcută),
+ * conductanțele doar cu alte reguli. O editare care schimbă DOAR fețele (`epocaFete`) recalculează deci numai
+ * bucățile cu rânduri noi (recenzia GRAF, L3-2: pe M10, 7,4 → 1,65 ms); la o epocă nouă memoria se golește.
+ * SINE se hotărăște la asamblare, pe nodul componentei.
  *
  * ## Regimul permanent (§5)
  *
@@ -50,7 +64,21 @@
  *   T_i ← rot((Σ_r g_r·T_r + Σ_j g_ij·T_j) / (Σ_r g_r + Σ_j g_ij))
  *
  * cu rotunjirea la cel mai apropiat întreg, jumătatea DEPARTE de zero (simetrică: rot(−x) = −rot(x)), până la
- * o trecere fără nicio schimbare (plafon: 1.000 de treceri, determinist). Numitorul e > 0 pentru orice nod
+ * o trecere fără nicio schimbare. **Plafonul** (1.000 de treceri, determinist; 783 la 30.000 de camere, măsurat):
+ * dacă punctul fix nu e atins în el, regimul se REFUZĂ (`CAPACITATE_DEPASITA`), nu se întoarce cu cifre
+ * neconvergente — la plafonul 20, un hotel 30×30×10 ar fi afișat 3,9 °C eroare (recenzia GRAF, L3-3).
+ *
+ * **Un regim pe (graf, tick).** Rezolvarea se memorează pe index, cheiată pe OBIECTUL grafului (refolosit doar
+ * sub ștampila lui), seed, tick și plafon: overlay-ul și inspectorul (`canaleTermice`) împart aceeași rezolvare
+ * (recenzia GRAF, L3-2). Regimul și agregarea pe componentă se citesc sub ACEEAȘI ștampilă: `canaleTermice` cere
+ * regimul indexului de acum, nu primește unul din afară — un regim de acum o secundă lângă agregarea de acum a dat
+ * 25 de refuzuri și 6 citiri ale altei încăperi din 80 (verificatorul L4-2).
+ *
+ * **Pornirea e mereu `T_afara(tick)`, nu soluția precedentă.** Pornirea caldă ar tăia trecerile de 4–6 ori pe
+ * complexele de încăperi interioare (82 → 28, 783 → 131; recenzia GRAF, L3-2), dar punctul fix pe întregi NU e
+ * unic (pe un hotel, pornind din 0 față de T_afara: 1–5 Q16 diferență), deci regimul ar depinde de istoria
+ * cererilor, nu doar de starea lumii. `regimPermanent` rămâne o funcție a (stării, tick-ului): t.2b îl
+ * migrează în stare. Numitorul e > 0 pentru orice nod
  * (lema: fața de sus a celei mai înalte celule nu e SINE, iar orice g e ≥ 1 în domeniul din content) —
  * altfel refuz la construire. Câtul Σ g_r·T_r / Σ g_r fără muchii NU se folosește nicăieri (0/0 pe debaraua
  * din mijlocul unei case cu trei niveluri; panoul, L1-03).
@@ -67,9 +95,13 @@
  * ## Canalele (§5, §6)
  *
  * `canaleTermice`: pe ce „stă" temperatura unei încăperi — DATE, nu text, ca t.3 să le pună în parametrii
- * unui Outcome. Grupuri fixe (clasa de direcție, destinația, ușa), ordonate după ponderea în ΣG (geometrică,
- * stabilă între tickuri fără editări; ordinea după flux s-ar schimba de 1–6 ori pe zi — panoul, L5-1),
- * încăperile vecine CONTOPITE într-un rând pe direcție, cel mult 3 rânduri + „rest".
+ * unui Outcome. Grupuri fixe (clasa de direcție, destinația, ușa, golul), ordonate după ponderea în ΣG
+ * (geometrică, stabilă între tickuri fără editări; ordinea după flux s-ar schimba de 1–6 ori pe zi — panoul,
+ * L5-1), încăperile vecine CONTOPITE într-un rând pe direcție, cel mult 3 rânduri + „rest". Fețele DESCHISE
+ * (golul ușii) sunt grupul lor, nu se contopesc cu zidurile spre aerul de afară: DESCHISA și EXT au aceeași
+ * destinație, iar pe o casă cu golul ușii neînchis golul e 87% din ΣG, citit „pereți 93%" (recenzia ECRAN,
+ * L4-1). O față cu g = 0 (gDeschis 0 e content valid) nu poartă nimic și nu intră în niciun grup — un grup numai
+ * din ele ar fi împărțit la 0 (recenzia GRAF, L3-1).
  */
 
 import type { ReguliTermic, Rules } from './content.ts'
@@ -81,7 +113,7 @@ import { GRAD_Q16, mcLaQ16, tAfara, tSol } from './clima.ts'
 import type { World } from './state.ts'
 import { eSolNatural, Material, MATERIAL_MAX } from './terrain/chunk.ts'
 import { WORLD_CELLS } from './terrain/terrain.ts'
-import type { Outcome } from './result.ts'
+import type { Outcome, Refusal } from './result.ts'
 import { accept, Reason, refuse } from './result.ts'
 
 // ---------------------------------------------------------------------------------------------
@@ -203,13 +235,70 @@ export interface StatGraf {
   refolosiri: number
 }
 
+/** Contoarele memoriilor grafului (antetul): contribuțiile bucăților și regimul pe (graf, tick). */
+export interface StatMemorieTermica {
+  /** Bucăți a căror contribuție s-a calculat la o refacere (nu s-a luat din memorie). */
+  bucatiCalculate: number
+  /** Rezolvări Gauss–Seidel ale regimului permanent. */
+  regimuriRezolvate: number
+  /** Cereri ale regimului servite din memorie (același graf, seed, tick, plafon). */
+  regimuriRefolosite: number
+}
+
+/**
+ * Contribuția unei bucăți la nodul ei (antetul), calculată o dată pe tabloul ei de rânduri: perechi plate
+ * (bin, Σg) și (componenta de dincolo, Σg), în ordinea primei apariții, plus fețele DESCHISE. E chiar ramura
+ * „ok" a calculului ei (`ok: true` lângă `Refusal`): un `accept` în jurul ei ar fi fost încă un obiect pe bucată, la
+ * fiecare refacere completă.
+ */
+interface ContributieBucata {
+  readonly ok: true
+  /** Tabloul din care s-a calculat: identitatea lui e validarea. */
+  readonly rr: readonly RandFete[]
+  readonly binuri: readonly number[]
+  readonly vecine: readonly number[]
+  readonly deschise: number
+}
+
+/** Ultimul regim cerut pe un index (antetul, „un regim pe (graf, tick)"). */
+interface MemorieRegim {
+  readonly graf: GrafTermic
+  readonly seed: number
+  readonly tick: number
+  readonly plafon: number
+  readonly o: Outcome<RegimPermanent>
+}
+
 interface IntrareGraf {
   graf: GrafTermic | null
   readonly stat: StatGraf
+  /** Contribuția fiecărei bucăți, pe slot; valabilă pe (`epocaContributii`, `reguliContributii`). */
+  contributii: (ContributieBucata | undefined)[]
+  epocaContributii: number
+  reguliContributii: Rules | null
+  regim: MemorieRegim | null
+  readonly statMemorie: StatMemorieTermica
 }
 
 /** Graful fiecărui index, legat de OBIECTUL indexului — un index aruncat își ia graful cu el. */
 const GRAFURI = new WeakMap<IndexCamere, IntrareGraf>()
+
+function intrarea(idx: IndexCamere): IntrareGraf {
+  let e = GRAFURI.get(idx)
+  if (e === undefined) {
+    e = {
+      graf: null,
+      stat: { refaceri: 0, refolosiri: 0 },
+      contributii: [],
+      epocaContributii: -1,
+      reguliContributii: null,
+      regim: null,
+      statMemorie: { bucatiCalculate: 0, regimuriRezolvate: 0, regimuriRefolosite: 0 },
+    }
+    GRAFURI.set(idx, e)
+  }
+  return e
+}
 
 /** Contoarele grafului unui index (o copie). Un index pe care nu l-a cerut nimeni are 0 / 0. */
 export function statGraf(idx: IndexCamere): StatGraf {
@@ -217,24 +306,35 @@ export function statGraf(idx: IndexCamere): StatGraf {
   return e === undefined ? { refaceri: 0, refolosiri: 0 } : { ...e.stat }
 }
 
+/** Contoarele memoriilor grafului unui index (o copie). */
+export function statMemorieTermica(idx: IndexCamere): StatMemorieTermica {
+  const e = GRAFURI.get(idx)
+  return e === undefined ? { bucatiCalculate: 0, regimuriRezolvate: 0, regimuriRefolosite: 0 } : { ...e.statMemorie }
+}
+
 /**
  * Graful termic al indexului: refolosit dacă ștampila lui (`epoca`, `epocaFete`, regulile) e cea de acum,
  * altfel reconstruit din cache-ul de fețe. Refuz `INVARIANT_INCALCAT` (cu cauza) dacă fețele nu se potrivesc
- * cu indexul — o muchie spre o celulă care nu e aer acoperit, o muchie asimetrică, un numitor 0.
+ * cu indexul — o muchie spre o celulă care nu e aer acoperit, o muchie asimetrică, un numitor 0, alte fețe
+ * DESCHISE decât ale componentei.
  */
 export function grafTermic(idx: IndexCamere, rules: Rules): Outcome<GrafTermic> {
-  let e = GRAFURI.get(idx)
-  if (e === undefined) {
-    e = { graf: null, stat: { refaceri: 0, refolosiri: 0 } }
-    GRAFURI.set(idx, e)
-  }
+  const e = intrarea(idx)
   const g = e.graf
   if (g !== null && g.epoca === idx.epoca && g.epocaFete === idx.epocaFete && g.reguli === rules) {
     e.stat.refolosiri++
     return accept(g)
   }
   e.stat.refaceri++
-  const nou = construiesteGraf(idx, rules)
+  // Contribuțiile bucăților țin cât (epoca, regulile): componenta de dincolo și sloturile se schimbă doar cu o
+  // epocă nouă, conductanțele doar cu alte reguli (antetul).
+  if (e.epocaContributii !== idx.epoca || e.reguliContributii !== rules) {
+    // Un tablou nou, cât sloturile: scris pe sloturi împrăștiate, unul gol ar trece pe elemente-dicționar.
+    e.contributii = new Array<ContributieBucata | undefined>(idx.bUrmator)
+    e.epocaContributii = idx.epoca
+    e.reguliContributii = rules
+  }
+  const nou = construiesteGraf(idx, rules, e.contributii, e.statMemorie)
   e.graf = nou.ok ? nou.value : null
   return nou
 }
@@ -266,10 +366,29 @@ interface Lucru {
   ultimaFelie: Felie | undefined
   /** −Z_DEPL: cheia celulei e ((z − Z0) · L + y) · L + x. */
   readonly z0: number
+  /** Contribuțiile bucăților (memoria intrării grafului), pe slot. */
+  readonly contributii: (ContributieBucata | undefined)[]
+  readonly statMemorie: StatMemorieTermica
+  /** Fețele DESCHISE ale nodului curent: invariantul (antetul) le compară cu `deschise` al componentei. */
+  deschise: number
+  /**
+   * Σg pe bin și spre fiecare componentă, al bucății care se calculează (golite după ea); listele = cheile atinse,
+   * marcate. Nu o căutare în perechi: pe bucățile unui hub, cu zeci de vecine, ar fi O(rânduri × vecine).
+   */
+  readonly pBin: Float64Array
+  readonly pBinAtins: Uint8Array
+  readonly pBinLista: number[]
+  readonly pComp: Float64Array
+  readonly pCompAtins: Uint8Array
+  readonly pCompLista: number[]
 }
 
-/** Rândurile bucății `rr` ale nodului `i`, adunate în `l`. Întoarce refuzul, sau null. */
-function acumuleazaBucata(l: Lucru, i: number, rr: readonly RandFete[]): Outcome<GrafTermic> | null {
+/**
+ * Contribuția bucății cu rândurile `rr` (antetul). Refuz dacă un rând n-are conductanță sau dacă celula de
+ * dincolo a unei muchii nu e aer acoperit al unei componente.
+ */
+function contributiaBucatii(l: Lucru, rr: readonly RandFete[]): ContributieBucata | Refusal {
+  let deschise = 0
   for (const x of rr) {
     const km = (x.compozitie * 8 + x.fel) * 4 + x.clasa
     let g1 = l.memo[km] ?? -1
@@ -280,9 +399,9 @@ function acumuleazaBucata(l: Lucru, i: number, rr: readonly RandFete[]): Outcome
     if (g1 < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'fata fara conductanta (compozitie SOL fara exact o celula de sol)', compozitie: x.compozitie, fel: x.fel })
     const G = x.fete * g1
     if (x.fel === FelFata.MUCHIE) {
-      // Celula de dincolo → bucată → componentă → nod (§5), ca `bucataLa`, cu felia memorată. Cheia trece de
-      // 2^31: o singură împărțire pe double (exactă), restul pe întregi mici — `decodeazaCelula` face două `%`
-      // pe double, jumătate din costul refacerii pe M10.
+      // Celula de dincolo → bucată → componentă (§5), ca `bucataLa`, cu felia memorată. Cheia trece de 2^31: o
+      // singură împărțire pe double (exactă), restul pe întregi mici — `decodeazaCelula` face două `%` pe double,
+      // jumătate din costul refacerii pe M10. Nodul (și SINE) se hotărăsc la asamblare.
       const q = Math.floor(x.dincolo / WORLD_CELLS)
       const px = x.dincolo - q * WORLD_CELLS
       const py = q % WORLD_CELLS
@@ -295,30 +414,82 @@ function acumuleazaBucata(l: Lucru, i: number, rr: readonly RandFete[]): Outcome
         l.ultimaFelie = l.idx.felii.get(kf)
       }
       const bd = l.ultimaFelie === undefined ? -1 : l.ultimaFelie.cel[(py - by * FELIE) * FELIE + (px - bx * FELIE)]!
-      const j = bd < 0 ? -1 : l.nodDupaComp[l.idx.bComp[bd]!] ?? -1
-      if (j < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'celula de dincolo a unei muchii nu e aer acoperit al unei componente', x: px, y: py, z: pz })
-      if (j === i) continue // SINE
-      if (l.vecinAtins[j] === 0) {
-        l.vecinAtins[j] = 1
-        l.vecine.push(j)
+      const vecina = bd < 0 ? -1 : l.idx.bComp[bd]!
+      if (vecina < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'celula de dincolo a unei muchii nu e aer acoperit al unei componente', x: px, y: py, z: pz })
+      if (l.pCompAtins[vecina] === 0) {
+        l.pCompAtins[vecina] = 1
+        l.pCompLista.push(vecina)
       }
-      l.spre[j] += G
+      l.pComp[vecina] += G
       continue
     }
+    if (x.fel === FelFata.DESCHISA) deschise += x.fete
     let k: number
     if (x.fel === FelFata.DESCHISA || x.fel === FelFata.EXT) k = BIN_AFARA
     else if (x.fel === FelFata.APA) k = BIN_APA + x.adancime
     else k = BIN_SOL + x.adancime // SOL, ADANC
+    if (l.pBinAtins[k] === 0) {
+      l.pBinAtins[k] = 1
+      l.pBinLista.push(k)
+    }
+    l.pBin[k] += G
+  }
+  // Perechile plate (cheie, Σg), în ordinea primei apariții; zgârietura se golește pentru bucata următoare.
+  const binuri: number[] = []
+  for (const k of l.pBinLista) {
+    binuri.push(k, l.pBin[k]!)
+    l.pBin[k] = 0
+    l.pBinAtins[k] = 0
+  }
+  l.pBinLista.length = 0
+  const vecine: number[] = []
+  for (const c of l.pCompLista) {
+    vecine.push(c, l.pComp[c]!)
+    l.pComp[c] = 0
+    l.pCompAtins[c] = 0
+  }
+  l.pCompLista.length = 0
+  return { ok: true, rr, binuri, vecine, deschise }
+}
+
+/**
+ * Contribuția bucății `b` a nodului `i` — din memorie dacă tabloul ei de rânduri e același, altfel calculată
+ * acum —, adunată în `l`. Întoarce refuzul, sau null.
+ */
+function acumuleazaBucata(l: Lucru, i: number, b: number, rr: readonly RandFete[]): Refusal | null {
+  let cb = l.contributii[b]
+  if (cb === undefined || cb.rr !== rr) {
+    const o = contributiaBucatii(l, rr)
+    if (!o.ok) return o
+    cb = o
+    l.contributii[b] = cb
+    l.statMemorie.bucatiCalculate++
+  }
+  l.deschise += cb.deschise
+  const bins = cb.binuri
+  for (let p = 0; p < bins.length; p += 2) {
+    const k = bins[p]!
     if (l.binAtins[k] === 0) {
       l.binAtins[k] = 1
       l.atinse.push(k)
     }
-    l.bin[k] += G
+    l.bin[k] += bins[p + 1]!
+  }
+  const vec = cb.vecine
+  for (let p = 0; p < vec.length; p += 2) {
+    const j = l.nodDupaComp[vec[p]!] ?? -1
+    if (j < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'vecina unei muchii nu e un nod al grafului', vecina: vec[p]! })
+    if (j === i) continue // SINE
+    if (l.vecinAtins[j] === 0) {
+      l.vecinAtins[j] = 1
+      l.vecine.push(j)
+    }
+    l.spre[j] += vec[p + 1]!
   }
   return null
 }
 
-function construiesteGraf(idx: IndexCamere, rules: Rules): Outcome<GrafTermic> {
+function construiesteGraf(idx: IndexCamere, rules: Rules, contributii: (ContributieBucata | undefined)[], statMemorie: StatMemorieTermica): Outcome<GrafTermic> {
   const comps = listaComponente(idx)
   const n = comps.length
   const comp = new Int32Array(n)
@@ -348,6 +519,15 @@ function construiesteGraf(idx: IndexCamere, rules: Rules): Outcome<GrafTermic> {
     ultimaCheie: -1,
     ultimaFelie: undefined,
     z0: decodeazaCelula(0).z,
+    contributii,
+    statMemorie,
+    deschise: 0,
+    pBin: new Float64Array(NR_BINURI),
+    pBinAtins: new Uint8Array(NR_BINURI),
+    pBinLista: [],
+    pComp: new Float64Array(idx.cUrmator),
+    pCompAtins: new Uint8Array(idx.cUrmator),
+    pCompLista: [],
   }
   const rezStart = new Int32Array(n + 1)
   const rezBin: number[] = []
@@ -366,9 +546,12 @@ function construiesteGraf(idx: IndexCamere, rules: Rules): Outcome<GrafTermic> {
     for (const b of comps[i]!.bucati) {
       const rr = idx.fete.randuri[b]
       if (rr === undefined) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'bucata fara randuri de fete', bucata: b })
-      const r = acumuleazaBucata(l, i, rr)
+      const r = acumuleazaBucata(l, i, b, rr)
       if (r !== null) return r
     }
+    // Invariantul fețelor DESCHISE (antetul): cache-ul de fețe și indexul, două implementări ale convenției.
+    if (l.deschise !== comps[i]!.deschise) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'fetele DESCHISA nu sunt fetele deschise ale componentei', ancora: comps[i]!.ancora, cache: l.deschise, index: comps[i]!.deschise })
+    l.deschise = 0
     l.atinse.sort((a, b) => a - b)
     let s = 0
     for (const k of l.atinse) {
@@ -528,9 +711,10 @@ export interface SolutieRegim {
 
 /**
  * Gauss–Seidel pe întregi pe un graf, cu rezervoarele date (`tRez`, pe bin) și pornind din `tStart` pe toate
- * nodurile. `totulPeBigInt` rezolvă și nodurile mici pe BigInt (referința testelor; rezultatul e același).
+ * nodurile, cel mult `plafon` treceri. `totulPeBigInt` rezolvă și nodurile mici pe BigInt (referința testelor;
+ * rezultatul e același).
  */
-export function rezolvaRegim(g: GrafTermic, tRez: ArrayLike<number>, tStart: number, totulPeBigInt = false): SolutieRegim {
+export function rezolvaRegim(g: GrafTermic, tRez: ArrayLike<number>, tStart: number, totulPeBigInt = false, plafon = PLAFON_TRECERI): SolutieRegim {
   const n = g.n
   const big = new Uint8Array(n)
   const numRez = new Float64Array(n)
@@ -557,7 +741,7 @@ export function rezolvaRegim(g: GrafTermic, tRez: ArrayLike<number>, tStart: num
   const T = new Int32Array(n).fill(tStart)
   let treceri = 0
   let schimbari = 1
-  while (schimbari > 0 && treceri < PLAFON_TRECERI) {
+  while (schimbari > 0 && treceri < plafon) {
     schimbari = 0
     treceri++
     for (let i = 0; i < n; i++) {
@@ -580,6 +764,10 @@ export function rezolvaRegim(g: GrafTermic, tRez: ArrayLike<number>, tStart: num
   return { t: T, treceri, convergent: schimbari === 0 }
 }
 
+/**
+ * Regimul permanent la un tick. ÎMPĂRȚIT între cererile cu același (graf, seed, tick, plafon) — antetul —, deci
+ * `t` și `tRez` se citesc, nu se scriu.
+ */
 export interface RegimPermanent extends SolutieRegim {
   readonly graf: GrafTermic
   readonly tick: number
@@ -590,14 +778,29 @@ export interface RegimPermanent extends SolutieRegim {
 
 /**
  * Regimul permanent al încăperilor lumii la `tick` (§5): unde AR ajunge temperatura fiecărei componente cu
- * rezervoarele de acum. Fără inerție și fără oameni (t.2b). Refuz doar dacă graful refuză (fețe nepotrivite).
+ * rezervoarele de acum. Fără inerție și fără oameni (t.2b). Pornit MEREU din `T_afara(tick)` (antetul): o
+ * funcție a stării, nu a istoriei cererilor. Memorat pe (graf, seed, tick, plafon): overlay-ul și inspectorul
+ * împart rezolvarea. Refuz dacă graful refuză (fețe nepotrivite) și `CAPACITATE_DEPASITA` dacă Gauss–Seidel nu
+ * ajunge la punctul fix în `plafon` treceri — cifre neconvergente nu ies de aici.
  */
-export function regimPermanent(w: World, rules: Rules, tick: number): Outcome<RegimPermanent> {
+export function regimPermanent(w: World, rules: Rules, tick: number, plafon = PLAFON_TRECERI): Outcome<RegimPermanent> {
   const go = grafTermic(w.camere, rules)
   if (!go.ok) return go
+  const g = go.value
+  const e = intrarea(w.camere)
+  const m = e.regim
+  if (m !== null && m.graf === g && m.seed === w.seed && m.tick === tick && m.plafon === plafon) {
+    e.statMemorie.regimuriRefolosite++
+    return m.o
+  }
+  e.statMemorie.regimuriRezolvate++
   const tRez = temperaturiRezervoare(w.seed, tick, rules)
-  const s = rezolvaRegim(go.value, tRez, tRez[BIN_AFARA]!)
-  return accept({ ...s, graf: go.value, tick, tAfaraQ16: tRez[BIN_AFARA]!, tRez })
+  const s = rezolvaRegim(g, tRez, tRez[BIN_AFARA]!, false, plafon)
+  let o: Outcome<RegimPermanent>
+  if (!s.convergent) o = refuse(Reason.CAPACITATE_DEPASITA, { motiv: 'regimul permanent nu converge in plafonul de treceri', treceri: s.treceri, noduri: g.n })
+  else o = accept({ ...s, graf: g, tick, tAfaraQ16: tRez[BIN_AFARA]!, tRez })
+  e.regim = { graf: g, seed: w.seed, tick, plafon, o }
+  return o
 }
 
 /** T de echilibru (Q16) al componentei cu id-ul (slotul) dat, sau null dacă nu e un nod al grafului. */
@@ -627,6 +830,11 @@ export interface CanalTermic {
   readonly destinatie: DestinatieId
   /** Drumul trece printr-o ușă (compoziția are USA). */
   readonly usa: boolean
+  /**
+   * Fețe DESCHISE (golul, ventilația), nu zid: DESCHISA și EXT au aceeași destinație, deci fără cheia asta golul
+   * se contopea cu pereții și se numea „pereți" (antetul).
+   */
+  readonly deschis: boolean
   /** Ponderea în ΣG, Q16 (65536 = 100%). Ponderile rândurilor + restul = 65536 exact. */
   readonly pondereQ16: number
   /** Σ g al grupului, Q16 W/K. */
@@ -649,7 +857,7 @@ export interface CanaleTermice {
   readonly tAfaraQ16: number
   /** ΣG al componentei, Q16 W/K (= numitorul regimului). */
   readonly sumaG: number
-  /** Cel mult 3, după pondere (descrescător), apoi după (clasă, destinație, ușă). */
+  /** Cel mult 3, după pondere (descrescător), apoi după (clasă, destinație, ușă, gol). */
   readonly randuri: readonly CanalTermic[]
   /** Ce n-a încăput în cele 3 rânduri. */
   readonly rest: { readonly pondereQ16: number; readonly grupuri: number }
@@ -662,6 +870,7 @@ interface Grup {
   clasa: ClasaDirId
   destinatie: DestinatieId
   usa: boolean
+  deschis: boolean
   g: number
   gt: bigint
   fete: number
@@ -688,6 +897,9 @@ export function canaleTermice(w: World, rules: Rules, compId: number, tick: numb
     const g1 = conductantaFetei(t, x.clasa, x.fel, cmp)
     if (g1 < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'fata fara conductanta', compozitie: x.compozitie, fel: x.fel })
     const G = x.fete * g1
+    // O față fără conductanță (gDeschis 0 e content valid) nu poartă nimic din ΣG; un grup numai din ele ar
+    // împărți la 0 la temperatura destinației (antetul).
+    if (G === 0) continue
     let dest: DestinatieId
     let tD: number
     if (x.fel === FelFata.MUCHIE) {
@@ -706,10 +918,12 @@ export function canaleTermice(w: World, rules: Rules, compId: number, tick: numb
       tD = r.tRez[BIN_SOL + x.adancime]!
     }
     const usa = (cmp[Material.USA] ?? 0) > 0
-    const k = (x.clasa * 8 + dest) * 2 + (usa ? 1 : 0)
+    const deschis = x.fel === FelFata.DESCHISA
+    // Cheile de dinainte de `deschis`, dublate: departajările dintre grupurile vechi rămân în aceeași ordine.
+    const k = ((x.clasa * 8 + dest) * 2 + (usa ? 1 : 0)) * 2 + (deschis ? 1 : 0)
     let gr = grupuri.get(k)
     if (gr === undefined) {
-      gr = { clasa: x.clasa, destinatie: dest, usa, g: 0, gt: 0n, fete: 0, peCompozitie: new Map() }
+      gr = { clasa: x.clasa, destinatie: dest, usa, deschis, g: 0, gt: 0n, fete: 0, peCompozitie: new Map() }
       grupuri.set(k, gr)
     }
     gr.g += G
@@ -755,6 +969,7 @@ export function canaleTermice(w: World, rules: Rules, compId: number, tick: numb
       clasa: gr.clasa,
       destinatie: gr.destinatie,
       usa: gr.usa,
+      deschis: gr.deschis,
       pondereQ16: acum - prec,
       gQ16: gr.g,
       tDestQ16: rotunjitBig(gr.gt, BigInt(gr.g)),

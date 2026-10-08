@@ -313,6 +313,11 @@ test('FETE pe hartie: un stalp de 1x1 in mijlocul unei pivnite — cele 8 fete l
   assert.equal(a.sine, 8)
   assert.equal(a.fete, 24 + 24 + 4 * 5 * 2 + 8, 'pe hartie: tavan si podea 24+24, pereti 40, stalpul 8')
   assert.ok(a.randuri.every((q) => q.fel !== FelFata.MUCHIE && q.fel !== FelFata.SINE), 'nicio muchie: pivnita e singura')
+  // Și citirea directă (`feteleCelulei`) rezolvă SINE: fața +x a celulei de la vest de stâlp trece prin el și se
+  // întoarce în pivniță (recenzia FETE, L1-2: rezolvarea SINE de acolo nu era probată).
+  const f = feteleCelulei(w.camere, cititorCamere(t), wx + 2, wy + 3, g - 3).find((q) => q.directie === 0)
+  assert.ok(f, 'fata +x spre stalp')
+  assert.equal(NUME_FEL[f!.fel], 'SINE')
   egalCuRecalculul(w, 'stalpul')
 })
 
@@ -333,6 +338,97 @@ test('FETE pe hartie: d_ef — un perete natural subtire spre un sant deschis pa
     assert.equal(f!.adancime, asteptat, `l ${l}: d_ef`)
     egalCuRecalculul(w, `sant la ${l}`)
   }
+})
+
+test('FETE pe hartie: casa cu golul usii neinchis — cele 2 fete ale golului spre aerul de afara sunt DESCHISA (ventilatia), nu EXT, cate fete deschise are si indexul', () => {
+  // Recenzia FETE, L1-1: niciun test pe hârtie nu conținea o față DESCHISA, iar oracolul (cache == recalcul) e
+  // autoconsistent pe clasificare — DESCHISĂ→EXT trecea toată suita. Golul (2, 0) e acoperit de acoperiș, deci e
+  // aerul casei; vecinul lui spre sud e aer sub cer.
+  const { w, wx, wy, g } = sitPlat(12345, 8)
+  const t = w.terrain
+  for (let z = g + 1; z <= g + 2; z++) for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) {
+    if (dx !== 0 && dx !== 4 && dy !== 0 && dy !== 4) continue
+    if (dx === 2 && dy === 0) continue
+    assert.ok(fill(t, wx + dx, wy + dy, z, P).ok)
+  }
+  for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) assert.ok(fill(t, wx + dx, wy + dy, g + 3, P).ok)
+  sincronizeazaCamere(w.camere, t)
+  const { text, c } = randuri(w, wx + 2, wy + 2, g + 1)
+  assert.equal(c.deschise, 2, 'fixtura: golul de 1x2')
+  assert.ok(text.includes('LAT DESCHISA [] p0 x2'), text.join(' | '))
+  egalCuRecalculul(w, 'golul usii')
+})
+
+test('FETE pe hartie: pivnita sub iaz cu 1 m de PAMANT deasupra — drumul se inchide in apa DUPA sol: SUS SOL cu d-ul primei celule de sol (1), nu 0', () => {
+  // Recenzia FETE, L1-2 (a): d-ul unei fețe SOL al cărei drum se închide în apă nu era fixat de nimic. Iazul de la
+  // seed 4242 (−40), pivnița la −42..−43: deasupra ei −41 e PĂMÂNT (d 1), apoi apa.
+  const w = createWorld(4242)
+  const t = w.terrain
+  const x = 244 * 32 + 8, y = 244 * 32 + 8
+  for (let j = 0; j < 3; j++) for (let i = 0; i < 3; i++) {
+    const m = materialAt(t, x + i, y + j, -40)
+    assert.ok(m.ok && m.value === Material.APA, 'fixtura: apa la −40')
+    for (const z of [-42, -43]) assert.ok(dig(t, x + i, y + j, z).ok)
+  }
+  sincronizeazaCamere(w.camere, t)
+  const { text } = randuri(w, x + 1, y + 1, -42)
+  assert.ok(text.includes('SUS SOL [2x1] p2 d1 x9'), text.join(' | '))
+  egalCuRecalculul(w, 'pivnita sub iaz, sub pamant')
+})
+
+test('FETE pe hartie: acoperisul pe ULTIMUL nivel al ferestrei — peste fereastra e aer, deci fetele SUS sunt EXT [6x1], nu SOL prin stanca', () => {
+  // Recenzia FETE, L1-2 (b): convenția camerelor „peste fereastră e aer" nu era fixată (un turn de ~40 m). Un
+  // acoperiș 3×3 pe bazaVoxeli + 63 (ultimul nivel în care se poate zidi), pe un singur chunk; aerul de sub el e
+  // acoperit, cu fețele laterale spre cer.
+  const { w, wx, wy, g } = sitPlat(12345, 12)
+  const t = w.terrain
+  const x0 = wx + 2, y0 = wy + 2
+  const baza = bazaVoxeli(t, x0, y0)
+  for (let i = 0; i < 3; i++) assert.equal(bazaVoxeli(t, x0 + i, y0 + i), baza, 'fixtura: un singur chunk')
+  for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) assert.ok(fill(t, x0 + dx, y0 + dy, baza + 63, P).ok)
+  const peste = fill(t, x0, y0, baza + 64, P)
+  assert.ok(!peste.ok && peste.reason === Reason.IN_AFARA_LUMII, 'fixtura: baza + 63 e ultimul nivel al ferestrei')
+  sincronizeazaCamere(w.camere, t)
+  const { text, c } = randuri(w, x0 + 1, y0 + 1, baza + 62)
+  assert.equal(c.volum, 9 * (baza + 62 - g), 'fixtura: tot aerul de sub acoperis, pana la sol')
+  assert.ok(text.includes('SUS EXT [6x1] p6 x9'), text.join(' | '))
+  egalCuRecalculul(w, 'acoperisul de pe ultimul nivel')
+})
+
+test('FETE pe hartie: o pivnita sapata la marginea lumii (x = 0) — fata −x da in stanca de dincolo de margine, adanca: SOL [1x1] pe ROCA la d 64', () => {
+  // Recenzia FETE, L1-2 (c): convenția „în afara lumii stânca e adâncă (d 64)" nu era fixată. Seed 12345, la
+  // marginea de vest: x 0..2, y 323..325, la −22..−21 (solul ~−18).
+  const w = createWorld(12345)
+  const t = w.terrain
+  for (let x = 0; x <= 2; x++) for (let y = 323; y <= 325; y++) {
+    const gg = groundLevelM(t, x, y)
+    assert.ok(gg.ok && gg.value >= -18, 'fixtura: uscat deasupra pivnitei')
+    for (const z of [-22, -21]) assert.ok(dig(t, x, y, z).ok)
+  }
+  sincronizeazaCamere(w.camere, t)
+  const { text } = randuri(w, 1, 324, -21)
+  // Cele 3 × 2 celule de pe x = 0: prima celulă de dincolo (x = −1) e deja în afara lumii.
+  assert.ok(text.includes('LAT SOL [1x1] p1 d64 x6'), text.join(' | '))
+  egalCuRecalculul(w, 'marginea lumii')
+})
+
+test('FETE pe hartie: o pivnita sub un dop de 9 m de piatra — fetele SUS sunt ADANC cu d-ul celei de-a 9-a celule (2), nu 0', () => {
+  // Recenzia FETE, L1-2 (d): d-ul capătului ADÂNC (alegerea liderului în locul lui T_sol(0) din tabelul designului)
+  // era probat doar deasupra solului, unde clamp-ul îl face 0 oricum. Pivnița 3×3×2 la g−12..g−11, puțul de deasupra
+  // ei astupat cu piatră pe g−10..g−2: K = 8 celule de piatră, a 9-a (g−2) tot piatră, la 2 m sub solul natural.
+  const { w, wx, wy, g } = sitPlat(12345, 8)
+  const t = w.terrain
+  for (let dx = 1; dx <= 3; dx++) for (let dy = 1; dy <= 3; dy++) {
+    for (const z of [g - 12, g - 11]) assert.ok(dig(t, wx + dx, wy + dy, z).ok)
+    for (let z = g - 10; z <= g - 2; z++) {
+      assert.ok(dig(t, wx + dx, wy + dy, z).ok)
+      assert.ok(fill(t, wx + dx, wy + dy, z, P).ok)
+    }
+  }
+  sincronizeazaCamere(w.camere, t)
+  const { text } = randuri(w, wx + 2, wy + 2, g - 11)
+  assert.ok(text.includes('SUS ADANC [6x8] p6 d2 x9'), text.join(' | '))
+  egalCuRecalculul(w, 'dopul de 9 m')
 })
 
 // --- D+ și oracolul ---------------------------------------------------------------

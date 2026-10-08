@@ -556,8 +556,12 @@ export function textDrum(compozitie: string): string {
 /** Pe `Destinatie`: AFARA, SOL, APA, INCAPERI, ADANC (ADANC nu se scrie asa: vezi `textCanale`). */
 const NUME_DESTINATIE_TEXT: readonly string[] = ['aer de afară', 'sol', 'apă', 'încăperi vecine', 'zid gros']
 
-/** Clasa de directie a unui canal, in cuvinte. SUS e „acoperiș" spre cer, altfel „tavan"; o usa in sus sau in jos e chepengul. */
-function numeClasa(clasa: ClasaDirId, usa: boolean, dest: DestinatieId): string {
+/**
+ * Clasa de directie a unui canal, in cuvinte. SUS e „acoperiș" spre cer, altfel „tavan"; o usa in sus sau in jos e
+ * chepengul; fetele DESCHISE (golul, ventilatia) sunt „gol deschis", nu „pereți" (recenzia ECRAN, L4-1).
+ */
+function numeClasa(clasa: ClasaDirId, usa: boolean, deschis: boolean, dest: DestinatieId): string {
+  if (deschis) return 'gol deschis'
   if (usa) return clasa === ClasaDir.LAT ? 'ușă' : 'chepeng'
   if (clasa === ClasaDir.LAT) return 'pereți'
   if (clasa === ClasaDir.JOS) return 'podea'
@@ -575,11 +579,12 @@ function textGrupCanale(dest: DestinatieId, rs: readonly CanalTermic[], pondere:
   const adanc = dest === Destinatie.ADANC
   // O fata ADANC e un zid plin mai gros de K celule: „peste 8 m de piatră", nu „sol adânc" (§5).
   const cap = adanc ? `peste ${r0.grosime} m de ${NUME_MATERIAL_DRUM[r0.material] ?? 'zid'}` : NUME_DESTINATIE_TEXT[dest]!
-  if (rs.length > 1) return `${textProcent(pondere)} ${cap} (${rs.map((r) => `${numeClasa(r.clasa, r.usa, dest)} ${textProcent(r.pondereQ16)}`).join(', ')}, ${t})`
-  const clasa = numeClasa(r0.clasa, r0.usa, dest)
+  if (rs.length > 1) return `${textProcent(pondere)} ${cap} (${rs.map((r) => `${numeClasa(r.clasa, r.usa, r.deschis, dest)} ${textProcent(r.pondereQ16)}`).join(', ')}, ${t})`
+  const clasa = numeClasa(r0.clasa, r0.usa, r0.deschis, dest)
   if (adanc) return `${textProcent(pondere)} ${clasa} ${cap} (${t})`
   const prinZid = (dest === Destinatie.AFARA || dest === Destinatie.INCAPERI) && !r0.usa
-  const drum = !prinZid ? '' : r0.compozitie === '' ? 'deschis' : textDrum(r0.compozitie)
+  // Golul (fata DESCHISA) n-are drum: textDrum('') = '', deci „prin gol deschis (~X °C)".
+  const drum = !prinZid ? '' : textDrum(r0.compozitie)
   return `${textProcent(pondere)} ${cap} prin ${clasa} (${drum ? `${drum}, ` : ''}${t})`
 }
 

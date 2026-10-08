@@ -164,6 +164,30 @@ test('TERMIC ECRAN inspectorul: fata ADANC in sus e „peste 8 m de piatră", nu
   assert.equal(textCanale(o.value), t.canale)
 })
 
+test('TERMIC ECRAN inspectorul pe hartie: casa 5x5x2 cu golul usii (2 celule) — golul e „gol deschis", nu „pereți"', () => {
+  // Recenzia ECRAN, L4-1: DESCHISA și EXT au aceeași destinație (AFARA), deci fără `deschis` în cheia grupului golul
+  // se contopea cu pereții, iar textul spunea „pereți 93%" pentru o componentă care stă 87% pe gol.
+  const { w, wx, wy, g } = sitPlat(12345, 12)
+  casa(w, wx, wy, g, false)
+  for (let z = g + 1; z <= g + 2; z++) assert.ok(dig(w.terrain, wx + 2, wy, z).ok)
+  sincronizeazaCamere(w.camere, w.terrain)
+  const celula = { x: wx + 2, y: wy + 2, z: g + 1 }
+  // Pe hârtie: golul 2 · 13.107.200 = 26.214.400 (DESCHISĂ, 200 W/K); pereții spre aer 22 · 86.231 + 4 · 48.545 (2 m
+  // de piatră, lângă gol: 130 + 1.180 + 40 = 1.350) = 2.091.262; podeaua 10 · 110.144 = 1.101.440; acoperișul
+  // 10 · 89.775 = 897.750. Σ 30.304.852; cumulat: 56.690 (86,5%), 61.213 → 4.523 (6,9%), 63.595 → 2.382 (3,6%),
+  // restul 1.941 (3,0%).
+  const o = canaleTermice(w, R, componentaLa(w.camere, celula.x, celula.y, celula.z)!.id, 0)
+  assert.ok(o.ok)
+  assert.deepEqual(o.value.randuri.map((r) => [r.clasa, r.destinatie, r.deschis, r.gQ16, r.pondereQ16, r.fete]), [
+    [ClasaDir.LAT, Destinatie.AFARA, true, 26214400, 56690, 2],
+    [ClasaDir.LAT, Destinatie.AFARA, false, 2091262, 4523, 26],
+    [ClasaDir.JOS, Destinatie.SOL, false, 1101440, 2382, 10],
+  ])
+  assert.equal(o.value.rest.pondereQ16, 1941)
+  w.tick = 0
+  assert.equal(termicLa(w, R, celula)?.canale, '93% aer de afară (gol deschis 87%, pereți 7%, ~15 °C) · 4% sol prin podea (~13 °C) · rest 3%')
+})
+
 test('TERMIC ECRAN textele: zecimile si gradele cu minus tipografic, rotunjire simetrica, fara „−0,0"; procentele; drumul', () => {
   // Pe hârtie, în Q16 (65.536 = 1 °C): 0,25 °C = 16.384 → zecimea 2,5 → jumătatea departe de zero.
   assert.equal(textZecimi(0), '0,0')
@@ -192,7 +216,7 @@ test('TERMIC ECRAN textele: zecimile si gradele cu minus tipografic, rotunjire s
 
 test('TERMIC ECRAN textele: descompunerea contopeste randurile pe destinatie, in ordinea ponderii, cu restul', () => {
   const r = (clasa: number, destinatie: number, pondereQ16: number, gQ16: number, tDestQ16: number, o: Partial<CanalTermic> = {}): CanalTermic =>
-    ({ clasa: clasa as CanalTermic['clasa'], destinatie: destinatie as CanalTermic['destinatie'], usa: false, pondereQ16, gQ16, tDestQ16, compozitie: '6x1', grosime: 1, material: P, fete: 1, ...o })
+    ({ clasa: clasa as CanalTermic['clasa'], destinatie: destinatie as CanalTermic['destinatie'], usa: false, deschis: false, pondereQ16, gQ16, tDestQ16, compozitie: '6x1', grosime: 1, material: P, fete: 1, ...o })
   // Pivnița designului: 42% pereți și 24% podea spre sol, 31% acoperiș spre aer, prin 3 m de rocă și pământ.
   const pivnita = {
     randuri: [
@@ -217,8 +241,8 @@ test('TERMIC ECRAN textele: descompunerea contopeste randurile pe destinatie, in
   // Ușa e grupul ei: „ușă" în locul pereților, fără drum; chepengul e ușa din tavan sau din podea.
   assert.equal(textCanale({ randuri: [r(ClasaDir.LAT, Destinatie.AFARA, 65536, 1, -3 * Q, { usa: true, compozitie: '9x1', material: Material.USA })], rest: { pondereQ16: 0 } }), '100% aer de afară prin ușă (~−3 °C)')
   assert.equal(textCanale({ randuri: [r(ClasaDir.SUS, Destinatie.INCAPERI, 65536, 1, 0, { usa: true })], rest: { pondereQ16: 0 } }), '100% încăperi vecine prin chepeng (~0 °C)')
-  // Un spațiu deschis: fețele DESCHISE n-au drum.
-  assert.equal(textCanale({ randuri: [r(ClasaDir.LAT, Destinatie.AFARA, 65536, 1, 5 * Q, { compozitie: '', grosime: 0, material: -1 })], rest: { pondereQ16: 0 } }), '100% aer de afară prin pereți (deschis, ~5 °C)')
+  // Un spațiu deschis: fețele DESCHISE sunt „gol deschis", fără drum (recenzia ECRAN, L4-1).
+  assert.equal(textCanale({ randuri: [r(ClasaDir.LAT, Destinatie.AFARA, 65536, 1, 5 * Q, { compozitie: '', grosime: 0, material: -1, deschis: true })], rest: { pondereQ16: 0 } }), '100% aer de afară prin gol deschis (~5 °C)')
 })
 
 test('TERMIC ECRAN memoria termica: in pauza (acelasi tick) niciun calcul; un tick nou sau alta componenta, unul', () => {
