@@ -148,11 +148,14 @@ export const MUTATII = [
     t: T, e: 'GRAF mostenirea: o componenta fara sursa veche',
   },
   {
-    n: 'o componenta cu nod nou isi muta doar membrii surselor (costul: membrii hub-ului parcursi la fiecare desprindere)',
+    // Doar costul: bucățile mutate sunt aceleași (cele născute merg pe nod oricum), dar se parcurg membrii nodului-sursă —
+    // pe o desprindere din hub, ~1.200 în loc de câteva. Lărgire20 n-are o asemenea desprindere (K05 a ieșit RATATĂ pe ea,
+    // 08.10): o prinde contorul `parcurseMostenire` pe hârtie.
+    n: 'o componenta cu nod nou parcurge membrii surselor, nu bucatile ei (costul: tot nodul-sursa la fiecare desprindere)',
     f: F,
     a: '    if (!surse.includes(s)) {',
     b: '    if (false) {',
-    t: TK, e: 'GRAF K05',
+    t: T, e: 'GRAF mostenirea pe hartie',
   },
   // --- stampila, citirea, compararea
   {

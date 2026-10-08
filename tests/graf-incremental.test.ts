@@ -14,7 +14,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { componentaLa, sincronizeazaCamere } from '../src/sim/camere.ts'
+import { componentaLa, decodeazaFelie, sincronizeazaCamere } from '../src/sim/camere.ts'
 import { capacitateMu, contoareComponentei } from '../src/sim/fete.ts'
 import { decode, encode } from '../src/sim/save.ts'
 import type { World } from '../src/sim/state.ts'
@@ -45,9 +45,9 @@ function nodulLui(w: World, x: number, y: number, z: number): number {
 
 // --- moștenirea, pe hârtie ----------------------------------------------------------------
 
-test('GRAF mostenirea pe hartie: usa dintre o pivnita de 24 de celule si una de 12 — la unire nodul celei MARI ramane, bucatile supravietuitoare ale celei mici se muta; la despartire cea mare isi pastreaza nodul, cea mica primeste unul nou', () => {
+test('GRAF mostenirea pe hartie: usa dintre o pivnita de 48 de celule si una de 12 — la unire nodul celei MARI ramane, bucatile supravietuitoare ale celei mici se muta; la despartire cea mare isi pastreaza nodul, cea mica primeste unul nou si isi parcurge DOAR bucatile ei', () => {
   const { w, wx, wy, g } = sitPlat(12345, 16)
-  cutie(w, wx + 2, wx + 5, wy + 2, wy + 4, g - 3, g - 2) // A: 4×3×2
+  cutie(w, wx + 2, wx + 5, wy + 2, wy + 4, g - 5, g - 2) // A: 4×3×4
   cutie(w, wx + 7, wx + 8, wy + 2, wy + 4, g - 3, g - 2) // B: 2×3×2, zidul pe x = wx+6
   lot(w)
   const nA = nodulLui(w, wx + 2, wy + 2, g - 3), nB = nodulLui(w, wx + 7, wy + 2, g - 3)
@@ -58,17 +58,22 @@ test('GRAF mostenirea pe hartie: usa dintre o pivnita de 24 de celule si una de 
   const u = lot(w)
   const supravietuitoareB = B.bucati.filter((b) => !u.bucatiMoarte.includes(b)).length
   assert.ok(supravietuitoareB > 0, 'fixtura: B are bucati care supravietuiesc lotului')
-  assert.equal(nodulLui(w, wx + 7, wy + 2, g - 3), nA, 'unite, pe nodul lui A (24 de celule)')
+  assert.equal(nodulLui(w, wx + 7, wy + 2, g - 3), nA, 'unite, pe nodul lui A (48 de celule)')
   assert.ok(!graf(w).noduri.has(nB), 'nodul lui B a disparut')
   let d = delta(w, st)
   assert.deepEqual([d.mosteniri, d.noduriNoi, d.mutate], [1, 0, supravietuitoareB], JSON.stringify(d))
   egalCuIndexulNou(w, 'unirea')
-  // Ușa zidită la loc: A' (24) moștenește nodul unirii, B' (12) primește unul nou și își mută toate bucățile.
+  // Ușa zidită la loc: A' (48) moștenește nodul unirii, B' (12) primește unul nou și își mută toate bucățile — le
+  // parcurge pe ale EI, nu membrii nodului unirii (A la g−5, g−4, g−2 și B la g−2 supraviețuiesc lotului: cel puțin unul
+  // în plus față de B').
   st = statGraf(w.camere)
+  let supravietuitoareUnire = 0
+  for (const b of graf(w).noduri.get(nA)!.membri) if (decodeazaFelie(w.camere.bFelie[b]!).z !== g - 3) supravietuitoareUnire++
   assert.ok(fill(w.terrain, wx + 6, wy + 3, g - 3, P).ok)
   lot(w)
   assert.equal(nodulLui(w, wx + 2, wy + 2, g - 3), nA, 'A isi pastreaza nodul')
   const Bn = componentaLa(w.camere, wx + 7, wy + 2, g - 3)!
+  assert.ok(supravietuitoareUnire > Bn.bucati.length, `fixtura: nodul unirii are mai multe bucati supravietuitoare (${supravietuitoareUnire}) decat B' (${Bn.bucati.length})`)
   d = delta(w, st)
   assert.deepEqual([d.mosteniri, d.noduriNoi, d.parcurseMostenire], [1, 1, Bn.bucati.length], JSON.stringify(d))
   egalCuIndexulNou(w, 'despartirea')
