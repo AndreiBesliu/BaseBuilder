@@ -1,10 +1,10 @@
 /**
  * Graful termic al încăperilor și regimul lor permanent — S24-27, tăietura 2a (design-temperatura-v2 §4.2,
- * §5, §7).
+ * §5, §7) —, plus graful incremental al simulării din tăietura 2b (research/temperatura-t2b.md §6).
  *
- * În t.2a NIMIC din simulare nu citește ce e aici: graful și regimul permanent sunt TRANSIENTE, nu intră în
- * hash și nu se salvează; le cere viewer-ul (inspectorul, overlay-ul Temperatură), cel mult o dată pe secundă.
- * Hash-urile de referință nu se mișcă.
+ * Grafurile și regimul permanent sunt TRANSIENTE: nu intră în hash și nu se salvează. Graful t.2a și regimul le cere
+ * viewer-ul (inspectorul, overlay-ul Temperatură), cel mult o dată pe secundă; graful incremental îl ține la zi
+ * sincronizarea lumii (t.2b, commit-ul 4 îl leagă de tick și de comenzi).
  *
  * ## Conductanța unei fețe (§4.2), pe întregi
  *
@@ -46,7 +46,8 @@
  * `epoca` e 1 în orice lume nouă (panoul, L4-1). Se reface când (`epoca`, `epocaFete`, regulile) diferă de
  * ștampila lui — `epocaFete` fiindcă fețele se schimbă fără `epoca` nouă (pământ pe acoperiș: 169 din 169
  * de loturi de suprafață care schimbă fețe ies din sincronizare fără `epoca++`; panoul, L2-1/L1-02/L4-1).
- * Altfel se refolosește. Graful incremental cu noduri stabile e pentru t.2b.
+ * Altfel se refolosește. Graful t.2a rămâne al viewer-ului (inspectorul, overlay-ul U) și al regimului permanent (migrarea
+ * din t.2b); simularea are graful incremental de mai jos.
  *
  * **Contribuția fiecărei bucăți** (Σg pe bin, Σg spre fiecare componentă de dincolo, fețele ei DESCHISE) se
  * memorează pe identitatea TABLOULUI ei de rânduri: fete.ts nu modifică un tablou de rânduri, îl înlocuiește,
@@ -55,6 +56,30 @@
  * conductanțele doar cu alte reguli. O editare care schimbă DOAR fețele (`epocaFete`) recalculează deci numai
  * bucățile cu rânduri noi (recenzia GRAF, L3-2: pe M10, 7,4 → 1,65 ms); la o epocă nouă memoria se golește.
  * SINE se hotărăște la asamblare, pe nodul componentei.
+ *
+ * ## Graful incremental (ii) — t.2b §6
+ *
+ * Graful SIMULĂRII (pasul de 1 Hz, proveniența, salvarea îl citesc): ținut la zi pe LOT de `actualizeazaGraful`, pe care
+ * `sincronizeazaLumea` o cheamă după fiecare `sincronizeazaCamere` — graful e funcție a indexului la fiecare graniță de
+ * lot, deci o lume încărcată (graful construit integral) citește aceleași sume ca cea continuă [B5 §4.1].
+ *
+ * - **Nodurile sunt etichete stabile.** O componentă nouă moștenește nodul sursei-componente vechi de la care are cele
+ *   mai multe celule (proveniența sincronizării); SOL / CER / NEC nu concurează; fără nicio sursă veche, nod nou.
+ *   Egalitățile se rup GEOMETRIC: ancora componentei noi, apoi ancora sursei de dinainte de lot — niciodată pe slot sau
+ *   pe etichetă [IDX-8]. Moștenirea schimbă doar costul (bucățile mutate), nu graful: o poartă K05 pe contoare o probează
+ *   (fără ea, pe lărgire20 |S| crește cu așezarea: 589.760 pe 7×7, 1.950.924 pe 13×13).
+ * - **Muchiile sunt dirijate**: fiecare capăt își adună fețele lui spre nodul celuilalt, iar simetria se verifică la
+ *   citire. Regula t.2a „din capătul cu ancora mai mică" nu ține la delte: ancora se mută la o săpătură sub minimul ei.
+ * - **Pe bucată**: ce a adunat (`AdunareBucata`, ca scăderea să fie exactă), contribuția memorată (perechile pe BUCATA de
+ *   dincolo, valabilă cât înregistrarea de fețe și feliile de dincolo sunt aceleași obiecte) și indexul invers (cine are
+ *   o pereche spre ea). C' pe nod = Σ contoarele de capacitate ale bucăților (`capacitateMu`, aceeași funcție ca la
+ *   proveniență).
+ * - **Delta** pe S = bucățile născute, moarte, mutate pe alt nod, vecinii lor din indexul invers și cele rescrise de D+:
+ *   fiecare se scade exact și se adună din nou. Sumele sunt întregi exacte sub 2^53 pe bin și pe muchie, deci ordinea
+ *   (iterarea pe Map / Set) nu contează.
+ * - **Nu aruncă**: o ștampilă care nu e a lotului de dinainte sau un invariant încălcat în deltă → refacerea integrală de
+ *   urgență, numărată (`refaceriDeUrgenta`). O deltă greșită FĂRĂ asimetrie nu se vede la citire; o prinde compararea cu
+ *   graful integral (`comparaGrafulCuIntegral`, la `encode`) [IDX-4].
  *
  * ## Regimul permanent (§5)
  *
@@ -105,10 +130,10 @@
  */
 
 import type { ReguliTermic, Rules } from './content.ts'
-import type { Felie, IndexCamere } from './camere.ts'
-import { cheieFelie, decodeazaCelula, FELIE, listaComponente } from './camere.ts'
-import type { ClasaDirId, FelFataId, RandFete } from './fete.ts'
-import { ADANCIME_MAX, agregaComponenta, ClasaDir, FelFata } from './fete.ts'
+import type { Componenta, Felie, IndexCamere, SchimbareCamere, StampilaIndex } from './camere.ts'
+import { cheieFelie, decodeazaCelula, FELIE, listaComponente, stampilaIndexului } from './camere.ts'
+import type { ClasaDirId, ContoareMasa, FelFataId, InregistrareFete, RandFete } from './fete.ts'
+import { ADANCIME_MAX, agregaComponenta, capacitateMu, ClasaDir, FelFata } from './fete.ts'
 import { GRAD_Q16, mcLaQ16, tAfara, tSol } from './clima.ts'
 import type { World } from './state.ts'
 import { eSolNatural, Material, MATERIAL_MAX } from './terrain/chunk.ts'
@@ -188,6 +213,47 @@ export function margineTemperaturi(rules: Rules): number {
   return mcLaQ16(abs(c.tMedieMc) + abs(c.amplitudineAnMc) + abs(c.amplitudineZiMc) + abs(c.valFrig.amplitudineMc) + abs(c.deltaAdancMc)) + GRAD_Q16
 }
 
+/**
+ * Binul de rezervor al unui rând care nu e MUCHIE (§5): aerul de afară (DESCHISĂ, EXT), apa sau solul pe adâncimea
+ * rândului (SOL, ADÂNC). Un singur loc pentru ambele grafuri (t.2a și incrementalul).
+ */
+function binulRandului(x: RandFete): number {
+  if (x.fel === FelFata.DESCHISA || x.fel === FelFata.EXT) return BIN_AFARA
+  if (x.fel === FelFata.APA) return BIN_APA + x.adancime
+  return BIN_SOL + x.adancime // SOL, ADANC
+}
+
+/** z-ul celulei cu cheia 0: cheia unei celule e ((z − Z0) · L + y) · L + x. */
+const Z0_CELULA = decodeazaCelula(0).z
+
+/** Cursorul celulelor de dincolo ale rândurilor MUCHIE: felia ultimei celule (rândurile unei bucăți cad de obicei în aceeași). */
+interface CursorDincolo {
+  readonly idx: IndexCamere
+  readonly z0: number
+  ultimaCheie: number
+  ultimaFelie: Felie | undefined
+}
+
+/**
+ * Bucata celulei de dincolo (`cheieCelula`), ca `bucataLa`, cu felia memorată în cursor (`ultimaFelie` rămâne felia
+ * celulei); −1 dacă celula nu e aer acoperit. Cheia trece de 2^31: o singură împărțire pe double (exactă), restul pe
+ * întregi mici — `decodeazaCelula` face două `%` pe double, jumătate din costul refacerii pe M10.
+ */
+function bucataDeDincolo(c: CursorDincolo, dincolo: number): number {
+  const q = Math.floor(dincolo / WORLD_CELLS)
+  const px = dincolo - q * WORLD_CELLS
+  const py = q % WORLD_CELLS
+  const pz = (q - py) / WORLD_CELLS + c.z0
+  const bx = Math.floor(px / FELIE)
+  const by = Math.floor(py / FELIE)
+  const kf = cheieFelie(bx, by, pz)
+  if (kf !== c.ultimaCheie) {
+    c.ultimaCheie = kf
+    c.ultimaFelie = c.idx.felii.get(kf)
+  }
+  return c.ultimaFelie === undefined ? -1 : c.ultimaFelie.cel[(py - by * FELIE) * FELIE + (px - bx * FELIE)]!
+}
+
 // ---------------------------------------------------------------------------------------------
 // graful
 // ---------------------------------------------------------------------------------------------
@@ -229,10 +295,35 @@ export interface GrafTermic {
   readonly margineT: number
 }
 
-/** Contoarele refacerii (K05 se probează pe ele). */
+/**
+ * Contoarele grafurilor unui index (K05 se probează pe ele, nu pe timp). `refaceri` / `refolosiri`: graful t.2a
+ * (`grafTermic`, refăcut la ștampila schimbată). Restul: graful incremental (ii) al simulării (t.2b §6).
+ */
 export interface StatGraf {
   refaceri: number
   refolosiri: number
+  /** Delte aplicate (loturi care au schimbat ceva). */
+  loturi: number
+  /** Construcții integrale obișnuite: prima, la recalculul indexului, la alte reguli. */
+  construiri: number
+  /** Refaceri integrale de urgență: o ștampilă care nu e a lotului de dinainte, un invariant încălcat în deltă, o diferență la compararea cu integralul. */
+  refaceriDeUrgenta: number
+  /** |S|: bucăți scăzute și adunate din nou (născute ∪ moarte ∪ mutate ∪ vecinii lor din indexul invers ∪ rescrise). */
+  S: number
+  /** Contribuții calculate din rânduri (nu luate din memorie), la delte și la construcții. */
+  recalculate: number
+  /** Bucăți vii mutate pe alt nod. */
+  mutate: number
+  /** Bucăți parcurse la moștenire (membrii surselor pierdute, componentele cu nod nou). */
+  parcurseMostenire: number
+  noduriNoi: number
+  mosteniri: number
+  /** Perechi (bucată, bucata de dincolo) adunate. */
+  perechiAdunate: number
+}
+
+function statGol(): StatGraf {
+  return { refaceri: 0, refolosiri: 0, loturi: 0, construiri: 0, refaceriDeUrgenta: 0, S: 0, recalculate: 0, mutate: 0, parcurseMostenire: 0, noduriNoi: 0, mosteniri: 0, perechiAdunate: 0 }
 }
 
 /** Contoarele memoriilor grafului (antetul): contribuțiile bucăților și regimul pe (graf, tick). */
@@ -278,6 +369,8 @@ interface IntrareGraf {
   reguliContributii: Rules | null
   regim: MemorieRegim | null
   readonly statMemorie: StatMemorieTermica
+  /** Graful incremental (ii) al simulării (t.2b §6), ținut la zi pe lot de `actualizeazaGraful`. */
+  inc: StareGraf | null
 }
 
 /** Graful fiecărui index, legat de OBIECTUL indexului — un index aruncat își ia graful cu el. */
@@ -288,7 +381,8 @@ function intrarea(idx: IndexCamere): IntrareGraf {
   if (e === undefined) {
     e = {
       graf: null,
-      stat: { refaceri: 0, refolosiri: 0 },
+      stat: statGol(),
+      inc: null,
       contributii: [],
       epocaContributii: -1,
       reguliContributii: null,
@@ -300,10 +394,10 @@ function intrarea(idx: IndexCamere): IntrareGraf {
   return e
 }
 
-/** Contoarele grafului unui index (o copie). Un index pe care nu l-a cerut nimeni are 0 / 0. */
+/** Contoarele grafurilor unui index (o copie). Un index pe care nu l-a cerut nimeni are totul 0. */
 export function statGraf(idx: IndexCamere): StatGraf {
   const e = GRAFURI.get(idx)
-  return e === undefined ? { refaceri: 0, refolosiri: 0 } : { ...e.stat }
+  return e === undefined ? statGol() : { ...e.stat }
 }
 
 /** Contoarele memoriilor grafului unui index (o copie). */
@@ -344,8 +438,7 @@ export function grafTermic(idx: IndexCamere, rules: Rules): Outcome<GrafTermic> 
  * mică chemată pe fiecare bucată. Scrisă în corpul lui `construiesteGraf` (chemat o dată pe refacere), bucla
  * rula pe cod OSR care ieșea din optimizare la fiecare refacere (măsurat pe M10: 8,5 ms, față de ~3 ms așa).
  */
-interface Lucru {
-  readonly idx: IndexCamere
+interface Lucru extends CursorDincolo {
   readonly termic: ReguliTermic
   /** g pe față, pe (compoziție, fel, clasă); −2 = necalculat. */
   readonly memo: Float64Array
@@ -361,11 +454,6 @@ interface Lucru {
   readonly spre: Float64Array
   readonly vecinAtins: Uint8Array
   readonly vecine: number[]
-  /** Felia ultimei celule de dincolo. */
-  ultimaCheie: number
-  ultimaFelie: Felie | undefined
-  /** −Z_DEPL: cheia celulei e ((z − Z0) · L + y) · L + x. */
-  readonly z0: number
   /** Contribuțiile bucăților (memoria intrării grafului), pe slot. */
   readonly contributii: (ContributieBucata | undefined)[]
   readonly statMemorie: StatMemorieTermica
@@ -399,23 +487,10 @@ function contributiaBucatii(l: Lucru, rr: readonly RandFete[]): ContributieBucat
     if (g1 < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'fata fara conductanta (compozitie SOL fara exact o celula de sol)', compozitie: x.compozitie, fel: x.fel })
     const G = x.fete * g1
     if (x.fel === FelFata.MUCHIE) {
-      // Celula de dincolo → bucată → componentă (§5), ca `bucataLa`, cu felia memorată. Cheia trece de 2^31: o
-      // singură împărțire pe double (exactă), restul pe întregi mici — `decodeazaCelula` face două `%` pe double,
-      // jumătate din costul refacerii pe M10. Nodul (și SINE) se hotărăsc la asamblare.
-      const q = Math.floor(x.dincolo / WORLD_CELLS)
-      const px = x.dincolo - q * WORLD_CELLS
-      const py = q % WORLD_CELLS
-      const pz = (q - py) / WORLD_CELLS + l.z0
-      const bx = Math.floor(px / FELIE)
-      const by = Math.floor(py / FELIE)
-      const kf = cheieFelie(bx, by, pz)
-      if (kf !== l.ultimaCheie) {
-        l.ultimaCheie = kf
-        l.ultimaFelie = l.idx.felii.get(kf)
-      }
-      const bd = l.ultimaFelie === undefined ? -1 : l.ultimaFelie.cel[(py - by * FELIE) * FELIE + (px - bx * FELIE)]!
+      // Celula de dincolo → bucată → componentă (§5). Nodul (și SINE) se hotărăsc la asamblare.
+      const bd = bucataDeDincolo(l, x.dincolo)
       const vecina = bd < 0 ? -1 : l.idx.bComp[bd]!
-      if (vecina < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'celula de dincolo a unei muchii nu e aer acoperit al unei componente', x: px, y: py, z: pz })
+      if (vecina < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'celula de dincolo a unei muchii nu e aer acoperit al unei componente', ...decodeazaCelula(x.dincolo) })
       if (l.pCompAtins[vecina] === 0) {
         l.pCompAtins[vecina] = 1
         l.pCompLista.push(vecina)
@@ -424,10 +499,7 @@ function contributiaBucatii(l: Lucru, rr: readonly RandFete[]): ContributieBucat
       continue
     }
     if (x.fel === FelFata.DESCHISA) deschise += x.fete
-    let k: number
-    if (x.fel === FelFata.DESCHISA || x.fel === FelFata.EXT) k = BIN_AFARA
-    else if (x.fel === FelFata.APA) k = BIN_APA + x.adancime
-    else k = BIN_SOL + x.adancime // SOL, ADANC
+    const k = binulRandului(x)
     if (l.pBinAtins[k] === 0) {
       l.pBinAtins[k] = 1
       l.pBinLista.push(k)
@@ -518,7 +590,7 @@ function construiesteGraf(idx: IndexCamere, rules: Rules, contributii: (Contribu
     vecine: [],
     ultimaCheie: -1,
     ultimaFelie: undefined,
-    z0: decodeazaCelula(0).z,
+    z0: Z0_CELULA,
     contributii,
     statMemorie,
     deschise: 0,
@@ -654,6 +726,618 @@ export function formaCanonicaGraf(g: GrafTermic): string[] {
   }
   for (let e = 0; e < g.muchieA.length; e++) out.push(`M ${g.ancora[g.muchieA[e]!]}-${g.ancora[g.muchieB[e]!]} ${g.muchieG[e]}`)
   return out
+}
+
+// ---------------------------------------------------------------------------------------------
+// graful incremental (ii) — t.2b §6
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Contribuția unei bucăți la graful incremental: ca la t.2a (Σg pe bin, fețele DESCHISE), dar perechile MUCHIE sunt pe
+ * BUCATA de dincolo, nu pe componentă — deci contribuția supraviețuiește unei epoci noi. E valabilă cât (1)
+ * înregistrarea de fețe a bucății e același obiect (rândurile și contoarele se scriu împreună, fete.ts) și (2) fiecare
+ * felie a celulelor de dincolo e același obiect `Felie` (obiectele nu se modifică; o felie refăcută schimbă bucata de
+ * dincolo) [B5 §2.3: fără validarea (2), oracolul pică pe fuzz].
+ */
+interface ContributieInc {
+  readonly ok: true
+  readonly inreg: InregistrareFete
+  /** (bin, Σg) plate, în ordinea primei apariții. */
+  readonly binuri: readonly number[]
+  /** (bucata de dincolo, Σg) plate, în ordinea primei apariții. */
+  readonly perechi: readonly number[]
+  /** Feliile celulelor de dincolo, distincte. */
+  readonly felii: readonly Felie[]
+  readonly deschise: number
+}
+
+/** Ce a ADUNAT o bucată, ca scăderea să fie exactă: aceeași contribuție, același nod, aceleași noduri de dincolo. */
+interface AdunareBucata {
+  readonly nod: number
+  readonly c: ContributieInc
+  /** Nodul bucății de dincolo al fiecărei perechi, la adunare. */
+  readonly noduriDincolo: readonly number[]
+  readonly volum: number
+}
+
+/**
+ * Un nod al grafului incremental, citit de pasul de 1 Hz (temperatura.ts): sumele bucăților lui. Contoarele de capacitate
+ * (`ContoareMasa`) dau C' cu `capacitateMu(nod, rules.termic.mase)` — aceeași funcție ca la proveniență.
+ */
+export interface NodTermic extends ContoareMasa {
+  /** Componenta care îl ține (id-ul din indexul de acum). */
+  readonly comp: number
+  /** Ancora ei, la ultima actualizare: departajarea moștenirii la lotul următor. */
+  readonly ancora: number
+  /** Σg spre rezervoare pe bin (`BIN_*`), Q16 W/K; fără intrări 0. */
+  readonly bin: ReadonlyMap<number, number>
+  /** Σg spre fiecare nod vecin, din fețele ACESTUI capăt (muchie dirijată; simetria se verifică la citire); fără intrări 0. */
+  readonly vec: ReadonlyMap<number, number>
+  readonly deschise: number
+  readonly volum: number
+  /** Bucăți adunate; == `membri.size`. */
+  readonly nb: number
+  readonly membri: ReadonlySet<number>
+}
+
+interface NodLucru {
+  comp: number
+  ancora: number
+  readonly bin: Map<number, number>
+  readonly vec: Map<number, number>
+  deschise: number
+  volum: number
+  nb: number
+  nAer: number
+  nConstr: number
+  nSolMasiv: number
+  nApa: number
+  readonly membri: Set<number>
+}
+
+/**
+ * Graful incremental (ii) al unui index (DERIVED, TRANSIENT; t.2b §6). Nodurile sunt ETICHETE stabile: un nod trece de la
+ * o componentă la cea care moștenește cele mai multe celule de la ea, deci o renumerotare a componentelor nu mută nimic.
+ * Nicio valoare nu depinde de etichetă (nu se salvează, nu intră în hash, nicio ordine nu se ia din ea): o lume încărcată
+ * are alte etichete și același graf.
+ */
+export interface GrafIncremental {
+  readonly reguli: Rules
+  /** Ștampila indexului la ultima actualizare: `SchimbareCamere.inainte` a lotului următor trebuie să fie ea. */
+  readonly stampila: StampilaIndex
+  readonly noduri: ReadonlyMap<number, NodTermic>
+  /** Componenta (id-ul din index) → eticheta nodului ei. */
+  readonly nodComp: ReadonlyMap<number, number>
+  /** M, marginea temperaturilor (Q16): un nod cu Σg · M ≥ 2^52 cere BigInt (antetul, „Exactitatea"). */
+  readonly margineT: number
+}
+
+interface StareGraf extends GrafIncremental {
+  stampila: StampilaIndex
+  readonly noduri: Map<number, NodLucru>
+  readonly nodComp: Map<number, number>
+  /** Nodul fiecărei bucăți, pe slot (−1: niciunul). */
+  nodB: Int32Array
+  readonly adunari: (AdunareBucata | undefined)[]
+  /** Memoria contribuțiilor, pe slot (validată la fiecare folosire). */
+  readonly contrib: (ContributieInc | undefined)[]
+  /** Indexul invers: bucata de dincolo → bucățile cu o pereche spre ea. */
+  readonly inv: (Set<number> | undefined)[]
+  /** Etichetele libere (LIFO). */
+  readonly libere: number[]
+  urm: number
+  /** g pe față, pe (compoziție, fel, clasă). Compozițiile se adaugă cu timpul, deci un Map, nu un tablou fix. */
+  readonly memoG: Map<number, number>
+  readonly cursor: CursorDincolo
+  readonly pBin: Float64Array
+  readonly pBinAtins: Uint8Array
+  readonly pBinLista: number[]
+}
+
+function grafGol(idx: IndexCamere, rules: Rules): StareGraf {
+  return {
+    reguli: rules,
+    stampila: stampilaIndexului(idx),
+    noduri: new Map(),
+    nodComp: new Map(),
+    margineT: margineTemperaturi(rules),
+    nodB: new Int32Array(Math.max(64, idx.bUrmator)).fill(-1),
+    adunari: [],
+    contrib: [],
+    inv: [],
+    libere: [],
+    urm: 0,
+    memoG: new Map(),
+    cursor: { idx, z0: Z0_CELULA, ultimaCheie: -1, ultimaFelie: undefined },
+    pBin: new Float64Array(NR_BINURI),
+    pBinAtins: new Uint8Array(NR_BINURI),
+    pBinLista: [],
+  }
+}
+
+function cresteNodB(g: StareGraf, b: number): void {
+  if (b < g.nodB.length) return
+  const n = new Int32Array(Math.max(b + 1, 2 * g.nodB.length)).fill(-1)
+  n.set(g.nodB)
+  g.nodB = n
+}
+
+/** Un nod gol pentru componenta `c`; eticheta din cele libere, altfel una nouă. */
+function nodNou(g: StareGraf, c: Componenta): number {
+  const s = g.libere.length > 0 ? g.libere.pop()! : g.urm++
+  g.noduri.set(s, { comp: c.id, ancora: c.ancora, bin: new Map(), vec: new Map(), deschise: 0, volum: 0, nb: 0, nAer: 0, nConstr: 0, nSolMasiv: 0, nApa: 0, membri: new Set() })
+  return s
+}
+
+/** Adună `d` la intrarea `k`; o intrare care ajunge la 0 dispare (un g 0 nu poartă nimic). */
+function adaugaLa(m: Map<number, number>, k: number, d: number): void {
+  if (d === 0) return
+  const v = (m.get(k) ?? 0) + d
+  if (v === 0) m.delete(k)
+  else m.set(k, v)
+}
+
+function gPeFata(g: StareGraf, x: RandFete): number {
+  const km = (x.compozitie * 8 + x.fel) * 4 + x.clasa
+  let v = g.memoG.get(km)
+  if (v === undefined) {
+    v = conductantaFetei(g.reguli.termic, x.clasa, x.fel, g.cursor.idx.fete.compNumarari[x.compozitie]!)
+    g.memoG.set(km, v)
+  }
+  return v
+}
+
+function contributiaInc(g: StareGraf, e: InregistrareFete): ContributieInc | Refusal {
+  let deschise = 0
+  const perechi = new Map<number, number>()
+  const felii: Felie[] = []
+  for (const x of e.randuri) {
+    const g1 = gPeFata(g, x)
+    if (g1 < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'fata fara conductanta (compozitie SOL fara exact o celula de sol)', compozitie: x.compozitie, fel: x.fel })
+    const G = x.fete * g1
+    if (x.fel === FelFata.MUCHIE) {
+      const bd = bucataDeDincolo(g.cursor, x.dincolo)
+      if (bd < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'celula de dincolo a unei muchii nu e aer acoperit', ...decodeazaCelula(x.dincolo) })
+      const f = g.cursor.ultimaFelie!
+      if (!felii.includes(f)) felii.push(f)
+      perechi.set(bd, (perechi.get(bd) ?? 0) + G)
+      continue
+    }
+    if (x.fel === FelFata.DESCHISA) deschise += x.fete
+    const k = binulRandului(x)
+    if (g.pBinAtins[k] === 0) {
+      g.pBinAtins[k] = 1
+      g.pBinLista.push(k)
+    }
+    g.pBin[k] += G
+  }
+  const binuri: number[] = []
+  for (const k of g.pBinLista) {
+    binuri.push(k, g.pBin[k]!)
+    g.pBin[k] = 0
+    g.pBinAtins[k] = 0
+  }
+  g.pBinLista.length = 0
+  const per: number[] = []
+  // determinism-ok: ordinea inserării (rândurile, sortate în fete.ts); se adună sume întregi exacte.
+  for (const [bd, G] of perechi) per.push(bd, G)
+  return { ok: true, inreg: e, binuri, perechi: per, felii, deschise }
+}
+
+/** Contribuția din memorie e încă a bucății: aceeași înregistrare de fețe și aceleași felii de dincolo. */
+function contributieValida(c: ContributieInc, idx: IndexCamere, e: InregistrareFete): boolean {
+  if (c.inreg !== e) return false
+  for (const f of c.felii) if (idx.felii.get(f.cheie) !== f) return false
+  return true
+}
+
+/** Adună bucata `b` (vie) la nodul ei, `g.nodB[b]`. Refuz dacă fețele nu se potrivesc cu indexul. */
+function adunaBucata(g: StareGraf, idx: IndexCamere, b: number, st: StatGraf): Refusal | null {
+  const s = g.nodB[b]!
+  const n = g.noduri.get(s)
+  if (n === undefined) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'bucata pe un nod inexistent', bucata: b, nod: s })
+  const e = idx.fete.inreg[b]
+  if (e === undefined) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'bucata fara randuri de fete', bucata: b })
+  let c = g.contrib[b]
+  if (c === undefined || !contributieValida(c, idx, e)) {
+    const o = contributiaInc(g, e)
+    if (!o.ok) return o
+    c = o
+    g.contrib[b] = c
+    st.recalculate++
+  }
+  for (let p = 0; p < c.binuri.length; p += 2) adaugaLa(n.bin, c.binuri[p]!, c.binuri[p + 1]!)
+  const volum = idx.bCelule[b]!
+  n.deschise += c.deschise
+  n.volum += volum
+  n.nb++
+  n.nAer += e.nAer
+  n.nConstr += e.nConstr
+  n.nSolMasiv += e.nSolMasiv
+  n.nApa += e.nApa
+  const noduriDincolo: number[] = []
+  for (let p = 0; p < c.perechi.length; p += 2) {
+    const bd = c.perechi[p]!
+    const nd = g.nodB[bd] ?? -1
+    if (nd < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'bucata de dincolo a unei muchii n-are nod', bucata: b, dincolo: bd })
+    noduriDincolo.push(nd)
+    let iv = g.inv[bd]
+    if (iv === undefined) {
+      iv = new Set()
+      g.inv[bd] = iv
+    }
+    iv.add(b)
+    if (nd !== s) adaugaLa(n.vec, nd, c.perechi[p + 1]!) // pe același nod: SINE
+  }
+  st.perechiAdunate += noduriDincolo.length
+  g.adunari[b] = { nod: s, c, noduriDincolo, volum }
+  return null
+}
+
+/** Scade exact ce a adunat bucata `b` (nimic, dacă n-a adunat). */
+function scadeBucata(g: StareGraf, b: number): Refusal | null {
+  const a = g.adunari[b]
+  if (a === undefined) return null
+  const n = g.noduri.get(a.nod)
+  if (n === undefined) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'bucata adunata pe un nod sters', bucata: b, nod: a.nod })
+  const c = a.c
+  for (let p = 0; p < c.binuri.length; p += 2) adaugaLa(n.bin, c.binuri[p]!, -c.binuri[p + 1]!)
+  n.deschise -= c.deschise
+  n.volum -= a.volum
+  n.nb--
+  n.nAer -= c.inreg.nAer
+  n.nConstr -= c.inreg.nConstr
+  n.nSolMasiv -= c.inreg.nSolMasiv
+  n.nApa -= c.inreg.nApa
+  for (let p = 0; p < c.perechi.length; p += 2) {
+    g.inv[c.perechi[p]!]?.delete(b)
+    const nd = a.noduriDincolo[p >> 1]!
+    if (nd !== a.nod) adaugaLa(n.vec, nd, -c.perechi[p + 1]!)
+  }
+  g.adunari[b] = undefined
+  return null
+}
+
+/** Construcția integrală: un nod pe componentă (în ordinea ancorelor), toate bucățile adunate. */
+function construiesteStare(idx: IndexCamere, rules: Rules, st: StatGraf): Outcome<StareGraf> {
+  const g = grafGol(idx, rules)
+  const comps = listaComponente(idx)
+  for (const c of comps) {
+    const s = nodNou(g, c)
+    const n = g.noduri.get(s)!
+    for (const b of c.bucati) {
+      cresteNodB(g, b)
+      g.nodB[b] = s
+      n.membri.add(b)
+    }
+    g.nodComp.set(c.id, s)
+  }
+  for (const c of comps) {
+    for (const b of c.bucati) {
+      const r = adunaBucata(g, idx, b, st)
+      if (r !== null) return r
+    }
+  }
+  return accept(g)
+}
+
+/**
+ * Bucățile cu o pereche spre `b` (indexul invers) intră în S: bucata lor de dincolo a murit sau s-a mutat pe alt nod, deci
+ * perechea trebuie scăzută de pe nodul vechi și rezolvată din nou.
+ */
+function adaugaInversul(g: StareGraf, b: number, S: Set<number>): void {
+  const iv = g.inv[b]
+  // determinism-ok: doar adaugă într-o mulțime.
+  if (iv !== undefined) for (const x of iv) S.add(x)
+}
+
+/** Un candidat la moștenire: componenta nouă `c` ar lua nodul `nod` al unei surse vechi, cu `n` celule de la ea. */
+interface Candidat {
+  readonly c: number
+  readonly nod: number
+  readonly n: number
+  /** Ancora componentei noi. */
+  readonly ac: number
+  /** Ancora sursei, de dinainte de lot. */
+  readonly an: number
+}
+
+/**
+ * Delta pe un lot (§6; B5 §2.4, pe proveniența reală — panoul IDX):
+ * 1. sursele fiecărei componente noi, traduse pe noduri ÎNAINTE de orice schimbare (`nodComp` e încă al indexului de
+ *    dinainte); SOL / CER / NEC nu concurează;
+ * 2. bucățile moarte ies din nodurile lor;
+ * 3. MOȘTENIREA: perechile (componentă nouă, nod-sursă) în ordinea celulelor (descrescător), egalitățile rupte GEOMETRIC
+ *    (ancora componentei noi, apoi ancora sursei de dinainte de lot) — niciodată pe slot sau pe etichetă; fiecare
+ *    componentă și fiecare nod cel mult o dată; o componentă fără nod moștenit primește unul nou;
+ * 4. mutările: toate bucățile unei componente cu nod nou, membrii surselor pierdute ajunși în componentă, bucățile născute;
+ * 5. S = născute ∪ moarte ∪ mutate ∪ indexul invers al mutatelor și al moartelor ∪ rescrise: fiecare se scade exact și
+ *    se adună din nou (contribuția din memorie, dacă e încă validă);
+ * 6. nodurile golite dispar (cu sumele lor exact 0 — altfel deriva s-a văzut).
+ * Întoarce refuzul primului invariant încălcat (graful e atunci pe jumătate actualizat: se reface integral).
+ */
+function aplicaDelta(g: StareGraf, idx: IndexCamere, sch: SchimbareCamere, st: StatGraf): Refusal | null {
+  // Felia memorată de cursor e a indexului de la lotul trecut: o felie refăcută între timp e alt obiect sub aceeași cheie.
+  g.cursor.ultimaCheie = -1
+  g.cursor.ultimaFelie = undefined
+  const S = new Set<number>()
+  const golite = new Set<number>()
+  // (1) Sursele, pe noduri.
+  const cand: Candidat[] = []
+  const surseNod = new Map<number, number[]>()
+  for (const c of sch.noi) {
+    const comp = idx.comp.get(c)
+    if (comp === undefined) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'componenta noua inexistenta', comp: c })
+    const lista: number[] = []
+    const p = sch.prov.get(c)
+    // determinism-ok: candidații se sortează mai jos într-o ordine totală (celule, ancora nouă, ancora veche).
+    if (p !== undefined) for (const [s, n] of p) {
+      if (s < 0) continue // SOL, CER, NEC: nu sunt componente vechi
+      const nod = g.nodComp.get(s)
+      if (nod === undefined) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'sursa veche fara nod', comp: c, sursa: s })
+      lista.push(nod)
+      cand.push({ c, nod, n, ac: comp.ancora, an: g.noduri.get(nod)!.ancora })
+    }
+    surseNod.set(c, lista)
+  }
+  // (2) Moartele.
+  for (const b of sch.bucatiMoarte) {
+    const s = g.nodB[b] ?? -1
+    if (s >= 0) {
+      g.noduri.get(s)!.membri.delete(b)
+      g.nodB[b] = -1
+      golite.add(s)
+    }
+    S.add(b)
+    adaugaInversul(g, b, S)
+  }
+  // (3) Moștenirea.
+  cand.sort((a, b) => b.n - a.n || a.ac - b.ac || a.an - b.an)
+  const dat = new Map<number, number>()
+  const luat = new Set<number>()
+  for (const k of cand) {
+    if (dat.has(k.c) || luat.has(k.nod)) continue
+    dat.set(k.c, k.nod)
+    luat.add(k.nod)
+    st.mosteniri++
+  }
+  for (const c of sch.noi) {
+    if (dat.has(c)) continue
+    dat.set(c, nodNou(g, idx.comp.get(c)!))
+    st.noduriNoi++
+  }
+  for (const id of sch.moarte) g.nodComp.delete(id)
+  for (const c of sch.noi) {
+    const s = dat.get(c)!
+    const n = g.noduri.get(s)!
+    n.comp = c
+    n.ancora = idx.comp.get(c)!.ancora
+    g.nodComp.set(c, s)
+  }
+  // (4) Mutările.
+  const muta = (b: number, s: number): void => {
+    const v = g.nodB[b]!
+    if (v === s) return
+    if (v >= 0) {
+      g.noduri.get(v)!.membri.delete(b)
+      golite.add(v)
+      st.mutate++
+      adaugaInversul(g, b, S)
+    }
+    g.nodB[b] = s
+    g.noduri.get(s)!.membri.add(b)
+    S.add(b)
+  }
+  for (const c of sch.noi) {
+    const s = dat.get(c)!
+    const surse = surseNod.get(c)!
+    if (!surse.includes(s)) {
+      for (const b of idx.comp.get(c)!.bucati) {
+        st.parcurseMostenire++
+        muta(b, s)
+      }
+      continue
+    }
+    for (const s2 of surse) {
+      if (s2 === s) continue
+      const m = g.noduri.get(s2)
+      if (m === undefined) continue
+      // determinism-ok: mutarea fiecărei bucăți nu depinde de ordine (copia, fiindcă `muta` scoate din mulțime).
+      for (const b of [...m.membri]) {
+        st.parcurseMostenire++
+        if (idx.bComp[b] === c) muta(b, s)
+      }
+    }
+  }
+  for (const b of sch.bucatiNascute) {
+    cresteNodB(g, b)
+    const c = idx.bComp[b]!
+    const s = c < 0 ? undefined : g.nodComp.get(c)
+    if (s === undefined) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'bucata nascuta fara componenta cu nod', bucata: b, comp: c })
+    muta(b, s)
+  }
+  for (const b of sch.bucatiRescrise) S.add(b)
+  st.S += S.size
+  // (5) Delta: tot ce era adunat pe S iese, apoi bucățile vii din S intră din nou, pe nodul lor de acum.
+  // determinism-ok: sume întregi exacte (sub 2^53 pe bin și pe muchie); ordinea adunărilor nu contează.
+  for (const b of S) {
+    const r = scadeBucata(g, b)
+    if (r !== null) return r
+  }
+  // determinism-ok: idem.
+  for (const b of S) {
+    if (idx.bVecini[b] === undefined) continue // moartă
+    const c = idx.bComp[b]!
+    if (c < 0 || g.nodB[b] !== g.nodComp.get(c)) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'bucata vie pe alt nod decat al componentei ei', bucata: b, comp: c })
+    const r = adunaBucata(g, idx, b, st)
+    if (r !== null) return r
+  }
+  // (6) Nodurile golite dispar; cele care au rămas cu membri trebuie să fie ale unei componente vii.
+  for (const s of [...golite].sort((a, b) => a - b)) {
+    const n = g.noduri.get(s)
+    if (n === undefined) continue
+    if (n.membri.size > 0) {
+      if (g.nodComp.get(n.comp) !== s) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'nod cu bucati fara componenta', nod: s, comp: n.comp })
+      continue
+    }
+    if (n.nb !== 0 || n.bin.size !== 0 || n.vec.size !== 0 || n.volum !== 0 || n.deschise !== 0 || n.nAer !== 0 || n.nConstr !== 0 || n.nSolMasiv !== 0 || n.nApa !== 0) {
+      return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'nod golit cu sume ramase', nod: s, nb: n.nb, binuri: n.bin.size, muchii: n.vec.size })
+    }
+    if (g.nodComp.get(n.comp) === s) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'componenta pe un nod golit', nod: s, comp: n.comp })
+    g.noduri.delete(s)
+    g.libere.push(s)
+  }
+  return null
+}
+
+/** Construcția integrală, ținută pe index; `urgenta` alege contorul. Un refuz lasă indexul fără graf. */
+function refaIntegral(idx: IndexCamere, rules: Rules, e: IntrareGraf, urgenta: boolean): Outcome<GrafIncremental> {
+  if (urgenta) e.stat.refaceriDeUrgenta++
+  else e.stat.construiri++
+  const o = construiesteStare(idx, rules, e.stat)
+  e.inc = o.ok ? o.value : null
+  if (!o.ok) return o
+  o.value.stampila = stampilaIndexului(idx)
+  return o
+}
+
+/**
+ * Delta grafului incremental pe un lot (t.2b §6): `sincronizeazaLumea` (temperatura.ts) o cheamă după FIECARE
+ * `sincronizeazaCamere`, cu rezultatul ei, ca graful să fie funcție a indexului la fiecare graniță de lot (o lume încărcată
+ * între doi pași îl reface de la zero și trebuie să citească același C' și aceleași sume).
+ *
+ * - Fără graf, la recalculul indexului sau la alte reguli: construcția integrală (`construiri`).
+ * - O ștampilă care nu e `sch.inainte` (un lot pe care graful nu l-a văzut) sau un invariant încălcat în deltă: refacerea
+ *   integrală de URGENȚĂ (`refaceriDeUrgenta`) — nu aruncă, continuă pe graful bun.
+ * - Altfel delta, în O(lot) (plus moștenirea, numărată în `parcurseMostenire`).
+ * Refuz doar dacă nici construcția integrală nu merge (fețele nu se potrivesc cu indexul); indexul rămâne atunci fără graf.
+ */
+export function actualizeazaGraful(idx: IndexCamere, sch: SchimbareCamere, rules: Rules): Outcome<GrafIncremental> {
+  const e = intrarea(idx)
+  const g = e.inc
+  if (g === null || g.reguli !== rules || sch.recalcul) return refaIntegral(idx, rules, e, false)
+  const s = g.stampila
+  const a = sch.inainte
+  if (s.vazute !== a.vazute || s.epoca !== a.epoca || s.epocaFete !== a.epocaFete) return refaIntegral(idx, rules, e, true)
+  if (sch.bucatiMoarte.length > 0 || sch.bucatiNascute.length > 0 || sch.bucatiRescrise.length > 0 || sch.noi.length > 0) {
+    e.stat.loturi++
+    if (aplicaDelta(g, idx, sch, e.stat) !== null) return refaIntegral(idx, rules, e, true)
+  }
+  g.stampila = stampilaIndexului(idx)
+  return accept(g)
+}
+
+/**
+ * Graful incremental al indexului, dacă e la zi: aceeași ștampilă (vazute, epoca, epocaFete) ca indexul și aceleași
+ * reguli. Altfel refuz `INVARIANT_INCALCAT` — pasul de 1 Hz reface atunci integral (`refaGrafulDeUrgenta`).
+ */
+export function grafulIncremental(idx: IndexCamere, rules: Rules): Outcome<GrafIncremental> {
+  const g = GRAFURI.get(idx)?.inc ?? null
+  if (g === null) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'indexul n-are graf incremental' })
+  if (g.reguli !== rules) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'graful incremental e al altor reguli' })
+  const s = g.stampila
+  if (s.vazute !== idx.vazute || s.epoca !== idx.epoca || s.epocaFete !== idx.epocaFete) {
+    return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'graful incremental nu e la zi cu indexul', vazute: s.vazute, vazuteIndex: idx.vazute, epoca: s.epoca, epocaIndex: idx.epoca, epocaFete: s.epocaFete, epocaFeteIndex: idx.epocaFete })
+  }
+  return accept(g)
+}
+
+/** Refacerea integrală de urgență (numărată în `refaceriDeUrgenta`): pasul o cheamă la un graf care nu e la zi. */
+export function refaGrafulDeUrgenta(idx: IndexCamere, rules: Rules): Outcome<GrafIncremental> {
+  return refaIntegral(idx, rules, intrarea(idx), true)
+}
+
+/** Graful incremental construit integral pe `idx`, NEȚINUT pe index (oracolul și compararea de la encode). */
+export function construiesteGrafIncremental(idx: IndexCamere, rules: Rules): Outcome<GrafIncremental> {
+  const o = construiesteStare(idx, rules, statGol())
+  if (!o.ok) return o
+  o.value.stampila = stampilaIndexului(idx)
+  return o
+}
+
+/**
+ * Forma canonică a grafului incremental, independentă de etichete și de sloturi: un rând pe nod, în ordinea ancorelor —
+ * prefixul e rândul t.2a (`formaCanonicaGraf`: ancora, volumul, binurile, Σg, BIG), urmat de contoarele de capacitate
+ * și C' (μ) —, apoi muchiile pe ancore. Verificările LA CITIRE: fiecare nod e al unei componente vii care îl are ca nod,
+ * cu același volum, aceeași ancoră și aceleași fețe deschise; nodurile sunt exact componentele; fiecare muchie are
+ * aceeași sumă din ambele capete (simetria; fețele fiecărui capăt se adună separat). Altfel refuz `INVARIANT_INCALCAT`.
+ */
+export function formaCanonicaGrafIncremental(idx: IndexCamere, g: GrafIncremental): Outcome<string[]> {
+  const mase = g.reguli.termic.mase
+  const anc = new Map<number, number>()
+  const noduri: [number, number, NodTermic][] = []
+  // determinism-ok: rândurile se sortează pe ancoră mai jos.
+  for (const [s, n] of g.noduri) {
+    const c = idx.comp.get(n.comp)
+    if (c === undefined || g.nodComp.get(n.comp) !== s) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'nod fara componenta', nod: s, comp: n.comp })
+    if (n.ancora !== c.ancora || n.volum !== c.volum || n.nb !== n.membri.size) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'nodul nu se potriveste cu componenta', ancora: c.ancora, volum: c.volum, volumNod: n.volum })
+    if (n.deschise !== c.deschise) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'fetele DESCHISA nu sunt fetele deschise ale componentei', ancora: c.ancora, cache: n.deschise, index: c.deschise })
+    anc.set(s, c.ancora)
+    noduri.push([c.ancora, s, n])
+  }
+  if (g.noduri.size !== idx.comp.size || g.nodComp.size !== idx.comp.size) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'nodurile nu sunt componentele indexului', noduri: g.noduri.size, componente: idx.comp.size, nodComp: g.nodComp.size })
+  noduri.sort((a, b) => a[0] - b[0])
+  const out: string[] = []
+  const muchii: [number, number, number][] = []
+  for (const [a, s, n] of noduri) {
+    let sumaG = 0
+    // determinism-ok: binurile se sortează; suma e întreagă exactă.
+    const binuri = [...n.bin.entries()].sort((x, y) => x[0] - y[0])
+    for (const [, v] of binuri) sumaG += v
+    // determinism-ok: muchiile se sortează pe ancore; suma e întreagă exactă.
+    for (const [t, G] of n.vec) {
+      sumaG += G
+      const at = anc.get(t)
+      if (at === undefined) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'muchie spre un nod inexistent', ancora: a, nod: t })
+      const inv = g.noduri.get(t)!.vec.get(s)
+      if (inv !== G) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'muchie asimetrica', ancoraA: a, ancoraB: at, gA: G, gB: inv ?? -1 })
+      if (a < at) muchii.push([a, at, G])
+    }
+    const big = sumaG * g.margineT >= MARGINE_NUMBER ? ' BIG' : ''
+    out.push(`N ${a} v${n.volum} | ${binuri.map(([k, v]) => `${k}:${v}`).join(' ')} | ${sumaG}${big} | a${n.nAer} c${n.nConstr} s${n.nSolMasiv} w${n.nApa} C${capacitateMu(n, mase)}`)
+  }
+  muchii.sort((x, y) => x[0] - y[0] || x[1] - y[1])
+  for (const [a, b, G] of muchii) out.push(`M ${a}-${b} ${G}`)
+  return accept(out)
+}
+
+/**
+ * Compararea „incremental == integral" pe ACELAȘI index (t.2b §6, la fiecare `encode`; 9–15 ms pe M10 [B5 §2.7]): o
+ * deltă greșită fără asimetrie (binuri, C') ar lăsa lumea continuă să integreze pe un graf greșit, iar cea încărcată pe
+ * unul refăcut — M5 ar diverge fără alarmă [IDX-4]. Egale → graful incremental, neatins. Diferite (sau graful lipsește,
+ * nu e la zi, ori refuză la citire) → graful integral îl ÎNLOCUIEȘTE, `refaceriDeUrgenta` crește și se întoarce refuzul
+ * `INVARIANT_INCALCAT` cu prima linie diferită (de jurnalizat); graful indexului e atunci cel bun. Refuzul construcției
+ * integrale (fețele nu se potrivesc cu indexul) lasă indexul fără graf.
+ */
+export function comparaGrafulCuIntegral(idx: IndexCamere, rules: Rules): Outcome<GrafIncremental> {
+  const e = intrarea(idx)
+  const nou = construiesteStare(idx, rules, statGol())
+  if (!nou.ok) {
+    e.inc = null
+    return nou
+  }
+  nou.value.stampila = stampilaIndexului(idx)
+  const fi = formaCanonicaGrafIncremental(idx, nou.value)
+  if (!fi.ok) {
+    e.inc = null
+    return fi
+  }
+  const g = e.inc
+  let diferenta = 'graful incremental lipseste'
+  if (g !== null) {
+    const la = grafulIncremental(idx, rules)
+    const fg = la.ok ? formaCanonicaGrafIncremental(idx, g) : la
+    if (!fg.ok) diferenta = String(fg.params.motiv)
+    else {
+      let i = 0
+      while (i < fg.value.length && i < fi.value.length && fg.value[i] === fi.value[i]) i++
+      if (i === fg.value.length && i === fi.value.length) return accept(g)
+      diferenta = (fg.value[i] ?? '(lipsa)').slice(0, 160)
+    }
+  }
+  e.stat.refaceriDeUrgenta++
+  e.inc = nou.value
+  return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'graful incremental difera de cel integral', linie: diferenta, noduri: nou.value.noduri.size })
 }
 
 // ---------------------------------------------------------------------------------------------

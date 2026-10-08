@@ -114,6 +114,12 @@ function donjon(t: Terrain, x: number, y: number, g: number): void {
   }
 }
 
+/** Contoarele grafului t.2a (`grafTermic`), fără cele ale grafului incremental (t.2b). */
+function t2a(idx: IndexCamere): { refaceri: number; refolosiri: number } {
+  const s = statGraf(idx)
+  return { refaceri: s.refaceri, refolosiri: s.refolosiri }
+}
+
 const cuK = (k: number): Rules => ({ ...R, termic: { ...R.termic, kCelule: k } })
 
 /** Casa 5×5×2 de piatră cu golul ușii NEÎNCHIS: inelul fără (2, 0) pe ambele niveluri, acoperișul întreg. */
@@ -809,33 +815,33 @@ test('TERMIC K05: graful se reface doar cand stampila (epoca, epocaFete, regulil
   const t = w.terrain
   casa(t, wx, wy, g, 5, 2)
   sincronizeazaCamere(w.camere, t)
-  assert.deepEqual(statGraf(w.camere), { refaceri: 0, refolosiri: 0 })
+  assert.deepEqual(t2a(w.camere), { refaceri: 0, refolosiri: 0 })
   graf(w.camere)
   graf(w.camere)
   assert.ok(regimPermanent(w, R, 0).ok)
-  assert.deepEqual(statGraf(w.camere), { refaceri: 1, refolosiri: 2 })
+  assert.deepEqual(t2a(w.camere), { refaceri: 1, refolosiri: 2 })
   // O săpătură într-o carieră deschisă, departe: nicio față, nicio felie.
   assert.ok(dig(t, wx + 10, wy + 10, g).ok)
   sincronizeazaCamere(w.camere, t)
   graf(w.camere)
-  assert.deepEqual(statGraf(w.camere), { refaceri: 1, refolosiri: 3 })
+  assert.deepEqual(t2a(w.camere), { refaceri: 1, refolosiri: 3 })
   // Pământ pe acoperiș, deasupra interiorului: doar fețele (epocaFete).
   assert.ok(fill(t, wx + 2, wy + 2, g + 4, Material.PAMANT).ok)
   sincronizeazaCamere(w.camere, t)
   graf(w.camere)
-  assert.deepEqual(statGraf(w.camere), { refaceri: 2, refolosiri: 3 })
+  assert.deepEqual(t2a(w.camere), { refaceri: 2, refolosiri: 3 })
   // Alte reguli (alt R al pietrei): alt graf.
   const material = [...R.termic.material]
   material[P] = 400
   const alte: Rules = { ...R, termic: { ...R.termic, material } }
   const ga = graf(w.camere, alte)
-  assert.deepEqual(statGraf(w.camere), { refaceri: 3, refolosiri: 3 })
+  assert.deepEqual(t2a(w.camere), { refaceri: 3, refolosiri: 3 })
   assert.notEqual(ga.sumaG[0], graf(w.camere).sumaG[0])
 })
 
 test('TERMIC K05: scenariul standard (0 componente) nu plateste nimic — simularea nu cere graful, iar cerut, e gol', () => {
   const r = runScenario(standardScenario(12345, 3000, 20))
-  assert.deepEqual(statGraf(r.world.camere), { refaceri: 0, refolosiri: 0 })
+  assert.ok(Object.values(statGraf(r.world.camere)).every((v) => v === 0), 'niciun graf cerut: toate contoarele 0')
   const reg = regimPermanent(r.world, R, r.world.tick)
   assert.ok(reg.ok)
   assert.equal(reg.value.t.length, 0)

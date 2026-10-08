@@ -764,11 +764,35 @@ export interface SincronizareCamere {
 }
 
 /**
+ * Ștampila unui index: până unde a citit jurnalul și cele două epoci. Un consumator al sincronizării (graful termic,
+ * temperatura) care a văzut fiecare lot are exact ștampila de DINAINTE a lotului următor (`SchimbareCamere.inainte`).
+ */
+export interface StampilaIndex {
+  readonly vazute: number
+  readonly epoca: number
+  readonly epocaFete: number
+}
+
+export function stampilaIndexului(idx: IndexCamere): StampilaIndex {
+  return { vazute: idx.vazute, epoca: idx.epoca, epocaFete: idx.epocaFete }
+}
+
+/**
  * Contractul t.2b (§3): ce a făcut sincronizarea, cu proveniența. Id-urile vechi (`moarte`, sursele din `prov` și
  * `mase`) sunt sloturi ale indexului de DINAINTE de lot; cele noi, ale indexului de după — valabile până la lotul
  * următor (la recalcul un id nou poate fi chiar al unei surse moarte).
+ *
+ * Bucățile lotului (graful incremental, t.2b §6; termic.ts), toate crescătoare și goale la recalcul: `bucatiMoarte` =
+ * bucățile obiectelor `Felie` VECHI ale feliilor refăcute, `bucatiNascute` = ale celor noi (un slot poate fi în
+ * amândouă: LIFO), `bucatiRescrise` = bucățile care supraviețuiesc lotului (felia lor nu s-a refăcut) și cărora D+
+ * le-a rescris înregistrarea de fețe.
  */
 export interface SchimbareCamere extends SincronizareCamere {
+  /** Ștampila indexului ÎNAINTE de lot (pe NIMIC, cea de acum: nimic nu s-a mișcat). */
+  readonly inainte: StampilaIndex
+  readonly bucatiMoarte: readonly number[]
+  readonly bucatiNascute: readonly number[]
+  readonly bucatiRescrise: readonly number[]
   /** Id-urile vechi care nu mai există, crescător. */
   readonly moarte: readonly number[]
   /** Componentele noi sau refăcute (pe loc ori nu), pe ancoră. */
@@ -785,7 +809,7 @@ export interface SchimbareCamere extends SincronizareCamere {
 
 // Evidența goală scrisă aici, nu importată: la evaluarea modulului, legăturile din fete.ts (importul circular) pot
 // să nu existe încă — antetul din fete.ts.
-const NIMIC: SchimbareCamere = { felii: [], recalcul: false, moarte: [], noi: [], peLoc: [], prov: new Map(), mase: { noi: [], vechi: [], abateri: 0 }, feteSchimbate: [] }
+const NIMIC: Omit<SchimbareCamere, 'inainte'> = { felii: [], recalcul: false, moarte: [], noi: [], peLoc: [], prov: new Map(), mase: { noi: [], vechi: [], abateri: 0 }, feteSchimbate: [], bucatiMoarte: [], bucatiNascute: [], bucatiRescrise: [] }
 
 /**
  * Recalculul cu proveniență (lot > JURNAL_CAP, alt teren): INSTANTANEUL indexului vechi se ia ÎNAINTE de
@@ -795,6 +819,7 @@ const NIMIC: SchimbareCamere = { felii: [], recalcul: false, moarte: [], noi: []
  * materialele vechi, prima apariție; restul după solul natural (NEC). La alt teren nu se suprapune nimic.
  */
 function recalculCuProvenienta(idx: IndexCamere, t: Terrain, suprapune: boolean): SchimbareCamere {
+  const inainte = stampilaIndexului(idx)
   const inst: InstantaneuIndex | null = suprapune ? { felii: new Map(idx.felii), bComp: idx.bComp, comp: new Map(idx.comp), inreg: idx.fete.inreg } : null
   const vechi = new Map<number, number>()
   if (suprapune) {
@@ -818,6 +843,10 @@ function recalculCuProvenienta(idx: IndexCamere, t: Terrain, suprapune: boolean)
     prov: ev.prov,
     mase: ev.mase,
     feteSchimbate: [],
+    inainte,
+    bucatiMoarte: [],
+    bucatiNascute: [],
+    bucatiRescrise: [],
   }
 }
 
@@ -828,7 +857,8 @@ function recalculCuProvenienta(idx: IndexCamere, t: Terrain, suprapune: boolean)
 export function sincronizeazaCamere(idx: IndexCamere, t: Terrain): SchimbareCamere {
   if (idx.teren !== t) return recalculCuProvenienta(idx, t, false)
   const n = t.editari - idx.vazute
-  if (n === 0) return NIMIC
+  if (n === 0) return { ...NIMIC, inainte: stampilaIndexului(idx) }
+  const inainte = stampilaIndexului(idx)
   if (n < 0 || n > JURNAL_CAP) return recalculCuProvenienta(idx, t, n > 0)
   idx.stat.sincronizari++
   const r = cititorCamere(t)
@@ -875,7 +905,9 @@ export function sincronizeazaCamere(idx: IndexCamere, t: Terrain): SchimbareCame
     const ev = evidentaMaselor(idx, r, lot, matVechi, capturaGoala(), rf, [])
     idx.stat.coloaneCitite += r.citite
     idx.stat.coloaneNepromovate += r.nepromovate
-    return { felii: [], recalcul: false, moarte: [], noi: [], peLoc: [], prov: ev.prov, mase: ev.mase, feteSchimbate: ev.feteSchimbate }
+    // Nicio felie refăcută: toate bucățile marcate supraviețuiesc, cu rândurile rescrise.
+    const rescrise = [...rf.marcate].sort((a, b) => a - b)
+    return { felii: [], recalcul: false, moarte: [], noi: [], peLoc: [], prov: ev.prov, mase: ev.mase, feteSchimbate: ev.feteSchimbate, inainte, bucatiMoarte: [], bucatiNascute: [], bucatiRescrise: rescrise }
   }
   const felii = [...murdare].sort((a, b) => a - b)
   // Obiectele `Felie` de dinainte: nu se modifică niciodată (antetul), deci rămân versiunea veche.
@@ -896,7 +928,17 @@ export function sincronizeazaCamere(idx: IndexCamere, t: Terrain): SchimbareCame
   idx.stat.coloaneNepromovate += r.nepromovate
   idx.epoca++
   const noiPeAncora = [...captura.noi].sort((a, b) => idx.comp.get(a)!.ancora - idx.comp.get(b)!.ancora)
-  return { felii, recalcul: false, moarte: [...captura.moarte].sort((a, b) => a - b), noi: noiPeAncora, peLoc: [...captura.peLoc].sort((a, b) => a - b), prov: ev.prov, mase: ev.mase, feteSchimbate: ev.feteSchimbate }
+  // Bucățile lotului (graful incremental): ale feliilor vechi, ale celor noi, și cele marcate de D+ care n-au murit.
+  const bucatiMoarte: number[] = []
+  for (const fv of vechi) if (fv !== undefined) for (const b of fv.bucati) bucatiMoarte.push(b)
+  bucatiMoarte.sort((a, b) => a - b)
+  const bucatiNascute = [...noi].sort((a, b) => a - b)
+  const nascute = new Set(noi)
+  const bucatiRescrise: number[] = []
+  // determinism-ok: lista se sortează imediat.
+  for (const b of rf.marcate) if (!nascute.has(b)) bucatiRescrise.push(b)
+  bucatiRescrise.sort((a, b) => a - b)
+  return { felii, recalcul: false, moarte: [...captura.moarte].sort((a, b) => a - b), noi: noiPeAncora, peLoc: [...captura.peLoc].sort((a, b) => a - b), prov: ev.prov, mase: ev.mase, feteSchimbate: ev.feteSchimbate, inainte, bucatiMoarte, bucatiNascute, bucatiRescrise }
 }
 
 const VECINI_LATERALI = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const

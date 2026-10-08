@@ -43,5 +43,6 @@ export const SUITE = [
   { nume: 'clima', despre: 'S24-27 t.2a: ceasul, clima de afara si a solului, continutul calendar/clima/termic, scanerul (transcendentele), bara de sus', M: (await import('./clima.mjs')).MUTATII },
   { nume: 'termic', despre: 'S24-27 t.2a: graful termic si regimul permanent — K din content, conductanta pe hartie, stampila grafului, muchia o data, lema, 2^53, canalele, calibrarea', M: (await import('./termic.mjs')).MUTATII },
   { nume: 'temperatura', despre: 'S24-27 t.2b: temperatura ca stare — capacitatea (masele, contoarele pe bucata, dSolMasivM, calibrarea, valul de frig), jurnalul cu materialul vechi, proveninta C3 (evidenta maselor, rezerva, recalculul, ordinea consumatorului, pompa)', M: (await import('./temperatura.mjs')).MUTATII },
+  { nume: 'graf', despre: 'S24-27 t.2b: graful termic incremental (ii) — contributia memorata, indexul invers, sumele pe nod (C\'), mostenirea si egalitatile, K05, stampila, citirea, compararea cu integralul, bucatile lotului', M: (await import('./graf.mjs')).MUTATII },
   { nume: 'termic-ecran', despre: 'S24-27 t.2a: temperatura pe ecran — inspectorul (memoria termica, cheia de redesenare, textele), overlay-ul U (ancorele pe piese, densitatea, tenta, ritmul regimului), tasta U', M: (await import('./termic-ecran.mjs')).MUTATII },
 ]
