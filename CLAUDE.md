@@ -24,7 +24,9 @@ Detaliile în PLAN.md §0.5.
 
 ## Reguli dure în `src/sim/`
 
-Impuse mecanic de `tools/check-sim-discipline.mjs`, care rulează în `npm run check` și în CI.
+Impuse mecanic de `tools/check-sim-discipline.mjs`, care rulează în `npm run check` și în CI. Citește
+AST-ul TypeScript (din 08.10): un `/*` dintr-un șir, `Math?.random()` sau `const r = Math.random` nu-l mai
+păcălesc, iar din `Math` sunt voie doar membrii de pe o listă albă.
 
 | Interzis | De ce |
 |---|---|
@@ -90,7 +92,7 @@ Pe Windows, `kinstead.bat` le adună pe toate: dublu-click deschide un meniu, ia
 
 ```bash
 npm run mutatii -- --lista      # ce suite există
-npm run mutatii                 # toate cele 778, ~14,5 min local (01.10, cronometrat, vezi mai jos)
+npm run mutatii                 # toate cele 903, ~23 min (08.10, cronometrat; DOAR în afara Drive-ului, vezi mai jos)
 npm run mutatii -- nevoi        # o singură suită
 npm run mutatii -- nevoi podeaua  # doar mutațiile al căror nume conține „podeaua"
 npm run mutatii -- --izolare    # fiecare test NUMIT de o probă, singur, pe cod nemutat (~2 min)
@@ -139,6 +141,13 @@ potrivește în două locuri editează altul decât cel gândit, rulează testel
 > au rulat suita completă în paralel, fiecare în worktree-ul lui (12 min 30 s sub încărcare): un worktree în
 > afara dosarului sincronizat de Drive nu are problema restaurării; `git -c gc.auto=0 commit` acolo.
 > După t.2a valul 1 al temperaturii (01.10): **778 de probe în ~14,5 min** local, arbore curat la final.
+> După t.2a și recenzia ei (08.10): **903 probe în 23 min 25 s**, arbore curat la final. **A patra oară**, o
+> rulare în dosarul din Drive a lăsat mutații în arbore după „restaurat: da" (`rezervari.ts`,
+> `memorie-incapere.ts`), iar o probă a ieșit fals RATATĂ. **De acum, rularea completă se face doar într-un
+> worktree în afara dosarului sincronizat:** `git worktree add --detach <dosar> HEAD`, apoi
+> `cmd /c mklink /J <dosar>\node_modules node_modules`. La ștergere, joncțiunea se scoate întâi cu
+> `cmd /c rmdir <dosar>\node_modules` — niciodată `rm -rf` peste ea, ar goli `node_modules` din repo —, apoi
+> `git -c gc.auto=0 worktree remove <dosar>`. Cât rulează acolo, în repo se poate lucra.
 >
 > `tools/check-mutatii.mjs` a fost scris ca înlocuitor static și rămâne util, dar nu mai e o
 > compensație: el răspunde la „proba ARE ce să măsoare?", nu la „măsoară?". A doua întrebare

@@ -575,3 +575,70 @@ harnașamentul pe ecran (`bench/ui-fum.mjs`: clicul pe mijlocul golului, ușa di
 care nu se țintește, tenta chiar desenată, „Anulează" pe o jumătate de ușă); dacă se citește — doar pe ecran.
 
 **Pașii tăi:** `npm run viewer`, apoi http://localhost:5175/?joc=nou&seed=7 .
+
+---
+
+## 17. Temperatura — anotimpurile, frigul de sub pământ, unde ar ajunge o încăpere
+
+*(Nou, 08.10. Prima jumătate a temperaturii (S24-27 t.2a): ceasul, clima, solul și temperatura spre care
+merge fiecare încăpere. Nimic nu are încă efect asupra oamenilor sau a hranei — tocmai ca deciziile de mai
+jos să le poți vedea pe ecran înainte să intre în salvări. Codul a trecut printr-o recenzie adversarială;
+ce era greșit pe ecran e reparat.)*
+
+**Ce s-a schimbat pentru tine.**
+- **Bara de sus** arată acum anotimpul, ziua, ora și temperatura de afară: „Toamnă 2/4 · 14:20 · 8° ↘"
+  (săgeata = încotro merge în ora următoare). Peste ea, tooltip-ul spune când vine iarna, în timp real la
+  viteza curentă. Marca KINSTEAD a ieșit din bară (rămâne pe ecranul de titlu) — altfel nu încăpea. Când
+  insignele de alertă nu mai încap, se strâng într-una singură, „3 alerte", cu lista în tooltip.
+- **Inspectorul** (clic pe podeaua unei încăperi) spune unde ar ajunge temperatura și pe ce stă — de
+  exemplu, la o pivniță mare: „~5,4 °C la echilibru (afară 10 °C) · 90% sol (pereți 40%, podea 30%,
+  tavan 20%, ~5 °C) · rest 10%". Golul unei uși lăsate deschise apare separat, „gol deschis".
+- **Harta de temperatură** (tasta **U**, „Temperatură" sub Hărți; I și U se exclud): pe nivelul ales,
+  fiecare încăpere are o nuanță — mai închisă = mai rece, mai deschisă = mai cald, pe o scară care cuprinde și
+  aerul de afară — și cifra ei.
+
+**Pornirea.** `npm run viewer`, apoi http://localhost:5175/?joc=nou&seed=7 . Zidește o casă (Perete,
+dreptunghi 7×7, o ușă în gol, Podea un nivel mai sus ca acoperiș). În casă, sapă în jos o pivniță de 3×3,
+înaltă de 2 m, cu 1 m de pământ între ea și podeaua casei, și o scară până în ea (Sapă, pe niveluri;
+Scară). **Pune un chepeng în gaura scării** (Construiește ▸ Ușă, clic pe gaură) — fără el, casa și pivnița
+sunt o singură încăpere. Apoi **U** și Q/E până la nivelul pivniței; clic pe podeaua ei.
+
+**Cum arată bine:** toamna (cum pornește jocul) pivnița stă pe la 3–5 °C, mult sub casă și sub aerul de
+afară; la 3× iarna vine în ~40 de minute — atunci pivnița e mai caldă decât casa, iar în ziua valului de
+frig casa coboară sub −8 °C; o încăpere cu golul ușii deschis e aproape cât afară. Vara (pivnița sub 5 °C)
+vine abia după ~2 ore la 3×; o verifică testele (93 din 96 de ore). **Cum arată rău:** o pivniță caldă;
+cifre care sar de la o secundă la alta fără să schimbi nimic; o cifră pusă în altă încăpere decât cea pe
+care o descrie; harta U toată de aceeași culoare.
+
+**Decizii — cu implicitul ÎN FAȚĂ** (nu trebuie să faci nimic dacă ești de acord):
+1. **Ziua durează 40.320 de tickuri** (33,6 min la 1×, 11,2 min la 3×) — e chiar ritmul în care dorm
+   oamenii azi, deci nevoile nu se schimbă. **4 zile pe anotimp**, anul = 16 zile (9 h la 1×, 3 h la 3×).
+   **Jocul începe toamna.** Ținta din plan, „prima iarnă în 45–90 de minute", se atinge la 3×; la 1× prima
+   iarnă vine după ~2 ore. (Alternative: start toamna, ziua 3 — iarna la ~56 min la 1×; sau o zi mai
+   scurtă, care schimbă ritmul nevoilor.)
+2. **Sub pământ e frig — regulă de joc.** Solul adânc stă cu 9 °C sub media aerului (3,7 °C la 2 m,
+   ~0,4 °C adânc), ca o pivniță să țină hrana sub 5 °C vara. Fizic, într-o vale din România, ar fi ~10 °C
+   tot anul, iar pivnița n-ar ajuta niciodată sub 5 °C.
+3. **O singură climă pe toată lumea** (o vale din România: media 9,4 °C, iarna −2, vara 20, ±5 °C între zi
+   și noapte) **plus un val de frig pe iarnă** (o zi la −16 °C). Fără val, nimic n-ar coborî sub −6,8 °C,
+   iar o iarnă fără foc n-ar fi niciodată un pericol.
+4. **Ușa izolează puțin** (e „subțire"), grinda e de piatră, iar lemnul (când va exista) nu izolează mai bine
+   decât pământul — DESIGN §5.1.
+5. **O pivniță sub o casă cu ușa lăsată deschisă (golul fără ușă) nu ține:** vara stă sub 5 °C doar ~75% din
+   timp, față de ~97% cu ușa pusă — aerul de afară intră în casă, iar căldura casei coboară prin chepeng.
+   E fizic cinstit și e o lecție de joc („pune ușa"); alternativa ar fi un sol și mai rece.
+6. **Nuanța hărții U ține cont de aerul de afară** (o încăpere mai rece decât afară e mai închisă). Fără asta,
+   pe un nivel cu încăperi apropiate ca temperatură totul ieșea gri. Alternativa: scara doar pe încăperile de
+   la nivel — pivnițele se deosebesc mai bine între ele, dar nu se vede „mai rece decât afară".
+7. **Deocamdată vezi unde AR ajunge temperatura** (echilibrul). Inerția (o casă se încălzește în câteva
+   ore), căldura oamenilor și focul vin în pasul următor; hrana care se strică peste 5 °C, după.
+8. **Insignele de alertă se strâng în „N alerte"** de la a doua insignă pe un ecran sub 1.280 px lățime și de la
+   a patra pe unul mai lat — măsurat în cazul cel mai lung (prognoza hranei, calendarul cel mai lat), a
+   doua insignă ieșea din bară cu până la 53 px la 1.100 px. Alternativa: un al doilea rând de insigne sub
+   resurse.
+
+**De ce nu pot eu.** Cifrele (pivnița sub 5 °C, iarna, ritmul) și harta pe ecran (`bench/ui-fum.mjs`:
+cifrele la zi, excluderea I/U, legenda care nu pierde clicuri, bara de sus cu toate combinațiile de insigne)
+le verifică testele; dacă se citesc și dacă pivnița „se simte" rece — doar pe ecran.
+
+**Pașii tăi:** `npm run viewer`, apoi http://localhost:5175/?joc=nou&seed=7 .

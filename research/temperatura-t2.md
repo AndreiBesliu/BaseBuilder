@@ -115,8 +115,9 @@ material solid cu R ≤ 0. R în miimi de m²K/W pe celula de 1 m:
 | 340 | 850 | 850 | 590 | 590 (e de piatră) | 300 (regulă de joc: ușa e subțire) | 2000 | 500 (regulă: lemnul nu izolează mai bine decât pământul, DESIGN §5.1) |
 
 SUB_BAZA și MARGINE se citesc ca ROCA (în design, nu ca valori ale enumerării). Test: „nicio celulă
-construită nu izolează mai bine decât 1 m de pământ" (R ≤ R(PAMANT)). Gardă la încărcare: `6·g_max < 1`
-(stabilitatea pasului explicit din t.2b), cu probă negativă (R(USA) = 0 → refuz).
+construită nu izolează mai bine decât 1 m de pământ" (R ≤ R(PAMANT)). Gardă la încărcare: `6·g_max(MUCHIE) < 1`
+(pasul explicit din t.2b e doar pe muchiile cameră–cameră; rezervoarele intră implicit) — `R = min(2·R_si_lat,
+R_si_sus + R_si_jos) + R_min`, fără R_se; probă negativă: c_aer 459 refuzat, 460 trece [recenzia t.2a, L2-2].
 
 ### 4.4 Cache-ul de fețe pe bucată (DERIVED, TRANSIENT) [v2: L1-02, L2-1, L4-1, L2-4, L2-5, L2-6, L5-1]
 
@@ -160,7 +161,8 @@ construită nu izolează mai bine decât 1 m de pământ" (R ≤ R(PAMANT)). Gar
   unică. Măsurat pe M10: 7–9 treceri, 0,2–1,8 ms. **Câtul Σ g_r·T_r / Σ g_r fără muchii nu se folosește
   nicăieri** (0/0 pe debaraua din mijlocul unei case cu trei niveluri) [v2: L1-03].
 - Unități: T în Q16 °C; g în Q16 W/K, calculat pe întregi din R în miimi (`g = floor(2^16·1000 / R_total)`).
-  Produsele g·T ≤ 2^40, sumele < 2^50: exacte în Number.
+  Pe nodurile mari, Σg·|T| trece de 2^53 (hub-ul M10 2^53,3, mina 2^55,4): marginea se calculează pe nod la
+  construirea grafului, iar un nod peste 2^52 se rezolvă pe BigInt [corectat la livrare].
 - **Fără oamenii** în t.2a: regimul permanent ar sări când un om intră sau iese (fără inerție). Căldura
   oamenilor vine în t.2b, cu ocuparea reală măsurată (~+0,3 °C într-o casă, nu „+3–6 °C") [v2: L3-3].
 - `canaleTermice(w, comp)` — funcție PURĂ în src/sim, DATE nu text: rânduri {clasă de direcție → destinație
@@ -262,3 +264,29 @@ construită nu izolează mai bine decât 1 m de pământ" (R ≤ R(PAMANT)). Gar
 4. **Viewer** — inspectorul (canale + echilibru, scris pe loc), overlay-ul Temperatură (tentă + etichete DOM),
    bife ui-fum.
 5. DEVLOG, OWNER_VERIFY 17, PLAN, CLAUDE.md.
+## 11. La livrare (08.10.2026): ce s-a schimbat față de v2
+
+După implementare (două valuri) și recenzia codului (4 lentile + verificatori, 19 constatări, 2 MARE):
+
+- **Fețele DESCHISE** (ventilația prin goluri) au invariantul lor: Σ fețelor DESCHISA din cache == `deschise` din
+  index, în agregare și în graf. În canale, golul e **grupul lui**, numit „gol deschis" — nu se contopește cu
+  zidurile (o casă cu golul ușii arăta „pereți 93%", deși 87% era golul).
+- **Regimul se refuză la plafon** (`CAPACITATE_DEPASITA`), nu întoarce cifre neconvergente; convergența e probată
+  pe un hotel de 400 de camere interioare (zeci de treceri).
+- **Memoriile**: contribuția fiecărei bucăți se memorează pe identitatea rândurilor ei, valabilă pe (epoca,
+  reguli) — o editare care schimbă doar fețele reface graful M10 în ~1,3 ms în loc de ~8; un singur regim pe
+  (graf, seed, tick), împărțit de inspector și overlay. **Fără pornire caldă** a lui Gauss–Seidel: punctul fix
+  pe întregi nu e unic (±1–5 Q16), iar regimul trebuie să rămână funcție a stării (migrarea din t.2b).
+- **Inspectorul** recalculează temperatura cel mult o dată pe secundă (aceeași celulă / componentă); la o
+  unire reală, ≤ 1 s se arată valoarea veche.
+- **Overlay-ul U**: scara tentei cuprinde și aerul de afară (altfel 53 din 53 de niveluri M10 ieșeau gri);
+  necunoscutul nu se desenează; cifrele legendei se scriu pe loc (clicurile nu se mai pierd).
+- **Bara de sus**: o singură compunere pură (`baraDeSus`), comparată exact pe ecran; insignele se pliază în
+  „N alerte" (peste 1 sub 1.280 px, peste 3 de la 1.280).
+- **Scanerul de disciplină** citește AST-ul TypeScript: comentariile din trivia, `Math` doar pe o listă albă (fără
+  `random`), `**` și `**=` din AST. Clasele nedeterministe mai vechi pe care nu le prinde (`Date()`, crypto,
+  `for…in`, `Intl`) rămân o decizie separată.
+- **Convenții fixate la implementare**: ziua cea mai rece = ziua anului (14, adică ziua 3 a iernii la 00:00);
+  adâncimea solului se evaluează la centrul celulei (d + 0,5 m); MUCHIE și SINE se decid la citire (o unire
+  departe nu atinge fețele); ADÂNC ia T_sol(d) al capătului (0 pentru tot ce e zidit deasupra solului);
+  rândurile MUCHIE sunt pe celula de dincolo (88.577 pe M10).

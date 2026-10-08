@@ -4785,3 +4785,92 @@ graful pe (`epoca`, `epocaFete`) cu muchia luată o dată (ancora mai mică), `r
 întregi), `canaleTermice`, oracolul grafului; inspectorul (echilibrul + „pe ce stă temperatura", scris pe loc)
 și overlay-ul Temperatură pe tastă proprie. Apoi recenzia codului t.2a, OWNER_VERIFY 17 (deciziile de la §8 ale
 designului), apoi t.2b.
+
+## Task Completed — 08.10.2026 — S24-27 t.2a: ceasul, clima, solul, unde ar ajunge fiecare încăpere
+
+**Prompt:** „continua" (reluarea după pauza din 01.10)
+**Model:** Claude Opus 5.5 (claude-opus-5-5), Claude Code, Ultracode.
+
+**Ce s-a livrat după pauză.**
+- **Valul 2** (2 agenți pe ramuri paralele, 1,19 M; `bcda139`, `c34bc02`, `a68ea7b`):
+  - simularea (`termic.ts`): K legat de content (`termic.kCelule`); conductanța unei fețe din (clasă, fel,
+    compoziție) și R, pe întregi (Q16 W/K); graful termic pe (`epoca`, `epocaFete`, reguli), cu muchia luată
+    o dată (din ancora mai mică) și verificată din ambele capete; `regimPermanent` — Gauss–Seidel pe întregi
+    în ordinea ancorelor, pornit din aerul de afară, rotunjire jumătate departe de zero, BigInt pe nodurile
+    cu Σg·M ≥ 2^52; `canaleTermice` — date, nu text: cel mult 3 rânduri și restul;
+  - măsurat pe M10: 677 de noduri, 1.776 de muchii; un singur nod pe BigInt (hub-ul, Σg·M = 2^53,3);
+    Gauss–Seidel în 6–7 treceri, regimul 0,13–0,30 ms; refacerea completă a grafului ~6 ms (18,4 ms în prima
+    formă: rezolvarea MUCHIE cu decodarea celulei și bucla fierbinte care ieșea din optimizare). Mina de
+    104k m³: un nod, Σg·M = 2^55,4 — un nod sintetic arată că Number fără gardă greșește cu 1 Q16, deci garda
+    e reală;
+  - calibrarea (regimul permanent, seed 12345): pivnița sub casă, cu 1 m de pământ deasupra și chepeng, stă
+    vara sub 5 °C **93 din 96 de ore** (96,9%); cu 2 m, 100%. Casa singură, iarna: 7 ore sub −8 °C, toate în
+    ziua valului; fără val, niciodată;
+  - viewer: inspectorul (echilibrul și „pe ce stă temperatura", scris pe loc), overlay-ul Temperatură pe
+    tasta U (tentă pe luminanță și etichete DOM pe bucata 4-conexă de la nivel, ancorată la celula cea mai
+    apropiată de centroid; 3.727 de etichete pe M10, 0 în altă componentă), I și U se exclud. Inspectorul pe
+    hub: 2,7 ms p50; overlay-ul la secundă: 1,0 ms p50.
+- **Recenzia codului** (4 lentile — fețele, clima, graful, ecranul — și verificatori, 2,46 M): **19 constatări,
+  2 MARE după verificare**:
+  - **L1-1** ventilația (fețele DESCHISE) n-avea nicio probă: DESCHISĂ → EXT trecea toată suita și toate
+    mutațiile;
+  - **L4-2** inspectorul refăcea graful de 4 ori pe secundă cât timp pionii sapă (cadre de 16–20 ms pe M10;
+    designul: cel mult o dată pe secundă);
+  - celelalte: scanerul de disciplină se ocolea trivial (`Math?.random()`, un `/*` dintr-un șir orbea restul
+    fișierului); garda de stabilitate era calculată pe fața EXT, nu pe MUCHIE (un content valid ar fi dat un
+    pas instabil în t.2b); golul ușii era numit „pereți"; `canaleTermice` arunca pe un content valid (gDeschis
+    0, un șopron); convergența nu era probată peste 9 treceri; bara de sus nu era testată (testul îi copia
+    compunerea); tenta lui U ieșea aproape mereu gri; cifrele lui U și excluderea I/U nu le proba nimic
+    (mutanții treceau ui-fum 59/59); a doua insignă scotea bara din ecran la 1.100 px; plase lipsă pe
+    convențiile fețelor, pe marginea 2^52 și pe muchia văzută dintr-un singur capăt.
+- **Remedierea** (2 agenți pe ramuri paralele, 1,04 M; `11d56cb`, `1a4f76a`, `d497772`, `8bb2fdc`, `22e4b16`,
+  `2314b02`), toate cele 19 în forma măsurată de verificator:
+  - invariantul Σ DESCHISA == `deschise` în agregare și în graf; în canale, golul e grupul lui („gol deschis");
+  - scanerul pe AST-ul TypeScript (comentariile din trivia, `Math` pe o listă albă fără `random`, `**` și
+    `**=` din AST): o rulare 0,5 → 0,9 s;
+  - garda `6·g_max < 1` pe MUCHIE: `min(2·R_si_lat, R_si_sus + R_si_jos) + R_min`, fără R_se, cu un oracol în
+    ambele direcții pe grila de content;
+  - memoria contribuției pe bucată (pe identitatea rândurilor ei, valabilă pe (epoca, reguli)): o editare care
+    schimbă doar fețele reface graful M10 în **1,25 ms p50, nu 8,25**; un regim pe (graf, seed, tick, plafon),
+    împărțit de inspector și overlay; regimul neconvergent se refuză (`CAPACITATE_DEPASITA`), probat pe un
+    hotel de 400 de camere interioare;
+  - inspectorul recalculează cel mult o dată pe secundă, pe aceeași celulă sau pe aceeași componentă din
+    aceeași epocă (după o reconstrucție, două case își schimbă id-urile între ele — măsurat);
+  - `baraDeSus` pură, comparată exact pe ecran; insignele se pliază în „N alerte" (prag măsurat: peste 1 sub
+    1.280 px, peste 3 de la 1.280);
+  - tenta cu aerul de afară în scară, necunoscutul nedesenat (alfa 0), valorile mutate prin celule când o
+    geometrie nouă rotește id-urile, cifrele legendei scrise pe loc; patru bife ui-fum noi, fiecare cu
+    mutantul ei roșu;
+  - plus o cursă preexistentă între `fixture.test.ts` și `discipline.test.ts` (ENOENT o rulare din șase,
+    `cddb941`).
+- **Porți pe `main`:** 969 de teste, **903/903 de probe prinse** (23 min 25 s, într-un worktree în afara
+  Drive-ului, arbore curat la final), hash `52b16ed2` neschimbat (simularea nu citește temperaturile), ui-fum
+  62/62.
+
+**DriveFS, a patra oară.** O rulare a mutațiilor în repo-ul din Drive a lăsat mutații în `rezervari.ts` și
+`memorie-incapere.ts` după „restaurat: da", iar o probă a ieșit fals RATATĂ. Reluată într-un worktree în afara
+Drive-ului: 850/850, arbore curat. De acum, rularea completă se face doar acolo (CLAUDE.md, „Mutațiile").
+
+**Cost t.2 până aici:** harta 1,69 M + panoul 4,30 M + valul 1 1,06 M + valul 2 1,19 M + recenzia 2,46 M +
+remedierea 1,04 M = **11,74 M**.
+
+**Registru (nefăcut, cu motiv):**
+- refacerea grafului la EPOCĂ NOUĂ costă tot ~8–9 ms pe M10 — cazul obișnuit când pionii sapă lângă încăperi.
+  Pasul următor: contribuția să supraviețuiască epocii, validată prin identitatea obiectului Felie de dincolo;
+  cere o fixtură în care un slot refolosit schimbă componenta;
+- **fără pornire caldă** a lui Gauss–Seidel: punctul fix pe întregi nu e unic (±1–5 Q16), iar regimul trebuie
+  să rămână funcție a stării (migrarea din t.2b);
+- cu U aprins, până la 2 refaceri de graf pe secundă (două ceasuri defazate) — se rezolvă cu graful incremental
+  din t.2b;
+- politica scanerului pentru clasele nedeterministe pe care tot nu le prinde (`Date()` fără `new`, crypto,
+  `Promise.*`, `queueMicrotask`, `Intl` / `toLocale*`, `for…in`) — decizie separată, cu tabelul din CLAUDE.md;
+- o singură climă pe toată lumea; clima pe sit vine cu macro-harta, a cărei pantă e greșită pe HEAD
+  (`macro.ts:89-90`: comentariul spune 6,5 °C/km, codul face 6,5 °C la 100 m) — se repară atunci;
+- pivnița cu golul ușii neînchis: 75% din vară sub 5 °C, nu 85% (OWNER_VERIFY 17, decizia 5);
+- t.2b: inerția (starea T și restul PERSISTED pe ancoră), forma ψ sau delta, proveniența a2 ponderată pe
+  capacitate, `sincronizeazaLumea` ca punct unic, schema 8 cu migrare prin `regimPermanent`, scenele M5,
+  căldura oamenilor — designul §9.
+
+**La owner:** OWNER_VERIFY 17 — opt decizii, cu implicitul în față și proba pe ecran.
+
+**Ce urmează:** t.2b (inerția, starea salvată, schema 8), apoi t.3 (hrana sub 5 °C).
