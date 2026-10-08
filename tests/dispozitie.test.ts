@@ -331,6 +331,8 @@ test('migrarea 5 -> 6 pune baza din content, nu zero', () => {
   delete ag.gandPanaLa
   delete ag.ganduriSloturi
   delete brut.data.plecatiTotal
+  // Si tot ce a aparut dupa schema 5: blocul temperaturii (schema 8) e refuzat intr-o salvare mai veche.
+  delete brut.data.temperaturi
 
   const out = decode(JSON.stringify(brut), R)
   assert.ok(out.ok, `migrarea 5 -> 6 a picat: ${JSON.stringify(out)}`)

@@ -613,6 +613,20 @@ test('PROVENIENTA prin COMENZI (SAV-7): usa dintre doua pivnite deschisa si zidi
   assert.ok(statTermic(w).loturi >= 20, JSON.stringify(statTermic(w)))
 })
 
+test('PROVENIENTA prin COMENZI, lot DOAR-FETE (§3, IDX-2): comanda fill PIATRA pe apa de sub podeaua casei de pe iaz — T-ul consumatorului (w.temperatura) == oracolul: apa iese la T_sol, piatra apare la T-ul rezultat', () => {
+  const w = createWorld(4242)
+  const t = w.terrain
+  const x0 = 244 * 32 + 10, y0 = 244 * 32
+  for (let z = -39; z <= -38; z++) for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) if (dx === 0 || dy === 0 || dx === 4 || dy === 4) ok(fill(t, x0 + dx, y0 + dy, z, P), 'perete')
+  for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) ok(fill(t, x0 + dx, y0 + dy, -37, P), 'acoperis')
+  const b = new Banca(w, cutie(x0, y0, -40, x0 + 4, y0 + 4, -37), { lume: true })
+  const epoca = w.camere.epoca
+  const doarFete = statTermic(w).loturiDoarFete
+  b.lot(() => ok(applyCommand(w, { kind: 'fill', wx: x0 + 2, wy: y0 + 2, z: -40, material: P }, R), 'fill pe apa'), 'fill pe apa')
+  assert.equal(w.camere.epoca, epoca, 'fixtura: lotul nu reface nicio felie')
+  assert.equal(statTermic(w).loturiDoarFete, doarFete + 1, 'un lot doar-fete prin punctul unic')
+})
+
 // --- poarta pompei (§9) ------------------------------------------------------------------------
 
 /** N cicluri săpat → astupat pe ACELAȘI tick, în podeaua casei 5×5×2; T-ul (cu restul) după fiecare ciclu. */

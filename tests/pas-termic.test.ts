@@ -252,11 +252,12 @@ test('PAS oamenii dupa lot (B4 F5): un zid ridicat in tickul pasului desparte ca
   const [x, y, z] = lumi[0]!.rep.casa!
   assert.ok(applyCommand(lumi[0]!.w, { kind: 'spawnAgent', x: (x - 2) * 1000 + 500, y: y * 1000 + 500, z, faction: Faction.ASEZARE }, R).ok)
   for (const s of lumi) {
-    laEchilibru(s.w, 100 * TPS - 1)
-    // Zidul (pe x, prin toată casa) intră în lotul tickului care pășește: ca o editare a unui pion din `stepAgents`.
+    laEchilibru(s.w, 100 * TPS)
+    // Zidul (pe x, prin toată casa) intră în lotul tickului care pășește (w.tick % tps === 0): ca o editare a unui pion
+    // din `stepAgents`, sincronizată la capătul tickului, înaintea pasului.
     for (let dy = 1; dy <= 7; dy++) for (const zz of [z, z + 1]) assert.ok(fill(s.w.terrain, x, s.y0 + dy, zz, Material.PIATRA_CONSTRUITA).ok)
     tick(s.w, R)
-    tick(s.w, R)
+    assert.equal(statTermic(s.w).pasi, 1, 'fixtura: tickul lotului e un tick de pas')
     faraInvarianti(s.w, 'zidul')
   }
   const [cu, fara] = lumi.map((s) => s.w)

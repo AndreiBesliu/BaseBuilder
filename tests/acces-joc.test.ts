@@ -657,12 +657,15 @@ test('K05: accesul din simulare (memoria, sigilarea, coborarea) inunda cel mult 
 })
 
 test('hash de referinta al accesului vertical: casa cu doua etaje dupa 12.000 de tickuri', () => {
-  // Scenariul standard e orb la accesul vertical (52b16ed2 in toate formele: zideste doar la
+  // Scenariul standard e orb la accesul vertical (in toate formele lui: zideste doar la
   // sol, unde alegerea celulei nu se schimba). Asta e poarta lui: o schimbare a regulii de acces
   // muta hash-ul O DATA, cu motiv scris; altfel e o regresie.
+  //
+  // 3550c897 -> fe597a27 (S24-27 t.2b, schema 8): hash-ul cuprinde acum temperatura casei (o componenta
+  // deschisa, cu pionii inauntru la 236 din 600 de pasi, B1/B4) — se muta si la o recalibrare termica.
   const { w } = santier(12345, casaCuEtaj(true))
   advance(w, 12000, R)
-  assert.equal(hashWorld(w), '3550c897')
+  assert.equal(hashWorld(w), 'fe597a27')
 })
 
 // ---------------------------------------------------------------------------

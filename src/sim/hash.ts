@@ -13,6 +13,7 @@
 import type { World } from './state.ts'
 import { CATEGORII, NEVOI, RNG_STREAMS } from './state.ts'
 import { runCount } from './terrain/chunk.ts'
+import { listaComponente } from './camere.ts'
 
 const FNV_OFFSET = 0x811c9dc5
 const FNV_PRIME = 0x01000193
@@ -211,6 +212,19 @@ export function hashWorld(w: World): string {
     h.u32(key).i32(v.zBaseM).u32(runs)
     h.bytes(v.runMaterial, runs)
     h.bytes(v.runLength, runs)
+  }
+
+  // Temperatura (t.2b §7): T si rest pe ANCORA componentei, in ordinea ancorelor — niciodata pe slot (id-urile nu
+  // supravietuiesc unei incarcari) si niciodata `u32(ancora)` direct (orice ancora trece de 2^32: B1). Ancora si restul
+  // pe hi/lo; T ca i32 (salvarea accepta doar [−2^31, 2^31)).
+  const temp = w.temperatura.slot
+  const lista = listaComponente(w.camere)
+  h.u32(lista.length)
+  for (const c of lista) {
+    const r = temp.rest[c.id] ?? 0
+    h.u32(Math.floor(c.ancora / 4294967296)).u32(c.ancora % 4294967296)
+    h.i32(temp.t[c.id] ?? 0)
+    h.u32(Math.floor(r / 4294967296)).u32(r % 4294967296)
   }
 
   return h.hex()

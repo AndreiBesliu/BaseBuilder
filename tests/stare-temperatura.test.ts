@@ -174,11 +174,27 @@ test('STARE comenzile trec prin punctul unic: dig si fill pe o casa — fara inv
   assert.ok(statTermic(w).loturi >= 12, JSON.stringify(statTermic(w)))
 })
 
-test('STARE incarcarea (commit-ul 4: salvarea n-are inca T): lumea incarcata porneste de la echilibru — fiecare componenta are T == regimul permanent la tickul salvarii, rest 0, fara invarianti la tickurile urmatoare', () => {
+test('STARE incarcarea (schema 8): lumea incarcata are exact (T, rest) ale lumii continue, pe ancora; fara invarianti la tickurile urmatoare', () => {
   const s = casaTermica({ k: 1, etaj: true })
   const w = laEchilibru(s.w, 300000)
   for (let i = 0; i < 100; i++) tick(w, R)
   const d = bun(decode(encode(w), R), 'decode')
+  assert.deepEqual(tPeAncora(d), tPeAncora(w))
+  assert.ok(tPeAncora(w).some((l) => !l.endsWith(':0')), 'fixtura: restul nenul la salvare')
+  assert.ok(verificaStampila(d).ok)
+  assert.equal(statTermic(d).restNormalizat, 0, 'aceeasi amprenta: validare stricta, nimic normalizat')
+  for (let i = 0; i < 40; i++) tick(d, R)
+  faraInvarianti(d, 'dupa incarcare')
+})
+
+test('STARE migrarea (schema 7 -> 8, §7): o salvare fara blocul temperaturii porneste de la echilibru — fiecare componenta are T == regimul permanent la tickul salvarii, rest 0, fara invarianti la tickurile urmatoare', () => {
+  const s = casaTermica({ k: 1, etaj: true })
+  const w = laEchilibru(s.w, 300000)
+  for (let i = 0; i < 100; i++) tick(w, R)
+  const brut = JSON.parse(encode(w)) as { schema: number; data: Record<string, unknown> }
+  brut.schema = 7
+  delete brut.data.temperaturi
+  const d = bun(decode(JSON.stringify(brut), R), 'decode')
   const reg = bun(regimPermanent(d, R, d.tick, PLAFON_ECHILIBRU), 'regim')
   assert.equal(reg.graf.n, 3)
   for (let i = 0; i < reg.graf.n; i++) {

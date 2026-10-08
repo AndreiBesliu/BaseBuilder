@@ -36,7 +36,7 @@ import { makeZoneStore, reindexeazaZone } from './zone.ts'
 import type { ZoneStore } from './zone.ts'
 import { memorieSprijin } from './stabilitate.ts'
 import { memorieAcces } from './acces.ts'
-import { incarcaTemperaturi, temperaturaLaEchilibru, temperaturaLaZi } from './temperatura.ts'
+import { blocTemperaturi, incarcaTemperaturi, temperaturaLaEchilibru, temperaturaLaZi } from './temperatura.ts'
 
 /** Creste cand se schimba FORMATUL de fisier, independent de schema de stare. */
 export const SAVE_BUILD = 1
@@ -72,6 +72,11 @@ function cerIndexLaZi(w: World): void {
 
 export function encode(w: World): string {
   cerIndexLaZi(w)
+  // Temperatura (t.2b §7): blocul pe ancora, cu amprenta C'; graful incremental comparat cu cel integral (la diferenta
+  // e inlocuit si numarat, salvarea continua). T sau rest in afara domeniului e o stare pe care decode ar refuza-o: aici
+  // se arunca, nu se scrie.
+  const temp = blocTemperaturi(w)
+  if (!temp.ok) throw new Error(`encode: temperatura nu se poate salva (${String(temp.params.motiv ?? temp.params.camp ?? temp.reason)})`)
   const a = w.agents
   const rng: Record<string, RngState> = {}
   for (const name of RNG_STREAMS) rng[name] = w.rng[name]
@@ -248,6 +253,8 @@ export function encode(w: World): string {
           alive: Array.from(zc.alive.subarray(0, zc.count)),
         },
       },
+      // Temperatura (schema 8): T si rest pe ANCORA componentei, strict crescator; amprenta vectorului C'.
+      temperaturi: temp.value,
     },
   }
   return JSON.stringify(env)
@@ -260,6 +267,11 @@ const STORE_GOL = { count: 0, capacity: 0, id: [], kind: [], wx: [], wy: [], z: 
  * are o fixtura golden in `tests/fixtures/`, capturata INAINTE de schimbare.
  */
 const MIGRATIONS: Record<number, (data: Record<string, unknown>) => Record<string, unknown>> = {
+  // 7 -> 8 (S24-27 t.2b): temperatura incaperilor. Identitate: T-ul unei lumi fara istorie termica se calculeaza in
+  // `decode` (echilibrul, pe indexul si graful reconstruite acolo — JSON-ul n-are teren de citit). Fara treapta asta,
+  // bucla de migrari refuza ORICE salvare veche (B1: 4/4 fixturi refuzate). Decizia „migreaza" vine din `env.schema < 8`,
+  // nu dintr-un marcaj in JSON: o salvare de schema 8 fara bloc se refuza, nu migreaza tacut.
+  7: (d) => d,
   // 6 -> 7 (S20-23, taietura 2): constructia. Un save de schema 6 n-are nicio
   // piesa (nu existau), deci fiecare desemnare din el primeste SANTINELA
   // `Piesa.NICIUNA` — si faptul ca santinela e chiar 0 nu e o coincidenta
@@ -615,7 +627,10 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
   // Indexul incaperilor e DERIVED: reconstruit ACUM, nu la primul tick (lumea incarcata trebuie sa aiba, inainte de
   // orice, exact indexul lumii continue, la zi in afara tickului), cu K-ul si dSolMasiv ai regulilor de ACUM; graful
   // incremental construit integral; starea temperaturii aliniata la el (temperatura.ts, `incarcaTemperaturi`).
-  const lumeInc = incarcaTemperaturi(terrain, rules)
+  // Blocul temperaturii: obligatoriu de la schema 8, interzis inainte (o salvare veche nu poate avea T pe ancora).
+  if (env.schema < 8 && data.temperaturi !== undefined) return refuse(Reason.VALOARE_INVALIDA, { camp: 'temperaturi', motiv: 'bloc de temperatura intr-o salvare de schema < 8', schema: env.schema })
+  if (env.schema >= 8 && data.temperaturi === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'temperaturi' })
+  const lumeInc = incarcaTemperaturi(terrain, rules, env.schema >= 8 ? data.temperaturi : undefined)
   if (!lumeInc.ok) return lumeInc
 
   const w: World = {
@@ -643,9 +658,12 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
     temperatura: lumeInc.value.temperatura,
     plecatiTotal: (data.plecatiTotal as number | undefined) ?? 0,
   }
-  // Temperatura: o salvare de dinainte de t.2b n-o are, deci lumea porneste de la echilibru (t.2b §7).
-  const echilibru = temperaturaLaEchilibru(w, rules, w.tick)
-  if (!echilibru.ok) return echilibru
+  // Migrarea temperaturii (t.2b §7): o salvare de dinainte de schema 8 n-are T, deci lumea porneste de la echilibru — la
+  // neconvergenta, ultima iterata si contorul (temperatura.ts); un graf refuzat refuza incarcarea.
+  if (env.schema < 8) {
+    const echilibru = temperaturaLaEchilibru(w, rules, w.tick)
+    if (!echilibru.ok) return echilibru
+  }
   const construit = valideazaJoburiDeConstruit(w, rules)
   if (!construit.ok) return construit
   // Rezervarile sunt DERIVED din joburi. Ce nu se poate reconstrui e un save

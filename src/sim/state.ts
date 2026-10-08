@@ -41,8 +41,12 @@ import type { StareTemperatura } from './temperatura.ts'
  *       categorie, deci `prioPersonala` isi schimba pasul)
  *   5 — S16-19 taietura 3: nevoi (foame, odihna) si racirea lor
  *   6 — S16-19 taietura 3: dispozitia, gandurile de eveniment, plecatii
+ *   7 — S20-23 taietura 2: constructia (piesa pe desemnare, CATEGORII 3)
+ *   8 — S24-27 t.2b: temperatura incaperilor — blocul `temperaturi` {ancora, t, rest,
+ *       amprenta}, pe ANCORA componentei (id-urile nu supravietuiesc unei incarcari);
+ *       o salvare de schema 7 porneste de la echilibru (temperatura.ts)
  */
-export const SCHEMA_VERSION = 7
+export const SCHEMA_VERSION = 8
 
 /**
  * Categoriile de munca. Lista de STRUCTURA (ce feluri de munca exista), nu numar

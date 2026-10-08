@@ -69,13 +69,14 @@
  */
 
 import type { Rules } from './content.ts'
-import type { IndexCamere, SchimbareCamere } from './camere.ts'
-import { componentaLa, construiesteCamere, sincronizeazaCamere } from './camere.ts'
+import type { Componenta, IndexCamere, SchimbareCamere } from './camere.ts'
+import { componentaLa, construiesteCamere, listaComponente, sincronizeazaCamere } from './camere.ts'
 import type { ContoareMasa, MaseComponentaNoua, MaseComponentaVeche, MasaPeAdancime } from './fete.ts'
 import { capacitateMu, PROV_CER, PROV_NEC_CER, PROV_NEC_SOL0, PROV_SOL0 } from './fete.ts'
 import { tAfara, tSol } from './clima.ts'
 import type { GrafIncremental, NodTermic } from './termic.ts'
-import { actualizeazaGraful, BIN_AFARA, grafTermic, grafulIncremental, refaGrafulDeUrgenta, rezolvaRegim, temperaturiRezervoare } from './termic.ts'
+import { actualizeazaGraful, BIN_AFARA, comparaGrafulCuIntegral, grafTermic, grafulIncremental, refaGrafulDeUrgenta, rezolvaRegim, temperaturiRezervoare } from './termic.ts'
+import { Hasher } from './hash.ts'
 import { cellOf } from './drumuri.ts'
 import type { World } from './state.ts'
 import type { Terrain } from './terrain/terrain.ts'
@@ -370,12 +371,18 @@ export interface StatTermic {
   echilibre: number
   /** Dintre ele, oprite la plafon: ultima iterată, nu echilibrul (pasul o relaxează). */
   echilibreNeconvergente: number
+  /** Salvări la care graful incremental a diferit de cel integral (înlocuit; IDX-4) și prima linie diferită (jurnalul). */
+  grafDiferitLaSalvare: number
+  ultimaDiferentaGraf: string
+  /** La încărcare: componente cu restul pus la 0 fiindcă amprenta C' a salvării nu e a lumii (alt content sau cod; SAV-2). */
+  restNormalizat: number
 }
 
 function statGol(): StatTermic {
   return {
     pasi: 0, pasiBigInt: 0, noduriBigInt: 0, oameniCautati: 0, adunariOameni: 0, rezervoareCitite: 0, invarianti: 0, ultimulInvariant: '',
     loturi: 0, loturiDoarFete: 0, rezerva: 0, provenienteBigInt: 0, surseVechi: 0, surseSol: 0, surseCer: 0, surseNec: 0, echilibre: 0, echilibreNeconvergente: 0,
+    grafDiferitLaSalvare: 0, ultimaDiferentaGraf: '', restNormalizat: 0,
   }
 }
 
@@ -614,7 +621,81 @@ function completeaza(w: World, rules: Rules): void {
 // încărcarea (§7)
 // ---------------------------------------------------------------------------
 
-/** Indexul, graful și starea (fără T încă) ale unei lumi încărcate. */
+/**
+ * Blocul `temperaturi` al salvării (schema 8, §7): pe ANCORA componentei (id-urile nu supraviețuiesc unei încărcări: B1),
+ * strict crescător; T (Q16 °C) și rest (μ·Q16). `amprenta` = FNV u32 peste VECTORUL C' (n, apoi C' hi/lo în ordinea
+ * ancorelor): o schimbare de content SAU de cod a capacității o mută (verif-SAV-2). Nu intră în hash (e a regulilor).
+ */
+export interface BlocTemperaturi {
+  readonly ancora: number[]
+  readonly t: number[]
+  readonly rest: number[]
+  readonly amprenta: number
+}
+
+/** T acceptat pe disc: întreg sigur în [−2^31, 2^31) (hash-ul îl scrie ca i32; SAV-4). */
+const T_MIN = -2147483648
+const T_LIMITA = 2147483648
+const DOI_LA_32 = 4294967296
+
+/** FNV u32 peste vectorul C' (§7, verif-SAV-2): n, apoi C' hi/lo, în ordinea dată (a ancorelor). */
+export function amprentaCapacitatii(cap: readonly number[]): number {
+  const h = new Hasher().u32(cap.length)
+  for (const c of cap) h.u32(Math.floor(c / DOI_LA_32)).u32(c % DOI_LA_32)
+  return h.value()
+}
+
+/** C' (μ) al fiecărei componente din `lista`, din nodul ei din graful incremental. */
+function capacitatiPeAncora(g: GrafIncremental, lista: readonly Componenta[], rules: Rules): number[] | Refusal {
+  const out: number[] = []
+  for (const c of lista) {
+    const et = g.nodComp.get(c.id)
+    const nod = et === undefined ? undefined : g.noduri.get(et)
+    if (nod === undefined) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'componenta fara nod in graf', ancora: c.ancora })
+    out.push(capacitateMu(nod, rules.termic.mase))
+  }
+  return out
+}
+
+/**
+ * Blocul de scris la salvare (§7). Întâi: temperatura e la zi (ștampila, T în ambele direcții), iar graful incremental se
+ * compară cu cel INTEGRAL (IDX-4: o deltă greșită fără asimetrie — un bin, un C' — ar lăsa lumea continuă pe alt graf decât
+ * cea încărcată); la diferență, integralul îl înlocuiește, se numără (`grafDiferitLaSalvare`) și prima linie diferită intră
+ * în jurnal (`ultimaDiferentaGraf`), iar salvarea continuă pe graful bun. Apoi, pe fiecare componentă, în ordinea
+ * ancorelor: T întreg sigur în [−2^31, 2^31), rest întreg sigur în [0, C') — altfel refuz (`encode` aruncă).
+ */
+export function blocTemperaturi(w: World): Outcome<BlocTemperaturi> {
+  const z = temperaturaLaZi(w)
+  if (!z.ok) return z
+  const st = w.temperatura
+  const rules = st.reguli
+  const cmp = comparaGrafulCuIntegral(w.camere, rules)
+  if (!cmp.ok) {
+    if (cmp.params.motiv !== 'graful incremental difera de cel integral') return cmp
+    st.stat.grafDiferitLaSalvare++
+    st.stat.ultimaDiferentaGraf = String(cmp.params.linie)
+  }
+  const go = grafulIncremental(w.camere, rules)
+  if (!go.ok) return go
+  const lista = listaComponente(w.camere)
+  const cap = capacitatiPeAncora(go.value, lista, rules)
+  if ('reason' in cap) return cap
+  const sl = st.slot
+  const b: BlocTemperaturi = { ancora: [], t: [], rest: [], amprenta: amprentaCapacitatii(cap) }
+  for (let i = 0; i < lista.length; i++) {
+    const c = lista[i]!
+    const t = sl.t[c.id]!
+    const r = sl.rest[c.id]!
+    if (!Number.isSafeInteger(t) || t < T_MIN || t >= T_LIMITA) return refuse(Reason.VALOARE_INVALIDA, { camp: 'temperaturi.t', ancora: c.ancora, valoare: t })
+    if (!Number.isSafeInteger(r) || r < 0 || r >= cap[i]!) return refuse(Reason.VALOARE_INVALIDA, { camp: 'temperaturi.rest', ancora: c.ancora, valoare: r, capacitate: cap[i]! })
+    b.ancora.push(c.ancora)
+    b.t.push(t)
+    b.rest.push(r)
+  }
+  return accept(b)
+}
+
+/** Indexul, graful și starea ale unei lumi încărcate. */
 export interface LumeIncarcata {
   readonly camere: IndexCamere
   readonly temperatura: StareTemperatura
@@ -622,15 +703,59 @@ export interface LumeIncarcata {
 
 /**
  * Indexul unei lumi încărcate, construit de la zero pe terenul ei (DERIVED), cu graful incremental construit integral și
- * starea temperaturii aliniată la el, încă FĂRĂ T: `decode` o umple din salvare sau, la o salvare veche, de la echilibru
- * (`temperaturaLaEchilibru`). Refuz dacă graful refuză (fețele nu se potrivesc cu indexul: un defect, nu o salvare
- * stricată). Doar save.ts (testul AST, §2).
+ * starea temperaturii aliniată la el; T din `bloc` (schema 8) sau, fără bloc (o salvare de dinainte de t.2b), încă fără
+ * T — `decode` o umple atunci de la echilibru (`temperaturaLaEchilibru`). Doar save.ts (testul AST, §2).
+ *
+ * Validarea blocului (§7, B1, SAV-4): ancore întregi sigure, strict crescătoare, fiecare a unei componente
+ * (`ENTITATE_INEXISTENTA`), câte una pe componentă (`LIPSA_MATERIAL`); T întreg sigur în [−2^31, 2^31), rest întreg sigur
+ * ≥ 0 (`VALOARE_INVALIDA`). Apoi AMPRENTA C' (SAV-2): egală → validare STRICTĂ (rest ≥ C' e o salvare coruptă); diferită
+ * (alt content sau alt cod al capacității) → rest = 0 pe TOATE componentele, T rămâne, contorul `restNormalizat` = n —
+ * aceeași regulă ca în lumea continuă la o masă schimbată cu aceleași celule (C3 pe o componentă fără celule schimbate).
+ * Refuz și dacă graful refuză (fețele nu se potrivesc cu indexul: un defect, nu o salvare stricată).
  */
-export function incarcaTemperaturi(terrain: Terrain, rules: Rules): Outcome<LumeIncarcata> {
+export function incarcaTemperaturi(terrain: Terrain, rules: Rules, bloc?: unknown): Outcome<LumeIncarcata> {
   const camere = construiesteCamere(terrain, rules.termic.kCelule, rules.termic.dSolMasivM)
   const go = actualizeazaGraful(camere, sincronizeazaCamere(camere, terrain), rules)
   if (!go.ok) return go
-  return accept({ camere, temperatura: { slot: temperaturiGoale(camere.cUrmator), stampila: stampilaDe(camere), reguli: rules, pragBigInt: PRAG_NUMBER, stat: statGol() } })
+  const temperatura: StareTemperatura = { slot: temperaturiGoale(camere.cUrmator), stampila: stampilaDe(camere), reguli: rules, pragBigInt: PRAG_NUMBER, stat: statGol() }
+  if (bloc === undefined) return accept({ camere, temperatura })
+  const b = bloc as Partial<Record<keyof BlocTemperaturi, unknown>> | null
+  if (b === null || typeof b !== 'object' || !Array.isArray(b.ancora) || !Array.isArray(b.t) || !Array.isArray(b.rest)) return refuse(Reason.LIPSA_MATERIAL, { camp: 'temperaturi' })
+  const anc = b.ancora as unknown[]
+  const ts = b.t as unknown[]
+  const rs0 = b.rest as unknown[]
+  if (ts.length !== anc.length || rs0.length !== anc.length) return refuse(Reason.VALOARE_INVALIDA, { camp: 'temperaturi', lungime: anc.length, t: ts.length, rest: rs0.length })
+  if (typeof b.amprenta !== 'number' || !Number.isInteger(b.amprenta) || b.amprenta < 0 || b.amprenta >= DOI_LA_32) return refuse(Reason.VALOARE_INVALIDA, { camp: 'temperaturi.amprenta', valoare: String(b.amprenta) })
+  if (anc.length !== camere.comp.size) return refuse(Reason.LIPSA_MATERIAL, { camp: 'temperaturi', componente: camere.comp.size, cu_t: anc.length })
+  const lista = listaComponente(camere)
+  const peAncora = new Map<number, Componenta>()
+  for (const c of lista) peAncora.set(c.ancora, c)
+  const ordonate: Componenta[] = []
+  for (let i = 0; i < anc.length; i++) {
+    const a = anc[i]
+    if (typeof a !== 'number' || !Number.isSafeInteger(a) || (i > 0 && a <= (anc[i - 1] as number))) return refuse(Reason.VALOARE_INVALIDA, { camp: 'temperaturi.ancora', index: i, motiv: 'ancorele nu sunt intregi strict crescatori' })
+    const c = peAncora.get(a)
+    if (c === undefined) return refuse(Reason.ENTITATE_INEXISTENTA, { camp: 'temperaturi.ancora', ancora: a })
+    const t = ts[i]
+    const r = rs0[i]
+    if (typeof t !== 'number' || !Number.isSafeInteger(t) || t < T_MIN || t >= T_LIMITA) return refuse(Reason.VALOARE_INVALIDA, { camp: 'temperaturi.t', ancora: a, valoare: String(t) })
+    if (typeof r !== 'number' || !Number.isSafeInteger(r) || r < 0) return refuse(Reason.VALOARE_INVALIDA, { camp: 'temperaturi.rest', ancora: a, valoare: String(r) })
+    ordonate.push(c)
+  }
+  const cap = capacitatiPeAncora(go.value, ordonate, rules)
+  if ('reason' in cap) return cap
+  const strict = amprentaCapacitatii(cap) === b.amprenta
+  const sl = temperatura.slot
+  for (let i = 0; i < ordonate.length; i++) {
+    const c = ordonate[i]!
+    const r = rs0[i] as number
+    if (strict && r >= cap[i]!) return refuse(Reason.VALOARE_INVALIDA, { camp: 'temperaturi.rest', ancora: c.ancora, valoare: r, capacitate: cap[i]!, motiv: 'rest >= C\' cu aceeasi amprenta: salvare corupta' })
+    sl.t[c.id] = ts[i] as number
+    sl.rest[c.id] = strict ? r : 0
+    sl.are[c.id] = 1
+  }
+  if (!strict) temperatura.stat.restNormalizat = ordonate.length
+  return accept({ camere, temperatura })
 }
 
 // ---------------------------------------------------------------------------
@@ -899,9 +1024,6 @@ function pasPeGraf(w: World, g: GrafIncremental, rules: Rules, o: OptiuniPas): R
       r -= C
     }
     const tStar = T[i]! + q
-    // Un T în afara întregilor siguri (o stare care a divergat — content care ocolește garda — sau stricată) nu se mai poate
-    // calcula exact: pasul se refuză întreg, nu se scrie nimic (și nu aruncă).
-    if (!Number.isSafeInteger(tStar)) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'T iese din intregii siguri', comp: m.comp[i]! })
     // (4) rezervoarele, față de T*.
     const S = m.S[i]!
     const aT = tStar < 0 ? -tStar : tStar
@@ -933,6 +1055,9 @@ function pasPeGraf(w: World, g: GrafIncremental, rules: Rules, o: OptiuniPas): R
     }
     T[i] = tStar + q2 + 0
     rest[i] = r + 0
+    // Un T în afara întregilor siguri (o stare care a divergat — content care ocolește garda — sau stricată) nu se mai poate
+    // calcula exact: pasul se refuză întreg, nu se scrie nimic (și nu aruncă). Starea scrisă rămâne deci mereu pe întregi
+    // siguri, iar T* (sumă de doi întregi siguri) e cel mult un întreg exact de double: BigInt(T*) nu aruncă.
     if (!Number.isSafeInteger(T[i]!) || !Number.isSafeInteger(rest[i]!)) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'T iese din intregii siguri', comp: m.comp[i]! })
   }
   // Scrierea, la sfârșit.

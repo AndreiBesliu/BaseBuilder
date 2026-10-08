@@ -92,13 +92,17 @@ jobs:
       # era mutat de trei commit-uri si nimeni n-a vazut. Un rosu trebuie sa spuna
       # tot ce stie dintr-o singura rulare. Local il ruleaza `npm run check`
       # (tools/check-hash.mjs), care citeste EXPECTED de AICI.
+      #
+      # 52b16ed2 -> b38229fd (S24-27 t.2b, schema 8): schema 8 plus blocul temperaturii, GOL — scenariul n-are nicio
+      # componenta in niciun tick (tests/pas-termic.test.ts). Hash-ul asta e deci ORB la temperatura; literalul ei e
+      # al scenei S+ (tests/salvare-temperatura.test.ts), care ruleaza in `npm test`.
       - name: hash de referinta
         if: ${{ !cancelled() }}
         run: |
           OUT=$(node src/harness/cli.ts --seed 12345 --ticks 100000 --agents 40)
           echo "$OUT"
           HASH=$(echo "$OUT" | awk '/^hash/ {print $2}')
-          EXPECTED=52b16ed2
+          EXPECTED=b38229fd
           if [ "$HASH" != "$EXPECTED" ]; then
             echo "::error::hash-ul de referinta s-a schimbat: $HASH (asteptat $EXPECTED)"
             echo "Daca schimbarea e intentionata, actualizeaza EXPECTED in acest workflow"

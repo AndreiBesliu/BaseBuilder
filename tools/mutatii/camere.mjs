@@ -225,8 +225,8 @@ export const MUTATII = [
   {
     n: 'CTR-10: encode nu mai cere indexul incaperilor la zi (o editare care ocoleste punctele fixe se salveaza tacut)',
     f: 'src/sim/save.ts',
-    a: '  cerIndexLaZi(w)\n  const a = w.agents',
-    b: '  const a = w.agents',
+    a: '  cerIndexLaZi(w)\n  // Temperatura (t.2b §7): blocul',
+    b: '  // Temperatura (t.2b §7): blocul',
     t: T, e: 'SALVARE (CTR-10): encode refuza',
   },
   {
