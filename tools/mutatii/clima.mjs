@@ -229,13 +229,28 @@ export const MUTATII = [
     t: TCO, e: 'termic: garda 6·g_max < 1',
   },
   {
-    n: 'termic: garda fara R_se',
-    f: CO, a: '    const rFata = Math.min(t.rSiLateralMiimi, t.rSiSusMiimi, t.rSiJosMiimi) + t.rSeMiimi + rMin', b: '    const rFata = Math.min(t.rSiLateralMiimi, t.rSiSusMiimi, t.rSiJosMiimi) + rMin',
+    n: 'termic: garda pe fata EXT veche (R_si min + R_se + R_min), nu pe MUCHIE',
+    f: CO, a: '    const rFata = Math.min(2 * t.rSiLateralMiimi, t.rSiSusMiimi + t.rSiJosMiimi) + rMin', b: '    const rFata = Math.min(t.rSiLateralMiimi, t.rSiSusMiimi, t.rSiJosMiimi) + t.rSeMiimi + rMin',
     t: TCO, e: 'termic: garda 6·g_max < 1',
   },
   {
-    n: 'termic: garda cu cea mai MARE R_si (fata cea mai conductiva ratata)',
-    f: CO, a: '    const rFata = Math.min(t.rSiLateralMiimi, t.rSiSusMiimi, t.rSiJosMiimi) + t.rSeMiimi + rMin', b: '    const rFata = Math.max(t.rSiLateralMiimi, t.rSiSusMiimi, t.rSiJosMiimi) + t.rSeMiimi + rMin',
+    n: 'termic: garda pe fata EXT veche — prinsa si de oracolul conductantaFetei',
+    f: CO, a: '    const rFata = Math.min(2 * t.rSiLateralMiimi, t.rSiSusMiimi + t.rSiJosMiimi) + rMin', b: '    const rFata = Math.min(t.rSiLateralMiimi, t.rSiSusMiimi, t.rSiJosMiimi) + t.rSeMiimi + rMin',
+    t: TCO, e: 'termic: garda == cea mai conductiva MUCHIE',
+  },
+  {
+    n: 'termic: garda cu perechea R_si MAXIMA (muchia cea mai conductiva ratata)',
+    f: CO, a: '    const rFata = Math.min(2 * t.rSiLateralMiimi, t.rSiSusMiimi + t.rSiJosMiimi) + rMin', b: '    const rFata = Math.max(2 * t.rSiLateralMiimi, t.rSiSusMiimi + t.rSiJosMiimi) + rMin',
+    t: TCO, e: 'termic: garda 6·g_max < 1',
+  },
+  {
+    n: 'termic: garda doar pe perechea laterala (perechea verticala minima ratata)',
+    f: CO, a: '    const rFata = Math.min(2 * t.rSiLateralMiimi, t.rSiSusMiimi + t.rSiJosMiimi) + rMin', b: '    const rFata = 2 * t.rSiLateralMiimi + rMin',
+    t: TCO, e: 'termic: garda 6·g_max < 1',
+  },
+  {
+    n: 'termic: garda fara R_min (prea stricta)',
+    f: CO, a: '    const rFata = Math.min(2 * t.rSiLateralMiimi, t.rSiSusMiimi + t.rSiJosMiimi) + rMin', b: '    const rFata = Math.min(2 * t.rSiLateralMiimi, t.rSiSusMiimi + t.rSiJosMiimi)',
     t: TCO, e: 'termic: garda 6·g_max < 1',
   },
   {

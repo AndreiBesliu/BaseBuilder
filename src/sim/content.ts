@@ -1339,29 +1339,35 @@ export function parseRules(raw: unknown): Outcome<Rules> {
     })
   }
 
-  // STABILITATEA PASULUI EXPLICIT din t.2b: 6 · g_max < 1 (panoul, L1-06).
+  // STABILITATEA PASULUI EXPLICIT din t.2b: 6 · g_max < 1 pe MUCHII (panoul, L1-06; design §9;
+  // recenzia t.2a, L2-2).
   //
-  // Pasul de 1 Hz (`ticksPerSecond` tickuri = ticksPerSecond · 86.400 / ziTicks secunde de joc)
-  // muta T_i cu Σ g (T_j − T_i), g = G · dt / C_i. Ramane pozitiv (nu oscileaza, nu sare peste
-  // vecini) cat Σ g ≤ 1. O incapere are cel mult 6 fete pe celula si C ≥ V · c_aer, deci
-  // Σ g ≤ 6 · G_max · dt / c_aer, unde G_max e fata cea mai conductiva prin O celula: cea mai
-  // mica R_si, R_se si cel mai slab izolator — o fata cu usa spre afara, 1/(0,10 + 0,04 + 0,30)
-  // (o muchie camera–camera are doua R_si si e sub ea). Cu implicitele, 6 · g_max = 0,48.
-  // Garantia nu depinde de masa (c_masa), ci de R_min din continut — de aici garda.
+  // Contractul pasului (design §9): rezervoarele (EXT, SOL, APA, ADANC, DESCHISA) intra IMPLICIT
+  // (forma ψ / delta), stabile la orice Σ g; EXPLICIT sunt doar muchiile camera–camera. Pasul de
+  // 1 Hz (`ticksPerSecond` tickuri = ticksPerSecond · 86.400 / ziTicks secunde de joc) muta T_i cu
+  // Σ_j g_ij (T_j − T_i), g = G · dt / C_i, si ramane pozitiv (nu oscileaza, nu sare peste vecini)
+  // cat Σ g ≤ 1. O incapere are cel mult 6 fete pe celula si C ≥ V · c_aer, deci
+  // Σ g ≤ 6 · G_max · dt / c_aer, unde G_max e cea mai conductiva MUCHIE: R = R_si(d) + ΣR +
+  // R_si(opus d) (conductantaFetei, termic.ts), FARA R_se, prin cel putin o celula de hotar —
+  // min(2 · R_si_lat, R_si_sus + R_si_jos) + R_min. Cu implicitele 1/(0,26 + 0,30): 6 · g_max = 0,38.
+  // NU acopera rezervoarele: o fata DESCHISA are singura g = 7,08. Pana la 08.10 garda era pe fata EXT
+  // (R_si_min + R_se + R_min): prea stricta cu 27% pe implicite, si ocolita de un R_se mare (R_se 1.000,
+  // c_aer 184: garda 0,998, muchia 2,5). Garantia nu depinde de masa (c_masa), ci de R_min din
+  // continut — de aici garda.
   //
-  // Pe intregi, cu R in miimi: 6 · g_max < 1 ⟺ 6000 · tps · 86.400 < ziTicks · c_aer · (R_si + R_se + R_min).
+  // Pe intregi, cu R in miimi: 6 · g_max < 1 ⟺ 6000 · tps · 86.400 < ziTicks · c_aer · R_muchie.
   // BigInt: la plafoanele din specificatii, dreapta trece de 2^53.
   {
     const t = r.termic
     let rMin = MAX_R_MIIMI
     for (const [, id] of NUME_MATERIALE) if (isSolid(id)) rMin = Math.min(rMin, t.material[id]!)
-    const rFata = Math.min(t.rSiLateralMiimi, t.rSiSusMiimi, t.rSiJosMiimi) + t.rSeMiimi + rMin
+    const rFata = Math.min(2 * t.rSiLateralMiimi, t.rSiSusMiimi + t.rSiJosMiimi) + rMin
     const stanga = 6000n * BigInt(r.ticksPerSecond) * 86400n
     const dreapta = BigInt(r.calendar.ziTicks) * BigInt(t.cAerJPeK) * BigInt(rFata)
     if (stanga >= dreapta) {
       return refuse(Reason.VALOARE_INVALIDA, {
         camp: 'termic.stabilitate',
-        motiv: 'pasul termic explicit n-ar fi stabil: 6 · g_max trebuie sa fie sub 1 (cea mai slaba fata prin o celula conduce prea mult)',
+        motiv: 'pasul explicit pe muchiile camera–camera n-ar fi stabil: 6 · g_max trebuie sa fie sub 1 (cea mai conductiva muchie prin o celula conduce prea mult)',
         saseGMaxMiimi: Number((stanga * 1000n) / dreapta),
         rFataMiimi: rFata,
         rMinMiimi: rMin,

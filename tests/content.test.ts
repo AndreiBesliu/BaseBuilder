@@ -6,7 +6,9 @@ import { Reason } from '../src/sim/result.ts'
 import { createWorld } from '../src/sim/world.ts'
 import { MM_PER_CELL } from '../src/sim/state.ts'
 import { WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
-import { esteMaterialDeStructura, Material } from '../src/sim/terrain/chunk.ts'
+import { esteMaterialDeStructura, isSolid, Material, MATERIAL_MAX } from '../src/sim/terrain/chunk.ts'
+import { conductantaFetei } from '../src/sim/termic.ts'
+import { ClasaDir, FelFata } from '../src/sim/fete.ts'
 
 test('fisierul de reguli livrat cu jocul e valid', () => {
   // Daca asta pica, jocul nu porneste — si vreau sa aflu in CI, nu la rulare.
@@ -446,34 +448,89 @@ test('termic.material: fiecare material SOLID e obligatoriu, cu R > 0 (R(USA) = 
   }
 })
 
-test('termic: garda 6·g_max < 1 — implicitele dau 0,48; o usa de 72 de miimi e refuzata, de 73 trece', () => {
-  // Pasul de 1 Hz din t.2b e stabil cat 6 · G_max · dt / c_aer < 1, cu G_max = 1/(R_si + R_se + R_min)
-  // (panoul, L1-06). dt = 20 de tickuri = 42,86 s de joc, c_aer = 1.210 J/K:
-  // 6 · 42,857 / (1.210 · 0,44) = 0,483. Pragul: R_fata > 6 · 42,857 / 1.210 = 0,2125 m²K/W, adica
-  // R(USA) ≥ 73 de miimi cu R_si = 0,10 si R_se = 0,04.
-  const prag = (6 * DEFAULT_RULES.ticksPerSecond * (86400 / DEFAULT_RULES.calendar.ziTicks)) / DEFAULT_RULES.termic.cAerJPeK
-  assert.ok(Math.abs(prag / 0.44 - 0.483) < 0.001, `6·g_max cu implicitele: ${prag / 0.44}`)
-  const subtire = fisier()
-  subtire.termic.material.USA = 72
-  const out = parseRules(subtire)
-  assert.equal(out.ok, false)
-  if (!out.ok) {
-    assert.equal(out.reason, Reason.VALOARE_INVALIDA)
-    assert.equal(out.params.camp, 'termic.stabilitate')
-    assert.equal(out.params.rMinMiimi, 72)
-    assert.equal(out.params.saseGMaxMiimi, 1002)
+test('termic: garda 6·g_max < 1 — pe MUCHIE: implicitele dau 0,38; c_aer 459 refuzat, 460 trece; R_se nu conteaza; perechea verticala; ziua', () => {
+  // Pasul de 1 Hz din t.2b: explicit doar pe muchiile camera–camera (rezervoarele, implicit — design §9; recenzia
+  // t.2a, L2-2). G_max = 1/(min(2·R_si_lat, R_si_sus + R_si_jos) + R_min), fara R_se. dt = 20 de tickuri = 42,857 s,
+  // c_aer = 1.210: 6 · 42,857 / (1.210 · 0,56) = 0,3795. Pragul pe hartie: c_aer > 6 · 42,857 / 0,56 = 459,18.
+  // (Proba veche, „o usa de 72 de miimi", nu mai poate declansa garda: 0,26 + R(USA) > 0,2125 oricare ar fi R > 0.)
+  const dt = DEFAULT_RULES.ticksPerSecond * (86400 / DEFAULT_RULES.calendar.ziTicks)
+  assert.ok(Math.abs((6 * dt) / (DEFAULT_RULES.termic.cAerJPeK * 0.56) - 0.3795) < 0.0005, 'implicitele: 6·g_max = 0,3795')
+  assert.equal(parseRules(fisier()).ok, true)
+  const refuz = (r: Record<string, any>, sase: number, rFata: number, ce: string): void => {
+    const o = parseRules(r)
+    assert.equal(o.ok, false, ce)
+    if (!o.ok) {
+      assert.equal(o.reason, Reason.VALOARE_INVALIDA, ce)
+      assert.equal(o.params.camp, 'termic.stabilitate', ce)
+      assert.equal(o.params.rFataMiimi, rFata, ce)
+      assert.equal(o.params.saseGMaxMiimi, sase, ce)
+    }
   }
-  const destul = fisier()
-  destul.termic.material.USA = 73
-  assert.equal(parseRules(destul).ok, true, 'controlul: 73 trece (6·g_max = 0,998)')
-  // Garda citeste si ziua: cu ziua de doua ori mai scurta, pasul de 20 de tickuri tine de doua ori mai mult.
-  const scurt = fisier()
-  scurt.calendar.ziTicks = 20160
-  assert.equal(parseRules(scurt).ok, true)
-  scurt.termic.material.USA = 150
-  const s = parseRules(scurt)
-  assert.equal(s.ok, false, 'R_fata 0,29 < 2 · 0,2125')
-  if (!s.ok) assert.equal(s.params.camp, 'termic.stabilitate')
+  const cu = (f: (r: Record<string, any>) => void): Record<string, any> => { const r = fisier(); f(r); return r }
+  refuz(cu((r) => { r.termic.cAerJPeK = 459 }), 1000, 560, 'c_aer 459')
+  assert.equal(parseRules(cu((r) => { r.termic.cAerJPeK = 460 })).ok, true, 'controlul: c_aer 460 trece (6·g_max = 0,998)')
+  // R_se nu intra: nici 0, nici 10.000 nu muta pragul. Contraexemplul recenziei: R_se 1.000, c_aer 184 trecea garda
+  // veche (0,998 pe fata EXT), cu muchia la 6g = 2,495.
+  assert.equal(parseRules(cu((r) => { r.termic.cAerJPeK = 460; r.termic.rSeMiimi = 0 })).ok, true, 'R_se 0, c_aer 460')
+  refuz(cu((r) => { r.termic.cAerJPeK = 459; r.termic.rSeMiimi = 10000 }), 1000, 560, 'R_se 10.000, c_aer 459')
+  refuz(cu((r) => { r.termic.cAerJPeK = 184; r.termic.rSeMiimi = 1000 }), 2495, 560, 'R_se 1.000, c_aer 184')
+  // Perechea verticala, cand e EA minima: R_si_lat 1.000 → 0,10 + 0,17 + 0,30 = 0,57; pragul 451,13.
+  refuz(cu((r) => { r.termic.rSiLateralMiimi = 1000; r.termic.cAerJPeK = 451 }), 1000, 570, 'R_si_lat 1.000, c_aer 451')
+  assert.equal(parseRules(cu((r) => { r.termic.rSiLateralMiimi = 1000; r.termic.cAerJPeK = 452 })).ok, true, 'R_si_lat 1.000, c_aer 452')
+  // Garda citeste si ziua: cu ziua de doua ori mai scurta, pasul de 20 de tickuri tine de doua ori mai mult; pragul
+  // se dubleaza (918,37).
+  refuz(cu((r) => { r.calendar.ziTicks = 20160; r.termic.cAerJPeK = 918 }), 1000, 560, 'ziTicks 20.160, c_aer 918')
+  assert.equal(parseRules(cu((r) => { r.calendar.ziTicks = 20160; r.termic.cAerJPeK = 919 })).ok, true, 'ziTicks 20.160, c_aer 919')
+})
+
+test('termic: garda == cea mai conductiva MUCHIE din conductantaFetei (ambele directii, pe o grila de continut)', () => {
+  // Un singur adevar: garda trebuie sa spuna exact ce spune formula fetelor (termic.ts) despre muchia cea mai
+  // conductiva prin o celula de R_min, pe cele trei clase. Acceptat ⇒ 6g < 1; refuzat ⇒ 6g ≥ 0,999 (rotunjirea Q16
+  // a conductantei). Pe grila: R_se 0–10.000, cinci seturi de R_si (si cu perechea verticala minima), R(USA)
+  // 1/72/300, trei lungimi de zi, c_aer in jurul pragului de pe muchie.
+  let acc = 0
+  let ref = 0
+  for (const rSe of [0, 40, 1000, 10000]) for (const [lat, sus, jos] of [[130, 100, 170], [1000, 100, 170], [20, 500, 500], [1, 1, 1], [300, 10, 10]] as const) {
+    for (const usa of [1, 72, 300]) for (const zi of [40320, 20160, 12960]) {
+      const rMuchie = Math.min(2 * lat, sus + jos) + Math.min(usa, 340)
+      const dt = (20 * 86400) / zi
+      const cStar = (6 * dt * 1000) / rMuchie
+      for (const cA of [Math.floor(cStar) - 1, Math.floor(cStar), Math.floor(cStar) + 2, Math.ceil(cStar * 1.3), 184, 1210]) {
+        if (cA < 1) continue
+        const r = fisier()
+        r.termic.rSeMiimi = rSe
+        r.termic.rSiLateralMiimi = lat
+        r.termic.rSiSusMiimi = sus
+        r.termic.rSiJosMiimi = jos
+        r.termic.material.USA = usa
+        r.calendar.ziTicks = zi
+        r.termic.cAerJPeK = cA
+        const o = parseRules(r)
+        const reguli = parseRules({ ...r, termic: { ...r.termic, cAerJPeK: 10_000_000 } })
+        assert.ok(reguli.ok, 'aceleasi reguli cu c_aer mare trebuie sa treaca')
+        if (!reguli.ok) continue
+        const t = reguli.value.termic
+        // R_min ales AICI, pe toate materialele solide (independent de lista din content.ts).
+        let mMin: number = Material.ROCA
+        for (let m = 0; m <= MATERIAL_MAX; m++) if (isSolid(m) && t.material[m]! < t.material[mMin]!) mMin = m
+        const numarari = new Array<number>(MATERIAL_MAX + 1).fill(0)
+        numarari[mMin] = 1
+        let gMax = 0
+        for (const cl of [ClasaDir.SUS, ClasaDir.JOS, ClasaDir.LAT]) gMax = Math.max(gMax, conductantaFetei(t, cl, FelFata.MUCHIE, numarari) / 65536)
+        const sase = (6 * gMax * dt) / cA
+        const ctx = `rSe ${rSe} R_si ${lat}/${sus}/${jos} USA ${usa} zi ${zi} c_aer ${cA}: 6g_muchie = ${sase}`
+        if (o.ok) {
+          acc++
+          assert.ok(sase < 1, `acceptat cu muchia instabila — ${ctx}`)
+        } else {
+          ref++
+          assert.equal(o.params.camp, 'termic.stabilitate', ctx)
+          assert.ok(sase >= 0.999, `refuzat cu muchia stabila — ${ctx}`)
+        }
+      }
+    }
+  }
+  assert.ok(acc > 100 && ref > 100, `ambele ramuri exersate: ${acc} acceptate, ${ref} refuzate`)
 })
 
 test('nicio celula construita nu izoleaza mai bine decat 1 m de pamant (R ≤ R(PAMANT))', () => {
