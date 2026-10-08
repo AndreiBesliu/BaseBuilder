@@ -56,6 +56,7 @@ import {
 } from '../src/sim/termic.ts'
 import { createWorld } from '../src/sim/world.ts'
 import { R, sitPlat } from './fixturi.ts'
+import { sincronizeazaLumea } from '../src/sim/temperatura.ts'
 
 const P = Material.PIATRA_CONSTRUITA
 const Q = 65536
@@ -192,7 +193,7 @@ test('TERMIC K: indexul unei lumi e construit cu termic.kCelule din reguli — c
   assert.equal(w3.camere.fete.k, 3)
   for (const lume of [w, w3]) {
     donjon(lume.terrain, wx, wy, g)
-    sincronizeazaCamere(lume.camere, lume.terrain)
+    sincronizeazaLumea(lume, lume === w3 ? R3 : R)
   }
   // Pe hârtie: drumul în sus trece prin K celule de piatră și a K+1-a e tot piatră.
   assert.deepEqual(randuriText(w, wx + 2, wy + 2, g + 1), ['JOS SOL [2x1] d0 x9', 'LAT EXT [6x1] x24', 'SUS ADANC [6x8] d0 x9'])
@@ -589,7 +590,7 @@ test('TERMIC 2^53: mina de 192x192x3 — Σg ≈ 2^34, nodul e pe BigInt, iar re
 test('TERMIC M10: 677 de noduri si 1.776 de muchii (cifrele hartii), hub-ul pe BigInt, Gauss–Seidel converge in cel mult 9 treceri si da exact regimul calculat totul pe BigInt', () => {
   const w = createWorld(20260913)
   assert.ok(applyCommand(w, { kind: 'setFocus', cx: 300, cy: 300 }).ok)
-  buildM10PeLume(w, 300, 300)
+  buildM10PeLume(w, R, 300, 300)
   const gr = graf(w.camere)
   assert.equal(gr.n, 677)
   assert.equal(gr.muchieA.length, 1776)
@@ -841,7 +842,10 @@ test('TERMIC K05: graful se reface doar cand stampila (epoca, epocaFete, regulil
 
 test('TERMIC K05: scenariul standard (0 componente) nu plateste nimic — simularea nu cere graful, iar cerut, e gol', () => {
   const r = runScenario(standardScenario(12345, 3000, 20))
-  assert.ok(Object.values(statGraf(r.world.camere)).every((v) => v === 0), 'niciun graf cerut: toate contoarele 0')
+  // Graful t.2a (al viewer-ului) nu-l cere nimeni. Graful incremental al simularii (t.2b §6) e tinut la zi de punctul unic
+  // de sincronizare: pe o lume fara componente e gol — o singura constructie, la primul lot, apoi nicio delta.
+  const s = statGraf(r.world.camere)
+  assert.deepEqual({ ...s, construiri: s.construiri === 1 ? 0 : s.construiri }, { refaceri: 0, refolosiri: 0, loturi: 0, construiri: 0, refaceriDeUrgenta: 0, S: 0, recalculate: 0, mutate: 0, parcurseMostenire: 0, noduriNoi: 0, mosteniri: 0, perechiAdunate: 0 }, 'niciun graf t.2a cerut; graful incremental gol, construit o data')
   const reg = regimPermanent(r.world, R, r.world.tick)
   assert.ok(reg.ok)
   assert.equal(reg.value.t.length, 0)

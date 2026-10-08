@@ -116,15 +116,15 @@ export const MUTATII = [
   {
     n: 't.2b §4: createWorld construieste indexul cu dSolMasivM implicit, nu cu cel din reguli',
     f: 'src/sim/world.ts',
-    a: '    camere: indexCamere(terrain, rules.termic.kCelule, rules.termic.dSolMasivM),',
-    b: '    camere: indexCamere(terrain, rules.termic.kCelule),',
+    a: '  const camere = indexCamere(terrain, rules.termic.kCelule, rules.termic.dSolMasivM)',
+    b: '  const camere = indexCamere(terrain, rules.termic.kCelule)',
     t: TC, e: 'CAPACITATE dSolMasivM vine din content',
   },
   {
     n: 't.2b §4: decode construieste indexul cu dSolMasivM implicit (lumea incarcata cantareste altfel)',
-    f: 'src/sim/save.ts',
-    a: '    camere: construiesteCamere(terrain, rules.termic.kCelule, rules.termic.dSolMasivM),',
-    b: '    camere: construiesteCamere(terrain, rules.termic.kCelule),',
+    f: 'src/sim/temperatura.ts',
+    a: '  const camere = construiesteCamere(terrain, rules.termic.kCelule, rules.termic.dSolMasivM)',
+    b: '  const camere = construiesteCamere(terrain, rules.termic.kCelule)',
     t: TC, e: 'CAPACITATE dSolMasivM vine din content',
   },
   // --- commit-ul 2: jurnalul cu materialul vechi si proveninta C3 (§3)

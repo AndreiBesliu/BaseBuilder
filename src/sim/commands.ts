@@ -21,7 +21,7 @@ import { cellOf, clearPath } from './drumuri.ts'
 import type { Rules } from './content.ts'
 import { DEFAULT_RULES } from './content.ts'
 import { isWalkable, rebuildDirty } from './regions.ts'
-import { sincronizeazaCamere } from './camere.ts'
+import { sincronizeazaLumea } from './temperatura.ts'
 import { blocheazaMersul, esteMaterialCunoscut, isSolid, MATERIAL_MAX, type MaterialId } from './terrain/chunk.ts'
 import { CHUNK_GRID, inWorld, materialAt, setFocus, voxelRangeM, WORLD_CELLS } from './terrain/terrain.ts'
 import { adaugaDesemnare, Desemnare, slotDesemnare } from './desemnari.ts'
@@ -235,8 +235,9 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       // Invariantul: in afara unui tick, `regions.dirty` e gol.
       rebuildDirty(w.terrain, w.regions, rules)
       // La fel incaperile: lotul lor se inchide aici, nu la tickul urmator — o salvare luata intre
-      // comanda si tick ar fi scris altfel stare pusa pe ele (panoul camerelor, CTR-2).
-      sincronizeazaCamere(w.camere, w.terrain)
+      // comanda si tick ar fi scris altfel stare pusa pe ele (panoul camerelor, CTR-2). Si temperatura lor:
+      // provenienta lotului comenzii (t.2b §2, punctul unic).
+      sincronizeazaLumea(w, rules)
       return accept(0)
     }
 
@@ -274,7 +275,7 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       if (!out.ok) return out
       // Ca la `dig`: fara fereastra comanda -> tick cu blocuri murdare.
       rebuildDirty(w.terrain, w.regions, rules)
-      sincronizeazaCamere(w.camere, w.terrain)
+      sincronizeazaLumea(w, rules)
       return accept(0)
     }
 

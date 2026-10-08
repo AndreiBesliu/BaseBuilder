@@ -30,6 +30,7 @@ import type { Terrain } from '../src/sim/terrain/terrain.ts'
 import { bazaVoxeli, dig, fill, groundLevelM, materialAt } from '../src/sim/terrain/terrain.ts'
 import { createWorld, tick } from '../src/sim/world.ts'
 import { lasaItem, R, sitPlat } from './fixturi.ts'
+import { sincronizeazaLumea } from '../src/sim/temperatura.ts'
 
 const P = Material.PIATRA_CONSTRUITA
 
@@ -154,7 +155,7 @@ function m10(): World {
   if (m10Memo === null) {
     const w = createWorld(20260913)
     assert.ok(applyCommand(w, { kind: 'setFocus', cx: 300, cy: 300 }).ok)
-    buildM10PeLume(w, 300, 300)
+    buildM10PeLume(w, R, 300, 300)
     m10Memo = w
   }
   return m10Memo
@@ -535,7 +536,7 @@ function santierPestePivnita(seed: number): { w: World; ids: number[]; x0: numbe
   const x0 = wx + 5, y0 = wy + 4
   // Pivnița 7×7×2 sub toată amprenta casei, la d = 2..3 (tavan: 2 celule de sol), săpată înainte.
   for (let d = 2; d <= 3; d++) for (let y = 0; y < 7; y++) for (let x = 0; x < 7; x++) assert.ok(dig(w.terrain, x0 + x, y0 + y, g - d).ok)
-  sincronizeazaCamere(w.camere, w.terrain)
+  sincronizeazaLumea(w, R)
   const piese: (readonly [number, number, number, PiesaId])[] = []
   for (let z = g + 1; z <= g + 2; z++) for (let dx = 0; dx < 7; dx++) for (let dy = 0; dy < 7; dy++) {
     if (dx !== 0 && dx !== 6 && dy !== 0 && dy !== 6) continue

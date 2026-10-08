@@ -6,16 +6,15 @@
  * usa 1×2 (sau golul) la mijlocul peretelui de sud, acoperisul la g+H+1; etajul L×L×2 deasupra, cu placa =
  * acoperisul parterului; pivnita 3×3×2 sub mijloc cu k m de pamant deasupra, put si chepeng USA.
  *
- * Modelul in float e un MODEL de calibrare, nu pasul jocului: capacitatea vine din contoarele indexului
- * (C'·μ, in J/K), conductantele din graful real (`grafTermic`), rezervoarele din `temperaturiRezervoare`, iar
- * fiecare pas de 1 Hz e exponentiala EXACTA pe nod (Jacobi pe muchii). Pasul pe intregi (forma ψ, §5.2) vine in
- * commit-ul 4 al valului 1; atunci testele de calibrare se re-ancoreaza pe el (integratorul conteaza la nivelul de
- * 0,004 °C pe valul de frig — verif-NUM-2 —, cu doua ordine de marime sub banda).
+ * Modelul in float (`modelFloat`) e un MODEL de calibrare, nu pasul jocului: capacitatea din contoarele indexului (C'·μ,
+ * in J/K), conductantele din graful real (`grafTermic`) — pentru τ_loc = C/ΣG, analitic. Valul de frig si τ la o
+ * perturbatie ruleaza pe pasul pe intregi (`pasTermic`, forma ψ, §5.2) din commit-ul 4: integratorul (fata de
+ * exponentiala exacta pe nod a commit-ului 1) a mutat minimele valului cu +0,004 °C (verif-NUM-2), sub banda.
  */
 
 import assert from 'node:assert/strict'
 import type { Rules } from '../src/sim/content.ts'
-import { componentaLa, sincronizeazaCamere } from '../src/sim/camere.ts'
+import { componentaLa } from '../src/sim/camere.ts'
 import { capacitateMu, contoareComponentei } from '../src/sim/fete.ts'
 import type { GrafTermic } from '../src/sim/termic.ts'
 import { grafTermic } from '../src/sim/termic.ts'
@@ -23,7 +22,8 @@ import type { World } from '../src/sim/state.ts'
 import type { MaterialId } from '../src/sim/terrain/chunk.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
 import { dig, fill } from '../src/sim/terrain/terrain.ts'
-import { sitPlat } from './fixturi.ts'
+import { R, sitPlat } from './fixturi.ts'
+import { sincronizeazaLumea } from '../src/sim/temperatura.ts'
 
 export const Q16 = 65536
 
@@ -60,7 +60,7 @@ function ok(o: { ok: boolean }, ce: string): void {
   assert.ok(o.ok, `${ce}: ${JSON.stringify(o)}`)
 }
 
-/** Casa, editata direct in teren si sincronizata (indexul la zi). */
+/** Casa, editata direct in teren si sincronizata prin punctul unic (indexul, graful si temperatura la zi). */
 export function casaTermica(o: OptiuniCasa = {}): CasaTermica {
   const L = o.L ?? 5
   const H = o.H ?? 2
@@ -102,7 +102,7 @@ export function casaTermica(o: OptiuniCasa = {}): CasaTermica {
     ok(fill(t, x0 + c - 1, y0 + c - 1, g, Material.USA), 'chepeng')
     rep.pivnita = [x0 + c, y0 + c, zj]
   }
-  sincronizeazaCamere(w.camere, t)
+  sincronizeazaLumea(w, R)
   return { w, rep, x0, y0, g }
 }
 
@@ -150,27 +150,4 @@ export function modelFloat(w: World, rules: Rules, scalaC = 1): ModelFloat {
 export function tauLoc(m: ModelFloat, compId: number): number {
   const i = m.gr.nodDupaComp[compId]!
   return m.C[i]! / (m.gr.sumaG[i]! / Q16)
-}
-
-/** Un pas de 1 Hz: exponentiala exacta pe nod, cu rezervoarele si vecinii tinuti constanti pe pas. `tR` in Q16. */
-export function pasExp(m: ModelFloat, T: Float64Array, tR: ArrayLike<number>): void {
-  const g = m.gr
-  const nou = new Float64Array(g.n)
-  for (let i = 0; i < g.n; i++) {
-    let S = 0
-    let X = 0
-    for (let k = g.rezStart[i]!; k < g.rezStart[i + 1]!; k++) {
-      const G = g.rezG[k]! / Q16
-      S += G
-      X += G * (tR[g.rezBin[k]!]! / Q16)
-    }
-    for (let k = g.vecStart[i]!; k < g.vecStart[i + 1]!; k++) {
-      const G = g.vecG[k]! / Q16
-      S += G
-      X += G * T[g.vecNod[k]!]!
-    }
-    const tEq = X / S
-    nou[i] = tEq + (T[i]! - tEq) * Math.exp((-S * m.dt) / m.C[i]!)
-  }
-  T.set(nou)
 }

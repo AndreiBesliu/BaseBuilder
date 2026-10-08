@@ -24,6 +24,7 @@ import {
   sincronizeazaCamere,
   varfLa,
 } from '../src/sim/camere.ts'
+import { sincronizeazaLumea } from '../src/sim/temperatura.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { formaCanonicaFete, formaCanonicaFeteRecalculata } from '../src/sim/fete.ts'
 import { formaCanonicaGraf, grafTermic } from '../src/sim/termic.ts'
@@ -356,7 +357,7 @@ test('PUNCTELE FIXE: dupa orice comanda de teren si orice tick, indexul e la zi 
   }
   lasaItem(w, Item.HRANA, 75, wx + 10, wy + 10)
   const edInainte = w.terrain.editari
-  sincronizeazaCamere(w.camere, w.terrain)
+  sincronizeazaLumea(w, R)
   const epocaInainte = w.camere.epoca
   // Oracolul dupa FIECARE tick care a editat terenul, nu doar la final (recenzia incaperilor, CTR-9): o
   // abatere care se vindeca la o editare ulterioara din aceeasi felie nu se mai vede la capat. Tickurile
@@ -389,7 +390,7 @@ test('PRABUSIRE: placa 5x5 pe un stalp, peste o pivnita acoperita — stalpul sa
   for (let dx = 2; dx <= 5; dx++) for (let dy = 2; dy <= 5; dy++) for (const z of [g - 2, g - 1]) assert.ok(dig(t, wx + dx, wy + dy, z).ok)
   for (let z = g + 1; z <= g + 2; z++) assert.ok(fill(t, wx + 1, wy + 1, z, P).ok)
   for (let dx = 1; dx <= 5; dx++) for (let dy = 1; dy <= 5; dy++) assert.ok(fill(t, wx + dx, wy + dy, g + 3, P).ok)
-  sincronizeazaCamere(w.camere, t)
+  sincronizeazaLumea(w, R)
   const subPlaca = componentaLa(w.camere, wx + 3, wy + 3, g + 1)
   assert.ok(subPlaca && !esteIncapere(subPlaca), 'fixtura: aerul de sub placa e acoperit si deschis')
   const e0 = t.editari
@@ -434,7 +435,7 @@ test('SALVARE (CTR-10): encode refuza o lume cu indexul incaperilor in urma tere
   casa(w.terrain, wx, wy, g, 5, 2) // direct in teren: in afara tickului si a comenzilor
   assert.notEqual(w.camere.vazute, w.terrain.editari, 'fixtura: indexul e in urma')
   assert.throws(() => encode(w), /indexul incaperilor nu e la zi/)
-  sincronizeazaCamere(w.camere, w.terrain)
+  sincronizeazaLumea(w, R)
   const inc = decode(encode(w), R)
   assert.ok(inc.ok, 'dupa sincronizare, salvarea merge')
   // Si un index al ALTUI teren, cu acelasi numar de editari.
@@ -479,7 +480,7 @@ test('K05: o galerie lunga, acoperita si deschisa la gura — fiecare sapatura l
   // Gura: o groapa deschisa; galeria merge spre est pe 64 m, cu doua straturi de sol deasupra,
   // urmand relieful (pe o treapta de 1 m, cele doua niveluri se suprapun: galeria ramane legata).
   for (let z = g - 3; z <= g; z++) assert.ok(dig(t, wx + 1, wy + 5, z).ok)
-  sincronizeazaCamere(w.camere, t)
+  sincronizeazaLumea(w, R)
   let celule = 0
   let felii = 0
   let sapaturi = 0
@@ -557,7 +558,7 @@ test('K05 (IDX-1): o sapatura la fata unei mine acoperite mari trece pe calea ra
     assert.ok(gg.ok)
     for (let d = 2; d <= 4; d++) assert.ok(dig(t, wx + x, wy + y, gg.value - d).ok)
   }
-  sincronizeazaCamere(w.camere, t)
+  sincronizeazaLumea(w, R)
   const mina = componentaLa(w.camere, wx + 1, wy + 1, (groundLevelM(t, wx + 1, wy + 1) as { value: number }).value - 3)
   assert.ok(mina && mina.bucati.length > 40, `fixtura: mina are ${mina?.bucati.length} bucati`)
   let maxVizitate = 0
@@ -584,7 +585,7 @@ test('IDX-1: o gaura intre doua pivnite suprapuse le uneste — lotul atinge doa
     assert.ok(dig(t, wx + dx, wy + dy, g - 4).ok)
     assert.ok(dig(t, wx + dx, wy + dy, g - 2).ok)
   }
-  sincronizeazaCamere(w.camere, t)
+  sincronizeazaLumea(w, R)
   assert.deepEqual(listaComponente(w.camere).map((c) => c.volum), [9, 9])
   const a = { ...w.camere.stat }
   assert.ok(applyCommand(w, { kind: 'dig', wx: wx + 2, wy: wy + 2, z: g - 3 }, R).ok)
@@ -614,7 +615,7 @@ test('IDX-1: un lot care umple o nisa si largeste o pivnita atinge doua componen
 test('K05: o lume incarcata reconstruieste o data, iar in regim niciodata', () => {
   const { w, wx, wy, g } = sitPlat(12345, 10)
   casa(w.terrain, wx, wy, g, 5, 2)
-  sincronizeazaCamere(w.camere, w.terrain)
+  sincronizeazaLumea(w, R)
   const inc = decode(encode(w), R)
   assert.ok(inc.ok)
   const w2 = inc.value
@@ -640,7 +641,7 @@ test('K05: o sapatura intr-o pivnita izolata dintre 576 viziteaza doar bucatile 
     for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) for (const z of [gg.value - 3, gg.value - 2]) ok = dig(t, x + dx, y + dy, z).ok && ok
     if (ok) pivnite++
   }
-  sincronizeazaCamere(w.camere, t)
+  sincronizeazaLumea(w, R)
   assert.equal(pivnite, 576)
   const inainte = new Map([...w.camere.comp.values()].map((c) => [c.id, c.ancora]))
   assert.equal(inainte.size, 576, 'fixtura: fiecare pivnita e o componenta')
@@ -699,7 +700,7 @@ test('K05 (IDX-2): o prabusire de peste 4096 de editari intr-o singura comanda s
     assert.ok(gg.ok)
     for (const z of [gg.value - 2, gg.value - 1]) assert.ok(dig(t, x0 + x, y0 + y, z).ok)
   }
-  sincronizeazaCamere(w.camere, t)
+  sincronizeazaLumea(w, R)
   const r0 = w.camere.stat.recalculari
   const e0 = t.editari
   const gs = groundLevelM(t, x0 + c, y0 + c)

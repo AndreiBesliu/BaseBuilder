@@ -28,6 +28,7 @@ import type { ZoneStore } from './zone.ts'
 import type { MemorieSprijin } from './stabilitate.ts'
 import type { MemorieAcces } from './acces.ts'
 import type { IndexCamere } from './camere.ts'
+import type { StareTemperatura } from './temperatura.ts'
 
 /**
  * Versiunea schemei de stare. Creste la ORICE camp nou. Vezi save.ts.
@@ -515,6 +516,13 @@ export interface World {
    * reconstruiește. Vezi `camere.ts`.
    */
   camere: IndexCamere
+  /**
+   * MIXT — temperatura încăperilor (S24-27 t.2b, temperatura.ts §1): T și rest pe slotul componentei sunt PERSISTED
+   * (pe disc și în hash pe ANCORA componentei, nu pe slot); `are`, ștampila (indexul văzut la ultima sincronizare),
+   * regulile, pragul de probă și contoarele sunt TRANSIENT. O ține la zi DOAR punctul unic `sincronizeazaLumea`
+   * (proveniența la fiecare lot) și pasul de 1 Hz `pasTermic`.
+   */
+  temperatura: StareTemperatura
   /**
    * PERSISTED — cati pioni au PLECAT din asezare, de la inceputul lumii.
    *

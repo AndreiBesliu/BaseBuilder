@@ -44,6 +44,7 @@ import {
 } from '../viewer/overlay-temperatura.ts'
 import type { AncoraEticheta, OverlayTemperatura, ProiectieEticheta } from '../viewer/overlay-temperatura.ts'
 import { R, ruleaza, sitPlat } from './fixturi.ts'
+import { sincronizeazaLumea } from '../src/sim/temperatura.ts'
 
 const P = Material.PIATRA_CONSTRUITA
 const Q = 65536
@@ -75,7 +76,7 @@ const intreg = (q: number): string => { const g = Math.round(Math.abs(q) / Q); r
 test('TERMIC ECRAN inspectorul: N tickuri fara editari — textul temperaturii se schimba, explicatia ramane in memorie (1 calcul, acelasi obiect), cheia de redesenare nu se schimba', () => {
   const { w, wx, wy, g } = sitPlat(12345, 12)
   casa(w, wx, wy, g)
-  sincronizeazaCamere(w.camere, w.terrain)
+  sincronizeazaLumea(w, R)
   const mem = creeazaMemorieIncapere(() => 0)
   const memT = creeazaMemorieTermica()
   // Clic pe podeaua casei: aerul întrebat e deasupra ei.
@@ -444,7 +445,7 @@ test('TERMIC ECRAN ancorele pe hartie: L-ul (centrul cade afara, ancora in L), p
 function lumeaM10(): World {
   const w = createWorld(20260913)
   assert.ok(applyCommand(w, { kind: 'setFocus', cx: 300, cy: 300 }).ok)
-  buildM10PeLume(w, 300, 300)
+  buildM10PeLume(w, R, 300, 300)
   return w
 }
 
@@ -583,7 +584,7 @@ function liniar(c: readonly number[]): number[] {
 test('TERMIC ECRAN overlay-ul U: geometria la amprenta noua, regimul cel mult o data pe secunda si doar pe lume noua, la nivel nou imediat', () => {
   const { w, wx, wy, g } = sitPlat(12345, 24)
   casa(w, wx, wy, g)
-  sincronizeazaCamere(w.camere, w.terrain)
+  sincronizeazaLumea(w, R)
   const o = createTemperaturaOverlay()
   o.visible = true
   const z = g + 1

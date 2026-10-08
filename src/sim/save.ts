@@ -36,7 +36,7 @@ import { makeZoneStore, reindexeazaZone } from './zone.ts'
 import type { ZoneStore } from './zone.ts'
 import { memorieSprijin } from './stabilitate.ts'
 import { memorieAcces } from './acces.ts'
-import { construiesteCamere } from './camere.ts'
+import { incarcaTemperaturi, temperaturaLaEchilibru, temperaturaLaZi } from './temperatura.ts'
 
 /** Creste cand se schimba FORMATUL de fisier, independent de schema de stare. */
 export const SAVE_BUILD = 1
@@ -64,6 +64,10 @@ function cerIndexLaZi(w: World): void {
   if (c.teren !== w.terrain || c.vazute !== w.terrain.editari) {
     throw new Error(`encode: indexul incaperilor nu e la zi cu terenul (vazute ${c.vazute}, editari ${w.terrain.editari}${c.teren !== w.terrain ? ', alt teren' : ''}) — o editare a ocolit punctele fixe`)
   }
+  // Temperatura (t.2b §2, §7): stampila ei e a indexului (nimeni n-a sincronizat pe langa punctul unic) si fiecare
+  // componenta vie are T, niciun slot mort n-are. O stare care nu e a lumii nu se scrie.
+  const t = temperaturaLaZi(w)
+  if (!t.ok) throw new Error(`encode: temperatura nu e la zi cu indexul (${String(t.params.motiv)}) — punctul unic de sincronizare a fost ocolit`)
 }
 
 export function encode(w: World): string {
@@ -608,6 +612,11 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
   if (!iteme.ok) return iteme
   const zone = incarcaZone(data.zone, rules)
   if (!zone.ok) return zone
+  // Indexul incaperilor e DERIVED: reconstruit ACUM, nu la primul tick (lumea incarcata trebuie sa aiba, inainte de
+  // orice, exact indexul lumii continue, la zi in afara tickului), cu K-ul si dSolMasiv ai regulilor de ACUM; graful
+  // incremental construit integral; starea temperaturii aliniata la el (temperatura.ts, `incarcaTemperaturi`).
+  const lumeInc = incarcaTemperaturi(terrain, rules)
+  if (!lumeInc.ok) return lumeInc
 
   const w: World = {
     schema: SCHEMA_VERSION,
@@ -630,12 +639,13 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
     ratiune: makeRatiuneStore(capacity),
     sprijin: memorieSprijin(),
     acces: memorieAcces(),
-    // Reconstruit ACUM, nu la primul tick: lumea încărcată trebuie să aibă, înainte de orice,
-    // exact indexul lumii continue (care e la zi în afara tickului).
-    // K-ul fețelor e al regulilor de ACUM, nu al salvării: cache-ul de fețe e DERIVED.
-    camere: construiesteCamere(terrain, rules.termic.kCelule, rules.termic.dSolMasivM),
+    camere: lumeInc.value.camere,
+    temperatura: lumeInc.value.temperatura,
     plecatiTotal: (data.plecatiTotal as number | undefined) ?? 0,
   }
+  // Temperatura: o salvare de dinainte de t.2b n-o are, deci lumea porneste de la echilibru (t.2b §7).
+  const echilibru = temperaturaLaEchilibru(w, rules, w.tick)
+  if (!echilibru.ok) return echilibru
   const construit = valideazaJoburiDeConstruit(w, rules)
   if (!construit.ok) return construit
   // Rezervarile sunt DERIVED din joburi. Ce nu se poate reconstrui e un save

@@ -13,8 +13,9 @@
  * Plus POARTA POMPEI (C3 n-are pompă: săpat + astupat pe același tick întoarce T-ul), rezerva W_Y = 0 (CER / SOL),
  * jurnalul cu materialul vechi și „Number == BigInt".
  *
- * Loturile se fac direct pe teren + `sincronizeazaCamere` (o comandă `dig` / `fill` e exact un lot): punctul unic
- * `sincronizeazaLumea`, care va trece comenzile și tickul prin proveniență, vine în commit-ul 4.
+ * Loturile se fac direct pe teren + `sincronizeazaCamere` (o comandă `dig` / `fill` e exact un lot), cu proveniența
+ * aplicată de bancă pe starea ei. Banca „lume" (commit-ul 4, SAV-7) face loturile prin COMENZI (`applyCommand`, deci prin
+ * punctul unic `sincronizeazaLumea`) și compară cu oracolul T-ul CONSUMATORULUI — `w.temperatura`, după fiecare comandă.
  */
 
 import test from 'node:test'
@@ -27,7 +28,8 @@ import { celuleComponentei, cheieCelula, componentaLa, construiesteCamere, decod
 import type { ContoareMasa, EvidentaMase } from '../src/sim/fete.ts'
 import { capacitateMu, contoareComponentei } from '../src/sim/fete.ts'
 import type { TemperaturiSlot } from '../src/sim/temperatura.ts'
-import { provenientaTemperaturii, temperaturiGoale } from '../src/sim/temperatura.ts'
+import { provenientaTemperaturii, sincronizeazaLumea, statTermic, temperaturiGoale, verificaStampila } from '../src/sim/temperatura.ts'
+import { applyCommand } from '../src/sim/commands.ts'
 import type { World } from '../src/sim/state.ts'
 import type { MaterialId } from '../src/sim/terrain/chunk.ts'
 import { eSolNatural, Material } from '../src/sim/terrain/chunk.ts'
@@ -245,6 +247,8 @@ interface OptiuniBanca {
   /** Relaxează T-urile la valori distincte după fiecare lot (implicit da). */
   readonly relaxare?: boolean
   readonly tick?: number
+  /** Loturile vin prin COMENZI (punctul unic): starea e `w.temperatura`, iar oracolul compară T-ul consumatorului (SAV-7). */
+  readonly lume?: boolean
 }
 
 class Banca {
@@ -252,6 +256,7 @@ class Banca {
   readonly cutie: Cutie
   readonly tick: number
   readonly relaxare: boolean
+  readonly lume: boolean
   stare: TemperaturiSlot = temperaturiGoale()
   inst: Instantaneu
   pas = 0
@@ -263,7 +268,11 @@ class Banca {
     this.cutie = cutie
     this.tick = o.tick ?? TICK
     this.relaxare = o.relaxare ?? true
-    sincronizeazaCamere(w.camere, w.terrain)
+    this.lume = o.lume ?? false
+    if (this.lume) {
+      w.tick = this.tick
+      assert.ok(sincronizeazaLumea(w, R).ok)
+    } else sincronizeazaCamere(w.camere, w.terrain)
     this.relaxeaza()
     this.inst = instantaneu(w, cutie)
   }
@@ -287,6 +296,7 @@ class Banca {
       s.are[c.id] = 1
     }
     this.stare = s
+    if (this.lume) this.w.temperatura.slot = s
   }
 
   /** T-ul real al componentei (Q16), din (T, rest). */
@@ -306,28 +316,38 @@ class Banca {
       tVechi.set(c.ancora, this.stare.t[c.id]! + this.stare.rest[c.id]! / C)
     }
     const eVechi = [...hVechi.values()].reduce((a, b) => a + b, 0)
+    const lot0 = statTermic(w).loturi
     editeaza()
-    let sch = sincronizeazaCamere(w.camere, w.terrain)
     this.loturi++
     const nou = instantaneu(w, this.cutie)
     const K = contabilitate(w, this.cutie, this.inst, nou, this.tick)
-    comparaEvidenta(sch.mase, K, `${ce} (lotul ${this.loturi})`)
-    if (muta) sch = muta(sch)
-    const rez = provenientaTemperaturii(this.stare, sch, this.tick, w.seed, R)
-    // Number == BigInt, bit cu bit.
-    const big = provenientaTemperaturii(this.stare, sch, this.tick, w.seed, R, true)
-    assert.deepEqual([...big.stare.t], [...rez.stare.t], `${ce}: T pe BigInt`)
-    assert.deepEqual([...big.stare.rest], [...rez.stare.rest], `${ce}: rest pe BigInt`)
-    assert.equal(rez.surseFaraT, 0, `${ce}: surse fara T`)
-    this.stare = rez.stare
-    this.ev.noi += sch.noi.length
-    this.ev.peLoc += sch.peLoc.length
-    this.ev.moarte += sch.moarte.length
-    this.ev.rezerva += rez.rezerva
-    this.ev.bigInt += rez.bigInt
-    if (sch.recalcul) this.ev.recalcul++
-    if (sch.felii.length === 0 && !sch.recalcul && sch.mase.noi.length > 0) this.ev.doarFete++
-    for (const y of sch.mase.noi) if (y.surse.length >= 2) this.ev.uniri++
+    let sch: SchimbareCamere | null = null
+    if (this.lume) {
+      // Consumatorul e lumea: comanda a trecut prin punctul unic (ștampila la zi, nicio sursă fără T, niciun invariant).
+      assert.ok(verificaStampila(w).ok, `${ce}: stampila`)
+      assert.equal(statTermic(w).invarianti, 0, `${ce}: ${statTermic(w).ultimulInvariant}`)
+      assert.ok(statTermic(w).loturi > lot0 || w.camere.comp.size === 0, `${ce}: comanda n-a trecut prin proveninta`)
+      this.stare = w.temperatura.slot
+    } else {
+      sch = sincronizeazaCamere(w.camere, w.terrain)
+      comparaEvidenta(sch.mase, K, `${ce} (lotul ${this.loturi})`)
+      if (muta) sch = muta(sch)
+      const rez = provenientaTemperaturii(this.stare, sch, this.tick, w.seed, R)
+      // Number == BigInt, bit cu bit.
+      const big = provenientaTemperaturii(this.stare, sch, this.tick, w.seed, R, true)
+      assert.deepEqual([...big.stare.t], [...rez.stare.t], `${ce}: T pe BigInt`)
+      assert.deepEqual([...big.stare.rest], [...rez.stare.rest], `${ce}: rest pe BigInt`)
+      assert.equal(rez.surseFaraT, 0, `${ce}: surse fara T`)
+      this.stare = rez.stare
+      this.ev.noi += sch.noi.length
+      this.ev.peLoc += sch.peLoc.length
+      this.ev.moarte += sch.moarte.length
+      this.ev.rezerva += rez.rezerva
+      this.ev.bigInt += rez.bigInt
+      if (sch.recalcul) this.ev.recalcul++
+      if (sch.felii.length === 0 && !sch.recalcul && sch.mase.noi.length > 0) this.ev.doarFete++
+      for (const y of sch.mase.noi) if (y.surse.length >= 2) this.ev.uniri++
+    }
     // Fiecare componentă vie are T, niciun alt slot n-are (moartele s-au golit).
     const vii = new Set<number>()
     for (const c of w.camere.comp.values()) vii.add(c.id)
@@ -391,7 +411,7 @@ class Banca {
     }
     this.inst = nou
     if (this.relaxare) this.relaxeaza()
-    return sch
+    return sch!
   }
 }
 
@@ -575,6 +595,22 @@ test('PROVENIENTA depasirea: un lot de peste JURNAL_CAP editari care uneste doua
   // Tunelul e în partea validă a inelului: materialul lui vechi se știe (nu e NEC, după solul natural).
   const u = sch.mase.noi.find((y) => y.id === U.id)!
   assert.deepEqual([u.origine.cer, u.origine.nec, u.origine.sol.map((o) => o.celule)], [0, 0, [1]])
+})
+
+test('PROVENIENTA prin COMENZI (SAV-7): usa dintre doua pivnite deschisa si zidita la loc de 10 ori prin applyCommand dig / fill — T-ul CONSUMATORULUI (w.temperatura) == oracolul pe forta bruta dupa fiecare comanda, energia la rotunjire', () => {
+  const { w, wx, wy, g } = sitPlat(20261001, 12)
+  for (const z of [g - 2, g - 3]) for (let dy = 2; dy <= 4; dy++) {
+    for (let dx = 2; dx <= 4; dx++) ok(dig(w.terrain, wx + dx, wy + dy, z), 'pivnita A')
+    for (let dx = 6; dx <= 8; dx++) ok(dig(w.terrain, wx + dx, wy + dy, z), 'pivnita B')
+  }
+  const b = new Banca(w, cutie(wx + 1, wy + 1, g - 4, wx + 9, wy + 5, g + 1), { lume: true })
+  for (let k = 0; k < 10; k++) {
+    b.lot(() => ok(applyCommand(w, { kind: 'dig', wx: wx + 5, wy: wy + 3, z: g - 3 }, R), 'dig'), `usa ${k}`)
+    assert.equal(listaComponente(w.camere).length, 1, 'unite')
+    b.lot(() => ok(applyCommand(w, { kind: 'fill', wx: wx + 5, wy: wy + 3, z: g - 3, material: P }, R), 'fill'), `zid ${k}`)
+    assert.equal(listaComponente(w.camere).length, 2, 'despartite')
+  }
+  assert.ok(statTermic(w).loturi >= 20, JSON.stringify(statTermic(w)))
 })
 
 // --- poarta pompei (§9) ------------------------------------------------------------------------

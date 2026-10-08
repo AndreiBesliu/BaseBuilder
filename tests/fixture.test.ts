@@ -8,6 +8,9 @@ import { hashWorld } from '../src/sim/hash.ts'
 import { createWorld } from '../src/sim/world.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { esteIncapere, listaComponente } from '../src/sim/camere.ts'
+import { DEFAULT_RULES as R } from '../src/sim/content.ts'
+import { regimPermanent } from '../src/sim/termic.ts'
+import { PLAFON_ECHILIBRU, statTermic } from '../src/sim/temperatura.ts'
 
 // Fixtura de gate se valideaza pe proprietati STRUCTURALE, nu pe raportul de
 // reducere al mesher-ului. Validarea prin raport e auto-referentiala: selecteaza
@@ -83,11 +86,20 @@ test('M10 pe o LUME (gate-ul viewer-ului, IDX-5): dupa zidirea directa, indexul 
   // incaperi, iar prima sapatura din S-DIG platea recalculul intregii fixturi (~420 ms).
   const w = createWorld(20260913)
   assert.ok(applyCommand(w, { kind: 'setFocus', cx: 300, cy: 300 }).ok)
-  buildM10PeLume(w, 300, 300)
+  buildM10PeLume(w, R, 300, 300)
   assert.ok(w.terrain.editari > 150000, `fixtura: doar ${w.terrain.editari} editari`)
   assert.equal(w.camere.vazute, w.terrain.editari, 'invariantul indexului, dupa zidirea directa')
   const incaperi = listaComponente(w.camere).filter(esteIncapere).length
   assert.ok(incaperi > 600, `overlay-ul I ar vedea ${incaperi} incaperi (masurat: 677)`)
+  // Temperatura (t.2b §7, SAV-11): asezarea n-are istorie, deci porneste de la echilibru — regimul permanent la tickul
+  // zidirii, rest 0 — ca o salvare veche migrata. Proveniența NEC a recalculului e suprascrisa.
+  const reg = regimPermanent(w, R, w.tick, PLAFON_ECHILIBRU)
+  assert.ok(reg.ok)
+  for (let i = 0; i < reg.value.graf.n; i++) {
+    const slot: number = reg.value.graf.comp[i]!
+    assert.deepEqual([w.temperatura.slot.t[slot], w.temperatura.slot.rest[slot], w.temperatura.slot.are[slot]], [reg.value.t[i], 0, 1], `componenta ${slot}`)
+  }
+  assert.equal(statTermic(w).echilibre, 1)
   const r0 = w.camere.stat.recalculari
   // Peretele dintre primele doua camere, la un metru sub sol: o sapatura ca ale gate-ului.
   const x = 300 * 32 + 15, y = 300 * 32 + 7

@@ -2,9 +2,10 @@
  * Fixturile grafului termic incremental (t.2b §6, src/sim/termic.ts): lotul și tickul cu delta grafului, oracolele și
  * scenele măsurate de harta B5 și de panoul IDX (lărgire20, mina20, zidul M10, grila M10 pe n×n chunk-uri).
  *
- * Punctul unic de sincronizare (`sincronizeazaLumea`, commit-ul 4) va lega indexul, graful și temperatura în tick și
- * în comenzi; până atunci, aici, un LOT = `sincronizeazaCamere` + `actualizeazaGraful`, iar tickul = `stepAgents` + lot
- * + `w.tick++` (exact `tick` din world.ts, cu delta grafului după sincronizare).
+ * Un LOT = punctul unic de sincronizare (`sincronizeazaLumea`, temperatura.ts: indexul, delta grafului, proveniența), cu
+ * `SchimbareCamere` lui; tickul = `stepAgents` + lot + pasul de 1 Hz + `w.tick++` (exact `tick` din world.ts, cu
+ * schimbarea lotului întoarsă). Testele care ascund un lot de graf cheamă direct `sincronizeazaCamere` și
+ * `actualizeazaGraful` (nivelul grafului, nu al lumii).
  */
 
 import assert from 'node:assert/strict'
@@ -22,13 +23,22 @@ import { dig, fill, groundLevelM } from '../src/sim/terrain/terrain.ts'
 import type { GrafIncremental } from '../src/sim/termic.ts'
 import { actualizeazaGraful, construiesteGrafIncremental, formaCanonicaGraf, formaCanonicaGrafIncremental, grafTermic, grafulIncremental, statGraf } from '../src/sim/termic.ts'
 import { createWorld } from '../src/sim/world.ts'
+import { pasTermic, sincronizeazaLumea } from '../src/sim/temperatura.ts'
 import { R, sitPlat } from './fixturi.ts'
 
-/** Un lot: sincronizarea indexului, apoi delta grafului, cu rezultatul ei. */
-export function lot(w: World): SchimbareCamere {
+/**
+ * Un lot la nivelul GRAFULUI (fără temperatură): `sincronizeazaCamere` + `actualizeazaGraful`. Doar pentru testele care
+ * ascund un lot de graf sau de punctul unic; o lume care trece pe aici are ștampila temperaturii în urmă.
+ */
+export function lotGraf(w: World): SchimbareCamere {
   const sch = sincronizeazaCamere(w.camere, w.terrain)
   bun(actualizeazaGraful(w.camere, sch, R), 'actualizeazaGraful')
   return sch
+}
+
+/** Un lot: punctul unic de sincronizare (indexul, delta grafului, proveniența), cu schimbarea indexului. */
+export function lot(w: World): SchimbareCamere {
+  return bun(sincronizeazaLumea(w, R), 'sincronizeazaLumea').sch
 }
 
 /**
@@ -40,10 +50,11 @@ export function bun<T>(o: Outcome<T>, ce: string): T {
   return o.value
 }
 
-/** Tickul lumii (world.ts), cu delta grafului după sincronizare. */
+/** Tickul lumii (world.ts: `stepAgents → sincronizeazaLumea → pasTermic la w.tick % tps === 0 → w.tick++`), cu schimbarea lotului. */
 export function tickCuGraf(w: World): SchimbareCamere {
   stepAgents(w, R)
   const sch = lot(w)
+  if (w.tick % R.ticksPerSecond === 0) pasTermic(w, R)
   w.tick++
   return sch
 }
@@ -114,7 +125,7 @@ export const gAt = (w: World, x: number, y: number): number => {
 export function lumeM10(seed = 20260913): World {
   const w = createWorld(seed)
   assert.ok(applyCommand(w, { kind: 'setFocus', cx: 300, cy: 300 }).ok)
-  buildM10PeLume(w, 300, 300)
+  buildM10PeLume(w, R, 300, 300)
   lot(w)
   return w
 }

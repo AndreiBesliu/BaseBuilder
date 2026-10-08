@@ -1,9 +1,37 @@
 /**
  * Temperatura ca stare — S24-27, tăietura 2b (research/temperatura-t2b.md).
  *
- * Valul 1, commit-ul 2: funcția PURĂ a provenienței (§3). Starea completă (`w.temperatura`), punctul unic de
- * sincronizare (`sincronizeazaLumea`), pasul de 1 Hz și invarianții vin în commit-ul 4; aici sunt tipul stării pe
- * slot și trecerea ei peste o `SchimbareCamere`.
+ * Starea `w.temperatura` (§1), punctul unic de sincronizare `sincronizeazaLumea` (§2), funcția PURĂ a provenienței
+ * (§3), pasul de 1 Hz `pasTermic` în forma ψ (§5), invarianții și inițializarea „lumii fără istorie"
+ * (`temperaturaLaEchilibru`, §7).
+ *
+ * ## Starea (§1)
+ *
+ * | câmp | clasă |
+ * |---|---|
+ * | `slot.t`, `slot.rest` (pe slotul componentei) | PERSISTED — pe disc și în hash pe ANCORĂ (save.ts, hash.ts) |
+ * | `slot.are` | TRANSIENT — invariant în AMBELE direcții: sloturi cu T == `comp.size`, fiecare componentă vie are T |
+ * | `stampila` (`idx`, `vazute`, `epoca`, `epocaFete`) | TRANSIENT — `idx` e OBIECTUL indexului (un index înlocuit repornește contoarele: clasa L4-1) |
+ * | `reguli`, `pragBigInt`, `stat` | TRANSIENT |
+ * | căldura oamenilor | DERIVED — eșantionată la pas din pozițiile pionilor, fără acumulator |
+ *
+ * ## Punctul unic (§2)
+ *
+ * `sincronizeazaLumea`: indexul (`sincronizeazaCamere`) → delta grafului (`actualizeazaGraful`, termic.ts) →
+ * proveniența → ștampila. Locurile: capătul tickului (world.ts: `stepAgents → sincronizeazaLumea → pasTermic` la
+ * `w.tick % tps === 0` `→ w.tick++`), comenzile `dig` / `fill` (commands.ts), `buildM10PeLume` (harnașamentul) și
+ * încărcarea (`incarcaTemperaturi`, save.ts). Un test AST după NUME (tests/sincronizare-plasa.test.ts) refuză
+ * aceste nume în afara modulelor permise; a doua plasă e invariantul la rulare.
+ *
+ * ## Invarianții (§2, §5.3)
+ *
+ * - **Ștampila completă** `(idx, vazute, epoca, epocaFete)` == a indexului: la intrarea în `sincronizeazaLumea`
+ *   (altfel cineva a sincronizat indexul pe lângă proveniență), la pas și în `encode`. Perechea (epoca, epocaFete),
+ *   nu doar `epoca`: un lot doar-fețe schimbă graful și C' cu epoca pe loc [IDX-2][SAV-1].
+ * - **T în ambele direcții**: fiecare componentă vie are T, niciun slot fără componentă n-are.
+ * - Un invariant încălcat dă `INVARIANT_INCALCAT`, dar NU aruncă din `tick()`: se numără în `statTermic(w).invarianti`
+ *   (cu motivul în `ultimulInvariant`), graful se reface integral, temperaturile pierdute se reiau de la echilibru, și
+ *   simularea continuă. `encode` aruncă (o salvare nu se scrie dintr-o stare care nu e a lumii).
  *
  * ## Starea pe slot
  *
@@ -41,10 +69,18 @@
  */
 
 import type { Rules } from './content.ts'
-import type { SchimbareCamere } from './camere.ts'
+import type { IndexCamere, SchimbareCamere } from './camere.ts'
+import { componentaLa, construiesteCamere, sincronizeazaCamere } from './camere.ts'
 import type { ContoareMasa, MaseComponentaNoua, MaseComponentaVeche, MasaPeAdancime } from './fete.ts'
-import { capacitateMu } from './fete.ts'
+import { capacitateMu, PROV_CER, PROV_NEC_CER, PROV_NEC_SOL0, PROV_SOL0 } from './fete.ts'
 import { tAfara, tSol } from './clima.ts'
+import type { GrafIncremental, NodTermic } from './termic.ts'
+import { actualizeazaGraful, BIN_AFARA, grafTermic, grafulIncremental, refaGrafulDeUrgenta, rezolvaRegim, temperaturiRezervoare } from './termic.ts'
+import { cellOf } from './drumuri.ts'
+import type { World } from './state.ts'
+import type { Terrain } from './terrain/terrain.ts'
+import type { Outcome, Refusal } from './result.ts'
+import { accept, Reason, refuse } from './result.ts'
 
 /** T și rest pe slotul componentei; `are[s] = 1` dacă slotul are o temperatură (TRANSIENT, §1). */
 export interface TemperaturiSlot {
@@ -104,31 +140,40 @@ function adun(a: Ent, b: Ent, c: Calcul): Ent {
   return bg(a) + bg(b)
 }
 
-/** rs(n / d), d > 0: la cel mai apropiat întreg, jumătatea departe de zero. */
-function rs(n: Ent, d: Ent, c: Calcul): Ent {
-  if (typeof n === 'number' && typeof d === 'number') {
-    const a = n < 0 ? -n : n
-    let q = Math.floor(a / d)
-    let r = a - q * d
-    // Împărțirea pe double e rotunjită: câtul poate ieși cu 1 peste sau sub cel întreg.
-    if (r < 0) {
-      q--
-      r += d
-    } else if (r >= d) {
-      q++
-      r -= d
-    }
-    if (2 * r >= d) q++
-    return (n < 0 ? -q : q) + 0
+/**
+ * rs(n / d), d > 0, pe Number (|n|, d întregi sub 2^53): la cel mai apropiat întreg, jumătatea DEPARTE de zero — impară,
+ * rs(−x) = −rs(x), deci orientarea unei muchii nu contează (SAV-3).
+ */
+function rsN(n: number, d: number): number {
+  const a = n < 0 ? -n : n
+  let q = Math.floor(a / d)
+  let r = a - q * d
+  // Împărțirea pe double e rotunjită: câtul poate ieși cu 1 peste sau sub cel întreg.
+  if (r < 0) {
+    q--
+    r += d
+  } else if (r >= d) {
+    q++
+    r -= d
   }
-  c.promovat = true
-  const nb = bg(n)
-  const db = bg(d)
-  const neg = nb < 0n
-  const a = neg ? -nb : nb
-  let q = a / db
-  if (2n * (a - q * db) >= db) q++
+  if (2 * r >= d) q++
+  return (n < 0 ? -q : q) + 0
+}
+
+/** rs(n / d), d > 0, pe BigInt: aceeași rotunjire (impară). */
+function rsB(n: bigint, d: bigint): bigint {
+  const neg = n < 0n
+  const a = neg ? -n : n
+  let q = a / d
+  if (2n * (a - q * d) >= d) q++
   return neg ? -q : q
+}
+
+/** rs(n / d), d > 0: Number cât se poate (`rsN`), BigInt altfel (`rsB`). */
+function rs(n: Ent, d: Ent, c: Calcul): Ent {
+  if (typeof n === 'number' && typeof d === 'number') return rsN(n, d)
+  c.promovat = true
+  return rsB(bg(n), bg(d))
 }
 
 /** floor(n / d) și restul, d > 0; amândouă întregi siguri (T pe Q16, 0 ≤ rest < d). */
@@ -270,4 +315,685 @@ export function provenientaTemperaturii(vechiSt: TemperaturiSlot, sch: Schimbare
 /** Energia componentei din slotul `s`, H = C'·T + rest (μ·Q16), pe BigInt (pentru oracole și invarianți). */
 export function energiaSlotului(stare: TemperaturiSlot, s: number, capacitate: ContoareMasa, rules: Rules): bigint {
   return BigInt(capacitateMu(capacitate, rules.termic.mase)) * BigInt(stare.t[s]!) + BigInt(stare.rest[s]!)
+}
+
+// ---------------------------------------------------------------------------
+// starea lumii (§1)
+// ---------------------------------------------------------------------------
+
+/** Pragul marginii Number / BigInt la pas (§5.3): 2^52. Sub el produsele și sumele unui nod sunt întregi exacți în Number. */
+export const PRAG_NUMBER = 4_503_599_627_370_496
+
+/** Plafonul trecerilor Gauss–Seidel ale echilibrului „lumii fără istorie" (§7, SAV-9): determinist, nu un număr de joc. */
+export const PLAFON_ECHILIBRU = 5000
+
+/** Ștampila sincronizării: OBIECTUL indexului și contoarele lui la ultima trecere prin punctul unic. TRANSIENT. */
+export interface StampilaTemperaturii {
+  readonly idx: IndexCamere
+  readonly vazute: number
+  readonly epoca: number
+  readonly epocaFete: number
+}
+
+/** Contoarele temperaturii (TRANSIENT): K05, invarianții și contoarele de viață ale porților se citesc pe ele. */
+export interface StatTermic {
+  /** Pași de 1 Hz făcuți (cu cel puțin o componentă). */
+  pasi: number
+  /** Pași cu cel puțin un nod sau o muchie pe BigInt. */
+  pasiBigInt: number
+  /** Noduri-pas cu rezervoarele pe BigInt. */
+  noduriBigInt: number
+  /** Pioni citiți la pas (`componentaLa` pe celula picioarelor). */
+  oameniCautati: number
+  /** Noduri-pas cu căldură umană (P > 0). */
+  adunariOameni: number
+  /** Citiri ale rezervoarelor (`temperaturiRezervoare`) la pas. */
+  rezervoareCitite: number
+  /** Invarianți încălcați (§2, §5.3): ștampila, T în ambele direcții, graful, evidența. */
+  invarianti: number
+  /** Motivul ultimului invariant încălcat (jurnalul; F3). */
+  ultimulInvariant: string
+  /** Loturi cu proveniență (componente noi, masă schimbată sau moarte). */
+  loturi: number
+  /** Dintre ele, loturi doar-fețe: nicio felie refăcută, masa schimbată cu epoca pe loc (C3, §3). */
+  loturiDoarFete: number
+  /** Componente noi cu W_Y = 0, după originea aerului. */
+  rezerva: number
+  /** Componente din proveniență calculate pe BigInt. */
+  provenienteBigInt: number
+  /** Perechi (componentă nouă, sursă) din `prov`: componente vechi, SOL(d), CER, NEC (recalculul). */
+  surseVechi: number
+  surseSol: number
+  surseCer: number
+  surseNec: number
+  /** Inițializări de la echilibru: lumea fără istorie, migrarea, reluarea după un invariant. */
+  echilibre: number
+  /** Dintre ele, oprite la plafon: ultima iterată, nu echilibrul (pasul o relaxează). */
+  echilibreNeconvergente: number
+}
+
+function statGol(): StatTermic {
+  return {
+    pasi: 0, pasiBigInt: 0, noduriBigInt: 0, oameniCautati: 0, adunariOameni: 0, rezervoareCitite: 0, invarianti: 0, ultimulInvariant: '',
+    loturi: 0, loturiDoarFete: 0, rezerva: 0, provenienteBigInt: 0, surseVechi: 0, surseSol: 0, surseCer: 0, surseNec: 0, echilibre: 0, echilibreNeconvergente: 0,
+  }
+}
+
+/** `w.temperatura` (§1). */
+export interface StareTemperatura {
+  /** T și rest pe slotul componentei (PERSISTED, pe ancoră la salvare); `are` TRANSIENT. */
+  slot: TemperaturiSlot
+  /** TRANSIENT: indexul la ultima trecere prin punctul unic. */
+  stampila: StampilaTemperaturii
+  /** TRANSIENT: regulile ultimei sincronizări (salvarea le citește: masele, graful). */
+  reguli: Rules
+  /**
+   * TRANSIENT, comutatorul de probă (§5.3, NUM-5): un nod sau o muchie trece pe BigInt când marginea ajunge la prag.
+   * Implicit 2^52; la 0, TOATE nodurile, muchiile și proveniența merg pe BigInt — rezultatul trebuie să fie același.
+   */
+  pragBigInt: number
+  readonly stat: StatTermic
+}
+
+function stampilaDe(idx: IndexCamere): StampilaTemperaturii {
+  return { idx, vazute: idx.vazute, epoca: idx.epoca, epocaFete: idx.epocaFete }
+}
+
+/**
+ * Starea unei lumi fără nicio componentă (`createWorld`): goală, aliniată la index. O lume cu încăperi are istorie —
+ * starea ei vine din proveniență, din salvare sau din `temperaturaLaEchilibru`; de aceea un index cu componente aici e o
+ * eroare de program (altfel funcția ar realinia ștampila peste proveniența pierdută).
+ */
+export function temperaturaGoala(idx: IndexCamere, rules: Rules): StareTemperatura {
+  if (idx.comp.size !== 0) throw new Error(`temperaturaGoala: indexul are ${idx.comp.size} componente — o lume cu incaperi are istorie`)
+  return { slot: temperaturiGoale(0), stampila: stampilaDe(idx), reguli: rules, pragBigInt: PRAG_NUMBER, stat: statGol() }
+}
+
+/** Contoarele temperaturii lumii (o copie). */
+export function statTermic(w: World): StatTermic {
+  return { ...w.temperatura.stat }
+}
+
+function invariant(st: StareTemperatura, o: Refusal): void {
+  st.stat.invarianti++
+  st.stat.ultimulInvariant = String(o.params.motiv ?? o.reason)
+}
+
+/**
+ * Ștampila temperaturii == a indexului lumii (§2): același OBIECT index, aceleași `vazute`, `epoca`, `epocaFete`. Altfel
+ * indexul s-a sincronizat pe lângă `sincronizeazaLumea` (sau a fost înlocuit), iar proveniența loturilor acelora s-a pierdut.
+ */
+export function verificaStampila(w: World): Outcome<void> {
+  const s = w.temperatura.stampila
+  const idx = w.camere
+  if (s.idx !== idx) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'temperatura e a altui index (indexul lumii a fost inlocuit)' })
+  if (s.vazute !== idx.vazute || s.epoca !== idx.epoca || s.epocaFete !== idx.epocaFete) {
+    return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'indexul s-a sincronizat pe langa temperatura (punctul unic ocolit)', vazute: s.vazute, vazuteIndex: idx.vazute, epoca: s.epoca, epocaIndex: idx.epoca, epocaFete: s.epocaFete, epocaFeteIndex: idx.epocaFete })
+  }
+  return accept()
+}
+
+/** T în AMBELE direcții (§1, IDX-6): fiecare slot cu T e al unei componente vii, iar numărul lor == `comp.size`. */
+export function verificaTemperaturi(w: World): Outcome<void> {
+  const sl = w.temperatura.slot
+  const idx = w.camere
+  let cuT = 0
+  for (let s = 0; s < sl.are.length; s++) {
+    if (sl.are[s] !== 1) continue
+    cuT++
+    if (!idx.comp.has(s)) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'slot cu T fara componenta', slot: s })
+  }
+  if (cuT !== idx.comp.size) {
+    // determinism-ok: se întoarce prima componentă fără T; ordinea inserării e deterministă, iar refuzul e oricum unul.
+    for (const c of idx.comp.values()) if (c.id >= sl.are.length || sl.are[c.id] !== 1) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'componenta fara T', comp: c.id, ancora: c.ancora })
+  }
+  return accept()
+}
+
+/** Totul de dinaintea unei salvări (§7): indexul la zi, ștampila, T în ambele direcții. `encode` aruncă pe refuz. */
+export function temperaturaLaZi(w: World): Outcome<void> {
+  const idx = w.camere
+  if (idx.teren !== w.terrain || idx.vazute !== w.terrain.editari) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'indexul nu e la zi cu terenul', vazute: idx.vazute, editari: w.terrain.editari })
+  const s = verificaStampila(w)
+  if (!s.ok) return s
+  return verificaTemperaturi(w)
+}
+
+// ---------------------------------------------------------------------------
+// punctul unic de sincronizare (§2)
+// ---------------------------------------------------------------------------
+
+/** Ce a făcut `sincronizeazaLumea` pe un lot. */
+export interface SincronizareLume {
+  readonly sch: SchimbareCamere
+  /** Graful incremental de după lot (sau refuzul lui: pasul îl reface de urgență). */
+  readonly graf: Outcome<GrafIncremental>
+  /** Componente cu T din proveniență pe lotul ăsta. */
+  readonly noi: number
+}
+
+/** Perechile (componentă nouă, sursă) ale lotului, pe fel (contoarele de viață ale porților, SAV-5). */
+function numaraSursele(stat: StatTermic, sch: SchimbareCamere): void {
+  // determinism-ok: numărători (sume întregi), ordinea nu contează.
+  for (const surse of sch.prov.values()) {
+    // determinism-ok: idem.
+    for (const s of surse.keys()) {
+      if (s >= 0) stat.surseVechi++
+      else if (s === PROV_CER) stat.surseCer++
+      else if (s === PROV_NEC_CER || s <= PROV_NEC_SOL0) stat.surseNec++
+      else if (s <= PROV_SOL0) stat.surseSol++
+    }
+  }
+}
+
+/**
+ * Punctul unic de sincronizare (§2): indexul (`sincronizeazaCamere`) → delta grafului (`actualizeazaGraful`) → proveniența
+ * temperaturii (§3, la tickul de acum) → ștampila. Se cheamă la capătul tickului, după comenzile de teren, la zidirea
+ * harnașamentului și (prin `incarcaTemperaturi`) la încărcare — nicăieri altundeva (testul AST, §2).
+ *
+ * Invarianții nu aruncă: o ștampilă care nu e a indexului la intrare (un lot sincronizat pe lângă) își pierde
+ * proveniența — graful se reface integral, T se reia de la echilibru pe toate componentele, se numără și se întoarce
+ * `INVARIANT_INCALCAT`. La fel se numără o sursă fără T (o stare nesincronizată), abaterile evidenței și un graf refuzat.
+ */
+export function sincronizeazaLumea(w: World, rules: Rules): Outcome<SincronizareLume> {
+  const st = w.temperatura
+  const intrare = verificaStampila(w)
+  const sch = sincronizeazaCamere(w.camere, w.terrain)
+  const graf = actualizeazaGraful(w.camere, sch, rules)
+  if (!intrare.ok) {
+    invariant(st, intrare)
+    reiaDeLaEchilibru(w, rules)
+    return intrare
+  }
+  let noi = 0
+  let surseFaraT = 0
+  if (sch.mase.noi.length > 0 || sch.moarte.length > 0) {
+    const p = provenientaTemperaturii(st.slot, sch, w.tick, w.seed, rules, st.pragBigInt === 0)
+    st.slot = p.stare
+    noi = sch.mase.noi.length
+    surseFaraT = p.surseFaraT
+    st.stat.loturi++
+    if (sch.felii.length === 0 && !sch.recalcul && noi > 0) st.stat.loturiDoarFete++
+    st.stat.rezerva += p.rezerva
+    st.stat.provenienteBigInt += p.bigInt
+    numaraSursele(st.stat, sch)
+  }
+  st.stampila = stampilaDe(w.camere)
+  st.reguli = rules
+  let o: Outcome<SincronizareLume> = accept({ sch, graf, noi })
+  if (surseFaraT > 0) o = refuse(Reason.INVARIANT_INCALCAT, { motiv: 'o sursa a provenientei n-avea T (stare nesincronizata)', surse: surseFaraT })
+  else if (sch.mase.abateri > 0) o = refuse(Reason.INVARIANT_INCALCAT, { motiv: 'evidenta maselor nu se inchide', abateri: sch.mase.abateri })
+  else if (!graf.ok) o = graf
+  if (!o.ok) invariant(st, o)
+  return o
+}
+
+// ---------------------------------------------------------------------------
+// echilibrul: lumea fără istorie (§7)
+// ---------------------------------------------------------------------------
+
+/** Rezultatul lui `temperaturaLaEchilibru`. */
+export interface Echilibru {
+  readonly treceri: number
+  /** false: oprit la `PLAFON_ECHILIBRU`, T e ultima iterată (deterministă), nu echilibrul — pasul o relaxează. */
+  readonly convergent: boolean
+}
+
+interface SolutieEchilibru extends Echilibru {
+  /** Slotul componentei și T-ul ei (Q16), pe nod. */
+  readonly comp: Int32Array
+  readonly t: Int32Array
+}
+
+function solutiaEchilibrului(w: World, rules: Rules, tick: number, plafon: number = PLAFON_ECHILIBRU): Outcome<SolutieEchilibru> {
+  const go = grafTermic(w.camere, rules)
+  if (!go.ok) return go
+  const g = go.value
+  const tRez = temperaturiRezervoare(w.seed, tick, rules)
+  const s = rezolvaRegim(g, tRez, tRez[BIN_AFARA]!, false, plafon)
+  return accept({ comp: g.comp, t: s.t, treceri: s.treceri, convergent: s.convergent })
+}
+
+/**
+ * T-ul „lumii fără istorie" (§7, SAV-9, SAV-11): regimul permanent al grafului (Gauss–Seidel pe întregi, `rezolvaRegim`
+ * direct, plafon `PLAFON_ECHILIBRU`), rest 0, pe TOATE componentele, la `tick`; ștampila se aliniază la index. La
+ * neconvergență: ultima iterată + contor (`echilibreNeconvergente`) — nu e echilibrul, pasul îl relaxează. Un singur adevăr
+ * pentru „lume fără istorie": migrarea salvărilor vechi (save.ts) și zidirea harnașamentului (fixture-m10.ts) — doar acolo
+ * (testul AST, §2). Cere indexul la zi. `plafon` e al probelor (neconvergența); jocul folosește `PLAFON_ECHILIBRU`.
+ */
+export function temperaturaLaEchilibru(w: World, rules: Rules, tick: number, plafon: number = PLAFON_ECHILIBRU): Outcome<Echilibru> {
+  const idx = w.camere
+  if (idx.teren !== w.terrain || idx.vazute !== w.terrain.editari) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'indexul nu e la zi cu terenul', vazute: idx.vazute, editari: w.terrain.editari })
+  const r = solutiaEchilibrului(w, rules, tick, plafon)
+  if (!r.ok) return r
+  const st = w.temperatura
+  const sl = temperaturiGoale(idx.cUrmator)
+  for (let i = 0; i < r.value.comp.length; i++) {
+    const c = r.value.comp[i]!
+    sl.t[c] = r.value.t[i]!
+    sl.are[c] = 1
+  }
+  st.slot = sl
+  st.stampila = stampilaDe(idx)
+  st.reguli = rules
+  st.stat.echilibre++
+  if (!r.value.convergent) st.stat.echilibreNeconvergente++
+  return accept({ treceri: r.value.treceri, convergent: r.value.convergent })
+}
+
+/** După o ocolire a punctului unic: T-urile nu mai au proveniență, deci toate se reiau de la echilibru (numărat de apelant). */
+function reiaDeLaEchilibru(w: World, rules: Rules): void {
+  const r = temperaturaLaEchilibru(w, rules, w.tick)
+  if (!r.ok) invariant(w.temperatura, r)
+}
+
+/** T lipsă pe unele componente (sau T pe sloturi moarte): cele lipsă de la echilibru, sloturile moarte golite. */
+function completeaza(w: World, rules: Rules): void {
+  const st = w.temperatura
+  const idx = w.camere
+  const r = solutiaEchilibrului(w, rules, w.tick)
+  if (!r.ok) {
+    invariant(st, r)
+    return
+  }
+  const vechi = st.slot
+  const sl = temperaturiGoale(Math.max(idx.cUrmator, vechi.are.length))
+  for (let i = 0; i < r.value.comp.length; i++) {
+    const c = r.value.comp[i]!
+    if (c < vechi.are.length && vechi.are[c] === 1) {
+      sl.t[c] = vechi.t[c]!
+      sl.rest[c] = vechi.rest[c]!
+    } else sl.t[c] = r.value.t[i]!
+    sl.are[c] = 1
+  }
+  st.slot = sl
+  st.stat.echilibre++
+}
+
+// ---------------------------------------------------------------------------
+// încărcarea (§7)
+// ---------------------------------------------------------------------------
+
+/** Indexul, graful și starea (fără T încă) ale unei lumi încărcate. */
+export interface LumeIncarcata {
+  readonly camere: IndexCamere
+  readonly temperatura: StareTemperatura
+}
+
+/**
+ * Indexul unei lumi încărcate, construit de la zero pe terenul ei (DERIVED), cu graful incremental construit integral și
+ * starea temperaturii aliniată la el, încă FĂRĂ T: `decode` o umple din salvare sau, la o salvare veche, de la echilibru
+ * (`temperaturaLaEchilibru`). Refuz dacă graful refuză (fețele nu se potrivesc cu indexul: un defect, nu o salvare
+ * stricată). Doar save.ts (testul AST, §2).
+ */
+export function incarcaTemperaturi(terrain: Terrain, rules: Rules): Outcome<LumeIncarcata> {
+  const camere = construiesteCamere(terrain, rules.termic.kCelule, rules.termic.dSolMasivM)
+  const go = actualizeazaGraful(camere, sincronizeazaCamere(camere, terrain), rules)
+  if (!go.ok) return go
+  return accept({ camere, temperatura: { slot: temperaturiGoale(camere.cUrmator), stampila: stampilaDe(camere), reguli: rules, pragBigInt: PRAG_NUMBER, stat: statGol() } })
+}
+
+// ---------------------------------------------------------------------------
+// pasul de 1 Hz, forma ψ (§5)
+// ---------------------------------------------------------------------------
+
+/** Fracția redusă `tps · 86.400 · μ_aer / (ziTicks · c_aer)`: G (Q16 W/K) → g pe pas (μ, Q16) — §5.1. DERIVED din reguli. */
+interface Conversie {
+  readonly num: number
+  readonly den: number
+}
+
+const CONVERSII = new WeakMap<Rules, Conversie>()
+
+function cmmdc(a: number, b: number): number {
+  while (b !== 0) {
+    const r = a % b
+    a = b
+    b = r
+  }
+  return a
+}
+
+function conversia(rules: Rules): Conversie {
+  let c = CONVERSII.get(rules)
+  if (c === undefined) {
+    const num = rules.ticksPerSecond * 86400 * rules.termic.mase.aer
+    const den = rules.calendar.ziTicks * rules.termic.cAerJPeK
+    const d = cmmdc(num, den)
+    c = { num: num / d, den: den / d }
+    CONVERSII.set(rules, c)
+  }
+  return c
+}
+
+/** rs(a·b / d), exact: Number cât produsul e un întreg sigur, BigInt altfel. */
+function rsProdus(a: number, b: number, d: number): number {
+  const p = a * b
+  if (Number.isSafeInteger(p)) return rsN(p, d)
+  return Number(rsB(BigInt(a) * BigInt(b), BigInt(d)))
+}
+
+/** g pe pas (§5.1) al unei sume de conductanțe G (Q16 W/K): rs(G · num / den). */
+function gPas(G: number, c: Conversie): number {
+  return rsProdus(G, c.num, c.den)
+}
+
+/** Căldura a `P` W întregi pe un pas, în unități H (μ·Q16): rs(P · 2^16 · num / den) — o conversie pe nod (§5.1). */
+function caldura(P: number, c: Conversie): number {
+  return rsProdus(P * 65536, c.num, c.den)
+}
+
+/** Fluxul unei muchii, F = rs(g·(T_a − T_b), 2^16) (§5.2): Number sub prag, BigInt altfel. `big.v` numără trecerile. */
+function fluxMuchie(g: number, d: number, prag: number, big: { v: number }): number {
+  const x = g * d
+  if ((x < 0 ? -x : x) < prag) return rsN(x, 65536)
+  big.v++
+  return Number(rsB(BigInt(g) * BigInt(d), 65536n))
+}
+
+/** Ce a făcut un pas (pentru oracole: ΔΣH == sumaFr + sumaP — muchiile se anulează). */
+export interface RaportPas {
+  readonly noduri: number
+  /** Σ fluxurile rezervoarelor, H (μ·Q16). */
+  readonly sumaFr: number
+  /** Σ căldura oamenilor, H. */
+  readonly sumaP: number
+  readonly noduriBigInt: number
+  readonly muchiiBigInt: number
+}
+
+/** Opțiunile de probă ale pasului. */
+export interface OptiuniPas {
+  /**
+   * Proba orientării (§9, SAV-3): pentru muchiile (a, b) (etichete, a < b) pe care le alege, fluxul se calculează din
+   * capătul b. Cu `rs` impară rezultatul e identic bit cu bit.
+   */
+  readonly inverseaza?: (a: number, b: number) => boolean
+}
+
+/**
+ * Modelul pasului (DERIVED din graful incremental și reguli, TRANSIENT): nodurile dense, C', muchiile o dată pe pereche
+ * cu g pe pas, rezervoarele pe bin cu g pe pas și S. Memorat pe OBIECTUL grafului, valabil cât ștampila lui (vazute,
+ * epoca, epocaFete) și regulile: orice deltă a grafului vine cu un lot, deci cu altă ștampilă (S2). Validările de citire
+ * ale grafului (simetria muchiilor, nodurile == componentele indexului, C' > 0) se fac aici, la construire.
+ */
+interface ModelPas {
+  readonly vazute: number
+  readonly epoca: number
+  readonly epocaFete: number
+  readonly reguli: Rules
+  readonly n: number
+  /** Slotul componentei fiecărui nod dens. */
+  readonly comp: Int32Array
+  readonly C: Float64Array
+  /** Slot → nod dens (−1: niciunul). */
+  readonly densDupaComp: Int32Array
+  /** Muchiile, o dată pe pereche (din eticheta mai mică): capetele dense, etichetele lor și g pe pas. */
+  readonly mA: Int32Array
+  readonly mB: Int32Array
+  readonly mEa: Int32Array
+  readonly mEb: Int32Array
+  readonly mG: Float64Array
+  /** Rezervoarele nodului i: `rBin/rG[rStart[i] .. rStart[i+1])`, g pe pas; S = Σ rG. */
+  readonly rStart: Int32Array
+  readonly rBin: Int32Array
+  readonly rG: Float64Array
+  readonly S: Float64Array
+}
+
+const MODELE = new WeakMap<GrafIncremental, ModelPas>()
+
+function modelul(w: World, g: GrafIncremental, rules: Rules): ModelPas | Refusal {
+  const s = g.stampila
+  const m = MODELE.get(g)
+  if (m !== undefined && m.reguli === rules && m.vazute === s.vazute && m.epoca === s.epoca && m.epocaFete === s.epocaFete) return m
+  const idx = w.camere
+  const n = g.noduri.size
+  if (n !== idx.comp.size) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'nodurile grafului nu sunt componentele indexului', noduri: n, componente: idx.comp.size })
+  const conv = conversia(rules)
+  let maxEt = 0
+  // determinism-ok: un maxim.
+  for (const et of g.noduri.keys()) if (et > maxEt) maxEt = et
+  const dupaEt = new Int32Array(maxEt + 1).fill(-1)
+  const comp = new Int32Array(n)
+  const C = new Float64Array(n)
+  const densDupaComp = new Int32Array(Math.max(1, idx.cUrmator)).fill(-1)
+  const noduri: NodTermic[] = []
+  const etichete: number[] = []
+  let i = 0
+  // determinism-ok: indicii denși urmează inserarea; fiecare nod se calculează separat, sumele sunt întregi exacte.
+  for (const [et, nod] of g.noduri) {
+    const c = nod.comp
+    if (!idx.comp.has(c) || g.nodComp.get(c) !== et || c >= densDupaComp.length) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'nod fara componenta', nod: et, comp: c })
+    const Cn = capacitateMu(nod, rules.termic.mase)
+    if (!(Cn > 0)) return refuse(Reason.INVARIANT_INCALCAT, { motiv: "C' nul pe un nod", comp: c })
+    dupaEt[et] = i
+    comp[i] = c
+    C[i] = Cn
+    densDupaComp[c] = i
+    noduri.push(nod)
+    etichete.push(et)
+    i++
+  }
+  const mA: number[] = []
+  const mB: number[] = []
+  const mEa: number[] = []
+  const mEb: number[] = []
+  const mG: number[] = []
+  const rStart = new Int32Array(n + 1)
+  const rBin: number[] = []
+  const rG: number[] = []
+  const S = new Float64Array(n)
+  for (let a = 0; a < n; a++) {
+    const ea = etichete[a]!
+    // determinism-ok: listele de muchii și de rezervoare urmează inserarea; fluxurile se adună în sume întregi exacte.
+    for (const [eb, G] of noduri[a]!.vec) {
+      const inv = g.noduri.get(eb)?.vec.get(ea)
+      if (inv !== G) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'muchie asimetrica', a: ea, b: eb, gA: G, gB: inv ?? -1 })
+      if (ea > eb) continue
+      const b = eb <= maxEt ? dupaEt[eb]! : -1
+      if (b < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'muchie spre un nod inexistent', a: ea, b: eb })
+      mA.push(a)
+      mB.push(b)
+      mEa.push(ea)
+      mEb.push(eb)
+      mG.push(gPas(G, conv))
+    }
+    rStart[a] = rBin.length
+    // determinism-ok: idem.
+    for (const [bin, G] of noduri[a]!.bin) {
+      const v = gPas(G, conv)
+      rBin.push(bin)
+      rG.push(v)
+      S[a] = S[a]! + v
+    }
+  }
+  rStart[n] = rBin.length
+  const nou: ModelPas = {
+    vazute: s.vazute, epoca: s.epoca, epocaFete: s.epocaFete, reguli: rules, n, comp, C, densDupaComp,
+    mA: Int32Array.from(mA), mB: Int32Array.from(mB), mEa: Int32Array.from(mEa), mEb: Int32Array.from(mEb), mG: Float64Array.from(mG),
+    rStart, rBin: Int32Array.from(rBin), rG: Float64Array.from(rG), S,
+  }
+  MODELE.set(g, nou)
+  return nou
+}
+
+/**
+ * Un pas pe graf, forma ψ (§5.2): (1) rezervoarele la tickul pasului; (2) muchiile din T VECHI, o dată pe pereche
+ * (din eticheta mai mică — `rs` impară face orientarea irelevantă); (3) oamenii (W întregi pe nod, o singură
+ * conversie); normalizare → **T*** (T după pasul 3, NUM-7); (4) rezervoarele: S = Σ g_r, X = Σ g_r·(T_r − T*),
+ * ψ = 2^16 − rs(2^16·S, C'·2^16 + S), F_r = rs(rs(X, 2^16)·ψ, 2^16); normalizare. Marginea e dinamică pe nod (§5.3):
+ * S·(M + |T*|) < prag și (C' + S)·2^16 < prag → Number, altfel BigInt (același rezultat). Totul se scrie la sfârșit:
+ * un refuz nu lasă un pas pe jumătate.
+ */
+function pasPeGraf(w: World, g: GrafIncremental, rules: Rules, o: OptiuniPas): RaportPas | Refusal {
+  const st = w.temperatura
+  const m = modelul(w, g, rules)
+  if ('reason' in m) return m
+  const conv = conversia(rules)
+  const n = m.n
+  const sl = st.slot
+  const T = new Float64Array(n)
+  const rest = new Float64Array(n)
+  for (let i = 0; i < n; i++) {
+    const c = m.comp[i]!
+    if (c >= sl.are.length || sl.are[c] !== 1) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'componenta nodului fara T', comp: c })
+    T[i] = sl.t[c]!
+    rest[i] = sl.rest[c]!
+  }
+  const prag = st.pragBigInt
+  // (1) rezervoarele la tickul pasului.
+  const tRez = temperaturiRezervoare(w.seed, w.tick, rules)
+  st.stat.rezervoareCitite++
+  // (2) muchiile, din T VECHI.
+  const acc = new Float64Array(n)
+  const big = { v: 0 }
+  const inv = o.inverseaza
+  for (let e = 0; e < m.mA.length; e++) {
+    const a = m.mA[e]!
+    const b = m.mB[e]!
+    if (inv !== undefined && inv(m.mEa[e]!, m.mEb[e]!)) {
+      const F = fluxMuchie(m.mG[e]!, T[b]! - T[a]!, prag, big)
+      acc[b] = acc[b]! - F
+      acc[a] = acc[a]! + F
+    } else {
+      const F = fluxMuchie(m.mG[e]!, T[a]! - T[b]!, prag, big)
+      acc[a] = acc[a]! - F
+      acc[b] = acc[b]! + F
+    }
+  }
+  // (3) oamenii: W întregi pe nod, eșantionați acum, din pozițiile de la capătul tickului (fără acumulator). Un om în
+  // tocul ușii sau afară (celula lui nu e aer acoperit) nu încălzește nimic.
+  const W = new Float64Array(n)
+  const ag = w.agents
+  for (let s = 0; s < ag.count; s++) {
+    if (ag.alive[s] !== 1) continue
+    st.stat.oameniCautati++
+    const c = componentaLa(w.camere, cellOf(ag.x[s]!), cellOf(ag.y[s]!), ag.z[s]!)
+    if (c === null) continue
+    const k = c.id < m.densDupaComp.length ? m.densDupaComp[c.id]! : -1
+    if (k < 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'pionul sta intr-o componenta fara nod', comp: c.id })
+    W[k] = W[k]! + rules.termic.omW
+  }
+  let sumaP = 0
+  let sumaFr = 0
+  let bigN = 0
+  const M = g.margineT
+  for (let i = 0; i < n; i++) {
+    let P = 0
+    if (W[i]! > 0) {
+      P = caldura(W[i]!, conv)
+      st.stat.adunariOameni++
+    }
+    sumaP += P
+    // T* = T după muchii și oameni, normalizat (NUM-7).
+    let r = rest[i]! + acc[i]! + P
+    const C = m.C[i]!
+    let q = Math.floor(r / C)
+    r -= q * C
+    if (r < 0) {
+      q--
+      r += C
+    } else if (r >= C) {
+      q++
+      r -= C
+    }
+    const tStar = T[i]! + q
+    // Un T în afara întregilor siguri (o stare care a divergat — content care ocolește garda — sau stricată) nu se mai poate
+    // calcula exact: pasul se refuză întreg, nu se scrie nimic (și nu aruncă).
+    if (!Number.isSafeInteger(tStar)) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'T iese din intregii siguri', comp: m.comp[i]! })
+    // (4) rezervoarele, față de T*.
+    const S = m.S[i]!
+    const aT = tStar < 0 ? -tStar : tStar
+    let Fr: number
+    if (S * (M + aT) < prag && (C + S) * 65536 < prag) {
+      let X = 0
+      for (let k = m.rStart[i]!; k < m.rStart[i + 1]!; k++) X += m.rG[k]! * (tRez[m.rBin[k]!]! - tStar)
+      const psi = 65536 - rsN(65536 * S, C * 65536 + S)
+      Fr = rsN(rsN(X, 65536) * psi, 65536)
+    } else {
+      bigN++
+      const tb = BigInt(tStar)
+      let X = 0n
+      for (let k = m.rStart[i]!; k < m.rStart[i + 1]!; k++) X += BigInt(m.rG[k]!) * (BigInt(tRez[m.rBin[k]!]!) - tb)
+      const Sb = BigInt(S)
+      const psi = 65536n - rsB(65536n * Sb, BigInt(C) * 65536n + Sb)
+      Fr = Number(rsB(rsB(X, 65536n) * psi, 65536n))
+    }
+    sumaFr += Fr
+    r += Fr
+    let q2 = Math.floor(r / C)
+    r -= q2 * C
+    if (r < 0) {
+      q2--
+      r += C
+    } else if (r >= C) {
+      q2++
+      r -= C
+    }
+    T[i] = tStar + q2 + 0
+    rest[i] = r + 0
+    if (!Number.isSafeInteger(T[i]!) || !Number.isSafeInteger(rest[i]!)) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'T iese din intregii siguri', comp: m.comp[i]! })
+  }
+  // Scrierea, la sfârșit.
+  for (let i = 0; i < n; i++) {
+    sl.t[m.comp[i]!] = T[i]!
+    sl.rest[m.comp[i]!] = rest[i]!
+  }
+  if (bigN > 0 || big.v > 0) st.stat.pasiBigInt++
+  st.stat.noduriBigInt += bigN
+  return { noduri: n, sumaFr, sumaP, noduriBigInt: bigN, muchiiBigInt: big.v }
+}
+
+/**
+ * Pasul de 1 Hz (§5): world.ts îl cheamă după `sincronizeazaLumea`, la `w.tick % tps === 0` (faza e GLOBALĂ, pe tick —
+ * nu de la încărcare). Prima linie: o lume fără nicio componentă (scenariul standard) nu face nimic, nici nu citește
+ * rezervoarele.
+ *
+ * NU aruncă (§5.3): o ștampilă care nu e a indexului (sau un index rămas în urma terenului) reia temperatura de la
+ * echilibru; o componentă fără T o primește de la echilibru, un slot mort se golește; un graf care nu e la zi sau refuză la
+ * citire (o muchie asimetrică) se reface integral, de urgență — fiecare numărat în `statTermic(w).invarianti`, apoi pasul
+ * continuă. Întoarce raportul pasului (sau null: nimic de făcut / graful nu se poate reface).
+ */
+export function pasTermic(w: World, rules: Rules, o: OptiuniPas = {}): RaportPas | null {
+  if (w.camere.comp.size === 0) return null
+  const st = w.temperatura
+  const idx = w.camere
+  const stamp = verificaStampila(w)
+  if (!stamp.ok || idx.teren !== w.terrain || idx.vazute !== w.terrain.editari) {
+    invariant(st, stamp.ok ? refuse(Reason.INVARIANT_INCALCAT, { motiv: 'pas: indexul nu e la zi cu terenul' }) : stamp)
+    if (idx.teren !== w.terrain || idx.vazute !== w.terrain.editari) actualizeazaGraful(idx, sincronizeazaCamere(idx, w.terrain), rules)
+    reiaDeLaEchilibru(w, rules)
+  } else {
+    const t = verificaTemperaturi(w)
+    if (!t.ok) {
+      invariant(st, t)
+      completeaza(w, rules)
+    }
+  }
+  let go = grafulIncremental(idx, rules)
+  if (!go.ok) {
+    invariant(st, go)
+    go = refaGrafulDeUrgenta(idx, rules)
+    if (!go.ok) {
+      invariant(st, go)
+      return null
+    }
+  }
+  let r = pasPeGraf(w, go.value, rules, o)
+  if ('reason' in r) {
+    invariant(st, r)
+    go = refaGrafulDeUrgenta(idx, rules)
+    if (!go.ok) {
+      invariant(st, go)
+      return null
+    }
+    r = pasPeGraf(w, go.value, rules, o)
+    if ('reason' in r) {
+      invariant(st, r)
+      return null
+    }
+  }
+  st.stat.pasi++
+  return r
 }

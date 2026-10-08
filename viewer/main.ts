@@ -258,7 +258,7 @@ const AGENTI_ACTIVI = SCENARIO === null
 // mica trece cu ORICE stiva si nu spune nimic; e fals pozitiv prin constructie.
 // De asta scenariile de gate incarca mereu M10, si niciodata fortareata.
 if (SCENARIO !== null) {
-  buildM10PeLume(world, FOCUS_CX, FOCUS_CY)
+  buildM10PeLume(world, DEFAULT_RULES, FOCUS_CX, FOCUS_CY)
 } else if (lumeIncarcata === null && JOC_NOU === null) {
   // Demo, verificare si bisectie: fortareata, ca inainte. Un joc nou porneste pe un loc neatins.
   buildFortress()

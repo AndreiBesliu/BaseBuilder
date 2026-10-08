@@ -24,7 +24,7 @@ import { dig, fill, materialAt } from '../src/sim/terrain/terrain.ts'
 import { actualizeazaGraful, comparaGrafulCuIntegral, construiesteGrafIncremental, formaCanonicaGrafIncremental, grafulIncremental, refaGrafulDeUrgenta, statGraf } from '../src/sim/termic.ts'
 import { createWorld } from '../src/sim/world.ts'
 import { R, sitPlat } from './fixturi.ts'
-import { bun, canonic, delta, egalCuIndexulNou, egalCuIntegralul, faraUrgente, gAt, graf, lot, lumeM10, lumeMina, tickCuGraf, zidLangaCamere } from './fixturi-graf.ts'
+import { bun, canonic, delta, egalCuIndexulNou, egalCuIntegralul, faraUrgente, gAt, graf, lot, lotGraf, lumeM10, lumeMina, tickCuGraf, zidLangaCamere } from './fixturi-graf.ts'
 
 const P = Material.PIATRA_CONSTRUITA
 
@@ -180,7 +180,7 @@ test('GRAF stampila: un lot pe care graful nu l-a vazut (sincronizare fara delta
   const o = grafulIncremental(w.camere, R)
   assert.ok(!o.ok && o.params.motiv === 'graful incremental nu e la zi cu indexul', o.ok ? 'acceptat' : JSON.stringify(o))
   assert.ok(dig(w.terrain, wx + 6, wy + 3, g - 3).ok)
-  lot(w)
+  lotGraf(w)
   assert.deepEqual([delta(w, st).refaceriDeUrgenta, delta(w, st).loturi], [1, 0], 'refacerea de urgenta, nu o delta pe un graf vechi')
   egalCuIndexulNou(w, 'dupa lotul ascuns')
   // Refacerea de urgență cerută explicit (pasul, la un graf care nu e la zi): același graf, contorul +1.
@@ -361,10 +361,10 @@ test('GRAF primul lot construieste graful integral (construiri 1); un lot fara s
   sincronizeazaCamere(w.camere, w.terrain)
   assert.ok(!grafulIncremental(w.camere, R).ok, 'inainte de primul lot: niciun graf')
   const st = statGraf(w.camere)
-  lot(w)
+  lotGraf(w)
   assert.deepEqual([delta(w, st).construiri, delta(w, st).loturi], [1, 0])
   const g0 = graf(w)
-  lot(w)
+  lotGraf(w)
   assert.equal(graf(w), g0)
   assert.deepEqual([delta(w, st).construiri, delta(w, st).loturi, delta(w, st).S], [1, 0, 0], 'NIMIC: nicio delta')
   // Alt teren: sincronizarea e un recalcul, graful se reconstruiește pe indexul nou.

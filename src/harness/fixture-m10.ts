@@ -22,7 +22,8 @@
  * separat si invalideaza seriile de masuratori existente.
  */
 
-import { reconstruiesteCamere } from '../sim/camere.ts'
+import type { Rules } from '../sim/content.ts'
+import { sincronizeazaLumea, temperaturaLaEchilibru } from '../sim/temperatura.ts'
 import type { World } from '../sim/state.ts'
 import { CHUNK_CELLS, Material } from '../sim/terrain/chunk.ts'
 import type { Terrain } from '../sim/terrain/terrain.ts'
@@ -149,10 +150,16 @@ export function buildM10(t: Terrain, cx: number, cy: number): FixtureStats {
  * incaperilor, IDX-5), invariantul `camere.vazute === terrain.editari` cadea (0 fata de 218.230),
  * overlay-ul I si inspectorul vedeau 0 incaperi in loc de 677, iar prima comanda `dig` din S-DIG
  * platea recalculul intregii fixturi (~420 ms), in bucla masurata a gate-ului.
+ *
+ * Punctul de sincronizare e cel unic al lumii (`sincronizeazaLumea`, t.2b §2): indexul, graful si temperatura. Asezarea
+ * n-are istorie (a aparut dintr-un lot), deci temperatura ei porneste de la echilibru — aceeasi functie ca migrarea unei
+ * salvari vechi, un singur adevar pentru „lume fara istorie" (t.2b §7, SAV-11).
  */
-export function buildM10PeLume(w: World, cx: number, cy: number): FixtureStats {
+export function buildM10PeLume(w: World, rules: Rules, cx: number, cy: number): FixtureStats {
   const stats = buildM10(w.terrain, cx, cy)
-  reconstruiesteCamere(w.camere, w.terrain)
+  sincronizeazaLumea(w, rules)
+  const e = temperaturaLaEchilibru(w, rules, w.tick)
+  if (!e.ok) throw new Error(`buildM10PeLume: temperatura la echilibru refuzata: ${JSON.stringify(e)}`)
   return stats
 }
 

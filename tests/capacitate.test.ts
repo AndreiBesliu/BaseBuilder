@@ -4,8 +4,8 @@
  * Trei feluri de probe. CONTOARELE pe hârtie și față de o numărătoare independentă (materialAt + groundLevelM +
  * bazaVoxeli, nu cititorul camerelor): masa unei fețe ține de prima celulă de pe normală. ORACOLUL: contoarele
  * ținute la zi == recalculul, după fiecare lot (forma canonică a fețelor le poartă). CALIBRAREA: τ_loc = C/ΣG pe
- * scenele numite și valul de frig pe benzi, pe modelul în FLOAT (tests/fixturi-temperatura.ts) — pasul pe
- * întregi vine în commit-ul 4, care re-ancorează testele pe el.
+ * scenele numite (τ pe pasul real e în tests/pas-termic.test.ts) și valul de frig pe benzi, pe PASUL REAL pe întregi
+ * (`pasTermic`, forma ψ; re-ancorat în commit-ul 4 de pe modelul în float — integratorul a mutat minimele cu +0,004 °C).
  */
 
 import test from 'node:test'
@@ -19,13 +19,13 @@ import { celuleComponentei, componentaLa, construiesteCamere, decodeazaCelula, l
 import type { ContoareMasa } from '../src/sim/fete.ts'
 import { capacitateMu, contoareComponentei, D_SOL_MASIV_IMPLICIT, formaCanonicaFete, formaCanonicaFeteRecalculata } from '../src/sim/fete.ts'
 import { decode, encode } from '../src/sim/save.ts'
-import { regimPermanent, temperaturiRezervoare } from '../src/sim/termic.ts'
+import { pasTermic, sincronizeazaLumea, temperaturaLaEchilibru } from '../src/sim/temperatura.ts'
 import type { World } from '../src/sim/state.ts'
 import { eSolNatural, Material } from '../src/sim/terrain/chunk.ts'
 import { bazaVoxeli, dig, fill, groundLevelM, materialAt, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 import { createWorld } from '../src/sim/world.ts'
 import type { CasaTermica } from './fixturi-temperatura.ts'
-import { capacitateaComponentei, casaTermica, compLa, modelFloat, pasExp, Q16, tauLoc } from './fixturi-temperatura.ts'
+import { capacitateaComponentei, casaTermica, compLa, modelFloat, Q16, tauLoc } from './fixturi-temperatura.ts'
 
 const R = DEFAULT_RULES
 const P = Material.PIATRA_CONSTRUITA
@@ -174,7 +174,7 @@ test('CAPACITATE dSolMasivM vine din content: createWorld si decode construiesc 
   const x = 10136, y = 9070, g = -7
   for (const w of lumi) {
     for (let j = 1; j < 6; j++) for (let i = 1; i < 6; i++) for (let dz = 1; dz <= 2; dz++) assert.ok(dig(w.terrain, x + i, y + j, g - dz).ok)
-    sincronizeazaCamere(w.camere, w.terrain)
+    sincronizeazaLumea(w, w === lumi[1] ? R3 : R)
   }
   assert.equal(lumi[1]!.camere.fete.dSolMasiv, 3)
   assert.deepEqual(contoare(lumi[0]!, x + 3, y + 3, g - 1), { nAer: 50, nConstr: 25, nSolMasiv: 65, nApa: 0 })
@@ -253,35 +253,52 @@ test('CALIBRARE casa din pamant zidit: C egal EXACT cu casa de piatra pe aceeasi
 
 // --- valul de frig (§4, verif-NUM-2) --------------------------------------------------------
 
-/** Minimul casei L×L×2 în iarna anului `an` (seed 12345), pe modelul în float; `scala` înmulțește toate capacitățile. */
+/**
+ * Regulile cu TOATE capacitățile înmulțite cu `scala` (c_aer, c_constr, c_sol): masele în μ rămân, μ în J/K se scalează —
+ * pe pasul real, exact C × scala (probele negative ale benzilor). Masele derivate se recalculează la parsare.
+ */
+function scalate(scala: number): Rules {
+  if (scala === 1) return R
+  const t = R.termic
+  const o = parseRules({ ...R, termic: { ...t, cAerJPeK: Math.round(t.cAerJPeK * scala), cConstrJPeK: Math.round(t.cConstrJPeK * scala), cSolJPeK: Math.round(t.cSolJPeK * scala), mase: undefined } } as unknown as Rules)
+  assert.ok(o.ok, JSON.stringify(o))
+  return o.value
+}
+
+/** Minimul casei L×L×2 în iarna anului `an` (seed 12345), pe pasul real (`pasTermic`); `scala` înmulțește toate capacitățile. */
 function minimIarna(L: number, an: number, scala: number): number {
   const s = casaTermica({ L })
-  const m = modelFloat(s.w, R, scala)
-  const i = m.gr.nodDupaComp[compLa(s, 'casa')]!
+  const rules = scalate(scala)
+  const c = compLa(s, 'casa')
   const tps = R.ticksPerSecond
   const iarna = panaLaAnotimp(0, Anotimp.IARNA, R) + an * tickuriPeAn(R)
-  // Două zile de rodaj din regimul permanent (τ 3,6 h: urma pornirii e e^−13), apoi iarna întreagă, pas cu pas.
+  // Două zile de rodaj de la echilibru (τ 3,6 h: urma pornirii e e^−13), apoi iarna întreagă, pas cu pas.
   const p0 = Math.ceil((iarna - 2 * R.calendar.ziTicks) / tps) * tps
-  const r = regimPermanent(s.w, R, p0)
-  assert.ok(r.ok)
-  const T = Float64Array.from(r.value.t, (v) => v / Q16)
+  s.w.tick = p0
+  // Alte reguli: graful se construiește pe ele (un lot NIMIC prin punctul unic), apoi lumea pornește de la echilibru.
+  assert.ok(sincronizeazaLumea(s.w, rules).ok)
+  assert.ok(temperaturaLaEchilibru(s.w, rules, p0).ok)
   let min = Number.POSITIVE_INFINITY
   for (let tk = p0 + tps; tk <= iarna + 4 * R.calendar.ziTicks; tk += tps) {
-    pasExp(m, T, temperaturiRezervoare(12345, tk, R))
+    s.w.tick = tk
+    pasTermic(s.w, rules)
     const mo = momentul(tk, R)
-    if (mo.anotimp === Anotimp.IARNA && mo.an === an && T[i]! < min) min = T[i]!
+    const T = s.w.temperatura.slot.t[c]! / Q16
+    if (mo.anotimp === Anotimp.IARNA && mo.an === an && T < min) min = T
   }
+  assert.equal(s.w.temperatura.stat.invarianti, 0)
   return min
 }
 
-test('VALUL DE FRIG pe benzi: casele 5x5x2 si 3x3x2 cu usa, seed 12345 anul 0 (valul in ziua 3) si anul 3 (ziua 2) — minimul in ±0,45 °C de valoarea calibrarii; ziua 3 sub ziua 2, casa mica sub cea mare; C×0,75 si C×1,5 ies din banda', () => {
-  // Benzile, la implicite (verif-NUM-2 la v1: −8,191 / −7,316 / −9,327 / −8,527; aici, cu masele în μ): 5×5×2 ziua 3
-  // −8,191, ziua 2 −7,317; 3×3×2 ziua 3 −9,327, ziua 2 −8,527 °C. Minimul pe pas, nu orele sub −8 (care depind de
-  // faza eșantionului: 3 h la :00, 2 h la :30).
+test('VALUL DE FRIG pe benzi, pe pasul real: casele 5x5x2 si 3x3x2 cu usa, seed 12345 anul 0 (valul in ziua 3) si anul 3 (ziua 2) — minimul in ±0,45 °C de valoarea calibrarii; ziua 3 sub ziua 2, casa mica sub cea mare; C×0,75 si C×1,5 ies din banda', () => {
+  // Benzile, la implicite, pe pasul pe întregi (forma ψ): 5×5×2 ziua 3 −8,187, ziua 2 −7,313; 3×3×2 ziua 3 −9,323, ziua 2
+  // −8,523 °C (modelul în float al commit-ului 1: −8,191 / −7,317 / −9,327 / −8,527; integratorul mută +0,004 °C, cum
+  // spunea verif-NUM-2). Probele, pe pasul real (capacitățile scalate în content): C×0,75 −8,825 / −7,954 / −10,025 /
+  // −9,230; C×1,5 −7,101 / −6,200 / −8,126 / −7,298. Minimul pe pas, nu orele sub −8 (depind de faza eșantionului).
   assert.equal(ziuaValului(12345, 0, R), 3, 'fixtura: anul 0, ziua 3')
   assert.equal(ziuaValului(12345, 3, R), 2, 'fixtura: anul 3, ziua 2')
   const BANDA = 0.45
-  const tinte = [[5, 0, -8.191], [5, 3, -7.317], [3, 0, -9.327], [3, 3, -8.527]] as const
+  const tinte = [[5, 0, -8.187], [5, 3, -7.313], [3, 0, -9.323], [3, 3, -8.523]] as const
   const min = new Map<string, number>()
   for (const [L, an, v] of tinte) {
     const m = minimIarna(L, an, 1)

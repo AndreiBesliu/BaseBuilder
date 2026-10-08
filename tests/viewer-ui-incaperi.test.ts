@@ -22,6 +22,7 @@ import type { IncapereLa } from '../viewer/ui/model.ts'
 import { creeazaMemorieIncapere, usilePropuse } from '../viewer/ui/memorie-incapere.ts'
 import { goluriUsi, textIncapere, textIndiciuUsa } from '../viewer/ui/texte.ts'
 import { desemneaza, R, ruleaza, sitPlat } from './fixturi.ts'
+import { sincronizeazaLumea } from '../src/sim/temperatura.ts'
 
 const P = Material.PIATRA_CONSTRUITA
 
@@ -44,7 +45,7 @@ function mina(seed: number, N: number, H: number, K: number): { w: World; wx: nu
     const y = Math.floor(((i + 0.5) * N) / K)
     for (let x = N; x <= N + 3; x++) for (const z of [Z0, Z0 + 1]) sapa(w, wx + x, wy + y, z)
   }
-  sincronizeazaCamere(w.camere, w.terrain)
+  sincronizeazaLumea(w, R)
   return { w, wx, wy, g, Z0 }
 }
 
@@ -54,7 +55,7 @@ function halaDeparte(w: World, x0: number, y0: number): { x0: number; y0: number
   for (let a = -1; a <= 8; a++) for (let b = -1; b <= 8; b++) { const g = groundLevelM(w.terrain, x0 + a, y0 + b); assert.ok(g.ok); jos = Math.min(jos, g.value) }
   const z = jos - 5
   for (const zz of [z, z + 1]) for (let a = 0; a < 6; a++) for (let b = 0; b < 6; b++) sapa(w, x0 + a, y0 + b, zz)
-  sincronizeazaCamere(w.camere, w.terrain)
+  sincronizeazaLumea(w, R)
   return { x0, y0, z }
 }
 
@@ -123,7 +124,7 @@ test('inspector (ECR-3): sapaturile sub acoperis in ALTA componenta (epoca noua)
   for (let i = 0; i < 10; i++) {
     const ep = w.camere.epoca
     sapa(w, h.x0 + 6, h.y0 + (i % 6), h.z + (i < 6 ? 0 : 1))
-    sincronizeazaCamere(w.camere, w.terrain)
+    sincronizeazaLumea(w, R)
     assert.notEqual(w.camere.epoca, ep, 'epoca noua')
     t += 250
     mem.ia(w, x, y, z, false)

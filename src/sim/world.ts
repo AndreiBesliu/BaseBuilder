@@ -25,7 +25,8 @@ import { makeItemStore } from './iteme.ts'
 import { makeZoneStore } from './zone.ts'
 import { memorieSprijin } from './stabilitate.ts'
 import { memorieAcces } from './acces.ts'
-import { indexCamere, sincronizeazaCamere } from './camere.ts'
+import { indexCamere } from './camere.ts'
+import { pasTermic, sincronizeazaLumea, temperaturaGoala } from './temperatura.ts'
 
 /**
  * Creeaza o lume. NU incarca teren: `createTerrain` aloca doar structura goala,
@@ -38,6 +39,9 @@ export function createWorld(seed: number, rules: Rules = DEFAULT_RULES): World {
   const rng = {} as Record<RngStreamName, RngState>
   for (const name of RNG_STREAMS) rng[name] = stream(seed, name)
   const terrain = createTerrain(seed, rules.chunkResidentRadius)
+  // Gol și la zi: o lume nouă n-are aer acoperit (heightfield fără surplombe). K-ul fețelor vine din
+  // content (`termic.kCelule`); un index își păstrează K-ul pe toată viața lui (și la `buildM10PeLume`).
+  const camere = indexCamere(terrain, rules.termic.kCelule, rules.termic.dSolMasivM)
 
   return {
     schema: SCHEMA_VERSION,
@@ -65,9 +69,9 @@ export function createWorld(seed: number, rules: Rules = DEFAULT_RULES): World {
     ratiune: makeRatiuneStore(rules.agentCapacity),
     sprijin: memorieSprijin(),
     acces: memorieAcces(),
-    // Gol și la zi: o lume nouă n-are aer acoperit (heightfield fără surplombe). K-ul fețelor vine din
-    // content (`termic.kCelule`); un index își păstrează K-ul pe toată viața lui (și la `buildM10PeLume`).
-    camere: indexCamere(terrain, rules.termic.kCelule, rules.termic.dSolMasivM),
+    camere,
+    // Nicio componentă, deci nicio temperatură: starea goală, aliniată la index.
+    temperatura: temperaturaGoala(camere, rules),
     plecatiTotal: 0,
   }
 }
@@ -80,9 +84,12 @@ export function tick(w: World, rules: Rules = DEFAULT_RULES): void {
   // stare INAINTE sa existe ceva de miscat — adica exact lucrurile care nu se
   // pot retrofita. Ramane ca stare Idle: un pion fara job hoinareste.
   stepAgents(w, rules)
-  // Încăperile, în punctul fix de la capătul tickului: lotul lor = editările unui tick (sau ale
-  // unei comenzi de teren). Nimeni altcineva nu le sincronizează — vezi antetul din camere.ts.
-  sincronizeazaCamere(w.camere, w.terrain)
+  // Încăperile și temperatura lor, în punctul fix de la capătul tickului: lotul = editările unui tick (sau ale
+  // unei comenzi de teren). Nimeni altcineva nu le sincronizează — vezi antetul din temperatura.ts (§2).
+  sincronizeazaLumea(w, rules)
+  // Pasul de 1 Hz, DUPĂ sincronizare: căldura oamenilor intră în componenta de după lot (B4, F5). Faza e globală, pe
+  // tick (o lume încărcată pășește la aceleași tickuri ca cea continuă).
+  if (w.tick % rules.ticksPerSecond === 0) pasTermic(w, rules)
   w.tick++
 }
 

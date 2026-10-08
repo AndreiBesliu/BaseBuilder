@@ -4,7 +4,7 @@
  *
  * Grafurile și regimul permanent sunt TRANSIENTE: nu intră în hash și nu se salvează. Graful t.2a și regimul le cere
  * viewer-ul (inspectorul, overlay-ul Temperatură), cel mult o dată pe secundă; graful incremental îl ține la zi
- * sincronizarea lumii (t.2b, commit-ul 4 îl leagă de tick și de comenzi).
+ * punctul unic de sincronizare al lumii (`sincronizeazaLumea`, temperatura.ts), la capătul tickului și după comenzi.
  *
  * ## Conductanța unei fețe (§4.2), pe întregi
  *
