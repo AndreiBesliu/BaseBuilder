@@ -632,7 +632,8 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
     acces: memorieAcces(),
     // Reconstruit ACUM, nu la primul tick: lumea încărcată trebuie să aibă, înainte de orice,
     // exact indexul lumii continue (care e la zi în afara tickului).
-    camere: construiesteCamere(terrain),
+    // K-ul fețelor e al regulilor de ACUM, nu al salvării: cache-ul de fețe e DERIVED.
+    camere: construiesteCamere(terrain, rules.termic.kCelule),
     plecatiTotal: (data.plecatiTotal as number | undefined) ?? 0,
   }
   const construit = valideazaJoburiDeConstruit(w, rules)

@@ -105,12 +105,15 @@ import type { CititorCamere, Coloana, Componenta, Felie, IndexCamere } from './c
 import { bucataLa, cheieCelula, cititorCamere, coloana, decodeazaCelula, decodeazaFelie, FELIE } from './camere.ts'
 import type { Outcome } from './result.ts'
 import { accept, Reason, refuse } from './result.ts'
+import { DEFAULT_RULES } from './content.ts'
 
 /**
  * K implicit: câte celule de hotar străbate mersul pe normală (§4.2). E un parametru al cache-ului, nu o
- * constantă a codului: valul 2 îl leagă de content (`indexCamere(t, k)`, `construiesteCamere(t, k)`).
+ * constantă a codului: lumea îl ia din content (`termic.kCelule`) în `createWorld` și în `decode`; implicitul
+ * de aici (indexurile construite fără reguli: oracolele testelor) e același număr, citit din `DEFAULT_RULES`,
+ * nu scris a doua oară.
  */
-export const K_FETE_IMPLICIT = 8
+export const K_FETE_IMPLICIT: number = DEFAULT_RULES.termic.kCelule
 
 /** Adâncimea maximă a solului, în metri: capătul tabelelor pe adâncime din §3 (0..64). */
 export const ADANCIME_MAX = 64

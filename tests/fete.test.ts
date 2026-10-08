@@ -21,6 +21,7 @@ import { slotDesemnare } from '../src/sim/desemnari.ts'
 import type { AgregareFete, StatFete } from '../src/sim/fete.ts'
 import { agregaComponenta, cacheFete, FelFata, feteleCelulei, formaCanonicaFete, formaCanonicaFeteRecalculata, NUME_CLASA, NUME_FEL } from '../src/sim/fete.ts'
 import { Reason } from '../src/sim/result.ts'
+import { formaCanonicaGraf, grafTermic } from '../src/sim/termic.ts'
 import type { World } from '../src/sim/state.ts'
 import { Faction, Item, Piesa } from '../src/sim/state.ts'
 import type { PiesaId } from '../src/sim/state.ts'
@@ -41,10 +42,19 @@ function casa(t: Terrain, x0: number, y0: number, g: number, L: number, H: numbe
   for (let dx = 0; dx < L; dx++) for (let dy = 0; dy < L; dy++) assert.ok(fill(t, x0 + dx, y0 + dy, g + H + 1, P).ok)
 }
 
-/** Oracolul: indexul == recalculul lui, iar cache-ul de fețe == recalculul complet al fețelor. */
+/**
+ * Oracolul: indexul == recalculul lui, iar cache-ul de fețe == recalculul complet al fețelor. Și graful termic
+ * (termic.ts, commit-ul 3 din t.2a): cel FOLOSIT (refolosit cât timp ștampila lui nu s-a mișcat) == graful
+ * indexului nou — pe fuzz-ul de suprafață, pe casa ridicată de pioni peste o pivniță și pe celelalte scene.
+ */
 function egalCuRecalculul(w: World, mesaj: string): void {
-  assert.deepEqual(formaCanonica(w.camere), formaCanonica(construiesteCamere(w.terrain)), `${mesaj} (indexul)`)
+  const nou = construiesteCamere(w.terrain)
+  assert.deepEqual(formaCanonica(w.camere), formaCanonica(nou), `${mesaj} (indexul)`)
   assert.deepEqual(formaCanonicaFete(w.camere), formaCanonicaFeteRecalculata(w.camere, w.terrain), `${mesaj} (fetele)`)
+  const folosit = grafTermic(w.camere, R)
+  const recalculat = grafTermic(nou, R)
+  assert.ok(folosit.ok && recalculat.ok, `${mesaj} (graful): ${JSON.stringify(folosit.ok ? recalculat : folosit)}`)
+  assert.deepEqual(formaCanonicaGraf(folosit.value), formaCanonicaGraf(recalculat.value), `${mesaj} (graful)`)
 }
 
 /** Rândurile agregate ale componentei celulei (x, y, z), ca text: „SUS SOL [3x1] p3 d0 x25". */

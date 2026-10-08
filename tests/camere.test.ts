@@ -26,6 +26,7 @@ import {
 } from '../src/sim/camere.ts'
 import { applyCommand } from '../src/sim/commands.ts'
 import { formaCanonicaFete, formaCanonicaFeteRecalculata } from '../src/sim/fete.ts'
+import { formaCanonicaGraf, grafTermic } from '../src/sim/termic.ts'
 import { decode, encode } from '../src/sim/save.ts'
 import type { World } from '../src/sim/state.ts'
 import { Faction, Item } from '../src/sim/state.ts'
@@ -59,11 +60,17 @@ function casa(t: Terrain, x0: number, y0: number, g: number, L: number, H: numbe
 
 /**
  * Oracolul: indexul == recalculul complet, iar cache-ul de fețe (fete.ts, S24-27 t.2a) == recalculul complet
- * al fețelor pe același index — după fiecare lot al fiecărui test de mai jos, fuzz-ul de cutii inclus.
+ * al fețelor pe același index — după fiecare lot al fiecărui test de mai jos, fuzz-ul de cutii inclus. Și graful
+ * termic (termic.ts, t.2a): cel FOLOSIT (refolosit cât timp ștampila lui nu s-a mișcat) == graful indexului nou.
  */
 function egalCuRecalculul(w: World, mesaj: string): void {
-  assert.deepEqual(formaCanonica(w.camere), formaCanonica(construiesteCamere(w.terrain)), mesaj)
+  const nou = construiesteCamere(w.terrain)
+  assert.deepEqual(formaCanonica(w.camere), formaCanonica(nou), mesaj)
   assert.deepEqual(formaCanonicaFete(w.camere), formaCanonicaFeteRecalculata(w.camere, w.terrain), `${mesaj} (fetele)`)
+  const folosit = grafTermic(w.camere, R)
+  const recalculat = grafTermic(nou, R)
+  assert.ok(folosit.ok && recalculat.ok, `${mesaj} (graful): ${JSON.stringify(folosit.ok ? recalculat : folosit)}`)
+  assert.deepEqual(formaCanonicaGraf(folosit.value), formaCanonicaGraf(recalculat.value), `${mesaj} (graful)`)
 }
 
 // --- definiția ---------------------------------------------------------------

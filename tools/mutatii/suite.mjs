@@ -41,4 +41,5 @@ export const SUITE = [
   { nume: 'fete', despre: 'S24-27 t.2a: fetele incaperilor — D+ (K+1 pasi, iesirea devreme, restrictiile a si b), epocaFete, clasificarea pe hartie, agregarea', M: (await import('./fete.mjs')).MUTATII },
   { nume: 'unelte', despre: 'instrumentele: harnasamentul de mutatii (doar testul numit)', M: unelte },
   { nume: 'clima', despre: 'S24-27 t.2a: ceasul, clima de afara si a solului, continutul calendar/clima/termic, scanerul (transcendentele), bara de sus', M: (await import('./clima.mjs')).MUTATII },
+  { nume: 'termic', despre: 'S24-27 t.2a: graful termic si regimul permanent — K din content, conductanta pe hartie, stampila grafului, muchia o data, lema, 2^53, canalele, calibrarea', M: (await import('./termic.mjs')).MUTATII },
 ]
