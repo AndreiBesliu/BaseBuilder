@@ -3,6 +3,10 @@
  * `calendar` / `clima` / `termic` cu validarea lui, testul pe TOT obiectul, scanerul (transcendentele si
  * `**`), textele barei de sus. Fiecare proba numeste testul scris pentru garantia ei (design temperatura
  * v2, §1–§4.3, §6, §7).
+ *
+ * Recenzia t.2a (08.10): scanerul pe AST (L2-1: `Math` doar ca `Math.<permis>`, `**` din AST, comentariile din
+ * trivia — un '/*' dintr-un sir nu mai orbeste regulile), garda termica pe MUCHIE (L2-2), bara de sus intr-o singura
+ * compunere, `baraDeSus` (L2-3), valul de frig in ziua ANULUI lui (L2-4).
  */
 
 const CA = 'src/sim/calendar.ts'
@@ -262,16 +266,37 @@ export const MUTATII = [
     t: TCO, e: 'fisierul de reguli si DEFAULT_RULES dau ACELASI obiect',
   },
 
-  // --- scanerul de disciplina (panoul, L4-7) ---
+  // --- scanerul de disciplina (panoul, L4-7; recenzia t.2a, L2-1: Math si ** pe AST, comentariile din trivia) ---
   {
-    n: 'scanerul: Math.cos scos din interdictiile dure',
-    f: SC, a: '    re: /\\bMath\\.(sin|cos|tan|', b: '    re: /\\bMath\\.(sin|tan|',
+    n: 'scanerul: Math.cos in lista alba',
+    f: SC, a: "'fround', 'sqrt',", b: "'fround', 'sqrt', 'cos',",
     t: TD, e: 'checker-ul PRINDE functiile transcendente',
   },
   {
     n: 'scanerul: operatorul ** permis',
-    f: SC, a: "  { re: /\\*\\*/, msg: '** — semantica Math.pow", b: "  { re: /\\*\\*\\*\\*/, msg: '** — semantica Math.pow",
+    f: SC, a: 'if (ts.isBinaryExpression(node) && (', b: 'if (false && ts.isBinaryExpression(node) && (',
     t: TD, e: 'checker-ul PRINDE functiile transcendente',
+  },
+  {
+    n: 'scanerul: Math.random in lista alba (Math?.random() si aliasul ar trece)',
+    f: SC, a: "'fround', 'sqrt',", b: "'fround', 'sqrt', 'random',",
+    t: TD, e: 'checker-ul chiar PRINDE o incalcare',
+  },
+  {
+    n: 'scanerul: Math judecat doar dupa numele membrului (aliasul, destructurarea si indexarea trec)',
+    f: SC, a: '      if (!tip && !(nume && MATH_PERMIS.has(nume))) {', b: '      if (!tip && nume !== null && !MATH_PERMIS.has(nume)) {',
+    t: TD, e: 'checker-ul PRINDE ocolirile',
+  },
+  {
+    n: 'scanerul: comentariile citite doar la pos/end de nod (f(/* x */) ramane cod)',
+    f: SC, a: 'const kids = n.getChildren(sf)\n    if (kids.length === 0) { sterge(n.pos); return }\n    for (const c of kids) frunze(c)', b: 'sterge(n.pos); sterge(n.end); ts.forEachChild(n, frunze)',
+    t: TD, e: 'checker-ul PRINDE ocolirile',
+  },
+  {
+    n: "scanerul: comentariile din indexOf('/*') pe linii (un '/*' dintr-un sir orbeste regulile)",
+    f: SC, a: "  return { sf, lines: ch.join('').split(/\\r?\\n/) }",
+    b: "  let inB = false\n  return { sf, lines: text.split(/\\r?\\n/).map((line) => { let out = ''; let i = 0; while (i < line.length) { if (inB) { const e = line.indexOf('*/', i); if (e === -1) return out; inB = false; i = e + 2; continue } const lc = line.indexOf('//', i); const bs = line.indexOf('/*', i); if (lc !== -1 && (bs === -1 || lc < bs)) return out + line.slice(i, lc); if (bs !== -1) { out += line.slice(i, bs); inB = true; i = bs + 2; continue } return out + line.slice(i) } return out }) }",
+    t: TD, e: 'checker-ul PRINDE ocolirile',
   },
   {
     n: 'joburi: puterile scorului din 3, nu din 2 (inlocuitorul lui ** nu e exact)',
