@@ -574,7 +574,8 @@ export function monteazaUI(ctx: ContextUI): UI {
   const termicCanale = h('div', { class: 'sub ui-termic-canale' })
   const termicEl = h('div', { class: 'ui-termic', title: 'La echilibru: unde ar ajunge temperatura cu vremea și solul de acum. Încăperea nu e încă acolo — inerția vine mai târziu.' }, termicLinie, termicCanale)
   function scrieTermic(inc: IncapereLa | null): void {
-    const t = memorieTermica.ia(w, rules, inc === null ? null : inc.celula)
+    // Ceasul viewer-ului: cu jocul mergand, cel mult un calcul (si o refacere de graf) pe secunda (recenzia t.2a, L4-2).
+    const t = memorieTermica.ia(w, rules, inc === null ? null : inc.celula, performance.now())
     ascuns(termicEl, t === null)
     if (t === null) return
     text(termicLinie, t.linie)

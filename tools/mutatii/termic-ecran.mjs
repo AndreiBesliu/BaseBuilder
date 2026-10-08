@@ -20,6 +20,7 @@ const E3 = 'TERMIC ECRAN inspectorul: fata ADANC in sus'
 const E4 = 'TERMIC ECRAN textele: zecimile si gradele'
 const E5 = 'TERMIC ECRAN textele: descompunerea contopeste'
 const E6 = 'TERMIC ECRAN memoria termica'
+const E6R = 'TERMIC ECRAN ritmul memoriei termice'
 const E7 = 'TERMIC ECRAN ancorele pe hartie'
 const E8 = 'TERMIC ECRAN ancorele pe M10'
 const E10 = 'TERMIC ECRAN densitatea'
@@ -60,9 +61,52 @@ export const MUTATII = [
   {
     n: 'memoria termica: componenta scoasa din cheie — alta incapere primeste raspunsul celei dinainte',
     f: M,
-    a: ' && k.comp === c.id && ',
-    b: ' && ',
+    a: ' && k.epocaFete === w.camere.epocaFete && k.comp === c.id && k.rules === rules) return raspuns',
+    b: ' && k.epocaFete === w.camere.epocaFete && k.rules === rules) return raspuns',
     t: T, e: E6,
+  },
+  // --- recenzia t.2a, L4-2: cu jocul mergand, cel mult un calcul (si o refacere de graf) pe secunda
+  {
+    n: 'L4-2: fara fereastra de o secunda — un calcul (si o refacere de graf) la fiecare reimprospatare cu jocul mergand',
+    f: M,
+    a: '      const proaspat = k !== null && k.rules === rules && acumMs - la < PERIOADA_TERMIC_MS\n',
+    b: '      const proaspat = false as boolean\n',
+    t: T, e: E6R,
+  },
+  {
+    n: 'L4-2: perioada de 250 ms (graful de 4 ori pe secunda, ca inainte)',
+    f: M,
+    a: 'export const PERIOADA_TERMIC_MS = 1000',
+    b: 'export const PERIOADA_TERMIC_MS = 250',
+    t: T, e: E6R,
+  },
+  {
+    n: 'L4-2: momentul ultimului calcul nememorat (fereastra nu se deschide niciodata)',
+    f: M,
+    a: '      la = acumMs\n',
+    b: '',
+    t: T, e: E6R,
+  },
+  {
+    n: 'L4-2: fara fereastra pe ACEEASI celula — id-ul rotit de o sapatura in felie reface graful la fiecare reimprospatare',
+    f: M,
+    a: '      if (proaspat && celLa !== null && celLa.x === celula.x && celLa.y === celula.y && celLa.z === celula.z) return raspuns\n',
+    b: '',
+    t: T, e: E6R,
+  },
+  {
+    n: 'L4-2: fara fereastra pe componenta — alt clic in aceeasi incapere recalculeaza',
+    f: M,
+    a: '      if (proaspat && k.comp === c.id && k.epoca === w.camere.epoca) return raspuns\n',
+    b: '',
+    t: T, e: E6R,
+  },
+  {
+    n: 'L4-2: fereastra pe componenta fara epoca — alta casa, cu id-ul refolosit, primeste raspunsul celei dinainte',
+    f: M,
+    a: '      if (proaspat && k.comp === c.id && k.epoca === w.camere.epoca) return raspuns\n',
+    b: '      if (proaspat && k.comp === c.id) return raspuns\n',
+    t: T, e: E6R,
   },
   // --- textele inspectorului (pe hartie)
   {

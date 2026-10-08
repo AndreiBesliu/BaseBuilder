@@ -40,11 +40,12 @@ import { WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 import { aceeasiAmprenta, amprentaNivel } from './overlay-camere.ts'
 import type { AmprentaNivel } from './overlay-camere.ts'
 import { textGeneric } from './ui/texte.ts'
+// Cel mult atât de des (ms, ceasul viewer-ului) se recalculează regimul permanent (§6): ACEEAȘI constantă ca
+// memoria temperaturii din inspector (recenzia t.2a, L4-2) — un singur adevăr pentru „graful ≤ 1/s".
+import { PERIOADA_TERMIC_MS as PERIOADA_REGIM_MS } from './ui/model.ts'
 
 /** Numele grupului în scenă: proba de pe ecran (bench/ui-fum.mjs) îl caută după el. */
 export const NUME_GRUP_TEMPERATURA = 'overlay-temperatura'
-/** Cel mult atât de des (ms, ceasul viewer-ului) se recalculează regimul permanent (§6). */
-export const PERIOADA_REGIM_MS = 1000
 /** O piesă mai mică primește cifră doar dacă e singura piesă a componentei la nivel. */
 export const PIESA_MIN_CELULE = 4
 /** Sub atâția pixeli pe celulă, cifrele se ascund și rămâne tenta (panoul, L5-3). */

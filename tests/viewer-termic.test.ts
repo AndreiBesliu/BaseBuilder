@@ -23,7 +23,7 @@ import { ClasaDir } from '../src/sim/fete.ts'
 import type { World } from '../src/sim/state.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
 import { dig, fill, groundLevelM, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
-import { canaleTermice, Destinatie, regimPermanent, temperaturaComponentei } from '../src/sim/termic.ts'
+import { canaleTermice, Destinatie, regimPermanent, statGraf, temperaturaComponentei } from '../src/sim/termic.ts'
 import type { CanalTermic } from '../src/sim/termic.ts'
 import { createWorld } from '../src/sim/world.ts'
 import { creeazaMemorieTermica, inspecteazaCelula, termicLa } from '../viewer/ui/model.ts'
@@ -85,14 +85,15 @@ test('TERMIC ECRAN inspectorul: N tickuri fara editari — textul temperaturii s
   const cheie = (): string => cheieInspectorCelula(inspecteazaCelula(w, R, ...sel, null), mem.versiune(), usilePropuse(w, mem.ia(w, ...sel, false)))
   const cheie0 = cheie()
   const linii = new Set<string>()
-  const t0 = memT.ia(w, R, inc0.celula)
+  const t0 = memT.ia(w, R, inc0.celula, 0)
   assert.ok(t0 && t0.tQ16 !== null)
   linii.add(t0.linie)
   for (let p = 0; p < 12; p++) {
     ruleaza(w, 420)
     const inc = mem.ia(w, ...sel, false)
     assert.equal(inc, inc0, `pasul ${p}: explicatia e acelasi obiect (memoria ei nu se invalideaza fara editari)`)
-    const t = memT.ia(w, R, inc!.celula)
+    // Ceasul viewer-ului merge odata cu jocul: 420 de tickuri = 21 s la 1× (fereastra de o secunda a memoriei e depasita).
+    const t = memT.ia(w, R, inc!.celula, (p + 1) * 21000)
     assert.ok(t && t.tQ16 !== null)
     // Temperatura e a lumii de ACUM: regimul permanent la tickul ei.
     const r = regimPermanent(w, R, w.tick)
@@ -107,7 +108,7 @@ test('TERMIC ECRAN inspectorul: N tickuri fara editari — textul temperaturii s
   // Un re-clic pe aceeași celulă: explicația tot din memorie (nicio editare), temperatura tot cea de acum.
   assert.equal(mem.ia(w, ...sel, true), inc0)
   assert.equal(mem.calcule(), 1)
-  assert.equal(termicLa(w, R, inc0.celula)?.linie, memT.ia(w, R, inc0.celula)?.linie)
+  assert.equal(termicLa(w, R, inc0.celula)?.linie, memT.ia(w, R, inc0.celula, 12 * 21000 + 500)?.linie)
 })
 
 test('TERMIC ECRAN inspectorul pe hartie: casa 5x5x2 cu usa — linia echilibrului si descompunerea pe destinatii, din ponderile calculate de mana', () => {
@@ -253,18 +254,77 @@ test('TERMIC ECRAN memoria termica: in pauza (acelasi tick) niciun calcul; un ti
   const m = creeazaMemorieTermica()
   const a = { x: wx + 2, y: wy + 2, z: g + 1 }
   const b = { x: wx + 10, y: wy + 2, z: g + 1 }
-  const ta = m.ia(w, R, a)
-  for (let i = 0; i < 10; i++) assert.equal(m.ia(w, R, a), ta, 'pauza: acelasi raspuns')
+  const ta = m.ia(w, R, a, 0)
+  for (let i = 0; i < 10; i++) assert.equal(m.ia(w, R, a, 250 * i), ta, 'pauza: acelasi raspuns')
   assert.equal(m.calcule(), 1)
-  const tb = m.ia(w, R, b)
+  const tb = m.ia(w, R, b, 2500)
   assert.ok(tb && ta && tb.comp !== ta.comp)
   assert.equal(m.calcule(), 2, 'alta componenta')
   w.tick += 1
-  m.ia(w, R, b)
-  assert.equal(m.calcule(), 3, 'un tick nou')
-  assert.equal(m.ia(w, R, null), null)
-  assert.equal(m.ia(w, R, { x: wx + 20, y: wy + 20, z: g + 1 }), null, 'aer sub cer: nimic')
+  m.ia(w, R, b, 3500)
+  assert.equal(m.calcule(), 3, 'un tick nou, dupa o secunda')
+  assert.equal(m.ia(w, R, null, 3600), null)
+  assert.equal(m.ia(w, R, { x: wx + 20, y: wy + 20, z: g + 1 }, 3600), null, 'aer sub cer: nimic')
   assert.equal(m.calcule(), 3)
+})
+
+test('TERMIC ECRAN ritmul memoriei termice: jocul mergand si fetele schimbandu-se la fiecare reimprospatare — cel mult un calcul (si o refacere de graf) pe secunda; pauza 0; alta casa imediat, chiar cu id-ul celei dinainte', () => {
+  // Recenzia t.2a, L4-2: cheiata doar pe tick, memoria recalcula la fiecare reimprospatare (4 Hz), iar orice sapatura
+  // langa aer acoperit muta stampila grafului: graful se refacea de pana la 4 ori pe secunda (designul §5: cel mult o
+  // data). Aici: pamant pe acoperis la fiecare reimprospatare (epocaFete creste), cu tickul mergand.
+  const { w, wx, wy, g } = sitPlat(12345, 16)
+  casa(w, wx, wy, g)
+  casa(w, wx + 8, wy, g, false)
+  sincronizeazaCamere(w.camere, w.terrain)
+  const m = creeazaMemorieTermica()
+  const a = { x: wx + 2, y: wy + 2, z: g + 1 }
+  const aSus = { x: wx + 2, y: wy + 2, z: g + 2 }
+  const b = { x: wx + 10, y: wy + 2, z: g + 1 }
+  const ta = m.ia(w, R, a, 0)
+  const ref0 = statGraf(w.camere).refaceri
+  const pamant = (x: number, y: number): void => {
+    const ep = w.camere.epocaFete
+    assert.ok(fill(w.terrain, x, y, g + 4, Material.PAMANT).ok)
+    sincronizeazaCamere(w.camere, w.terrain)
+    assert.ok(w.camere.epocaFete > ep, 'fixtura: pamantul pe acoperis schimba fetele')
+    w.tick += 5
+  }
+  for (let i = 1; i <= 3; i++) {
+    pamant(wx + i, wy + 1)
+    assert.equal(m.ia(w, R, a, 250 * i), ta, `reimprospatarea ${i}: raspunsul de acum ${250 * i} ms`)
+  }
+  // Alt clic in ACEEASI incapere (alta celula, aceeasi componenta, aceeasi epoca a indexului), sub o secunda.
+  pamant(wx + 1, wy + 2)
+  assert.equal(m.ia(w, R, aSus, 900), ta, 'aceeasi incapere, alta celula, sub o secunda')
+  assert.equal(m.calcule(), 1, 'sub o secunda: niciun calcul nou')
+  assert.equal(statGraf(w.camere).refaceri - ref0, 0, 'sub o secunda: nicio refacere de graf')
+  m.ia(w, R, a, 1000)
+  assert.equal(m.calcule(), 2, 'dupa o secunda: un calcul')
+  for (let t = 1250; t <= 6000; t += 250) m.ia(w, R, a, t)
+  assert.equal(m.calcule(), 2, 'pauza (acelasi tick): niciun calcul, oricat timp')
+  // Aceeasi celula, id-ul componentei ROTIT (o celula din interior umpluta si sapata la loc reface indexul: casa A
+  // trece de la id-ul 0 la 1, casa B de la 1 la 0): sub o secunda, raspunsul de acum.
+  w.tick += 5
+  const t3 = m.ia(w, R, a, 6100)
+  assert.equal(m.calcule(), 3)
+  const idA = componentaLa(w.camere, a.x, a.y, a.z)!.id
+  const idB = componentaLa(w.camere, b.x, b.y, b.z)!.id
+  assert.ok(fill(w.terrain, wx + 1, wy + 3, g + 1, P).ok)
+  sincronizeazaCamere(w.camere, w.terrain)
+  assert.ok(dig(w.terrain, wx + 1, wy + 3, g + 1).ok)
+  sincronizeazaCamere(w.camere, w.terrain)
+  w.tick += 5
+  assert.equal(componentaLa(w.camere, b.x, b.y, b.z)!.id, idA, 'fixtura: casa B a primit id-ul casei A')
+  assert.notEqual(componentaLa(w.camere, a.x, a.y, a.z)!.id, idA, 'fixtura: id-ul casei A s-a rotit')
+  assert.notEqual(idA, idB)
+  assert.equal(m.ia(w, R, a, 6350), t3, 'aceeasi celula, id rotit, sub o secunda: raspunsul de acum')
+  assert.equal(m.calcule(), 3)
+  // Clic pe casa B, sub o secunda: alta componenta — imediat, chiar daca are acum id-ul pe care il avea A.
+  const tb = m.ia(w, R, b, 6400)
+  assert.equal(m.calcule(), 4, 'alta casa: imediat')
+  assert.ok(tb && t3 && tb.tQ16 !== null)
+  assert.equal(tb.tQ16, termicLa(w, R, b)!.tQ16, 'raspunsul e al casei B, nu cel al casei A cu acelasi id')
+  assert.notEqual(tb.tQ16, t3.tQ16, 'fixtura: casele (cu usa si fara) au alt echilibru')
 })
 
 // --- 2. ancorele cifrelor ------------------------------------------------------------

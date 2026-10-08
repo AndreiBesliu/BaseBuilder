@@ -667,27 +667,49 @@ export function termicLa(w: World, rules: Rules, celula: Celula): TermicLa | nul
 }
 
 /**
- * Memoria temperaturii din inspector: același (tick, epocă, epocaFete, componentă, reguli) ⇒ același răspuns,
- * fără calcul (în pauză, 0 calcule la 4 Hz). Orice tick nou recalculează: temperatura se schimbă fără editări.
+ * Memoria temperaturii din inspector. Același (tick, epocă, epocaFete, componentă, reguli) ⇒ același răspuns, fără
+ * calcul (în pauză, 0 calcule la 4 Hz). Cu jocul mergând, cel mult un calcul pe `PERIOADA_TERMIC_MS` (design §5:
+ * graful „la cerere, cel mult o dată pe secundă"; recenzia t.2a, L4-2): cheiată doar pe tick, memoria recalcula la
+ * fiecare reîmprospătare (4 Hz), iar orice săpătură lângă aer acoperit, oriunde în așezare, mută ștampila grafului —
+ * deci graful se reface de până la 4 ori pe secundă (2,35/s măsurat la 3×, cadre de 11–16 ms pe M10).
+ *
+ * Sub o secundă de la ultimul calcul se întoarce răspunsul de atunci pentru:
+ * - ACEEAȘI celulă, chiar dacă id-ul componentei s-a rotit: o săpătură în felia comună reface și componenta
+ *   întrebată (hub-ul M10: 68 de id-uri noi în 20 s). Prețul: la o unire reală, ≤ 1 s se arată T-ul componentei
+ *   vechi;
+ * - aceeași componentă (alt clic în aceeași încăpere), dar numai în ACEEAȘI epocă a indexului: după o reconstrucție
+ *   id-urile se refolosesc (o casă poate primi id-ul celeilalte), iar un clic pe altă casă se calculează imediat.
+ * Ceasul e al viewer-ului (`performance.now()` în panouri.ts), injectat ca testele să-l aleagă; e OBLIGATORIU, ca
+ * un apelant să nu-l poată uita (fără el, fereastra n-ar exista).
  */
 export interface MemorieTermica {
-  ia(w: World, rules: Rules, celula: Celula | null): TermicLa | null
+  ia(w: World, rules: Rules, celula: Celula | null, acumMs: number): TermicLa | null
   calcule(): number
 }
+
+/** Cel mult atât de des (ms, ceasul viewer-ului) se recalculează temperatura din inspector și regimul lui U (§5–6). */
+export const PERIOADA_TERMIC_MS = 1000
 
 export function creeazaMemorieTermica(): MemorieTermica {
   let cheie: { tick: number; epoca: number; epocaFete: number; comp: number; rules: Rules } | null = null
   let raspuns: TermicLa | null = null
+  let la = Number.NEGATIVE_INFINITY
+  let celLa: Celula | null = null
   let calcule = 0
   return {
-    ia(w, rules, celula) {
+    ia(w, rules, celula, acumMs) {
       if (celula === null) return null
       const c = componentaLa(w.camere, celula.x, celula.y, celula.z)
       if (c === null) return null
       const k = cheie
       if (k !== null && k.tick === w.tick && k.epoca === w.camere.epoca && k.epocaFete === w.camere.epocaFete && k.comp === c.id && k.rules === rules) return raspuns
+      const proaspat = k !== null && k.rules === rules && acumMs - la < PERIOADA_TERMIC_MS
+      if (proaspat && celLa !== null && celLa.x === celula.x && celLa.y === celula.y && celLa.z === celula.z) return raspuns
+      if (proaspat && k.comp === c.id && k.epoca === w.camere.epoca) return raspuns
       raspuns = termicLa(w, rules, celula)
       cheie = { tick: w.tick, epoca: w.camere.epoca, epocaFete: w.camere.epocaFete, comp: c.id, rules }
+      la = acumMs
+      celLa = { x: celula.x, y: celula.y, z: celula.z }
       calcule++
       return raspuns
     },
