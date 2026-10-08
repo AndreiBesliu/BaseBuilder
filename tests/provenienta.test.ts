@@ -40,7 +40,10 @@ const R = DEFAULT_RULES
 const Q = 65536
 const P = Material.PIATRA_CONSTRUITA
 const MASE = R.termic.mase
-/** Vara, ziua 2, 15:00, anul 0: T_sol(0) ≠ T_sol(1) ≠ T_sol(2) ≠ T_afara, ca o adâncime greșită să se vadă. */
+/**
+ * Vara, ziua 2, 15:00 — a anului 1 (jocul începe toamna, deci prima vară e în anul 1): T_afara 25,48 °C, T_sol pe
+ * d 0 / 1 / 2 / 3: 11,70 / 3,90 / 2,49 / 1,94 °C, ca o adâncime greșită sau o origine schimbată să se vadă.
+ */
 const TICK = panaLaAnotimp(0, Anotimp.VARA, R) + R.calendar.ziTicks + 15 * tickuriPeOra(R)
 
 // --- oracolul ------------------------------------------------------------------------------
@@ -596,8 +599,9 @@ function pompa(umplutura: MaterialId, n: number, muta?: (s: SchimbareCamere) => 
 
 test('POARTA POMPEI: 20 de cicluri sapat → astupat in podeaua casei 5x5x2, pe acelasi tick, cu PODEA (piatra) si cu PAMANT — T si restul raman ±2 Q16 dupa primul ciclu; varianta B (solul iese la T-ul incaperii) pompeaza', () => {
   // Vara, casa la 20 °C, T_sol(0) / T_sol(1) mai reci: B trage casa spre sol la fiecare ciclu (verif-JOC-2: −9,78 °C
-  // pe 100 de cicluri pe 7×7). C3: primul ciclu înlocuiește o dată IARBA podelei cu piatra (sau pământul zidit),
-  // apoi geometria revine identică și T-ul la fel.
+  // pe 100 de cicluri pe 7×7). C3: primul ciclu înlocuiește o dată IARBA podelei cu piatra (+0,090 °C) sau cu pământul
+  // zidit (0), apoi geometria revine identică și T-ul la fel. Măsurat: ciclurile 2..20 la 0 Q16 de primul; saltul la
+  // săpat −2,68 °C, la astupat +2,68 °C; B: 20,00 → 5,67 °C în 20 de cicluri (PODEA), 5,97 (PAMANT).
   for (const um of [P, Material.PAMANT] as MaterialId[]) {
     const ts = pompa(um, 20)
     for (let k = 1; k < ts.length; k++) assert.ok(Math.abs(ts[k]! - ts[0]!) <= 2, `${um === P ? 'PODEA' : 'PAMANT'}: ciclul ${k + 1} la ${ts[k]! - ts[0]!} Q16 de primul`)
