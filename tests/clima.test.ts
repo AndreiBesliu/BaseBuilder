@@ -172,6 +172,15 @@ test('ziua valului: in [ziMin, ziMax] pe 2000 de seed-uri, depinde de seed si de
   assert.equal(tAfara(12345, t + AN, R) - valDeFrig(12345, momentul(t + AN, R), R), tAfara(12345, t, R) - valDeFrig(12345, momentul(t, R), R))
 })
 
+test('valul de frig vine in ziua ANULUI lui — seed 7: ziua 2 in anul 0, ziua 3 in anul 2 (la 12:00: −10, 0, 0, −10 °C)', () => {
+  // Recenzia t.2a, L2-4: ziuaValului e testat pe ani, dar consumatorul lui (valDeFrig, deci tAfara, bara si rezervoarele
+  // regimului) doar in anul 0 — un valDeFrig care cere ziua anului 0 in fiecare an trecea toata suita. Pe hartie: la
+  // 12:00 valul e pe platou (03:00–21:00), deci −10 °C in ziua lui si 0 in cealalta.
+  assert.deepEqual([ziuaValului(7, 0, R), ziuaValului(7, 2, R)], [2, 3])
+  const la = (an: number, z: number): number => valDeFrig(7, momentul(an * AN + (12 + z - 1) * ZI + 12 * ORA - tickDeStart(R), R), R)
+  assert.deepEqual([la(0, 2), la(0, 3), la(2, 2), la(2, 3)], [-10 * GRAD_Q16, 0, 0, -10 * GRAD_Q16])
+})
+
 test('clima urmeaza calendarul: cu ziua de doua ori mai scurta, la acelasi tick e alta clima', () => {
   // Cu ziua de doua ori mai scurta, la acelasi tick e alta ora — clima urmeaza calendarul, nu tickul.
   const scurt: Rules = { ...R, calendar: { ...R.calendar, ziTicks: ZI / 2 } }

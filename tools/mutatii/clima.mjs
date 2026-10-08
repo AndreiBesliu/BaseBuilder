@@ -159,6 +159,11 @@ export const MUTATII = [
     f: CL, a: '  return v.ziMin + (hash2(an, SARE_VAL, seed) % (v.ziMax - v.ziMin + 1))', b: '  return v.ziMin + (hash2(0, SARE_VAL, seed) % (v.ziMax - v.ziMin + 1))',
     t: TCL, e: 'ziua valului: in [ziMin, ziMax]',
   },
+  {
+    n: 'valul de frig: in fiecare an in ziua anului 0 (consumatorul ignora anul; recenzia t.2a, L2-4)',
+    f: CL, a: 'm.zi !== ziuaValului(seed, m.an, rules)', b: 'm.zi !== ziuaValului(seed, 0, rules)',
+    t: TCL, e: 'valul de frig vine in ziua ANULUI lui',
+  },
 
   // --- continutul: validarea sectiunilor noi ---
   {
@@ -349,5 +354,21 @@ export const MUTATII = [
     n: 'tooltip-ul calendarului: zilele rotunjite in sus („Iarna în 4 zile" la start)',
     f: TX, a: '  const zile = Math.floor(tickuri / ziTicks)', b: '  const zile = Math.ceil(tickuri / ziTicks)',
     t: TB, e: 'textPesteZile si textMinuteReale',
+  },
+  // --- compunerea barei: o singura functie, baraDeSus (recenzia t.2a, L2-3: testul copia compunerea din panouri.ts) ---
+  {
+    n: 'bara de sus: sageata inversata (acum − peste o ora)',
+    f: TX, a: '    text: textCalendar(m, rules.calendar.zilePeAnotimp, acum, pesteOra - acum),', b: '    text: textCalendar(m, rules.calendar.zilePeAnotimp, acum, acum - pesteOra),',
+    t: TB, e: 'bara de sus: „Toamnă 2/4',
+  },
+  {
+    n: 'tooltip-ul calendarului: in iarna, socotit pana la URMATOAREA iarna',
+    f: TX, a: '      panaLaPrimavara: panaLaAnotimp(tick, Anotimp.PRIMAVARA, rules),', b: '      panaLaPrimavara: panaLaAnotimp(tick, Anotimp.IARNA, rules),',
+    t: TB, e: 'tooltip-ul calendarului',
+  },
+  {
+    n: 'bara de sus: clima altei lumi (seed 0: valul de frig in alta zi)',
+    f: TX, a: '  const acum = tAfara(seed, tick, rules)', b: '  const acum = tAfara(0, tick, rules)',
+    t: TB, e: 'bara de sus: „Toamnă 2/4',
   },
 ]

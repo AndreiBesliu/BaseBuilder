@@ -25,9 +25,7 @@ import type { UsilePropuse } from './memorie-incapere.ts'
 import type { Bara, IncapereLa, InspectieCelula, NormalaFetei, Previz, RandOm } from './model.ts'
 import { actualizeaza, creeazaAlerte, eveniment, REGULI_ALERTE, Severitate } from './alerte.ts'
 import type { StareAlerta, Tinta } from './alerte.ts'
-import { cant, NUME_ITEM, NUME_MATERIAL, NUME_PIESA, NUME_ZONA, textCalendar, textIncapere, textIndiciuUsa, textMinute, textNumar, textPrioritatePersonala, textTimp, textTitluCalendar } from './texte.ts'
-import { Anotimp, momentul, panaLaAnotimp, tickuriPeOra } from '../../src/sim/calendar.ts'
-import { tAfara } from '../../src/sim/clima.ts'
+import { baraDeSus, cant, NUME_ITEM, NUME_MATERIAL, NUME_PIESA, NUME_ZONA, textIncapere, textIndiciuUsa, textMinute, textNumar, textPrioritatePersonala, textTimp } from './texte.ts'
 import { conturImplicit, Unealta } from './dreptunghi.ts'
 import type { UnealtaId } from './dreptunghi.ts'
 import { eTimpulSalvariiAutomate, idAutomata, salvareAutomataPermisa } from './salvari-plic.ts'
@@ -1141,19 +1139,9 @@ export function monteazaUI(ctx: ContextUI): UI {
 
   /** Bara de sus: „Toamnă 2/4 · 14:20 · 8° ↘"; tendinta e pe ora de joc urmatoare (clima e o functie pura de tick). */
   function scrieCalendar(): void {
-    const m = momentul(w.tick, rules)
-    const acum = tAfara(w.seed, w.tick, rules)
-    const pesteOra = tAfara(w.seed, w.tick + tickuriPeOra(rules), rules)
-    text(calendar, textCalendar(m, rules.calendar.zilePeAnotimp, acum, pesteOra - acum))
-    attr(calendar, 'title', textTitluCalendar({
-      tick: w.tick,
-      moment: m,
-      panaLaIarna: panaLaAnotimp(w.tick, Anotimp.IARNA, rules),
-      panaLaPrimavara: panaLaAnotimp(w.tick, Anotimp.PRIMAVARA, rules),
-      ziTicks: rules.calendar.ziTicks,
-      ticksPerSecond: rules.ticksPerSecond,
-      viteza: ctx.viteza(),
-    }))
+    const b = baraDeSus(w.tick, w.seed, rules, ctx.viteza())
+    text(calendar, b.text)
+    attr(calendar, 'title', b.titlu)
   }
 
   function scrieLegenda(faraNivel: boolean): void {

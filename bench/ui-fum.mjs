@@ -302,6 +302,7 @@ async function ruleaza() {
       const vechi = cal.textContent
       const texte = [vechi]
       let variante = 'niciuna'
+      let asteptat = null
       try {
         const T = await import('/@fs/${REPO}/viewer/ui/texte.ts')
         const Cl = await import('/@fs/${REPO}/src/sim/clima.ts')
@@ -317,6 +318,8 @@ async function ruleaza() {
           texte.push(T.textCalendar({ anotimp: a, zi: R.calendar.zilePeAnotimp, ora: 23, minut: 59 }, R.calendar.zilePeAnotimp, v, d))
         }
         variante = ext.map(([mn, mx]) => Math.round(mn / 65536) + '..' + Math.round(mx / 65536)).join(' | ')
+        // Ce TREBUIE sa scrie bara acum: aceeasi compunere ca panouri.ts (baraDeSus), la tickul si seed-ul lumii.
+        asteptat = { tick: __kinstead.world.tick, ...T.baraDeSus(__kinstead.world.tick, seed, R, __kinstead.stare().viteza) }
       } catch (e) { variante = 'fara calendar: ' + String(e?.message ?? e).slice(0, 80) }
       const masuri = []
       for (const t of texte) {
@@ -331,7 +334,7 @@ async function ruleaza() {
       const lat = masuri.reduce((a, m) => (m.lat > a.lat ? m : a), masuri[0])
       const ingust = masuri.reduce((a, m) => (m.lat < a.lat ? m : a), masuri[0])
       const rele = masuri.filter((m) => !(m.sw <= m.cw && m.dreapta <= m.cw && m.inalt <= 20))
-      return { latime: innerWidth, marca: !!sus.querySelector('.ui-marca'), cate: masuri.length, variante, acum: masuri[0], celMaiLat: lat, celMaiIngust: ingust, rele: rele.slice(0, 4), titlu: cal.title, text: vechi }
+      return { latime: innerWidth, marca: !!sus.querySelector('.ui-marca'), cate: masuri.length, variante, acum: masuri[0], celMaiLat: lat, celMaiIngust: ingust, rele: rele.slice(0, 4), titlu: cal.title, text: vechi, asteptat }
     })()`)
     p.win.setContentSize(W, H)
     await astepta(700)
@@ -339,8 +342,11 @@ async function ruleaza() {
     bifa('bara-sus', r.latime === 1100 && !r.marca && r.cate >= 25 && r.rele.length === 0 && r.celMaiLat.lat - r.celMaiIngust.lat <= 1,
       'bara de sus la 1.100 px, cu 2 insigne si cu cel mai lat calendar al fiecarui anotimp: nimic nu iese din bara, calendarul e pe un rand, de aceeasi latime pentru orice text, fara marca KINSTEAD',
       JSON.stringify({ latime: r.latime, marca: r.marca, cate: r.cate, variante: r.variante, acum: r.acum, celMaiLat: r.celMaiLat, celMaiIngust: r.celMaiIngust, rele: r.rele }))
-    bifa('bara-sus-calendar', /^(Primăvară|Vară|Toamnă|Iarnă) \d+\/\d+ · \d\d:\d\d · −?\d+° [↗↘→]$/.test(r.text) && /^Iarna (în|într-o|se termină) .+ \(≈ .+ la [123]×\) · timp de joc \d+:\d\d:\d\d$/.test(r.titlu),
-      'calendarul din bara („Toamnă 1/4 · 08:00 · 15° ↗") si tooltip-ul lui („Iarna în 3 zile (≈ 2 h 03 min la 1×) · timp de joc 0:00:02")', JSON.stringify({ text: r.text, titlu: r.titlu }))
+    // EXACT ce scrie baraDeSus la tickul lumii (recenzia t.2a, L2-3), nu doar formatul: regexul de dinainte accepta prin
+    // constructie o sageata inversata, tooltip-ul din iarna socotit pana la urmatoarea iarna si clima altei lumi.
+    bifa('bara-sus-calendar', r.asteptat !== null && r.text === r.asteptat.text && r.titlu === r.asteptat.titlu
+      && /^(Primăvară|Vară|Toamnă|Iarnă) \d+\/\d+ · \d\d:\d\d · −?\d+° [↗↘→]$/.test(r.text) && /^Iarna (în|într-o|se termină) .+ \(≈ .+ la [123]×\) · timp de joc \d+:\d\d:\d\d$/.test(r.titlu),
+      'calendarul din bara si tooltip-ul lui sunt EXACT baraDeSus(tickul lumii, seed-ul ei, viteza) („Toamnă 1/4 · 08:00 · 15° ↗" / „Iarna în 3 zile (≈ 2 h 03 min la 1×) · timp de joc 0:00:02")', JSON.stringify({ text: r.text, titlu: r.titlu, asteptat: r.asteptat }))
   })
   // Primul Q porneste nivelul la solul de sub camera (ECR-5), nu in varful ferestrei.
   await pas('primul-q', async () => {

@@ -5,29 +5,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DEFAULT_RULES as R } from '../src/sim/content.ts'
-import { Anotimp, momentul, panaLaAnotimp, tickuriPeOra } from '../src/sim/calendar.ts'
-import { tAfara } from '../src/sim/clima.ts'
-import { textCalendar, textGrade, textMinuteReale, textPesteZile, textTendinta, textTitluCalendar } from '../viewer/ui/texte.ts'
+import { baraDeSus, textGrade, textMinuteReale, textPesteZile, textTendinta } from '../viewer/ui/texte.ts'
 
 const Q = 65536
 const ZI = 40320
 
-/** Ce scrie bara la tickul `t`: aceeasi compunere ca `scrieCalendar` din panouri.ts. */
-function bara(t: number, seed = 7): string {
-  const acum = tAfara(seed, t, R)
-  return textCalendar(momentul(t, R), R.calendar.zilePeAnotimp, acum, tAfara(seed, t + tickuriPeOra(R), R) - acum)
-}
-function titlu(t: number, viteza: number): string {
-  return textTitluCalendar({
-    tick: t,
-    moment: momentul(t, R),
-    panaLaIarna: panaLaAnotimp(t, Anotimp.IARNA, R),
-    panaLaPrimavara: panaLaAnotimp(t, Anotimp.PRIMAVARA, R),
-    ziTicks: R.calendar.ziTicks,
-    ticksPerSecond: R.ticksPerSecond,
-    viteza,
-  })
-}
+/** Ce scrie bara la tickul `t`: EXACT compunerea din panouri.ts (`baraDeSus`), nu o copie a ei (recenzia t.2a, L2-3). */
+const bara = (t: number, seed = 7): string => baraDeSus(t, seed, R, 1).text
+const titlu = (t: number, viteza: number): string => baraDeSus(t, 7, R, viteza).titlu
 
 test('bara de sus: „Toamnă 2/4 · 14:20 · 16° →" — anotimpul, ziua din anotimp, ora, gradele, tendinta', () => {
   // Tickul 50.960 = toamna, ziua 2, 14:20. Aerul: 9,4 + 11,2·0,158 + 5·0,985 = 16,1 °C; in ora urmatoare

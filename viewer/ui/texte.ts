@@ -24,8 +24,10 @@ import { DetaliuItem } from '../../src/sim/iteme.ts'
 import { FelJob, Gand, Item, PasCara, PasConstruieste, PasJob, Piesa } from '../../src/sim/state.ts'
 import { Material } from '../../src/sim/terrain/chunk.ts'
 import { Zona } from '../../src/sim/zone.ts'
-import { Anotimp } from '../../src/sim/calendar.ts'
+import { Anotimp, momentul, panaLaAnotimp, tickuriPeOra } from '../../src/sim/calendar.ts'
 import type { Moment } from '../../src/sim/calendar.ts'
+import { tAfara } from '../../src/sim/clima.ts'
+import type { Rules } from '../../src/sim/content.ts'
 import { ClasaDir } from '../../src/sim/fete.ts'
 import type { ClasaDirId } from '../../src/sim/fete.ts'
 import { Destinatie, PONDERE_TOTALA } from '../../src/sim/termic.ts'
@@ -482,6 +484,31 @@ export function textTitluCalendar(p: {
   const reale = textMinuteReale(t / p.ticksPerSecond / p.viteza / 60)
   const ce = iarna ? `Iarna se termină ${textPesteZile(t, p.ziTicks)}` : `Iarna ${textPesteZile(t, p.ziTicks)}`
   return `${ce} (≈ ${reale} la ${p.viteza}×) · timp de joc ${textTimp(p.tick, p.ticksPerSecond)}`
+}
+
+/**
+ * Bara de sus la tickul `tick` al lumii `seed`: textul („Toamnă 2/4 · 14:20 · 8° ↘") si tooltip-ul, intr-o SINGURA
+ * compunere — `scrieCalendar` (panouri.ts) o scrie, testele si ui-fum („bara-sus-calendar") o compara. Tendinta e pe
+ * ora de joc urmatoare: clima e o functie pura de (seed, tick). Inainte, testul copia compunerea din panouri.ts, iar
+ * ui-fum verifica doar formatul: o sageata inversata, tooltip-ul din iarna socotit pana la URMATOAREA iarna sau clima
+ * altei lumi (seed 0) treceau toate portile (recenzia t.2a, L2-3).
+ */
+export function baraDeSus(tick: number, seed: number, rules: Rules, viteza: number): { readonly text: string; readonly titlu: string } {
+  const m = momentul(tick, rules)
+  const acum = tAfara(seed, tick, rules)
+  const pesteOra = tAfara(seed, tick + tickuriPeOra(rules), rules)
+  return {
+    text: textCalendar(m, rules.calendar.zilePeAnotimp, acum, pesteOra - acum),
+    titlu: textTitluCalendar({
+      tick,
+      moment: m,
+      panaLaIarna: panaLaAnotimp(tick, Anotimp.IARNA, rules),
+      panaLaPrimavara: panaLaAnotimp(tick, Anotimp.PRIMAVARA, rules),
+      ziTicks: rules.calendar.ziTicks,
+      ticksPerSecond: rules.ticksPerSecond,
+      viteza,
+    }),
+  }
 }
 
 /** Minute de joc, rotunjite, pentru prognoze: „~16 min", „~2 h 5 min". */
