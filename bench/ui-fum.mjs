@@ -882,57 +882,29 @@ async function ruleaza() {
       && /^\d+% aer de afară \(pereți \d+%, acoperiș \d+%, ~−?\d+ °C\) · \d+% sol prin podea \(~−?\d+ °C\)/.test(insp.canale) && !/pierde|câștigă/.test(insp.inc),
       'inspectorul pe podeaua casei: „~X °C la echilibru (afară Y °C)" si descompunerea („…% aer de afară (pereți …, acoperiș …) · …% sol prin podea"), fara „pierde/câștigă"', JSON.stringify({ insp, pPodea }))
     await p.poza('8-temperatura-inspector.png')
-    // Fara clic: textul temperaturii se schimba cu lumea (3×), iar „Arată nivelul" e ACELASI nod. Pionii nu iau lucrari
-    // cat se masoara (prioritatile 0, puse la loc la final): o editare langa casa ar reface explicatia, deci si corpul
-    // inspectorului — legitim, dar nu ce se masoara aici. Cateva secunde intai, cat isi termina lucrul inceput.
-    const viteza0 = await p.js('__kinstead.stare().viteza')
-    const prio = await p.js(`(async () => {
-      const C = await import('/@fs/${REPO}/src/sim/commands.ts')
-      const w = __kinstead.world, a = w.agents, vechi = []
-      for (let i = 0; i < a.count; i++) if (a.alive[i] && a.faction[i] === 0) for (let c = 0; c < 3; c++) {
-        vechi.push([a.id[i], c, a.prioPersonala[i * 3 + c]])
-        C.applyCommand(w, { kind: 'setPrioritatePersonala', id: a.id[i], categorie: c, nivel: 0 })
-      }
-      return vechi
-    })()`)
-    await p.tasta('3')
-    // Pana nu mai sapa si nu mai zideste nimeni (lucrul inceput se termina): `editari` pe loc 2 s, cel mult 30 s.
-    const editari = () => p.js('__kinstead.world.terrain.editari')
-    let linistit = 0
-    for (let i = 0, e0 = await editari(); i < 60 && linistit < 4; i++) {
-      await astepta(500)
-      const e1 = await editari()
-      linistit = e1 === e0 ? linistit + 1 : 0
-      e0 = e1
-    }
+    // Fara clic: textul temperaturii se schimba cu lumea, iar „Arată nivelul" e ACELASI nod. Lumea sta pe pauza si i se
+    // sare tickul (ca la „titlu-fara-automata"): echilibrul e o functie de tick, deci textul se schimba, dar nimeni nu
+    // sapa langa casa — o editare acolo ar reface explicatia, deci si corpul inspectorului (legitim, nu ce se masoara
+    // aici). Prima varianta lasa jocul sa mearga cu prioritatile pionilor puse pe 0: le ramanea motivul „n-are voie la
+    // munca" in sertarul Oameni, iar „sertar-oameni" iesea rosie cand fereastra se lungea (7 px de text in plus).
+    if (!(await p.js('__kinstead.stare().pauza'))) await p.tasta(' ')
     const citeste = () => p.js(`(() => {
       const b = [...document.querySelectorAll('.ui-inspector button')].find((x) => /Arată nivelul/.test(x.textContent))
       const l = document.querySelector('.ui-termic-t')
       if (!globalThis.__tempBtn) { globalThis.__tempBtn = b ?? null; globalThis.__tempLinie = l }
-      return { buton: !!b, acelasi: b === globalThis.__tempBtn, liniaAceeasi: l === globalThis.__tempLinie, linie: l?.textContent ?? '', editari: __kinstead.world.terrain.editari, tick: __kinstead.world.tick }
+      return { buton: !!b, acelasi: b === globalThis.__tempBtn, liniaAceeasi: l === globalThis.__tempLinie, linie: l?.textContent ?? '', editari: __kinstead.world.terrain.editari, tick: __kinstead.world.tick, pauza: __kinstead.stare().pauza }
     })()`)
-    // O fereastra in care s-a editat ceva (in lume) nu judeca nimic: se reia, de cel mult 5 ori.
-    let inainte = null, dupa = null, ferestre = 0
-    for (; ferestre < 5; ferestre++) {
-      await p.js('globalThis.__tempBtn = null; true')
-      inainte = await citeste()
-      dupa = inainte
-      for (let i = 0; i < 50 && dupa.linie === inainte.linie; i++) {
-        await astepta(300)
-        dupa = await citeste()
-      }
-      if (dupa.editari === inainte.editari) break
+    await p.js('globalThis.__tempBtn = null; true')
+    const inainte = await citeste()
+    // O ora de joc: casa urmeaza aerul de afara, deci echilibrul ei se muta cu zecimi de grad.
+    await p.js('__kinstead.world.tick += 1680; true')
+    let dupa = inainte
+    for (let i = 0; i < 20 && dupa.linie === inainte.linie; i++) {
+      await astepta(250)
+      dupa = await citeste()
     }
-    if (!(await p.js('__kinstead.stare().pauza'))) await p.tasta(' ')
-    bifa('temperatura-fara-clic', inainte.buton && inainte.linie !== '' && dupa.linie !== inainte.linie && dupa.acelasi && dupa.liniaAceeasi && dupa.tick > inainte.tick && dupa.editari === inainte.editari,
-      'fara niciun clic, textul temperaturii din inspector se schimba cu lumea, iar butonul „Arată nivelul" ramane ACELASI nod (scris pe loc, nu redesenat)', JSON.stringify({ inainte, dupa, ferestre, linistit }))
-    // La loc: prioritatile, viteza (o cifra porneste jocul: pauza dupa ea), U stins, toate nivelurile.
-    await p.js(`(async () => {
-      const C = await import('/@fs/${REPO}/src/sim/commands.ts')
-      for (const [id, c, n] of ${JSON.stringify(prio)}) C.applyCommand(__kinstead.world, { kind: 'setPrioritatePersonala', id, categorie: c, nivel: n })
-      return true
-    })()`)
-    if (viteza0 !== 3) { await p.tasta(String(viteza0)); await p.tasta(' ') }
+    bifa('temperatura-fara-clic', inainte.buton && inainte.linie !== '' && dupa.linie !== inainte.linie && dupa.acelasi && dupa.liniaAceeasi && dupa.pauza && dupa.editari === inainte.editari,
+      'fara niciun clic, textul temperaturii din inspector se schimba cu lumea, iar butonul „Arată nivelul" ramane ACELASI nod (scris pe loc, nu redesenat)', JSON.stringify({ inainte, dupa }))
     await p.tasta('u')
     await p.tasta('r')
   })
