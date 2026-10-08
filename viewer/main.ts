@@ -54,7 +54,7 @@ import { actiuneTasta, tintaEditabila } from './ui/taste.ts'
 import type { Actiune } from './ui/taste.ts'
 import { normalizeaza, planDreptunghi, textPlan, Unealta } from './ui/dreptunghi.ts'
 import type { Lumea, PlanDreptunghi, UnealtaId } from './ui/dreptunghi.ts'
-import { textMotiv } from './ui/texte.ts'
+import { textIntervalTemperatura, textMotiv } from './ui/texte.ts'
 import { cifreDinReguli } from './ui/model.ts'
 import { citesteSalvare, listaSalvari, scrieSalvare, stergeSalvare } from './ui/salvari-idb.ts'
 import { FORMAT_SALVARE, numeFisier, valideazaSalvare } from './ui/salvari-plic.ts'
@@ -65,6 +65,9 @@ import { actualizeazaStratResurse, creeazaStratResurse } from './strat-resurse.t
 import { actualizeazaStratUsi, creeazaStratUsi, impacturiUsi, plaseUsi } from './strat-usi.ts'
 import { celuleUsiiInPlan, celuleUsiiPlan, golulTintit, grupUsa, MESAJ_FARA_GOL } from './usi.ts'
 import { createCamereOverlay, rebuildCamereOverlay } from './overlay-camere.ts'
+import { actualizeazaTemperaturaOverlay, createTemperaturaOverlay } from './overlay-temperatura.ts'
+import { actualizeazaEtichete, creeazaStratEtichete } from './etichete-temperatura.ts'
+import type { StratEtichete } from './etichete-temperatura.ts'
 
 /** Lumea demo-ului, a modului de verificare si a gate-ului. Un joc nou isi alege seed-ul. */
 const SEED_DEMO = 20260913
@@ -817,6 +820,11 @@ scene.add(stabOverlay.group)
 // Incaperile (I): aerul acoperit de la nivelul activ. Vezi overlay-camere.ts.
 const camereOverlay = createCamereOverlay()
 scene.add(camereOverlay.group)
+// Temperatura (U): echilibrul spatiilor acoperite de la nivelul activ, tenta + cifre DOM. Vezi overlay-temperatura.ts.
+const tempOverlay = createTemperaturaOverlay()
+scene.add(tempOverlay.group)
+/** Cifrele lui U: stratul DOM se face la prima aprindere (o pagina de gate nu-l are niciodata). */
+let stratEtichete: StratEtichete | null = null
 /**
  * Cat lucru de stabilitate intra intr-un cadru, in ms, plus celula din curs. Langa
  * grinzi o trecere intreaga costa secunde (3,2 s intr-o sala 23×23 cu 4 grinzi, masurat
@@ -1642,6 +1650,17 @@ function comutaI(): void {
   camereOverlay.group.visible = camereOverlay.visible
   camereOverlay.epoca = -1
   rebuildCamereOverlay(camereOverlay, world, sliceLevel === null ? null : sliceLevel - 1)
+  // I si U tenteaza amandoua podeaua nivelului: aprinse impreuna, culorile s-ar amesteca.
+  if (camereOverlay.visible && tempOverlay.visible) comutaU()
+}
+function comutaU(): void {
+  tempOverlay.visible = !tempOverlay.visible
+  tempOverlay.group.visible = tempOverlay.visible
+  // Aprinderea e o actiune a jucatorului: geometria si regimul se fac acum, nu la secunda urmatoare.
+  tempOverlay.nivel = undefined
+  if (tempOverlay.visible && stratEtichete === null) stratEtichete = creeazaStratEtichete(document.body)
+  actualizeazaTemperaturaOverlay(tempOverlay, world, DEFAULT_RULES, sliceLevel === null ? null : sliceLevel - 1, performance.now())
+  if (tempOverlay.visible && camereOverlay.visible) comutaI()
 }
 
 /** Nivelul, cu plaja lui: Q porneste slice-ul in varful ferestrei si coboara; E urca, iar peste varf il opreste. */
@@ -1717,6 +1736,7 @@ function executa(a: Actiune, ev: KeyboardEvent): void {
     case 'overlayJ': comutaJ(); return
     case 'overlayS': comutaS(); return
     case 'overlayI': comutaI(); return
+    case 'overlayU': comutaU(); return
     case 'traversare': traversing = !traversing; return
     case 'traversareSens': traverseDir = -traverseDir; return
     case 'ceas': traverseFixedClock = !traverseFixedClock; return
@@ -2167,6 +2187,8 @@ function stepFrame(ts: number): void {
     if (stratUsi !== null) actualizeazaStratUsi(stratUsi, world.terrain)
     // Incaperile: indexul e la zi dupa fiecare tick; overlay-ul se reface doar la alta epoca sau alt nivel.
     if (camereOverlay.visible) rebuildCamereOverlay(camereOverlay, world, sliceLevel === null ? null : sliceLevel - 1)
+    // Temperatura: geometria la amprenta noua a nivelului, valorile (regimul permanent) cel mult o data pe secunda.
+    if (tempOverlay.visible) actualizeazaTemperaturaOverlay(tempOverlay, world, DEFAULT_RULES, sliceLevel === null ? null : sliceLevel - 1, now)
     if (jobOverlay.visible && frameIndex % 6 === 0) rebuildJobOverlay(jobOverlay, world)
     // Mult mai rar decat overlay-ul de joburi. Cererea nu reporneste trecerea din curs,
     // nici una terminata pe acelasi teren (vezi `ceFacCuTrecerea`): o celula ajunsa la
@@ -2194,6 +2216,8 @@ function stepFrame(ts: number): void {
   stepNegativeProbe()
   stepTraverse(dt)
   controls.update()
+  // Cifrele lui U urmaresc camera: proiectia ancorelor dupa ce camera s-a mutat in cadrul asta.
+  if (stratEtichete !== null) actualizeazaEtichete(stratEtichete, tempOverlay, camera, window.innerWidth, window.innerHeight)
   updateFocus()
   pumpBuildQueue()
   // Balastul si sarcina de bisectie se ard INAINTE de randare, ca sa concureze
@@ -2330,7 +2354,13 @@ function navigheaza(cautare: string): void {
   location.search = cautare
 }
 
-function cifreOverlay(o: 'J' | 'S' | 'G' | 'I'): string {
+function cifreOverlay(o: 'J' | 'S' | 'G' | 'I' | 'U'): string {
+  if (o === 'U') {
+    const t = tempOverlay
+    if (!t.visible || t.nivel === null || t.nivel === undefined) return ''
+    if (t.eroare !== '') return t.eroare
+    return textIntervalTemperatura(t.valori.size, t.min, t.max, t.tAfara)
+  }
   if (o === 'I') {
     const c = camereOverlay
     if (!c.visible || c.nivel === null) return ''
@@ -2398,8 +2428,8 @@ if (!MOD.faraUI && MOD_JOC !== 'gate') {
       return { cota: sliceLevel, lo, hi, sol: g.ok ? g.value : null }
     },
     seteazaNivel,
-    overlayPornit: (o) => (o === 'J' ? jobOverlay.visible : o === 'S' ? stabOverlay.visible : o === 'I' ? camereOverlay.visible : regionOverlay.visible),
-    comutaOverlay: (o) => { if (o === 'J') comutaJ(); else if (o === 'S') comutaS(); else if (o === 'I') comutaI(); else comutaG() },
+    overlayPornit: (o) => (o === 'J' ? jobOverlay.visible : o === 'S' ? stabOverlay.visible : o === 'I' ? camereOverlay.visible : o === 'U' ? tempOverlay.visible : regionOverlay.visible),
+    comutaOverlay: (o) => { if (o === 'J') comutaJ(); else if (o === 'S') comutaS(); else if (o === 'I') comutaI(); else if (o === 'U') comutaU(); else comutaG() },
     cifreOverlay,
     stabilitateInvechita: () => previzInvechita(stabOverlay, world),
     refaStabilitatea: () => redeseneazaStabilitate(stabOverlay, world, DEFAULT_RULES),
@@ -2456,4 +2486,4 @@ if (!MOD.faraUI && MOD_JOC !== 'gate') {
 requestAnimationFrame(tick)
 
 // Expus pentru masuratori din consola, nu pentru joc.
-Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport, fantoma, jobOverlay, stabOverlay, ui, mod: MOD_JOC, agentLayer, tintaLa, suprafata, stratResurse, stare: () => ({ viteza, pauza: simPauza }) } })
+Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport, fantoma, jobOverlay, stabOverlay, tempOverlay, etichete: () => stratEtichete, ui, mod: MOD_JOC, agentLayer, tintaLa, suprafata, stratResurse, stare: () => ({ viteza, pauza: simPauza }) } })

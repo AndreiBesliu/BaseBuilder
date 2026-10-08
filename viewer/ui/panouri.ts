@@ -19,8 +19,8 @@ import { CATEGORII, Faction, Item, Piesa } from '../../src/sim/state.ts'
 import { Zona } from '../../src/sim/zone.ts'
 import { ascuns, attr, clasa, h, text } from './dom.ts'
 import { ICON } from './iconite.ts'
-import { cauzaGolirii, creeazaPrevizualizare, golita, inspecteazaCelula, refacePrevizualizarea, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte } from './model.ts'
-import { creeazaMemorieIncapere, usilePropuse } from './memorie-incapere.ts'
+import { cauzaGolirii, creeazaMemorieTermica, creeazaPrevizualizare, golita, inspecteazaCelula, refacePrevizualizarea, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte } from './model.ts'
+import { cheieInspectorCelula, creeazaMemorieIncapere, usilePropuse } from './memorie-incapere.ts'
 import type { UsilePropuse } from './memorie-incapere.ts'
 import type { Bara, IncapereLa, InspectieCelula, NormalaFetei, Previz, RandOm } from './model.ts'
 import { actualizeaza, creeazaAlerte, eveniment, REGULI_ALERTE, Severitate } from './alerte.ts'
@@ -35,7 +35,7 @@ import type { RezumatSalvare } from './salvari-plic.ts'
 import { HRANA_PE_OM } from './pornire.ts'
 import { FEL_RESURSA } from '../resurse.ts'
 
-export type Overlay = 'J' | 'S' | 'G' | 'I'
+export type Overlay = 'J' | 'S' | 'G' | 'I' | 'U'
 export type ModJoc = 'titlu' | 'joc-nou' | 'incarca' | 'verificare'
 
 /** Ce ii da main.ts UI-ului. Singura cale prin care UI-ul schimba ceva. */
@@ -160,6 +160,17 @@ const LEGENDE: Readonly<Record<Overlay, { titlu: string; randuri: readonly { c: 
     ],
     fara: 'Încăperile se văd pe un nivel.',
   },
+  // Temperatura (design temperatura v2, §6): valoarea pe LUMINOZITATE (DESIGN §9 regula 9), cifra pe fiecare
+  // piesă a încăperii. Fără hașură și fără prag de 5 °C: pragul vine cu efectul (t.3).
+  U: {
+    titlu: 'Temperatură (U)',
+    randuri: [
+      { c: '#ffe8b8', t: 'Deschis: mai cald — cifra e unde ar ajunge temperatura acolo, cu vremea și solul de acum' },
+      { c: '#1a2652', t: 'Închis: mai rece (scara merge de la cel mai rece la cel mai cald spațiu de pe nivel)' },
+      { c: '#808080', t: 'Gri: abia apărut — valoarea vine într-o secundă' },
+    ],
+    fara: 'Temperatura se vede pe un nivel.',
+  },
   G: {
     titlu: 'Regiuni (G)',
     randuri: [
@@ -196,7 +207,7 @@ const AJUTOR: readonly { sectiune: string; randuri: readonly [string, string][] 
     randuri: [
       ['Spațiu · 1 2 3', 'Pauză și viteza'],
       ['O', 'Oamenii: ce face fiecare și ce muncă are voie să facă'],
-      ['J · S · G', 'Planul, stabilitatea, regiunile'],
+      ['J · S · I · U · G', 'Planul, stabilitatea, încăperile, temperatura, regiunile'],
       ['Ctrl+S', 'Salvează'],
       ['F1 · F3', 'Ajutorul · Diagnosticul (fps și cifrele de măsură)'],
     ],
@@ -379,8 +390,9 @@ export function monteazaUI(ctx: ContextUI): UI {
     S: iconBtn(ICON.stabilitate, 'Stabilitate', 'S', 'Ce ține și ce cade, pe nivelul ales (S)'),
     G: iconBtn(ICON.regiuni, 'Regiuni', 'G', 'Pe unde se poate ajunge (G)'),
     I: iconBtn(ICON.incaperi, 'Încăperi', 'I', 'Încăperile închise și pe unde iese aerul, pe nivelul ales (I)'),
+    U: iconBtn(ICON.temperatura, 'Temperatură', 'U', 'Unde ar ajunge temperatura fiecărei încăperi, pe nivelul ales (U)'),
   }
-  for (const o of ['J', 'S', 'I', 'G'] as const) btnOv[o].addEventListener('click', () => ctx.comutaOverlay(o))
+  for (const o of ['J', 'S', 'I', 'U', 'G'] as const) btnOv[o].addEventListener('click', () => ctx.comutaOverlay(o))
   const listaPasi = h('ol')
   const hranaPasi = h('div', { class: 'hrana' })
   const btnInchidePasi = iconBtn(ICON.inchide, '', '', 'Ascunde')
@@ -388,7 +400,7 @@ export function monteazaUI(ctx: ContextUI): UI {
     h('div', { style: 'display:flex;justify-content:space-between;align-items:center' }, h('span', { class: 'eticheta' }, 'Primii pași'), btnInchidePasi), listaPasi, hranaPasi)
   let pasiInchise = ctx.mod !== 'joc-nou'
   btnInchidePasi.addEventListener('click', () => { pasiInchise = true; ascuns(cardPasi, true) })
-  radacina.append(h('div', { class: 'ui-stanga' }, nivel, h('div', { class: 'ui-insula ui-overlay' }, h('div', { class: 'eticheta' }, 'Hărți'), btnOv.J, btnOv.S, btnOv.I, btnOv.G)), cardPasi)
+  radacina.append(h('div', { class: 'ui-stanga' }, nivel, h('div', { class: 'ui-insula ui-overlay' }, h('div', { class: 'eticheta' }, 'Hărți'), btnOv.J, btnOv.S, btnOv.I, btnOv.U, btnOv.G)), cardPasi)
   const legenda = h('div', { class: 'ui-insula ui-legenda', hidden: true })
   radacina.append(legenda)
   let legendaScrisa = ''
@@ -552,6 +564,25 @@ export function monteazaUI(ctx: ContextUI): UI {
   let inspectorCheie = ''
   /** Încăperea celulei selectate: memorată pe celulă + amprenta pe jurnal, cu frână (memorie-incapere.ts). */
   const memorieIncapere = creeazaMemorieIncapere(() => performance.now())
+  /**
+   * Temperatura încăperii (design temperatura v2, §6; panoul, L5-2): elemente făcute O DATĂ și scrise PE LOC, la
+   * fiecare reîmprospătare, ÎNAINTEA comparației cheii. Explicația rămâne în memoria ei, neschimbată și fără nimic
+   * termic (memoria întoarce același obiect cât nu se editează lângă componentă: temperatura ar fi înghețat); iar
+   * în cheie, temperatura ar fi refăcut tot corpul — cu „Arată nivelul" / „Pune ușa" — la fiecare schimbare, și un
+   * clic căzut între mousedown și mouseup s-ar fi pierdut. La o redesenare, același element e mutat în corpul nou.
+   */
+  const memorieTermica = creeazaMemorieTermica()
+  const termicLinie = h('div', { class: 'ui-termic-t num' })
+  const termicCanale = h('div', { class: 'sub ui-termic-canale' })
+  const termicEl = h('div', { class: 'ui-termic', title: 'La echilibru: unde ar ajunge temperatura cu vremea și solul de acum. Încăperea nu e încă acolo — inerția vine mai târziu.' }, termicLinie, termicCanale)
+  function scrieTermic(inc: IncapereLa | null): void {
+    const t = memorieTermica.ia(w, rules, inc === null ? null : inc.celula)
+    ascuns(termicEl, t === null)
+    if (t === null) return
+    text(termicLinie, t.linie)
+    text(termicCanale, t.canale)
+    ascuns(termicCanale, t.canale === '')
+  }
   function scrieInspector(fortat = false): void {
     if (panouSertar.hidden || sertar !== 'inspector') return
     if (!selectie) {
@@ -598,7 +629,9 @@ export function monteazaUI(ctx: ContextUI): UI {
     // din timp cât minerii lucrează chiar acolo (recenzia încăperilor, EXP-4 / ECR-3). Un clic o sare.
     const inc = memorieIncapere.ia(w, selectie.wx, selectie.wy, selectie.z, fortat, selectie.n)
     const usi = usilePropuse(w, inc)
-    const cheie = `${JSON.stringify(c)}|${memorieIncapere.versiune()}|${usi.lipsa.length}|${usi.desemnata}`
+    // Pe loc, înainte de comparație: se schimbă fără editări (vezi `scrieTermic`).
+    scrieTermic(inc)
+    const cheie = cheieInspectorCelula(c, memorieIncapere.versiune(), usi)
     if (!fortat && cheie === inspectorCheie) return
     inspectorCheie = cheie
     corpInspector.replaceChildren(...corpCelula(c, inc, usi))
@@ -629,7 +662,7 @@ export function monteazaUI(ctx: ContextUI): UI {
     ]
     const t = inc === null ? null : textIncapere(inc, usi.desemnata)
     if (inc !== null && t !== null && t.titlu !== '') {
-      const s = h('section', { class: 'ui-incapere' }, motivEl({ titlu: t.titlu, actiune: t.actiune }, t.bine ? 'bine' : 'atentie'))
+      const s = h('section', { class: 'ui-incapere' }, motivEl({ titlu: t.titlu, actiune: t.actiune }, t.bine ? 'bine' : 'atentie'), termicEl)
       const act = h('div', { class: 'ui-actiuni' })
       if (inc.e.fel === 'DESCHISA') {
         const g = inc.e.gaura
@@ -1098,7 +1131,7 @@ export function monteazaUI(ctx: ContextUI): UI {
     const n = ctx.nivel()
     text(cota, n.cota === null ? '—' : `${n.cota - 1} m`)
     text(rel, n.cota === null ? 'toate nivelurile' : n.sol === null ? 'nivel activ' : n.cota - 1 - n.sol === 0 ? 'la sol' : `sol ${n.cota - 1 - n.sol > 0 ? '+' : '−'}${Math.abs(n.cota - 1 - n.sol)}`)
-    for (const o of ['J', 'S', 'I', 'G'] as const) attr(btnOv[o], 'aria-pressed', ctx.overlayPornit(o) ? 'true' : 'false')
+    for (const o of ['J', 'S', 'I', 'U', 'G'] as const) attr(btnOv[o], 'aria-pressed', ctx.overlayPornit(o) ? 'true' : 'false')
     scrieLegenda(n.cota === null)
     scrieInspector()
     scrieOameni()
@@ -1124,7 +1157,7 @@ export function monteazaUI(ctx: ContextUI): UI {
   }
 
   function scrieLegenda(faraNivel: boolean): void {
-    const pornit = (['S', 'I', 'J', 'G'] as const).find((o) => ctx.overlayPornit(o)) ?? null
+    const pornit = (['S', 'U', 'I', 'J', 'G'] as const).find((o) => ctx.overlayPornit(o)) ?? null
     if (!pornit) { ascuns(legenda, true); legendaScrisa = ''; return }
     ascuns(legenda, false)
     const L = LEGENDE[pornit]
@@ -1141,7 +1174,7 @@ export function monteazaUI(ctx: ContextUI): UI {
     comuta.style.height = '22px'
     comuta.style.fontSize = '11px'
     const copii: Node[] = [h('h3', {}, h('span', {}, L.titlu), comuta)]
-    const peNivel = pornit === 'S' || pornit === 'I'
+    const peNivel = pornit === 'S' || pornit === 'I' || pornit === 'U'
     if (!legendaDeschisa && !(peNivel && faraNivel)) {
       // pliata: doar cifrele
     } else if (peNivel && faraNivel && L.fara) {

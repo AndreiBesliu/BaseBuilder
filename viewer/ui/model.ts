@@ -26,11 +26,12 @@ import { motivDinCod, Reason } from '../../src/sim/result.ts'
 import { cellKey } from '../../src/sim/path.ts'
 import { materialAt } from '../../src/sim/terrain/terrain.ts'
 import { Material } from '../../src/sim/terrain/chunk.ts'
-import { cititorCamere, esteAer, esteAerAcoperit } from '../../src/sim/camere.ts'
+import { cititorCamere, componentaLa, esteAer, esteAerAcoperit } from '../../src/sim/camere.ts'
+import { canaleTermice } from '../../src/sim/termic.ts'
 import { explicaCelula } from '../../src/sim/camere-explica.ts'
 import type { Celula, Explicatie } from '../../src/sim/camere-explica.ts'
 import { numePion } from './nume.ts'
-import { cant, NUME_GAND, NUME_ITEM_MIC, NUME_PIESA, textActivitate, textMinute, textMotiv, textRatiunePion } from './texte.ts'
+import { cant, NUME_GAND, NUME_ITEM_MIC, NUME_PIESA, textActivitate, textCanale, textEchilibru, textGeneric, textMinute, textMotiv, textRatiunePion } from './texte.ts'
 import type { Cifre, TextMotiv } from './texte.ts'
 import type { Semnal, Tinta } from './alerte.ts'
 
@@ -632,6 +633,66 @@ export function aerulIntrebat(w: World, wx: number, wy: number, z: number, n: No
   if (dedesubt !== null) return dedesubt
   for (const [dx, dy] of VECINI_PLAN) if (esteAerAcoperit(r, wx + dx, wy + dy, z)) return la(wx + dx, wy + dy, z)
   return null
+}
+
+// ---------------------------------------------------------------------------------------------
+// temperatura încăperii de la celula inspectată (design temperatura v2, §6)
+// ---------------------------------------------------------------------------------------------
+
+/** Ce scrie inspectorul despre temperatura componentei: echilibrul și pe ce stă el. */
+export interface TermicLa {
+  /** Componenta (id-ul din index) pentru care s-a calculat. */
+  readonly comp: number
+  /** Echilibrul, Q16 °C; null = nu s-a putut calcula (graful a refuzat). */
+  readonly tQ16: number | null
+  /** „~4,5 °C la echilibru (afară 12 °C)". */
+  readonly linie: string
+  /** „66% sol (pereți 42%, podea 24%, ~4 °C) · 31% aer de afară prin acoperiș (…)"; '' la refuz. */
+  readonly canale: string
+}
+
+/**
+ * Temperatura componentei care conține celula de aer `celula` (cea întrebată de explicație, `IncapereLa.celula`),
+ * la tickul lumii de ACUM. NU stă în `IncapereLa` și nu trece prin memoria explicației: aceea întoarce același
+ * obiect cât nu se editează lângă componentă, deci temperatura ar fi rămas cea de la primul clic (panoul, L5-2: 400
+ * din 400 de reîmprospătări, abatere de 8,7 °C în 20 de minute). Canalele vin din graful simulării (cache-ul de
+ * fețe, agregat pe bucățile componentei), nu dintr-un mers al fețelor în viewer (30–250 ms pe componentele mari).
+ */
+export function termicLa(w: World, rules: Rules, celula: Celula): TermicLa | null {
+  const c = componentaLa(w.camere, celula.x, celula.y, celula.z)
+  if (c === null) return null
+  const o = canaleTermice(w, rules, c.id, w.tick)
+  if (!o.ok) return { comp: c.id, tQ16: null, linie: `Temperatura nu se poate calcula: ${textGeneric(o.reason).titlu}`, canale: '' }
+  return { comp: c.id, tQ16: o.value.tQ16, linie: textEchilibru(o.value.tQ16, o.value.tAfaraQ16), canale: textCanale(o.value) }
+}
+
+/**
+ * Memoria temperaturii din inspector: același (tick, epocă, epocaFete, componentă, reguli) ⇒ același răspuns,
+ * fără calcul (în pauză, 0 calcule la 4 Hz). Orice tick nou recalculează: temperatura se schimbă fără editări.
+ */
+export interface MemorieTermica {
+  ia(w: World, rules: Rules, celula: Celula | null): TermicLa | null
+  calcule(): number
+}
+
+export function creeazaMemorieTermica(): MemorieTermica {
+  let cheie: { tick: number; epoca: number; epocaFete: number; comp: number; rules: Rules } | null = null
+  let raspuns: TermicLa | null = null
+  let calcule = 0
+  return {
+    ia(w, rules, celula) {
+      if (celula === null) return null
+      const c = componentaLa(w.camere, celula.x, celula.y, celula.z)
+      if (c === null) return null
+      const k = cheie
+      if (k !== null && k.tick === w.tick && k.epoca === w.camere.epoca && k.epocaFete === w.camere.epocaFete && k.comp === c.id && k.rules === rules) return raspuns
+      raspuns = termicLa(w, rules, celula)
+      cheie = { tick: w.tick, epoca: w.camere.epoca, epocaFete: w.camere.epocaFete, comp: c.id, rules }
+      calcule++
+      return raspuns
+    },
+    calcule: () => calcule,
+  }
 }
 
 // ---------------------------------------------------------------------------------------------

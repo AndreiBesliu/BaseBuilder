@@ -38,7 +38,7 @@ import { componentaLa, decodeazaFelie, FELIE } from '../../src/sim/camere.ts'
 import type { Celula } from '../../src/sim/camere-explica.ts'
 import { JURNAL_CAP } from '../../src/sim/terrain/terrain.ts'
 import { incaperea } from './model.ts'
-import type { IncapereLa, NormalaFetei } from './model.ts'
+import type { IncapereLa, InspectieCelula, NormalaFetei } from './model.ts'
 
 /** Cel mai des cât se reface explicația, fără un clic: o dată la 250 ms (reîmprospătarea inspectorului). */
 export const FRANA_MIN_MS = 250
@@ -123,6 +123,17 @@ export function usilePropuse(w: World, inc: IncapereLa | null): UsilePropuse {
     else if (d.kind[ds] === Desemnare.CONSTRUIESTE && d.piesa[ds] === Piesa.USA) usa++
   }
   return { lipsa, desemnata: usa === inc.e.usiPropuse.length }
+}
+
+/**
+ * Cheia de redesenare a inspectorului pe o celulă: când se schimbă, `corpInspector.replaceChildren` reface tot
+ * corpul, cu butoane cu tot. Conține DOAR ce se schimbă prin editări, prin desemnări sau printr-un clic — nimic
+ * termic. Temperatura se schimbă fără editări (o dată la 4–24 s reali) și se scrie PE LOC, înaintea comparației:
+ * pusă în cheie, butoanele „Arată nivelul" / „Pune ușa" s-ar recrea la fiecare schimbare, iar un clic care cade
+ * între mousedown și mouseup s-ar pierde (panoul, L5-2: 0 din 10 clicuri cu `replaceChildren`, 10 din 10 pe loc).
+ */
+export function cheieInspectorCelula(c: InspectieCelula, versiune: number, usi: UsilePropuse): string {
+  return `${JSON.stringify(c)}|${versiune}|${usi.lipsa.length}|${usi.desemnata}`
 }
 
 function aceeasiNormala(a: NormalaFetei | null, b: NormalaFetei | null): boolean {

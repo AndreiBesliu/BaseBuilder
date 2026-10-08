@@ -804,6 +804,138 @@ async function ruleaza() {
     bifa('pune-usa', b5 !== null && bPune !== null && usi.length === 2 && usi.every((u) => u.prioritate === 5) && /Ușa e desemnată — o zidesc oamenii/.test(dupa.text) && !dupa.pune && dupa.arataUsa,
       'inspectorul pe o casa cu golul deschis: „Pune ușa" pune usa intreaga cu prioritatea barei (5), apoi spune „Ușa e desemnată", fara buton', JSON.stringify({ inainte, usi, dupa }))
   })
+  // --- 6g. temperatura (design temperatura v2, §6; panoul, L5-2 / L5-3): overlay-ul U din tasta si din butonul din
+  // „Hărți", tenta si cifra pe casa de proba; inspectorul pe podeaua ei arata echilibrul si descompunerea; textul
+  // temperaturii se schimba FARA clic, iar butonul „Arată nivelul" ramane acelasi nod (scris pe loc, nu redesenat).
+  await pas('temperatura', async () => {
+    if (casaI === null) { bifa('temperatura-tasta', false, 'fara casa de proba (6c)'); return }
+    const { x0: hx, y0: hy, s: hs } = casaI
+    if (!(await p.js('__kinstead.stare().pauza'))) await p.tasta(' ')
+    await p.tasta('r')
+    await p.tasta('v')
+    if (await p.js(`document.querySelector('button[title^="Încăperile închise"]')?.getAttribute('aria-pressed') === 'true'`)) await p.tasta('i')
+    await p.js(`__f.centreaza(${hx + 2.5}, ${hy + 2.5}, ${hs + 1}, 9)`)
+    await astepta(250)
+    // Nivelul: aerul casei (sol +1), ca la 6c — dupa fiecare tasta se ASTEAPTA eticheta noua.
+    const eticheta = () => p.js(`document.querySelector('.ui-nivel .rel')?.textContent ?? ''`)
+    const tastaNivel = async (k) => {
+      const inainte = await eticheta()
+      await p.tasta(k)
+      for (let j = 0; j < 30 && (await eticheta()) === inainte; j++) await astepta(50)
+    }
+    await tastaNivel('q')
+    for (let i = 0; i < 8; i++) {
+      const rel = await eticheta()
+      if (rel === 'sol +1') break
+      await tastaNivel(/sol \+[2-9]/.test(rel) ? 'q' : 'e')
+    }
+    const stare = () => p.js(`(() => {
+      const K = __kinstead, o = K.tempOverlay, s = K.etichete ? K.etichete() : null
+      if (!o) return { lipsa: true }
+      const g = K.scene.getObjectByName('overlay-temperatura')
+      const casa = o.ancore.filter((a) => a.x >= ${hx + 1} && a.x <= ${hx + 3} && a.y >= ${hy + 1} && a.y <= ${hy + 3})
+      const spanuri = s ? s.spanuri.map((e) => ({ vizibil: !e.hidden && !s.radacina.hidden, text: e.textContent })) : []
+      const i = casa.length ? o.ancore.indexOf(casa[0]) : -1
+      const leg = document.querySelector('.ui-legenda')
+      return {
+        vizibil: o.visible, nivel: o.nivel ?? null, grup: g ? g.visible : null,
+        plase: g ? g.children.map((c) => ({ tip: c.type, varfuri: c.geometry?.getAttribute('position')?.count ?? 0, culori: !!c.geometry?.getAttribute('color') })) : [],
+        ancoreCasa: casa.length, eticheta: i >= 0 && spanuri[i] ? spanuri[i] : null, etichete: spanuri.filter((x) => x.vizibil).length,
+        buton: document.querySelector('button[title^="Unde ar ajunge temperatura"]')?.getAttribute('aria-pressed') ?? null,
+        legenda: leg && !leg.hidden ? (leg.querySelector('h3 span')?.textContent ?? '') + ' | ' + (leg.querySelector('.cifre')?.textContent ?? '') : '',
+      }
+    })()`)
+    const s0 = await stare()
+    await p.tasta('u')
+    await astepta(500)
+    const s1 = await stare()
+    bifa('temperatura-tasta', s0.vizibil === false && s1.vizibil === true && s1.buton === 'true' && s1.nivel === hs + 1, 'tasta U aprinde overlay-ul Temperatura pe nivelul casei (butonul din „Hărți" apasat)', JSON.stringify({ s0: { vizibil: s0.vizibil, buton: s0.buton, lipsa: s0.lipsa }, s1: { vizibil: s1.vizibil, nivel: s1.nivel, buton: s1.buton }, hs }))
+    bifa('temperatura-tenta', s1.grup === true && (s1.plase ?? []).some((c) => c.tip === 'Mesh' && c.culori && c.varfuri >= 9 * 6), 'overlay-ul U: tenta e in scena (o plasa cu culori pe varf, cel putin cele 9 celule ale casei)', JSON.stringify(s1.plase))
+    bifa('temperatura-etichete', s1.ancoreCasa === 1 && s1.eticheta !== null && s1.eticheta.vizibil && /^−?\d+,\d°$/.test(s1.eticheta.text), 'overlay-ul U: o cifra pe casa de proba, ancorata in interiorul ei si vizibila („4,5°")', JSON.stringify({ ancoreCasa: s1.ancoreCasa, eticheta: s1.eticheta, etichete: s1.etichete }))
+    bifa('temperatura-legenda', /^Temperatură \(U\) \| /.test(s1.legenda ?? '') && /°C la echilibru · afară −?\d+ °C$/.test(s1.legenda ?? ''), 'legenda lui U: intervalul de la nivel si aerul de afara', String(s1.legenda))
+    await p.poza('7-temperatura-overlay.png')
+    // Butonul din „Hărți": U stins din tasta, aprins din buton.
+    await p.tasta('u')
+    await astepta(300)
+    const s2 = await stare()
+    const bT = await p.js(`(() => { const b = document.querySelector('button[title^="Unde ar ajunge temperatura"]'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
+    if (bT) await p.click(bT.x, bT.y)
+    await astepta(400)
+    const s3 = await stare()
+    bifa('temperatura-buton', s2.vizibil === false && bT !== null && s3.vizibil === true && s3.buton === 'true' && s3.eticheta?.vizibil === true, 'butonul „Temperatură" din „Hărți" aprinde overlay-ul (dupa ce U l-a stins), cu cifra casei', JSON.stringify({ s2: s2.vizibil, bT, s3: { vizibil: s3.vizibil, buton: s3.buton, eticheta: s3.eticheta } }))
+    // Inspectorul pe podeaua casei (sub planul de taiere, proiectata direct, ca la 6c).
+    const pPodea = await p.js(`(() => {
+      const K = __kinstead, q = __f.proj(${hx + 2.5}, ${hs + 1}, ${hy + 2.5})
+      for (let r = 0; r <= 20; r++) for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue
+        const x = Math.round(q.x) + dx, y = Math.round(q.y) + dy
+        if (document.elementFromPoint(x, y) !== K.renderer.domElement) continue
+        const t = K.tintaLa(x, y, { ctrl: false, shift: false, alt: false })
+        if (t.ok && t.wx === ${hx + 2} && t.wy === ${hy + 2}) return { x, y, z: t.z }
+      }
+      return null
+    })()`)
+    if (pPodea !== null) await p.click(pPodea.x, pPodea.y)
+    await astepta(500)
+    const insp = await p.js(`({ inc: document.querySelector('.ui-incapere')?.textContent ?? '', linie: document.querySelector('.ui-termic-t')?.textContent ?? '', canale: document.querySelector('.ui-termic-canale')?.textContent ?? '' })`)
+    bifa('temperatura-inspector', /Încăpere · 18 m³/.test(insp.inc) && /^~−?\d+,\d °C la echilibru \(afară −?\d+ °C\)$/.test(insp.linie)
+      && /^\d+% aer de afară \(pereți \d+%, acoperiș \d+%, ~−?\d+ °C\) · \d+% sol prin podea \(~−?\d+ °C\)/.test(insp.canale) && !/pierde|câștigă/.test(insp.inc),
+      'inspectorul pe podeaua casei: „~X °C la echilibru (afară Y °C)" si descompunerea („…% aer de afară (pereți …, acoperiș …) · …% sol prin podea"), fara „pierde/câștigă"', JSON.stringify({ insp, pPodea }))
+    await p.poza('8-temperatura-inspector.png')
+    // Fara clic: textul temperaturii se schimba cu lumea (3×), iar „Arată nivelul" e ACELASI nod. Pionii nu iau lucrari
+    // cat se masoara (prioritatile 0, puse la loc la final): o editare langa casa ar reface explicatia, deci si corpul
+    // inspectorului — legitim, dar nu ce se masoara aici. Cateva secunde intai, cat isi termina lucrul inceput.
+    const viteza0 = await p.js('__kinstead.stare().viteza')
+    const prio = await p.js(`(async () => {
+      const C = await import('/@fs/${REPO}/src/sim/commands.ts')
+      const w = __kinstead.world, a = w.agents, vechi = []
+      for (let i = 0; i < a.count; i++) if (a.alive[i] && a.faction[i] === 0) for (let c = 0; c < 3; c++) {
+        vechi.push([a.id[i], c, a.prioPersonala[i * 3 + c]])
+        C.applyCommand(w, { kind: 'setPrioritatePersonala', id: a.id[i], categorie: c, nivel: 0 })
+      }
+      return vechi
+    })()`)
+    await p.tasta('3')
+    // Pana nu mai sapa si nu mai zideste nimeni (lucrul inceput se termina): `editari` pe loc 2 s, cel mult 30 s.
+    const editari = () => p.js('__kinstead.world.terrain.editari')
+    let linistit = 0
+    for (let i = 0, e0 = await editari(); i < 60 && linistit < 4; i++) {
+      await astepta(500)
+      const e1 = await editari()
+      linistit = e1 === e0 ? linistit + 1 : 0
+      e0 = e1
+    }
+    const citeste = () => p.js(`(() => {
+      const b = [...document.querySelectorAll('.ui-inspector button')].find((x) => /Arată nivelul/.test(x.textContent))
+      const l = document.querySelector('.ui-termic-t')
+      if (!globalThis.__tempBtn) { globalThis.__tempBtn = b ?? null; globalThis.__tempLinie = l }
+      return { buton: !!b, acelasi: b === globalThis.__tempBtn, liniaAceeasi: l === globalThis.__tempLinie, linie: l?.textContent ?? '', editari: __kinstead.world.terrain.editari, tick: __kinstead.world.tick }
+    })()`)
+    // O fereastra in care s-a editat ceva (in lume) nu judeca nimic: se reia, de cel mult 5 ori.
+    let inainte = null, dupa = null, ferestre = 0
+    for (; ferestre < 5; ferestre++) {
+      await p.js('globalThis.__tempBtn = null; true')
+      inainte = await citeste()
+      dupa = inainte
+      for (let i = 0; i < 50 && dupa.linie === inainte.linie; i++) {
+        await astepta(300)
+        dupa = await citeste()
+      }
+      if (dupa.editari === inainte.editari) break
+    }
+    if (!(await p.js('__kinstead.stare().pauza'))) await p.tasta(' ')
+    bifa('temperatura-fara-clic', inainte.buton && inainte.linie !== '' && dupa.linie !== inainte.linie && dupa.acelasi && dupa.liniaAceeasi && dupa.tick > inainte.tick && dupa.editari === inainte.editari,
+      'fara niciun clic, textul temperaturii din inspector se schimba cu lumea, iar butonul „Arată nivelul" ramane ACELASI nod (scris pe loc, nu redesenat)', JSON.stringify({ inainte, dupa, ferestre, linistit }))
+    // La loc: prioritatile, viteza (o cifra porneste jocul: pauza dupa ea), U stins, toate nivelurile.
+    await p.js(`(async () => {
+      const C = await import('/@fs/${REPO}/src/sim/commands.ts')
+      for (const [id, c, n] of ${JSON.stringify(prio)}) C.applyCommand(__kinstead.world, { kind: 'setPrioritatePersonala', id, categorie: c, nivel: n })
+      return true
+    })()`)
+    if (viteza0 !== 3) { await p.tasta(String(viteza0)); await p.tasta(' ') }
+    await p.tasta('u')
+    await p.tasta('r')
+  })
   // --- 6f. zona moarta a barei de jos: cu trei toasturi, coloana .ui-jos nu prinde clicuri pe teren (ECR-4) ---
   await pas('zona-moarta', async () => {
     await p.tasta('d')

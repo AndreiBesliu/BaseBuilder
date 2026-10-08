@@ -26,6 +26,10 @@ import { Material } from '../../src/sim/terrain/chunk.ts'
 import { Zona } from '../../src/sim/zone.ts'
 import { Anotimp } from '../../src/sim/calendar.ts'
 import type { Moment } from '../../src/sim/calendar.ts'
+import { ClasaDir } from '../../src/sim/fete.ts'
+import type { ClasaDirId } from '../../src/sim/fete.ts'
+import { Destinatie, PONDERE_TOTALA } from '../../src/sim/termic.ts'
+import type { CanalTermic, DestinatieId } from '../../src/sim/termic.ts'
 
 /** Un motiv tradus: ce s-a intamplat, si ce poate face jucatorul. `actiune` gol = nimic de facut decat asteptat. */
 export interface TextMotiv {
@@ -486,4 +490,124 @@ export function textMinute(min: number): string {
   const m = Math.max(0, Math.round(min))
   if (m < 60) return `~${m} min`
   return `~${Math.floor(m / 60)} h ${m % 60} min`
+}
+
+// ---- temperatura pe incaperi: inspectorul si overlay-ul U (design temperatura v2, §6) ------------------
+
+/**
+ * Q16 °C cu o zecimala si minusul tipografic: „4,5", „−0,3". Rotunjirea e simetrica (jumatatea departe de
+ * zero, ca in regimul permanent), iar ce se rotunjeste la zero e „0,0", nu „−0,0".
+ */
+export function textZecimi(q16: number): string {
+  const z = Math.round((Math.abs(q16) * 10) / 65536)
+  const s = `${Math.floor(z / 10)},${z % 10}`
+  return q16 < 0 && z > 0 ? `−${s}` : s
+}
+
+/** Grade intregi, in propozitii: „12", „−3", „0" (si −0,4 °C e „0"). */
+export function textGradeIntregi(q16: number): string {
+  const g = Math.round(Math.abs(q16) / 65536)
+  return q16 < 0 && g > 0 ? `−${g}` : `${g}`
+}
+
+/** Linia inspectorului: „~4,5 °C la echilibru (afară 12 °C)". Echilibrul = unde AR ajunge, fara inertie (t.2a). */
+export function textEchilibru(tQ16: number, tAfaraQ16: number): string {
+  return `~${textZecimi(tQ16)} °C la echilibru (afară ${textGradeIntregi(tAfaraQ16)} °C)`
+}
+
+/** Cifra unei piese de incapere pe overlay-ul Temperatura: „4,5°". */
+export function textEticheta(tQ16: number): string {
+  return `${textZecimi(tQ16)}°`
+}
+
+/** Materialele de pe drumul unei fete, mici si scurte („3 m rocă+pământ"). Indexat cu `MaterialId`. */
+export const NUME_MATERIAL_DRUM: Readonly<Record<number, string>> = {
+  [Material.AER]: 'aer',
+  [Material.ROCA]: 'rocă',
+  [Material.PAMANT]: 'pământ',
+  [Material.IARBA]: 'iarbă',
+  [Material.APA]: 'apă',
+  [Material.LEMN_CONSTRUIT]: 'lemn',
+  [Material.PIATRA_CONSTRUITA]: 'piatră',
+  [Material.MOLOZ]: 'moloz',
+  [Material.GRINDA]: 'grindă',
+  [Material.USA]: 'ușă',
+}
+
+/** O pondere Q16 (65536 = 100%) ca procent intreg; peste 0, dar sub 0,5%, e „<1%", nu „0%". */
+export function textProcent(q16: number): string {
+  const p = Math.round((q16 * 100) / PONDERE_TOTALA)
+  return p === 0 && q16 > 0 ? '<1%' : `${p}%`
+}
+
+/**
+ * Drumul unei compozitii (cheia canonica din fete.ts: `material x celule`, unite cu „+"): „3 m rocă+pământ",
+ * materialele cu cele mai multe celule intai. '' = drumul gol.
+ */
+export function textDrum(compozitie: string): string {
+  if (compozitie === '') return ''
+  const parti = compozitie.split('+').map((p) => p.split('x').map(Number) as [number, number])
+  let m = 0
+  for (const [, n] of parti) m += n
+  parti.sort((a, b) => b[1] - a[1] || a[0] - b[0])
+  return `${m} m ${parti.map(([mat]) => NUME_MATERIAL_DRUM[mat] ?? '?').join('+')}`
+}
+
+/** Pe `Destinatie`: AFARA, SOL, APA, INCAPERI, ADANC (ADANC nu se scrie asa: vezi `textCanale`). */
+const NUME_DESTINATIE_TEXT: readonly string[] = ['aer de afară', 'sol', 'apă', 'încăperi vecine', 'zid gros']
+
+/** Clasa de directie a unui canal, in cuvinte. SUS e „acoperiș" spre cer, altfel „tavan"; o usa in sus sau in jos e chepengul. */
+function numeClasa(clasa: ClasaDirId, usa: boolean, dest: DestinatieId): string {
+  if (usa) return clasa === ClasaDir.LAT ? 'ușă' : 'chepeng'
+  if (clasa === ClasaDir.LAT) return 'pereți'
+  if (clasa === ClasaDir.JOS) return 'podea'
+  return dest === Destinatie.AFARA ? 'acoperiș' : 'tavan'
+}
+
+/** Un grup de canale cu aceeasi destinatie (`textCanale`). */
+function textGrupCanale(dest: DestinatieId, rs: readonly CanalTermic[], pondere: number): string {
+  // Temperatura destinatiei, medie pe g (ca in canaleTermice); doar pentru afisare, deci pe Number.
+  let g = 0
+  let gt = 0
+  for (const r of rs) { g += r.gQ16; gt += r.gQ16 * r.tDestQ16 }
+  const r0 = rs[0]!
+  const t = `~${textGradeIntregi(g > 0 ? gt / g : r0.tDestQ16)} °C`
+  const adanc = dest === Destinatie.ADANC
+  // O fata ADANC e un zid plin mai gros de K celule: „peste 8 m de piatră", nu „sol adânc" (§5).
+  const cap = adanc ? `peste ${r0.grosime} m de ${NUME_MATERIAL_DRUM[r0.material] ?? 'zid'}` : NUME_DESTINATIE_TEXT[dest]!
+  if (rs.length > 1) return `${textProcent(pondere)} ${cap} (${rs.map((r) => `${numeClasa(r.clasa, r.usa, dest)} ${textProcent(r.pondereQ16)}`).join(', ')}, ${t})`
+  const clasa = numeClasa(r0.clasa, r0.usa, dest)
+  if (adanc) return `${textProcent(pondere)} ${clasa} ${cap} (${t})`
+  const prinZid = (dest === Destinatie.AFARA || dest === Destinatie.INCAPERI) && !r0.usa
+  const drum = !prinZid ? '' : r0.compozitie === '' ? 'deschis' : textDrum(r0.compozitie)
+  return `${textProcent(pondere)} ${cap} prin ${clasa} (${drum ? `${drum}, ` : ''}${t})`
+}
+
+/**
+ * Pe ce sta temperatura de echilibru a unei incaperi (`canaleTermice`, src/sim/termic.ts): randurile cu aceeasi
+ * destinatie contopite, in ordinea ponderii in ΣG, plus restul:
+ *   „71% aer de afară (pereți 51%, acoperiș 21%, ~14 °C) · 25% sol prin podea (~6 °C) · rest 4%"
+ * FARA „pierde"/„câștigă": semnul unui canal se schimba cu ziua si cu anotimpul (panoul, L5-1: acoperisul unei
+ * pivnite castiga caldura 63–67% din an), ponderea in ΣG nu (e geometrica, deci textul nu sare intre tickuri).
+ */
+export function textCanale(c: { readonly randuri: readonly CanalTermic[]; readonly rest: { readonly pondereQ16: number } }): string {
+  const grupuri: { dest: DestinatieId; rs: CanalTermic[]; pondere: number }[] = []
+  for (const r of c.randuri) {
+    let gr = grupuri.find((x) => x.dest === r.destinatie)
+    if (gr === undefined) { gr = { dest: r.destinatie, rs: [], pondere: 0 }; grupuri.push(gr) }
+    gr.rs.push(r)
+    gr.pondere += r.pondereQ16
+  }
+  // Sortarea e stabila: la ponderi egale ramane ordinea randurilor (cea din canaleTermice).
+  grupuri.sort((a, b) => b.pondere - a.pondere)
+  const bucati = grupuri.map((gr) => textGrupCanale(gr.dest, gr.rs, gr.pondere))
+  if (c.rest.pondereQ16 > 0) bucati.push(`rest ${textProcent(c.rest.pondereQ16)}`)
+  return bucati.join(' · ')
+}
+
+/** Cifrele legendei overlay-ului Temperatura (U): „−1,2 … 4,5 °C la echilibru · afară 12 °C". `n` = componente la nivel. */
+export function textIntervalTemperatura(n: number, min: number, max: number, tAfaraQ16: number): string {
+  if (n === 0) return `Nimic acoperit pe nivelul ăsta · afară ${textGradeIntregi(tAfaraQ16)} °C`
+  const interval = textZecimi(min) === textZecimi(max) ? `~${textZecimi(min)} °C` : `${textZecimi(min)} … ${textZecimi(max)} °C`
+  return `${interval} la echilibru · afară ${textGradeIntregi(tAfaraQ16)} °C`
 }

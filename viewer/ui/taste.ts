@@ -23,6 +23,8 @@ export type Actiune =
   // ale UI-ului de joc
   | 'selecteaza' | 'sapa' | 'construieste' | 'anuleaza' | 'zona' | 'oameni'
   | 'viteza1' | 'viteza2' | 'viteza3' | 'salveaza' | 'ajutor' | 'diagnostic' | 'esc'
+  // ale temperaturii (design temperatura v2, §6)
+  | 'overlayU'
   | 'cameraVest' | 'cameraEst' | 'cameraNord' | 'cameraSud'
 
 export interface IntrareTasta {
@@ -98,6 +100,10 @@ export function actiuneTasta(t: IntrareTasta): IesireTasta {
     case 'a': return fa('anuleaza')
     case 'k': return fa('zona')
     case 'o': return fa('oameni')
+    // U = Temperatura (DESIGN §9.5: overlay separat, cu tasta lui). T e traversarea, X si Z sunt ale zonelor
+    // (ascultatorii de stare tinuta din main.ts); L ramane pentru „lumină", tot din lista §9.5. U sta langa
+    // I (Încăperi), ruda ei, si nu intre Q si E, tastele nivelului (W s-ar apasa din greseala).
+    case 'u': return fa('overlayU')
     case '1': return fa('viteza1')
     case '2': return fa('viteza2')
     case '3': return fa('viteza3')
