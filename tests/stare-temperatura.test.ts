@@ -205,6 +205,9 @@ test('STARE echilibrul nu tine graful t.2a (GRAF-4): dupa lumea fara istorie (ha
   assert.ok(regimPermanent(w, R, w.tick).ok)
   const m = memoriaGrafuluiT2a(w.camere)
   assert.ok(m.graf && m.regim && m.contributii > 0, `controlul: memoria vazuta ${JSON.stringify(m)}`)
+  // Iar un echilibru de după ea eliberează tot, și regimul memorat (pe care echilibrul nu-l cere: `rezolvaRegim` direct).
+  laEchilibru(w, w.tick)
+  assert.deepEqual(memoriaGrafuluiT2a(w.camere), gol, 'echilibrul elibereaza si regimul cerut inainte')
 })
 
 test('STARE pasul nu arunca din tick (§5.3): o muchie stricata in graf fara niciun lot (asimetrica) — pasul o vede, reface graful de urgenta, numara si continua cu graful bun (== pasul pe o lume geamana)', () => {
