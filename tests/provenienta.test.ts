@@ -629,7 +629,7 @@ function minaInFasii(N: number): { w: World; hub: number; ex: number; ey: number
 test('PROVENIENTA K05 al evidentei (PROV-3): loturi DOAR-FETE (celula de suprafata de deasupra unei mine in fasii, sapata si astupata cu PAMANT) citesc ACELEASI inregistrari pe o mina de 256 si pe una de 1.024 de bucati — C\' memorat pe obiectul componentei, nu adunat pe toate bucatile; C\'-ul evidentei == contoarele componentei la fiecare lot', () => {
   // Măsurat (recenzia PROV, m2-pieptene): evidența parcurgea toate bucățile componentei de două ori (C' nou, capVeche):
   // pe lotul doar-fețe, 2 × 1.024 / 2 × 5.568 de bucăți; ~17 ns pe bucată (121–166 µs pe lot la 5.568, față de 23–30 pe main).
-  const sarcina = (N: number): { citite: number; bucati: number } => {
+  const sarcina = (N: number): { incalzire: number; citite: number; bucati: number } => {
     const { w, hub, ex, ey, ge } = minaInFasii(N)
     const t = w.terrain
     const lot = (k: number): SchimbareCamere => {
