@@ -4887,3 +4887,95 @@ proveniența la unirile și despărțirile de încăperi, un singur punct de sin
 temperaturi, migrarea 7 → 8 și hash-urile noi. Reparațiile panoului pentru partea asta sunt în
 `research/temperatura-t2.md` §9; registrul t.2a e în intrarea precedentă. Metoda, ca la t.1 și t.2a: hartă și
 măsurători pe HEAD → design → panou adversarial → cod → probe → recenzie a codului.
+
+## Task Completed — 10.10.2026 — S24-27 t.2b: temperatura ca stare (inerția, salvarea, oamenii, proveniența)
+
+**Prompt:** „continua" (08.10, după t.2a; reluat 10.10 cu „continua" și „Continua", după pauza cerută cu „sa faci pauza
+cand poti" și după o oprire a agenților la limita săptămânală de utilizare)
+**Model:** Claude Opus 5.5 (claude-opus-5-5), Claude Code, Ultracode.
+
+**Ce s-a livrat.** Temperatura e STARE: fiecare componentă a indexului t.1 are `T` (Q16 °C) și `rest`, salvate (schema 8, pe
+ANCORĂ), integrate la 1 Hz (forma ψ: muchiile explicit din T vechi, rezervoarele implicit pe nod, pe întregi, Number cu
+BigInt peste prag) cu capacitatea aerului, a pereților și a solului; căldura oamenilor (100 W); proveniența la orice schimbare
+a indexului (regula C3); un singur punct de sincronizare, `sincronizeazaLumea`; graful termic incremental pe lot (noduri
+stabile); migrarea 7 → 8 la echilibru; ecranul pe starea de acum. Simularea încă nu CITEȘTE temperatura (efectele vin cu t.3).
+Designul și abaterile: `research/temperatura-t2b.md` (§13 „La livrare").
+
+**Cum s-a ajuns aici.**
+- **Harta pe HEAD** (6 agenți, 2,53 M): id-urile nu supraviețuiesc unei încărcări (0–50% pe un fuzz cu uniri), ancorele da
+  (100%); scenariul standard are 0 componente în fiecare tick; căldura reală a oamenilor e +0,2–0,4 °C, nu „+3–6 °C";
+  refacerea grafului la epocă nouă (8–19 ms pe M10) cade în 70% din pașii de 1 Hz cât pionii sapă — deci graful trebuie ținut
+  incremental; proveniența a2 portată pe codul de azi: 0 erori pe 4.453 de loturi.
+- **Panoul pe design** (5 lentile + 14 verificatori, 5,97 M, 46 de constatări, 4 MARE după verificare) a schimbat regula
+  săpatului: regula A (masa nouă la T-ul încăperii) lăsa o pivniță săpată dintr-o casă caldă 4–5 zile peste 5 °C (vara are 4);
+  regula B (solul intră la T_sol, iese la T-ul încăperii) e o pompă (−10 °C vara prin „sapă și astupă"). **C3** (solul intră
+  ȘI iese la T_sol, ponderea = masa care persistă) le trece pe amândouă. Plus: o singură constantă de construcție cu ținta
+  relativă a casei de pământ, poarta valului de frig pe minime și benzi (ziua valului e 2 sau 3), amprenta lui C' în salvare,
+  inspectorul pe trei rânduri fixe.
+- **Valul 1, simularea** (3 agenți în ordine, 2,41 M, 8 commit-uri), **valul 2, ecranul** (2 agenți, 2 commit-uri; costul
+  nu s-a înregistrat — sesiunea s-a închis înainte de raportul workflow-ului).
+- **Recenzia codului** (5 lentile + 3 verificatori, 2,92 M): **29 de constatări, 2 MARE**:
+  - **PROV-1** C3 are o pompă ÎNCRUCIȘATĂ (zidit → săpat → scos → astupat): casa 5×5 vara 20 → 79 °C în 20 de cicluri pe
+    același tick; poarta pompei testa un singur fel de ciclu. Cu un singur T pe componentă nu există o regulă fără preț: C4
+    (orice masă intră și iese la o temperatură fixă) comută, dar un hol zidit iarna sare cu +12,6…+27,7 °C și decizia 3 se rupe.
+    **Decizie: C3 păstrat**, ciclurile încrucișate fixate de porți-VERDICT (24,9 / 20,5 / 17,5 °C, cu timpul pornit +4,3 °C pe
+    zi) și o plasă de siguranță ±1000 °C (numărată, cu alertă), ca salvarea să nu se strice (fără ea, exploitul trecea de
+    1000 °C la tickul 8.272 și `encode` arunca);
+  - **PROV-2** clasa de masă a GRINDA, MOLOZ și LEMN n-o vedea nicio poartă (3 mutanți treceau 1.056/1.056; oracolul și
+    numărătoarea „independentă" foloseau `eSolNatural`, ca producția) → tabelul pe hârtie, exhaustiv;
+  - restul: refacerile grafului și diferențele de la salvare se reparau tăcut (acum invarianți, cu alertă); `encode` arunca
+    după o deltă greșită de C' (acum normalizează restul); lotul doar-fețe devenise O(componentă) (C' memorat pe obiectul
+    componentei); modelul pasului se reconstruia la orice lot (acum doar la o deltă a grafului); plasa AST trecea pe 11 ocoliri;
+    o excepție din tick lăsa jocul să continue o lume pe jumătate de pas (acum simularea se oprește până la o încărcare);
+    filtrul oamenilor moștenea istoria altei componente la unire; trei garanții ale ecranului fără poartă; porți M5 fără loturi
+    după încărcare.
+- **Remedierea** (F1 simularea, F2 ecranul, în paralel; 1,06 M până la oprirea la limita de utilizare + 1,00 M la reluare;
+  24 de commit-uri): toate cele 29, fiecare cu test roșu pe vechi și verde pe nou și cu proba ei de mutație. Al doilea F1 a
+  găsit trei găuri în munca primului (un test pe un contor verde pe vechi prin `NaN == NaN`; o probă rămasă fără test după o
+  memorie nouă; un tip care înroșea `tsc`). Integrarea: ramura ecranului peste cea a simulării, fără conflicte, plus
+  `tipuriInvarianti` (E5: motivele distincte ale invarianților, ținute de simulare) — `cb1429d`. Rularea completă a
+  mutațiilor pe ramura integrată a găsit o probă RATATĂ: citirea monitorului după fiecare tick devenise, cu mulțimea din
+  simulare, o a doua cale pentru același lucru (mutant echivalent) — a ieșit din cod (`63702f1`).
+
+**Porți pe ramura integrată:** `npm run check` verde (1.086 de teste, disciplina curată, hash-ul `b38229fd` = ci.yml); mutațiile complete într-o clonă în afara Drive-ului: **1.102 / 1.103 la `cb1429d`** (31 min 42 s) — singura ratată, citirea monitorului pe tick devenită echivalentă după `tipuriInvarianti`, a ieșit din cod în `63702f1`, după care suita `termic-ecran` iese 84/84; ui-fum pe ramura integrată **74/74** și toate cele **16 probe negative**, fiecare cu EXACT bifa ei roșie (după `63702f1`: din nou 74/74, plus `alerta`, `exceptie-tick`, `filtru-bucla`).
+
+**Măsurat (cifrele care contează).**
+- Pasul de 1 Hz pe M10: 83–91 µs p50 cu modelul memorat; în situ, cu 20 de pioni care lărgesc încăperile, 0,74–0,78 ms p50
+  (modelul se reface la o deltă a grafului); scenariul standard: 0 componente, pasul iese pe prima linie, `sincronizeazaLumea`
+  +0,4 µs pe tick.
+- Graful incremental: delta pe lot 0,06–0,08 ms p50, plată cu așezarea (K05 pe contoare și pe timp, în lockstep); memoria 5,1 MB
+  pe M10; graful t.2a eliberat după echilibru (−2 MB).
+- Calibrarea pe pasul real: casa 3,58 h, golul ușii 0,93 h, etajul 4,17 h, pivnițele 1,23–1,50 zile; valul de frig: casa 5×5
+  −8,19 / −7,31 °C (ziua 3 / ziua 2), casa 3×3 −9,32 / −8,52 °C.
+- Pivnița nouă sub casă, săpată progresiv prin comenzi, la închiderea ușii: în [−0,41; +1,30] °C de regimul ei periodic, pe 8
+  momente; fără casă, 1 m: vara 49/96 de ore sub 5 °C, toamna 9/96; 2 m: 96/96 în fiecare anotimp. Oamenii: +0,228 °C cu 4 care
+  dorm pe parter, +0,002 fără pat.
+- Salvarea pe M10: `encode` 74–77 ms p50 cu compararea grafului, 55 fără ea (sărită când nimic nu s-a schimbat); peste
+  `ENCODE_LENT_MS` = 50, deci salvarea automată e la 10 minute pe o așezare de mărimea M10 (decizie la owner).
+- Hash-uri: `52b16ed2` → `b38229fd` (schema 8 cu bloc gol; scenariul standard n-are componente — ORB la temperatură, acceptabil
+  fiindcă literalul dedicat S+ `84d14adc` stă în `npm test`, care rulează în CI); `3550c897` → `fe597a27` (casa cu pioni vede
+  temperatura); `0e0666c5` → `65883f04` (fixtura migrată).
+
+**Indexul unui worktree stă tot în Drive.** O rulare completă a mutațiilor într-un worktree (`wt/V2-mut`) n-a mai putut
+restaura `termic.ts` („RESTAURARE ESUATA după trei încercări"), iar toate probele de după au ieșit controale invalide;
+`git worktree remove` dădea „Permission denied" pe `.git/worktrees/*`. Fișierele unui worktree stau în afara Drive-ului, dar
+indexul lui e în `.git`-ul repo-ului din Drive. **Mutațiile se rulează de acum într-o CLONĂ în afara Drive-ului** (`.git`
+propriu), nu într-un worktree (CLAUDE.md).
+
+**Cost t.2b:** harta 2,53 M + panoul 5,97 M + valul 1 2,41 M + valul 2 (neînregistrat) + recenzia 2,92 M + remedierea
+2,06 M = **15,89 M** fără valul 2.
+
+**Registru (nefăcut, cu motiv):**
+- **T pe bucată** (nodurile termice pe bucată): ar repara pompa încrucișată, săpatul lent (o celulă pe oră lasă pivnița la
+  6–7 °C) și amestecul de la ușa scoasă; schimbă starea și proveniența;
+- modelul pasului actualizat pe deltă (ar scădea pasul din situ de la ~0,75 ms);
+- ușa care se deschide la trecere = conductanță temporară pe muchia USA (fără index nou); golul unei uși scoase ca muchie =
+  schimbare t.1, cu tratament IMPLICIT (200 W/K pe față nu trece garda explicită);
+- pentru t.3: pivnița bună stă vara la 0,2–0,3 °C sub prag; vatra de deasupra o duce peste; mormanul din tocul ușii n-are
+  componentă — regula se decide acolo; acceptanța relativă a pivniței devine contractul t.2b → t.3;
+- somnul nesincronizat cu noaptea; clima pe sit (cu panta macro reparată); tablouri tipate pentru graf (memorie).
+
+**La owner:** OWNER_VERIFY 17, RESCRIS (nu doar adăugat): 18 decizii cu implicitul în față, între care regula săpatului (C3,
+cu limita ei), pivnița (2 m fără casă), oamenii, salvarea automată pe o așezare mare, oprirea după o eroare.
+
+**Ce urmează:** t.3 — hrana sub 5 °C (efectul temperaturii).

@@ -307,3 +307,44 @@ Apoi recenzia codului, DEVLOG, OWNER_VERIFY §17 RESCRIS (nu doar adăugat), PLA
   recalibrare); vatra de deasupra pivniței o duce peste prag; mormanul din tocul ușii (componentaLa = null) — regula
   (de ex. partea mai caldă) se decide acolo; acceptanța relativă a pivniței devine contractul t.2b → t.3 [JOC-7].
 - Somnul nesincronizat cu noaptea [B4]; clima pe sit; vatra; gheața; tablouri tipate pentru graf (memorie) [B5].
+
+## 13. La livrare (10.10.2026): ce s-a schimbat față de v2
+
+După implementare (două valuri), recenzia codului (5 lentile + verificatori, 29 de constatări, 2 MARE) și remediere:
+
+- **§3, regula C3 rămâne, cu limita ei scrisă.** Doar săpat și astupat nu pompează (exact, la 15:00 și la 03:00), dar
+  ciclurile ÎNCRUCIȘATE da — zidit → săpat → scos → astupat, sau pietre puse și scoase pe rând: vara, o casă 5×5 la 20 °C,
+  20 de cicluri pe același tick, 8 pietre într-un lot → 24,9 °C; doar piatră, pe comenzi → 20,5; ordinea inversă → 17,5;
+  cu timpul pornit, o comandă la 20 de tickuri timp de 24 h → +4,3 °C. Porțile-VERDICT fixează aceste cifre. **Plasa de
+  siguranță**: după proveniență și după pas, T se taie la ±1000 °C (`T_SIGURANTA`, numărat în `taieri` și ca invariant) —
+  fără ea, exploitul trecea de 1000 °C la tickul 8.272 și `encode` arunca. Cu un singur T pe componentă nu există o regulă
+  fără preț; varianta completă e T pe bucată (registru) [recenzia PROV-1].
+- **§3, decizia 9 corectată:** o casă de piatră pe pământ pornește de la T_sol(0) (podeaua e sol care intră la T_sol); de la
+  aerul de afară pornește doar una cu podea construită (rezerva CER) [PROV-4].
+- **§4:** clasa de masă are un test pe hârtie pe FIECARE material (oracolele nu mai împart `eSolNatural` cu producția)
+  [PROV-2]; C' memorat pe obiectul componentei, deci un lot doar-fețe costă O(lot) (5.568 de bucăți: 150–161 → 31–35 µs p50)
+  [PROV-3].
+- **§5.3:** pragul Number/BigInt al pasului e `2^53 − 2^17` (termenii lui X sub prag, |rs(X, 2^16)|·ψ ≤ 2^53 − 2^17); hub-ul
+  M10 nu mai trece pe BigInt [PAS-6]. Un invariant din pas, din proveniență sau din graf (inclusiv refacerea de urgență și
+  diferența de la salvare) se NUMĂRĂ în `invarianti`, cu motivul, iar `tipuriInvarianti` ține motivele distincte; ecranul
+  dă o alertă pe tip [GRAF-1, SAV-R2, E5]. O excepție din `tick()` oprește simularea pe pagină până la o încărcare
+  (Spațiu, Ctrl+S, salvarea automată refuzate) — lumea e pe jumătate de pas [E4].
+- **§5.4:** pasul pe M10 cu modelul memorat 83–91 µs p50; modelul se reface doar la o DELTĂ a grafului (înainte: la orice lot)
+  — cu loturi departe de încăperi 113 µs; în situ, cu 20 de pioni care lărgesc încăperile, 0,74–0,78 ms p50 (la 3×, ~2,3 ms
+  pe secundă de joc) [PAS-2].
+- **§6:** compararea grafului la `encode` costă 19–23 ms p50 pe M10 (construcția integrală 14 ms) și se SARE când graful și
+  indexul n-au nimic nou de la ultima comparare reușită [SAV-R6]; la diferență, graful se înlocuiește și restul se normalizează
+  exact pe C'-ul nou, în lumea continuă [GRAF-2, SAV-R1]. K05 măsoară și timpul deltei, în LOCKSTEP pe 7×7 și 13×13 (p50
+  13×13 / p50 7×7 ≤ 1,35, mediana pe 3 repetiții) [GRAF-3]. Graful t.2a îl cere doar echilibrul, care îl eliberează (−2 MB pe
+  M10) [GRAF-4].
+- **§7:** pe M10, `encode` costă 74–77 ms p50 cu compararea și 55 fără ea: peste `ENCODE_LENT_MS` = 50, deci salvarea
+  automată e la 10 minute pe o așezare de mărimea M10 (decizie la owner). Contoarele de viață ale lui S+: surse SOL ≥ 20,
+  CER ≥ 3 [SAV-R5]; marginile refuzurilor probate (rest == C', T = −2^31, amprenta în afara [0, 2^32)) [SAV-R3].
+- **§8:** filtrul oamenilor ține istoria ACELEIAȘI componente (ancoră + volum) [E1]; rândul F3 al temperaturii: pași,
+  invarianți (ultimul), tăieri, neconvergențe, rest normalizat, graf diferit la salvare, excepții, simularea oprită. ui-fum
+  are bifele `filtru-bucla`, `exceptie-tick` și `latime-inspector` (cele 40 de descompuneri reale cele mai lungi, scoase la
+  fiecare rulare din `bench/canale-lungi.mjs`), fiecare cu proba ei negativă [E3, E6].
+- **§9, M5 (f):** M5 cu LOTURI după încărcare pe S+ și M5 pe M10 cu indexul încărcat în altă ordine decât ancorele, plus
+  proba „amprenta pe ordinea sloturilor la decode" [SAV-R4]; `completeaza` probat pe valori, pe lumi gemene [PAS-1]; plasa
+  AST fără alias la import și fără spații de nume, pe toate extensiile [PAS-3].
+- **Registru, nou:** modelul pasului actualizat pe deltă (PAS-2 c); T pe bucată (pompa încrucișată, săpatul lent, ușa scoasă).

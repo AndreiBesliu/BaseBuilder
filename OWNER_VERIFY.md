@@ -578,67 +578,97 @@ care nu se țintește, tenta chiar desenată, „Anulează" pe o jumătate de u�
 
 ---
 
-## 17. Temperatura — anotimpurile, frigul de sub pământ, unde ar ajunge o încăpere
+## 17. Temperatura — anotimpurile, frigul de sub pământ, inerția, pivnița
 
-*(Nou, 08.10. Prima jumătate a temperaturii (S24-27 t.2a): ceasul, clima, solul și temperatura spre care
-merge fiecare încăpere. Nimic nu are încă efect asupra oamenilor sau a hranei — tocmai ca deciziile de mai
-jos să le poți vedea pe ecran înainte să intre în salvări. Codul a trecut printr-o recenzie adversarială;
-ce era greșit pe ecran e reparat.)*
+*(Rescris 10.10, după a doua jumătate a temperaturii, S24-27 t.2b. Temperatura e acum STARE: fiecare încăpere are
+temperatura ei de acum, se încălzește și se răcește în timp, se salvează, iar oamenii o încălzesc puțin. Încă nu are
+efect asupra oamenilor sau a hranei — hrana care se strică peste 5 °C vine în pasul următor. Codul a trecut prin două
+recenzii adversariale — una pe design, una pe cod; ce era greșit e reparat, iar unde a rămas o alegere, e mai jos.)*
 
 **Ce s-a schimbat pentru tine.**
-- **Bara de sus** arată acum anotimpul, ziua, ora și temperatura de afară: „Toamnă 2/4 · 14:20 · 8° ↘"
-  (săgeata = încotro merge în ora următoare). Peste ea, tooltip-ul spune când vine iarna, în timp real la
-  viteza curentă. Marca KINSTEAD a ieșit din bară (rămâne pe ecranul de titlu) — altfel nu încăpea. Când
-  insignele de alertă nu mai încap, se strâng într-una singură, „3 alerte", cu lista în tooltip.
-- **Inspectorul** (clic pe podeaua unei încăperi) spune unde ar ajunge temperatura și pe ce stă — de
-  exemplu, la o pivniță mare: „~5,4 °C la echilibru (afară 10 °C) · 90% sol (pereți 40%, podea 30%,
-  tavan 20%, ~5 °C) · rest 10%". Golul unei uși lăsate deschise apare separat, „gol deschis".
-- **Harta de temperatură** (tasta **U**, „Temperatură" sub Hărți; I și U se exclud): pe nivelul ales,
-  fiecare încăpere are o nuanță — mai închisă = mai rece, mai deschisă = mai cald, pe o scară care cuprinde și
-  aerul de afară — și cifra ei.
+- **Bara de sus**: anotimpul, ziua, ora și temperatura de afară — „Toamnă 2/4 · 14:20 · 8° ↘" (săgeata = încotro merge
+  în ora următoare); tooltip-ul spune când vine iarna. Marca KINSTEAD a ieșit din bară. Insignele de alertă care nu
+  mai încap se strâng în „N alerte".
+- **Inspectorul** (clic pe podeaua unei încăperi), trei rânduri fixe:
+  - „**13,2 °C** · afară 15 °C" — temperatura de ACUM;
+  - „trage spre 16,2 °C ↗" (sau „stabil") — încotro merge, cu oamenii dinăuntru socotiți;
+  - „oameni: 1 înăuntru";
+  - dedesubt, pe ce stă temperatura: „90% sol (pereți 40%, podea 30%, tavan 20%, ~5 °C) · rest 10%"; golul unei uși
+    lăsate deschise apare separat, „gol deschis".
+- **Harta de temperatură** (tasta **U**; I și U se exclud): fiecare încăpere de pe nivel are o nuanță și cifra ei de
+  acum, pe o scară care cuprinde și aerul de afară.
+- **Casa se încălzește în câteva ore de joc, pivnița în zile**: pe ecran, cifra casei se mișcă cu o zecime cam la 20 de
+  secunde la 1× (6 s la 3×), a pivniței cam la 14 minute (4–5 minute la 3×).
+- **Săpatul în pământ rece răcește încăperea** (mai jos, decizia 10): cât e deschis puțul pivniței, casa se răcește.
+- **După o eroare internă a simulării, jocul se oprește** (pauză, alertă în Jurnal): Spațiu și Ctrl+S sunt refuzate până
+  încarci ultima salvare — ca să nu se scrie o lume stricată peste una bună.
 
-**Pornirea.** `npm run viewer`, apoi http://localhost:5175/?joc=nou&seed=7 . Zidește o casă (Perete,
-dreptunghi 7×7, o ușă în gol, Podea un nivel mai sus ca acoperiș). În casă, sapă în jos o pivniță de 3×3,
-înaltă de 2 m, cu 1 m de pământ între ea și podeaua casei, și o scară până în ea (Sapă, pe niveluri;
-Scară). **Pune un chepeng în gaura scării** (Construiește ▸ Ușă, clic pe gaură) — fără el, casa și pivnița
-sunt o singură încăpere. Apoi **U** și Q/E până la nivelul pivniței; clic pe podeaua ei.
+**Pornirea.** `npm run viewer`, apoi http://localhost:5175/?joc=nou&seed=7 . Zidește o casă (Perete, dreptunghi 7×7, o ușă
+în gol, Podea un nivel mai sus ca acoperiș). În casă, sapă în jos o pivniță de 3×3, înaltă de 2 m, cu 1 m de pământ între
+ea și podeaua casei, și o scară până în ea. **Pune un chepeng în gaura scării** (Construiește ▸ Ușă, clic pe gaură) — fără
+el, casa și pivnița sunt o singură încăpere. Apoi **U**, Q/E până la nivelul pivniței, clic pe podeaua ei; și clic pe
+podeaua casei.
 
-**Cum arată bine:** toamna (cum pornește jocul) pivnița stă pe la 3–5 °C, mult sub casă și sub aerul de
-afară; la 3× iarna vine în ~40 de minute — atunci pivnița e mai caldă decât casa, iar în ziua valului de
-frig casa coboară sub −8 °C; o încăpere cu golul ușii deschis e aproape cât afară. Vara (pivnița sub 5 °C)
-vine abia după ~2 ore la 3×; o verifică testele (93 din 96 de ore). **Cum arată rău:** o pivniță caldă;
-cifre care sar de la o secundă la alta fără să schimbi nimic; o cifră pusă în altă încăpere decât cea pe
-care o descrie; harta U toată de aceeași culoare.
+**Cum arată bine:**
+- cât sapă oamenii puțul, casa se răcește (vara cu câteva grade); după chepeng, își revine în câteva ore de joc;
+- pivnița nouă e rece din prima clipă (3–5 °C), mult sub casă și sub aerul de afară, și rămâne așa;
+- „trage spre" e de partea în care se mișcă cifra de sus; „stabil" când stau la fel;
+- iarna (la 3×, în ~40 de minute) pivnița e mai caldă decât casa; în ziua valului de frig casa coboară spre −8 °C.
+
+**Cum arată rău:** o pivniță caldă; o cifră care sare de la o secundă la alta fără să schimbi nimic (în afară de
+săpatul sau astupatul de pământ într-o încăpere); o cifră pusă în altă încăpere decât cea pe care o descrie; „trage
+spre" care arată sus în timp ce cifra coboară; harta U toată de aceeași culoare.
 
 **Decizii — cu implicitul ÎN FAȚĂ** (nu trebuie să faci nimic dacă ești de acord):
-1. **Ziua durează 40.320 de tickuri** (33,6 min la 1×, 11,2 min la 3×) — e chiar ritmul în care dorm
-   oamenii azi, deci nevoile nu se schimbă. **4 zile pe anotimp**, anul = 16 zile (9 h la 1×, 3 h la 3×).
-   **Jocul începe toamna.** Ținta din plan, „prima iarnă în 45–90 de minute", se atinge la 3×; la 1× prima
-   iarnă vine după ~2 ore. (Alternative: start toamna, ziua 3 — iarna la ~56 min la 1×; sau o zi mai
-   scurtă, care schimbă ritmul nevoilor.)
-2. **Sub pământ e frig — regulă de joc.** Solul adânc stă cu 9 °C sub media aerului (3,7 °C la 2 m,
-   ~0,4 °C adânc), ca o pivniță să țină hrana sub 5 °C vara. Fizic, într-o vale din România, ar fi ~10 °C
-   tot anul, iar pivnița n-ar ajuta niciodată sub 5 °C.
-3. **O singură climă pe toată lumea** (o vale din România: media 9,4 °C, iarna −2, vara 20, ±5 °C între zi
-   și noapte) **plus un val de frig pe iarnă** (o zi la −16 °C). Fără val, nimic n-ar coborî sub −6,8 °C,
-   iar o iarnă fără foc n-ar fi niciodată un pericol.
-4. **Ușa izolează puțin** (e „subțire"), grinda e de piatră, iar lemnul (când va exista) nu izolează mai bine
-   decât pământul — DESIGN §5.1.
-5. **O pivniță sub o casă cu ușa lăsată deschisă (golul fără ușă) nu ține:** vara stă sub 5 °C doar ~75% din
-   timp, față de ~97% cu ușa pusă — aerul de afară intră în casă, iar căldura casei coboară prin chepeng.
-   E fizic cinstit și e o lecție de joc („pune ușa"); alternativa ar fi un sol și mai rece.
-6. **Nuanța hărții U ține cont de aerul de afară** (o încăpere mai rece decât afară e mai închisă). Fără asta,
-   pe un nivel cu încăperi apropiate ca temperatură totul ieșea gri. Alternativa: scara doar pe încăperile de
-   la nivel — pivnițele se deosebesc mai bine între ele, dar nu se vede „mai rece decât afară".
-7. **Deocamdată vezi unde AR ajunge temperatura** (echilibrul). Inerția (o casă se încălzește în câteva
-   ore), căldura oamenilor și focul vin în pasul următor; hrana care se strică peste 5 °C, după.
-8. **Insignele de alertă se strâng în „N alerte"** de la a doua insignă pe un ecran sub 1.280 px lățime și de la
-   a patra pe unul mai lat — măsurat în cazul cel mai lung (prognoza hranei, calendarul cel mai lat), a
-   doua insignă ieșea din bară cu până la 53 px la 1.100 px. Alternativa: un al doilea rând de insigne sub
-   resurse.
+1. **Ziua durează 40.320 de tickuri** (33,6 min la 1×, 11,2 min la 3×) — ritmul în care dorm oamenii azi. **4 zile pe
+   anotimp**, anul = 16 zile (9 h la 1×, 3 h la 3×). **Jocul începe toamna**; prima iarnă vine la ~40 min la 3×, ~2 h la
+   1×. (Alternative: start toamna, ziua 3; sau o zi mai scurtă, care schimbă ritmul nevoilor.)
+2. **Sub pământ e frig — regulă de joc.** Solul adânc stă cu 9 °C sub media aerului (3,7 °C la 2 m), ca o pivniță să
+   țină hrana sub 5 °C vara. Fizic ar fi ~10 °C tot anul, iar pivnița n-ar ajuta niciodată.
+3. **O singură climă pe toată lumea** (o vale din România: media 9,4 °C, iarna −2, vara 20, ±5 °C între zi și noapte)
+   **plus un val de frig pe iarnă** (o zi la −16 °C). În ziua valului, o casă de piatră 5×5 fără foc coboară la
+   −7,3…−8,2 °C, una 3×3 la −8,5…−9,3 °C. Fără val, nicio iarnă fără foc n-ar fi un pericol.
+4. **Ușa izolează puțin** (e „subțire"), grinda e de piatră, lemnul nu izolează mai bine decât pământul.
+5. **Ritmul**: o casă de piatră ~3,6 h de joc (≈ 5 min la 1×, 1,7 min la 3×); o pivniță 1,3–1,5 zile (≈ 45–50 min la 1×);
+   o casă cu golul ușii deschis ~1 h (doar casele mici; una de 7×7 ~1,3 h).
+6. **Pivnița** (răstoarnă decizia 5 de la 08.10): cu inerția, o pivniță sub o casă, cu 1 m de pământ, ține vara sub 5 °C
+   chiar și cu golul ușii casei lăsat deschis. **Fără casă deasupra îi trebuie 2 m de pământ** — cu 1 m, vara ține ~50%
+   din timp, toamna aproape deloc. O pivniță săpată sub casă în PRIMA toamnă stă sub 5 °C ~70% din restul toamnei.
+7. **Oamenii încălzesc imperceptibil** (100 W fiecare, cât stau într-o încăpere): +0,2 °C într-un parter unde dorm 4
+   oameni, 0 fără pat acolo. Pârghia reală va fi vatra.
+8. **„Trage spre" ține cont de oamenii de acum** (filtrat, ca să nu sară la fiecare trecere); rândul de sub el spune câți
+   sunt înăuntru, nu câte grade aduc (acel număr ar fi exagerat de 2–76 de ori).
+9. **Ce vezi pe hartă și în inspector e temperatura de ACUM** (înlocuiește „vezi unde AR ajunge" de la 08.10).
+10. **Săpatul în pământ rece răcește încăperea** (regula „C3"): pământul săpat intră cu temperatura solului, iar cel
+    astupat iese tot așa. De aceea o pivniță nouă e rece imediat. Prețul: cât e deschis puțul, casa de deasupra se răcește
+    vara cu 6–13 °C și își revine în ~12–24 h de joc; fiecare celulă de pământ săpată sau astupată într-o casă mică o mută
+    cu 2–5 °C. **Limita cunoscută:** un ciclu „încrucișat" repetat pe loc (pietre zidite și scoase, combinate cu săpat și
+    astupat) mută temperatura — vara, o casă 5×5 la 20 °C, 20 de cicluri pe același tick: 8 pietre deodată → 24,9 °C;
+    o comandă la 20 de tickuri timp de o zi → +4,3 °C. În jocul obișnuit efectul e de zecimi de grad (ar cere cel puțin 8
+    oameni puși ore întregi pe același ciclu); o plasă de siguranță taie orice temperatură peste ±1000 °C, ca salvarea să
+    rămână bună. Alternativele măsurate și respinse: pivnița pornește la temperatura casei și are nevoie de 4–5 zile vara;
+    sau „sapă și astupă" devine aer condiționat gratuit (−10 °C); sau „orice masă intră și iese la temperatura de afară",
+    unde un hol zidit iarna într-o casă încălzită o încălzește cu 12–28 °C.
+11. **Ușa scoasă dintre două încăperi le amestecă pe loc** (casa și pivnița ajung la aceeași temperatură); un pion care o
+    scoate și o pune la loc vara ține pivnița peste 5 °C de la câteva ore până la două zile (cu 1 m de pământ; cu 2 m
+    rămâne sub 5 °C). Ușa care se deschide la trecere, fără amestec, e
+    pentru mai târziu.
+12. **O încăpere nouă dintr-un acoperiș**: o casă de piatră pe pământ pornește de la temperatura solului de la suprafață
+    (vara, 11,7 °C cu 25,5 °C afară — podeaua e pământ); una cu podea de piatră, de la aerul de afară; o groapă acoperită,
+    de la temperatura solului.
+13. **Salvările vechi** se încarcă și pornesc de la echilibru (fiecare încăpere la temperatura spre care mergea).
+14. **Salvarea automată pe o așezare mare** (cât fortăreața M10, 677 de încăperi) rămâne la 10 minute: o salvare costă
+    55–77 ms, peste pragul de 50 ms. Alternativa: pragul ridicat la ~80 ms — salvare automată la 5 minute, cu o sacadă de
+    ~75 ms la fiecare.
+15. **După o eroare internă a simulării, jocul rămâne oprit până la o încărcare** (nu există „continuă oricum"): reluarea ar
+    fi continuat o lume pe jumătate de pas, iar salvarea automată ar fi scris-o peste ultima salvare bună.
+16. **Nuanța hărții U ține cont de aerul de afară** (o încăpere mai rece decât afară e mai închisă).
+17. **Insignele de alertă se strâng în „N alerte"** de la a doua insignă sub 1.280 px lățime, de la a patra peste.
+18. **Casa din pământ zidit** ar avea aceeași masă ca una din piatră (se încălzește cu ~20% mai repede); azi nu se poate
+    construi.
 
-**De ce nu pot eu.** Cifrele (pivnița sub 5 °C, iarna, ritmul) și harta pe ecran (`bench/ui-fum.mjs`:
-cifrele la zi, excluderea I/U, legenda care nu pierde clicuri, bara de sus cu toate combinațiile de insigne)
-le verifică testele; dacă se citesc și dacă pivnița „se simte" rece — doar pe ecran.
+**De ce nu pot eu.** Cifrele (pivnița, iarna, ritmul, săpatul, salvarea) și ecranul (`bench/ui-fum.mjs`: cifrele de acum,
+„trage spre", rândurile fixe ale inspectorului, oprirea după o eroare, salvarea și încărcarea) le verifică testele; dacă se
+citește, dacă pivnița „se simte" rece și dacă răcirea casei la săpat e acceptabilă — doar pe ecran.
 
 **Pașii tăi:** `npm run viewer`, apoi http://localhost:5175/?joc=nou&seed=7 .

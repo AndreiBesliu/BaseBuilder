@@ -50,6 +50,10 @@ Acoperă doar iterarea nesortată, **niciodată** interdicțiile dure. Te oblig�
   fiecărei verificări din joc.
 - **Nimic nu scrie în `World` din afară.** Orice schimbare intră prin `applyCommand`.
   De aici vin gratuit replay-ul, undo-ul și un eventual drum spre co-op.
+- **Indexul încăperilor și temperaturile se sincronizează într-un singur punct**, `sincronizeazaLumea`
+  (`src/sim/temperatura.ts`): tickul, `dig`/`fill`, harnașamentul M10; decode trece prin `incarcaTemperaturi`. Altfel
+  proveniența temperaturii se pierde. Două plase: testul AST pe nume (`tests/sincronizare-plasa.test.ts`) și ștampila
+  `(idx, vazute, epoca, epocaFete)` verificată la rulare (un invariant încălcat se numără, nu aruncă din `tick()`).
 - **Un număr de gameplay în cod e un bug de arhitectură.** Totul în `content/*.json`, validat
   la încărcare, cu refuz explicit pentru câmpuri necunoscute.
 - **Fiecare câmp de stare e PERSISTED, DERIVED sau TRANSIENT.** Ce e DERIVED nu se salvează,
@@ -82,8 +86,10 @@ node_modules/electron/dist/electron.exe bench/ui-fum.mjs http://localhost:5175/
 node_modules/electron/dist/electron.exe bench/ui-fum.mjs http://localhost:5175/ --proba-negativa=pauza
 ```
 
-Fiecare bifă are un nume; proba negativă strică pasul unei bife (`sapa`, `pauza`, `salvare`) și iese
-verde doar dacă EXACT bifa aceea e roșie. Profilul e nou la fiecare rulare.
+Fiecare bifă are un nume; proba negativă strică pasul unei bife (`sapa`, `pauza`, `salvare`, … — lista e
+`TINTE_NEGATIVE`, 16 la 10.10) și iese verde doar dacă EXACT bifa aceea e roșie și nicio alta. Profilul e nou la
+fiecare rulare. Temperatura rulează pe pagina ei, la final, pe o lume cu contract scris (`paginaTermica`): timpul trece
+doar prin `__kinstead.avanseaza(n)` (tickuri reale), niciodată prin `world.tick +=`. 74 de bife (10.10).
 
 Pe Windows, `kinstead.bat` le adună pe toate: dublu-click deschide un meniu, iar cu un argument
 (`kinstead.bat check`) rulează o singură comandă și întoarce codul ei de ieșire.
@@ -92,7 +98,7 @@ Pe Windows, `kinstead.bat` le adună pe toate: dublu-click deschide un meniu, ia
 
 ```bash
 npm run mutatii -- --lista      # ce suite există
-npm run mutatii                 # toate cele 903, ~23 min (08.10, cronometrat; DOAR în afara Drive-ului, vezi mai jos)
+npm run mutatii                 # toate cele 1.102, ~32 min (10.10; DOAR într-o CLONĂ în afara Drive-ului, vezi mai jos)
 npm run mutatii -- nevoi        # o singură suită
 npm run mutatii -- nevoi podeaua  # doar mutațiile al căror nume conține „podeaua"
 npm run mutatii -- --izolare    # fiecare test NUMIT de o probă, singur, pe cod nemutat (~2 min)
@@ -148,6 +154,14 @@ potrivește în două locuri editează altul decât cel gândit, rulează testel
 > `cmd /c mklink /J <dosar>\node_modules node_modules`. La ștergere, joncțiunea se scoate întâi cu
 > `cmd /c rmdir <dosar>\node_modules` — niciodată `rm -rf` peste ea, ar goli `node_modules` din repo —, apoi
 > `git -c gc.auto=0 worktree remove <dosar>`. Cât rulează acolo, în repo se poate lucra.
+> **10.10: nu într-un worktree, ci într-o CLONĂ.** Fișierele unui worktree stau în afara Drive-ului, dar INDEXUL lui stă
+> în `.git/worktrees/<nume>/` din repo-ul din Drive: o rulare completă n-a mai putut restaura `termic.ts` („RESTAURARE
+> ESUATA după trei încercări”), iar toate probele de după au ieșit controale invalide. O clonă are `.git` propriu:
+> `git clone -q --no-hardlinks --branch <ramura> <sursa> <dosar>`, joncțiunea `node_modules` ca mai sus, apoi
+> `npm run mutatii` acolo; la final `git status` gol, joncțiunea scoasă cu `cmd /c rmdir`, clona ștearsă. Fișierele noi
+> scrise cu LF ies CRLF în clonă (`autocrlf=true`): fantomă, nu diferență (`git hash-object` == `HEAD:<f>`).
+> După t.2b și recenzia ei (10.10): **1.102 de probe în 31 min 42 s**, într-o clonă, arbore curat la final
+> (după remediere, `--izolare` 670/670 în 11 min 13 s sub încărcare — „~2 min” e cifra unei mașini libere).
 >
 > `tools/check-mutatii.mjs` a fost scris ca înlocuitor static și rămâne util, dar nu mai e o
 > compensație: el răspunde la „proba ARE ce să măsoare?", nu la „măsoară?". A doua întrebare
