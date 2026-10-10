@@ -21,6 +21,14 @@ const TPL = 'tests/sincronizare-plasa.test.ts'
 const NEG = 'PLASA punctului unic, proba negativa'
 
 export const MUTATII = [
+  // --- tipurile invariantilor (recenzia E5): monitorul ecranului raporteaza fiecare tip nou o data.
+  {
+    n: 't.2b §5.3, E5: tipurile invariantilor nu se tin (al doilea tip intr-un pas il pierde pe primul)',
+    f: F,
+    a: '  if (!st.stat.tipuriInvarianti.includes(motiv)) st.stat.tipuriInvarianti.push(motiv)',
+    b: '  void motiv',
+    t: TS, e: 'STARE tipurile invariantilor',
+  },
   // --- plasa AST a punctului unic (§2, IDX-5; recenzia PAS-3): instrumentul e chiar testul, deci probele il strica pe EL.
   {
     n: 't.2b §2, PAS-3: plasa AST accepta un nume interzis importat CU alias intr-un modul permis (si reexportat)',

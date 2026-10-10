@@ -416,3 +416,30 @@ test('STARE temperaturaLaEchilibru cere indexul la zi (refuz), iar la plafon (SA
   const plin = bun(temperaturaLaEchilibru(h1, R, 0), 'plafonul jocului')
   assert.ok(plin.convergent && plin.treceri > 3, `${plin.treceri} treceri`)
 })
+
+test('STARE tipurile invariantilor (E5): fiecare motiv distinct o data, in ordinea primei aparitii — al doilea tip nu-l sterge pe primul', () => {
+  // Monitorul ecranului raportează fiecare tip nou (viewer/ui/model.ts, creeazaMonitorTermic); cu doar `ultimulInvariant`,
+  // două tipuri între două citiri lăsau primul fără alertă și fără console.error.
+  const s = casaTermica({ k: 1 })
+  const w = laEchilibru(s.w, 0)
+  const casa = componentaLa(w.camere, ...s.rep.casa!)!.id
+  assert.deepEqual(statTermic(w).tipuriInvarianti, [])
+  w.temperatura.slot.are[casa] = 0
+  w.tick = 20
+  pasTermic(w, R)
+  const a = statTermic(w).ultimulInvariant
+  assert.ok(a !== '', 'fixtura: primul invariant')
+  // Același tip încă o dată: nu se dublează.
+  w.temperatura.slot.are[casa] = 0
+  w.tick = 40
+  pasTermic(w, R)
+  // Alt tip: ocolirea punctului unic.
+  const [cx, cy, cz] = s.rep.casa!
+  assert.ok(dig(w.terrain, cx + 1, cy, cz - 1).ok)
+  sincronizeazaCamere(w.camere, w.terrain)
+  tick(w, R)
+  const st = statTermic(w)
+  assert.equal(st.invarianti, 3)
+  assert.deepEqual(st.tipuriInvarianti, [a, 'indexul s-a sincronizat pe langa temperatura (punctul unic ocolit)'])
+  assert.equal(st.ultimulInvariant, 'indexul s-a sincronizat pe langa temperatura (punctul unic ocolit)')
+})

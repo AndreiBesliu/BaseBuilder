@@ -415,6 +415,11 @@ export interface StatTermic {
   invarianti: number
   /** Motivul ultimului invariant încălcat (jurnalul; F3). */
   ultimulInvariant: string
+  /**
+   * Motivele DISTINCTE ale invarianților, în ordinea primei apariții (TRANSIENT). Monitorul ecranului raportează fiecare tip
+   * nou o dată, chiar dacă două tipuri apar în același pas — `ultimulInvariant` l-ar pierde pe primul (recenzia E5).
+   */
+  tipuriInvarianti: string[]
   /** Loturi cu proveniență (componente noi, masă schimbată sau moarte). */
   loturi: number
   /** Dintre ele, loturi doar-fețe: nicio felie refăcută, masa schimbată cu epoca pe loc (C3, §3). */
@@ -451,7 +456,7 @@ export interface StatTermic {
 
 function statGol(): StatTermic {
   return {
-    pasi: 0, pasiBigInt: 0, noduriBigInt: 0, oameniCautati: 0, adunariOameni: 0, rezervoareCitite: 0, modeleRefacute: 0, invarianti: 0, ultimulInvariant: '',
+    pasi: 0, pasiBigInt: 0, noduriBigInt: 0, oameniCautati: 0, adunariOameni: 0, rezervoareCitite: 0, modeleRefacute: 0, invarianti: 0, ultimulInvariant: '', tipuriInvarianti: [],
     loturi: 0, loturiDoarFete: 0, rezerva: 0, provenienteBigInt: 0, surseVechi: 0, surseSol: 0, surseCer: 0, surseNec: 0, echilibre: 0, echilibreNeconvergente: 0,
     grafDiferitLaSalvare: 0, ultimaDiferentaGraf: '', comparariSarite: 0, restNormalizat: 0, taieri: 0,
   }
@@ -495,7 +500,9 @@ export function statTermic(w: World): StatTermic {
 
 function invariant(st: StareTemperatura, o: Refusal): void {
   st.stat.invarianti++
-  st.stat.ultimulInvariant = String(o.params.motiv ?? o.reason)
+  const motiv = String(o.params.motiv ?? o.reason)
+  st.stat.ultimulInvariant = motiv
+  if (!st.stat.tipuriInvarianti.includes(motiv)) st.stat.tipuriInvarianti.push(motiv)
 }
 
 /**
