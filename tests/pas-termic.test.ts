@@ -29,7 +29,7 @@ import { regimPermanent } from '../src/sim/termic.ts'
 import { MOTIV_TAIERE, pasTermic, PRAG_NUMBER, statTermic, T_SIGURANTA } from '../src/sim/temperatura.ts'
 import { createWorld, tick } from '../src/sim/world.ts'
 import { casaTermica, compLa, modelFloat, tauLoc } from './fixturi-temperatura.ts'
-import { avanseazaTermic, bun, cruce, energia, faraInvarianti, hotel, laEchilibru, mina192, pasReferinta, tPeAncora } from './fixturi-pas.ts'
+import { avanseazaTermic, bun, cruce, energia, faraInvarianti, grafLumii, hotel, laEchilibru, mina192, pasReferinta, tPeAncora } from './fixturi-pas.ts'
 import { R } from './fixturi.ts'
 
 const Q = 65536
@@ -109,6 +109,9 @@ test('PAS Number == BigInt (comutatorul pragBigInt = 0: toate nodurile si muchii
       const r = pasTermic(m, R)!
       assert.equal(energia(m) - h0, BigInt(r.sumaFr + r.sumaP), `M10, pasul ${k}`)
     }
+    // PAS-6: cu pragul 2^53 − 2^17, hub-ul M10 (S·M ≈ 1,39·2^52) merge pe Number — comparația cu BigInt de mai jos e deci
+    // chiar pe calea Number a hub-ului (cu 2^52 era pe BigInt la fiecare pas, iar comparația îl compara cu el însuși).
+    if (prag === PRAG_NUMBER) assert.equal(statTermic(m).noduriBigInt, 0, 'M10: hub-ul pe Number (PAS-6)')
     rez.push(tPeAncora(m))
   }
   assert.deepEqual(rez[1], rez[0], 'M10: dupa o zi, Number == BigInt')
@@ -143,6 +146,42 @@ test('PAS marginea dinamica (§5.3, NUM-5): mina 192x192x3 (un nod, Σg ≈ 2^34
   assert.deepEqual([ra.sumaFr, ra.sumaP], [rb.sumaFr, rb.sumaP], 'fluxurile, inainte de plasa')
   assert.deepEqual([ra.taieri, rb.taieri], [1, 1], 'plasa de siguranta a taiat casa la 1000 °C')
   assert.deepEqual(tPeAncora(ca), tPeAncora(cb))
+})
+
+test('PAS pragul Number / BigInt (§5.3, PAS-6): 2^53 − 2^17 — un nod cu S·(M + |T*|) = cel mai mare multiplu de S sub prag sta pe Number, cu un Q16 mai mult trece pe BigInt; in ambele cazuri fluxurile == totul pe BigInt', () => {
+  // S = Σ g pe pas spre rezervoare, calculat ca în referința independentă (fixturi-pas.ts: rs(G·num/den) pe BigInt), M =
+  // marginea grafului; casa singură, fără oameni și fără muchii, deci T* = T (restul < C'). |T| = ⌊(prag − 1)/S⌋ − M pune
+  // S·(M + |T|) ≤ prag − 1, iar |T| + 1 îl duce la ≥ prag. Pragul se ia de pe HÂRTIE (2^53 − 2^17), nu din PRAG_NUMBER: testul
+  // fixează VALOAREA pragului prin rutare (un prag mai mic trece nodul de jos pe BigInt, unul mai mare îl lasă pe cel de sus pe
+  // Number), nu doar faptul că rutarea urmează constanta.
+  const PRAG = 9_007_199_254_609_920n
+  const A = BigInt(R.ticksPerSecond * 86400 * R.termic.mase.aer)
+  const B = BigInt(R.calendar.ziTicks * R.termic.cAerJPeK)
+  const pentru = (sus: boolean, semn: 1 | -1): { r: NonNullable<ReturnType<typeof pasTermic>>; rb: NonNullable<ReturnType<typeof pasTermic>>; produs: bigint } => {
+    const ca = laEchilibru(casaTermica().w, 0)
+    const cb = laEchilibru(casaTermica().w, 0)
+    cb.temperatura.pragBigInt = 0
+    const g = grafLumii(ca)
+    assert.equal(g.noduri.size, 1, 'fixtura: casa e un singur nod')
+    const nod = [...g.noduri.values()][0]!
+    let S = 0n
+    for (const G of nod.bin.values()) S += (2n * BigInt(G) * A + B) / (2n * B)
+    const M = BigInt(g.margineT)
+    const t = (PRAG - 1n) / S - M + (sus ? 1n : 0n)
+    for (const w of [ca, cb]) for (const c of w.camere.comp.values()) {
+      w.temperatura.slot.t[c.id] = semn * Number(t)
+      w.temperatura.slot.rest[c.id] = 0
+    }
+    return { r: pasTermic(ca, R)!, rb: pasTermic(cb, R)!, produs: S * (M + t) }
+  }
+  for (const semn of [1, -1] as const) {
+    const jos = pentru(false, semn)
+    const sus = pentru(true, semn)
+    assert.ok(jos.produs < PRAG && sus.produs >= PRAG, `fixtura: ${jos.produs} < prag <= ${sus.produs}`)
+    assert.equal(jos.r.noduriBigInt, 0, `semn ${semn}: sub prag, nodul pe Number`)
+    assert.equal(sus.r.noduriBigInt, 1, `semn ${semn}: la prag, nodul pe BigInt`)
+    for (const x of [jos, sus]) assert.deepEqual([x.r.sumaFr, x.r.sumaP], [x.rb.sumaFr, x.rb.sumaP], `semn ${semn}: fluxurile == totul pe BigInt`)
+  }
 })
 
 test('PAS orientarea (§5.2, SAV-3): fluxul calculat din capatul b pe jumatate din muchii (alese pseudo-aleator) — identic bit cu bit pe M10, o zi (rs e impara)', () => {

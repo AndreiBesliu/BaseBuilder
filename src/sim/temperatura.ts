@@ -346,8 +346,18 @@ export function energiaSlotului(stare: TemperaturiSlot, s: number, capacitate: C
 // starea lumii (§1)
 // ---------------------------------------------------------------------------
 
-/** Pragul marginii Number / BigInt la pas (§5.3): 2^52. Sub el produsele și sumele unui nod sunt întregi exacți în Number. */
-export const PRAG_NUMBER = 4_503_599_627_370_496
+/**
+ * Pragul marginii Number / BigInt la pas (§5.3): 2^53 − 2^17. Sub el, pe un nod, totul e întreg exact în Number:
+ * - fiecare termen și fiecare sumă parțială a lui X = Σ g_r·(T_r − T*) are modulul ≤ S·(M + |T*|) < prag < 2^53;
+ * - |rs(X, 2^16)| ≤ (prag − 1)/2^16 + 1/2, deci ≤ 2^37 − 2, iar cu ψ ≤ 2^16 produsul rs(X, 2^16)·ψ ≤ 2^53 − 2^17 < 2^53;
+ * - ψ: 2^16·S și C'·2^16 + S < prag (a doua condiție a nodului); o muchie: |g·(T_a − T_b)| < prag; `rsN` cere doar < 2^53;
+ * - comparația `S·(M + |T*|) < prag` e exactă: operanzii sunt întregi, iar un produs ≥ 2^53 se rotunjește la ≥ 2^53 > prag.
+ * Pragul vechi, 2^52, era de două ori mai strâns decât cere exactitatea: hub-ul M10 (S·M ≈ 1,39·2^52) mergea pe BigInt la
+ * fiecare pas fără să fie nevoie (recenzia PAS-6). Pe 3 zile de pași pe M10: identic bit cu bit, noduri pe BigInt 6.048 → 0,
+ * dar câștigul e mic — 87,7–91,1 → 86,9–89,7 µs p50 pe pasul memorat, cu lumile INTERCALATE (10.10). „97,9 → 81,4" al
+ * recenziei era ordinea rulării: lumea pasată prima e cu ~17 µs mai lentă, oricare ar fi pragul (inversată: 80,7 față de 97,1).
+ */
+export const PRAG_NUMBER = 9_007_199_254_609_920
 
 /** Plafonul trecerilor Gauss–Seidel ale echilibrului „lumii fără istorie" (§7, SAV-9): determinist, nu un număr de joc. */
 export const PLAFON_ECHILIBRU = 5000
@@ -447,7 +457,8 @@ export interface StareTemperatura {
   reguli: Rules
   /**
    * TRANSIENT, comutatorul de probă (§5.3, NUM-5): un nod sau o muchie trece pe BigInt când marginea ajunge la prag.
-   * Implicit 2^52; la 0, TOATE nodurile, muchiile și proveniența merg pe BigInt — rezultatul trebuie să fie același.
+   * Implicit `PRAG_NUMBER` (2^53 − 2^17); la 0, TOATE nodurile, muchiile și proveniența merg pe BigInt — rezultatul trebuie
+   * să fie același.
    */
   pragBigInt: number
   readonly stat: StatTermic

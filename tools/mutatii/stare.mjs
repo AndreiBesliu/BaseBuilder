@@ -273,7 +273,22 @@ export const MUTATII = [
     t: TP, e: 'PAS marginea dinamica',
   },
   {
-    n: 't.2b §5.3, NUM-5: comutatorul nu trece si muchiile pe BigInt (pragul fix 2^52 pe muchie)',
+    // PAS-6: pragul se fixeaza pe HARTIE (2^53 − 2^17) prin rutarea unui nod la margine, nu prin constanta.
+    n: 't.2b §5.3, PAS-6: pragul Number/BigInt inapoi la 2^52 (de doua ori mai strans decat cere exactitatea; hub-ul M10 pe BigInt)',
+    f: F,
+    a: 'export const PRAG_NUMBER = 9_007_199_254_609_920',
+    b: 'export const PRAG_NUMBER = 4_503_599_627_370_496',
+    t: TP, e: 'PAS pragul Number / BigInt',
+  },
+  {
+    n: 't.2b §5.3, PAS-6: pragul Number/BigInt la 2^53 (rs(X, 2^16)·ψ poate trece de 2^53: produsul nu mai e exact)',
+    f: F,
+    a: 'export const PRAG_NUMBER = 9_007_199_254_609_920',
+    b: 'export const PRAG_NUMBER = 9_007_199_254_740_992',
+    t: TP, e: 'PAS pragul Number / BigInt',
+  },
+  {
+    n: 't.2b §5.3, NUM-5: comutatorul nu trece si muchiile pe BigInt (pragul fix PRAG_NUMBER pe muchie)',
     f: F,
     a: '  if ((x < 0 ? -x : x) < prag) return rsN(x, 65536)',
     b: '  if ((x < 0 ? -x : x) < PRAG_NUMBER) return rsN(x, 65536)',
