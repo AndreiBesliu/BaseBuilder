@@ -569,6 +569,78 @@ test('PROVENIENTA oracol: pe un lot DOAR-FETE (fill PIATRA pe apa de sub podeaua
   assert.deepEqual([sch.felii.length, sch.noi.length, sch.feteSchimbate.length, sch.mase.noi.length], [0, 0, 1, 1])
   assert.deepEqual(deLaContoare(sch.mase.noi[0]!.aparuta), [0, 1, 0, 0], 'piatra apare')
   assert.deepEqual(sch.mase.vechi[0]!.solIese.map((v) => [v.d, v.masa.nApa]), [[0, 1]], 'apa iese la T_sol(0)')
+  // Încă două loturi doar-fețe pe ACEEAȘI componentă: C'-ul vine acum din memoria de pe obiectul ei plus diferența
+  // înregistrărilor rescrise (PROV-3), iar oracolul îl compară cu forța brută.
+  for (const [dx, dy] of [[1, 1], [3, 2]] as const) {
+    const s2 = b.lot(() => ok(fill(t, x0 + dx, y0 + dy, -40, P), 'fill pe apa'), `fill pe apa (${dx},${dy})`)
+    assert.deepEqual([s2.felii.length, s2.noi.length, s2.mase.noi.length], [0, 0, 1], 'fixtura: tot doar-fete')
+  }
+})
+
+/**
+ * Mina „în fâșii" a recenziei PROV (m2-pieptene): nivelul A (gmin−4) galerii pe x la y par, nivelul B (gmin−3) galerii pe y
+ * la x par, legate vertical la (x par, y par) — O componentă, 16 bucăți pe felie (8 pe nivel). Întoarce lumea, componenta
+ * și celula de suprafață de deasupra unei galerii B (cea mai joasă, plină, nu apă).
+ */
+function minaInFasii(N: number): { w: World; hub: number; ex: number; ey: number; ge: number } {
+  const w = createWorld(12345)
+  const t = w.terrain
+  const x0 = 112, y0 = 10736
+  let gmin = Infinity
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const g = groundLevelM(t, x0 + x, y0 + y)
+    assert.ok(g.ok)
+    if (g.value < gmin) gmin = g.value
+  }
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    if (y % 2 === 0) ok(dig(t, x0 + x, y0 + y, gmin - 4), 'galeria A')
+    if (x % 2 === 0) ok(dig(t, x0 + x, y0 + y, gmin - 3), 'galeria B')
+  }
+  sincronizeazaCamere(w.camere, t)
+  assert.equal(w.camere.comp.size, 1, 'fixtura: mina e o singura componenta')
+  let ex = -1, ey = -1, ge = Infinity
+  for (let y = 1; y < N - 1; y++) for (let x = 2; x < N - 2; x += 2) {
+    const g = groundLevelM(t, x0 + x, y0 + y)
+    assert.ok(g.ok)
+    const m = materialAt(t, x0 + x, y0 + y, g.value)
+    if (m.ok && m.value !== Material.AER && m.value !== Material.APA && g.value < ge) {
+      ge = g.value
+      ex = x0 + x
+      ey = y0 + y
+    }
+  }
+  return { w, hub: [...w.camere.comp.keys()][0]!, ex, ey, ge }
+}
+
+test('PROVENIENTA K05 al evidentei (PROV-3): loturi DOAR-FETE (celula de suprafata de deasupra unei mine in fasii, sapata si astupata cu PAMANT) citesc ACELEASI inregistrari pe o mina de 256 si pe una de 1.024 de bucati — C\' memorat pe obiectul componentei, nu adunat pe toate bucatile; C\'-ul evidentei == contoarele componentei la fiecare lot', () => {
+  // Măsurat (recenzia PROV, m2-pieptene): evidența parcurgea toate bucățile componentei de două ori (C' nou, capVeche):
+  // pe lotul doar-fețe, 2 × 1.024 / 2 × 5.568 de bucăți; ~17 ns pe bucată (121–166 µs pe lot la 5.568, față de 23–30 pe main).
+  const sarcina = (N: number): { citite: number; bucati: number } => {
+    const { w, hub, ex, ey, ge } = minaInFasii(N)
+    const t = w.terrain
+    const lot = (k: number): SchimbareCamere => {
+      ok(k % 2 === 0 ? dig(t, ex, ey, ge) : fill(t, ex, ey, ge, Material.PAMANT), 'suprafata')
+      const sch = sincronizeazaCamere(w.camere, t)
+      assert.equal(sch.felii.length, 0, `fixtura: lotul ${k} e doar-fete`)
+      const y = sch.mase.noi.find((v) => v.id === hub)
+      assert.ok(y, `fixtura: lotul ${k} atinge fetele minei`)
+      const c = contoareComponentei(w.camere, w.camere.comp.get(hub)!)
+      assert.ok(c.ok)
+      assert.deepEqual(deLaContoare(y!.capacitate), deLaContoare(c.value), `lotul ${k}: C' din evidenta == contoarele componentei`)
+      assert.equal(sch.mase.abateri, 0)
+      return sch
+    }
+    // Încălzirea: primul lot adună C'-ul o dată (obiectul componentei n-are încă memorie).
+    lot(0)
+    lot(1)
+    const a = w.camere.fete.stat.bucatiEvidenta
+    for (let k = 2; k < 42; k++) lot(k)
+    return { citite: w.camere.fete.stat.bucatiEvidenta - a, bucati: w.camere.comp.get(hub)!.bucati.length }
+  }
+  const mica = sarcina(64)
+  const mare = sarcina(128)
+  assert.deepEqual([mica.bucati, mare.bucati], [256, 1024], 'fixtura: minele')
+  assert.equal(mare.citite, mica.citite, `bucati citite de evidenta: ${mica.citite} pe ${mica.bucati}, ${mare.citite} pe ${mare.bucati}`)
 })
 
 test('PROVENIENTA depasirea: un lot de peste JURNAL_CAP editari care uneste doua pivnite — recalculul cu instantaneul indexului vechi; unirea primeste id-ul unei surse citite apoi de alta componenta (ordinea consumatorului)', () => {

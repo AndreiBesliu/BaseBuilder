@@ -218,6 +218,12 @@ export interface StatFete {
   feteClasificate: number
   /** Refaceri complete ale cache-ului. */
   recalculari: number
+  /**
+   * Bucăți ale căror înregistrări le-a citit evidența maselor ca să adune C'-ul unei componente ÎNTREGI (t.2b §3, PROV-3):
+   * componentele refăcute în lot și cele fără C' memorat. Pe un lot doar-fețe al unei componente vechi e 0 — K05-ul
+   * evidenței (tests/provenienta.test.ts) îl compară pe o mină mică și pe una mare.
+   */
+  bucatiEvidenta: number
 }
 
 /**
@@ -265,7 +271,7 @@ export function cacheFete(k: number = K_FETE_IMPLICIT, dSolMasiv: number = D_SOL
     compCheie: [],
     compDupaCheie: new Map(),
     compUrm: new Map(),
-    stat: { loturi: 0, loturiSarite: 0, drumuri: 0, celuleDrum: 0, rulajeSarite: 0, bucatiMarcate: 0, bucatiRecalculate: 0, bucatiPurtate: 0, feteClasificate: 0, recalculari: 0 },
+    stat: { loturi: 0, loturiSarite: 0, drumuri: 0, celuleDrum: 0, rulajeSarite: 0, bucatiMarcate: 0, bucatiRecalculate: 0, bucatiPurtate: 0, feteClasificate: 0, recalculari: 0, bucatiEvidenta: 0 },
   }
   golesteFete(c)
   return c
@@ -1039,10 +1045,12 @@ interface LucruMase {
   /** Componentele noi pentru care se ține `prov` (cele din `noi`). */
   readonly cuProv: ReadonlySet<number>
   abateri: number
+  /** Bucăți citite ca să se adune C'-ul unei componente întregi (`StatFete.bucatiEvidenta`, K05-ul evidenței). */
+  bucatiCitite: number
 }
 
 function lucruMase(dSolMasiv: number, cuProv: ReadonlySet<number>): LucruMase {
-  return { dSolMasiv, P: new Map(), solIn: new Map(), apare: new Map(), solOut: new Map(), altaOut: new Map(), orig: new Map(), prov: new Map(), cuProv, abateri: 0 }
+  return { dSolMasiv, P: new Map(), solIn: new Map(), apare: new Map(), solOut: new Map(), altaOut: new Map(), orig: new Map(), prov: new Map(), cuProv, abateri: 0, bucatiCitite: 0 }
 }
 
 function vec(m: Map<number, ContoareMasaMutabile>, k: number): ContoareMasaMutabile {
@@ -1159,6 +1167,7 @@ function origineCelulei(r: CititorCamere, x: number, y: number, z: number, vechi
 /** Contoarele unei componente, pe înregistrările date de `inreg` (o funcție de slot). */
 function sumaInregistrari(bucati: readonly number[], inreg: (b: number) => InregistrareFete | undefined, L: LucruMase): ContoareMasaMutabile {
   const acc = contoareGoale()
+  L.bucatiCitite += bucati.length
   for (const b of bucati) {
     const e = inreg(b)
     if (e === undefined) {
@@ -1420,6 +1429,33 @@ export function evidentaMaselor(idx: IndexCamere, r: CititorCamere, lot: readonl
   for (const y of [...A].sort((a, b) => a - b)) {
     const comp = idx.comp.get(y)
     if (comp === undefined) continue
+    // O componentă cu fețe atinse de D+ care nu e în `noi` (aceleași bucăți, același obiect, toate din ea însăși), cu C'
+    // memorat pe obiectul ei: C' nou = memorat + Σ (înregistrarea nouă − cea veche) pe sloturile ei rescrise — O(lot), nu
+    // O(componentă) (PROV-3: la 5.568 de bucăți, 121–166 µs pe lot față de 23–30 µs pe main).
+    if (!noiSet.has(y)) {
+      const v0 = CAP_COMPONENTA.get(comp)
+      if (v0 !== undefined) {
+        const tot = { nAer: v0.nAer, nConstr: v0.nConstr, nSolMasiv: v0.nSolMasiv, nApa: v0.nApa }
+        // determinism-ok: sume întregi exacte; ordinea adunărilor nu contează.
+        for (const [b, ev] of rf.inregVechi) {
+          if (idx.bComp[b] !== y) continue
+          const en = idx.fete.inreg[b]
+          if (en === undefined || ev === undefined) {
+            L.abateri++
+            continue
+          }
+          tot.nAer += en.nAer - ev.nAer
+          tot.nConstr += en.nConstr - ev.nConstr
+          tot.nSolMasiv += en.nSolMasiv - ev.nSolMasiv
+          tot.nApa += en.nApa - ev.nApa
+        }
+        adunaContoare(vec2(L.P, y, y), tot, 1)
+        adunaProv(L, y, y, comp.volum)
+        capNoi.set(y, tot)
+        continue
+      }
+    }
+    L.bucatiCitite += comp.bucati.length
     const tot = contoareGoale()
     let svUltim = -1
     let tinta: ContoareMasaMutabile | null = null
@@ -1454,6 +1490,11 @@ export function evidentaMaselor(idx: IndexCamere, r: CititorCamere, lot: readonl
 
   const obVechi = (s: number): Componenta | undefined => cap.compVechi.get(s) ?? idx.comp.get(s)
   const capVeche = (c: Componenta): ContoareMasa => {
+    // C'-ul de DINAINTE de lot al obiectului vechi: memoria lui e de la ultimul lot în care a fost în A (actualizată abia
+    // după asamblare, mai jos), iar între timp înregistrările lui nu s-au rescris (atunci ar fi fost în A).
+    const m0 = CAP_COMPONENTA.get(c)
+    if (m0 !== undefined) return { nAer: m0.nAer, nConstr: m0.nConstr, nSolMasiv: m0.nSolMasiv, nApa: m0.nApa }
+    L.bucatiCitite += c.bucati.length
     const acc = contoareGoale()
     for (const b of c.bucati) {
       const e = (mk[b]! & 2) !== 0 ? rf.inregVechi.get(b) : idx.fete.inreg[b]
@@ -1469,6 +1510,17 @@ export function evidentaMaselor(idx: IndexCamere, r: CititorCamere, lot: readonl
     return acc
   }
   const mase = asambleaza(L, idx, A, cap.moarte, obVechi, (y, c) => capNoi.get(y) ?? sumaInregistrari(c.bucati, (b) => idx.fete.inreg[b], L), capVeche, false)
+  // C' memorat pe OBIECTUL componentei (după asamblare: `capVeche` de mai sus a citit memoria de dinainte de lot). E valabil
+  // cât obiectul: orice schimbare a bucăților face un obiect nou (camere.ts: `componente`, `caleRapida`), iar înregistrările
+  // se rescriu doar pe componentele din A (D+ și feliile refăcute) — deci pe cele de aici.
+  // determinism-ok: doar scrie memoria pe obiecte; ordinea nu contează.
+  for (const y of A) {
+    const c = idx.comp.get(y)
+    const t = capNoi.get(y)
+    // O copie: `capNoi` ajunge în evidența întoarsă (`capacitate`), iar memoria nu trebuie să depindă de consumatorii ei.
+    if (c !== undefined && t !== undefined) CAP_COMPONENTA.set(c, { nAer: t.nAer, nConstr: t.nConstr, nSolMasiv: t.nSolMasiv, nApa: t.nApa })
+  }
+  idx.fete.stat.bucatiEvidenta += L.bucatiCitite
   // Marcajul se golește: e o zgârietură comună tuturor loturilor.
   for (const kf of felii) {
     const fn = idx.felii.get(kf)
@@ -1479,6 +1531,12 @@ export function evidentaMaselor(idx: IndexCamere, r: CititorCamere, lot: readonl
   feteSchimbate.sort((a, b) => idx.comp.get(a)!.ancora - idx.comp.get(b)!.ancora)
   return { mase, prov: L.prov, feteSchimbate }
 }
+
+/**
+ * C' (contoarele) al fiecărei componente, memorat pe OBIECTUL ei de evidența maselor (PROV-3). DERIVED, TRANSIENT: o lume
+ * încărcată pornește fără el și îl reface la primul lot al fiecărei componente — aceleași sume exacte, doar alt cost.
+ */
+const CAP_COMPONENTA = new WeakMap<Componenta, ContoareMasa>()
 
 /** Zgârietura de marcaje pe sloturi de bucăți (TRANSIENTĂ, golită după fiecare lot), crescută la nevoie. */
 let MARCAJ = new Uint8Array(64)

@@ -197,6 +197,20 @@ export const MUTATII = [
     t: TP, e: 'PROVENIENTA oracol: pe un lot DOAR-FETE',
   },
   {
+    n: 't.2b §3, PROV-3: C\' memorat ignorat (lotul doar-fete aduna iar toata componenta: O(componenta))',
+    f: F,
+    a: '      const v0 = CAP_COMPONENTA.get(comp)',
+    b: '      const v0 = undefined',
+    t: TP, e: 'PROVENIENTA K05 al evidentei',
+  },
+  {
+    n: 't.2b §3, PROV-3: memoria lui C\' fara diferenta apei pe sloturile rescrise (C\' ramane cel vechi)',
+    f: F,
+    a: '          tot.nApa += en.nApa - ev.nApa',
+    b: '          tot.nApa += 0',
+    t: TP, e: 'PROVENIENTA oracol: pe un lot DOAR-FETE',
+  },
+  {
     n: 't.2b §3, B2: adancime+1 pe solul care intra (T_sol al celulei de sub fata)',
     f: F,
     a: '      if (eClasaDeSol(kn)) adunaClasa(vec2(L.solIn, yn, FATA_NOUA[d]! >> 3), kn, 1)',
