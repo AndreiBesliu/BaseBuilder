@@ -312,10 +312,10 @@ export const MUTATII = [
     t: T, e: 'HRANA ECRAN un adevar',
   },
   {
-    n: 'Primii pasi: aceeasi propozitie cand prognozele difera',
+    n: 'Primii pasi: pasul camarii fara prognoza cand prognozele difera',
     f: X,
-    a: '  return cu === fara ? `Hrana ajunge ${cu}; nu se poate produce încă.` : `Hrana ajunge ${cu} (se strică); fără să se strice, ${fara}. Nu se poate produce încă.`',
-    b: '  return `Hrana ajunge ${cu}; nu se poate produce încă.`',
+    a: '  return cu === fara ? `${baza} — hrana ține ${cu}` : `${baza} — hrana ține ${fara}, nu ${acum}`',
+    b: '  return cu === fara ? `${baza} — hrana ține ${cu}` : baza',
     t: T, e: 'HRANA ECRAN un adevar',
   },
 

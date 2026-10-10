@@ -30,7 +30,7 @@ import type { Bazine } from '../src/sim/prognoza.ts'
 import {
   alterareaMormanului, aplicaZona, capacitateCamara, Clasa, clasaLaT, clasaMormanului, clasaPrognozei, creeazaMemorieHrana, esteCamara,
   hranaEcran, inspecteazaCelula, locGroapa, MASCA_DOAR_HRANA, mormanPeLoc, PRAG_APROAPE_ZI, PRAG_ATENTIE_ZILE, PRAG_CRITIC_ZILE,
-  prognozaJocNou, rezumatColonie, semnaleAlerte, suprafataColoanei, textPasiHrana, textPrognozaBara,
+  prognozaJocNou, rezumatColonie, semnaleAlerte, suprafataColoanei, textPasiHrana, textPasulCamarii, textPrognozaBara,
 } from '../viewer/ui/model.ts'
 import { cheieListei } from '../viewer/ui/alerte.ts'
 import type { StareAlerta } from '../viewer/ui/alerte.ts'
@@ -449,7 +449,9 @@ test('HRANA ECRAN un adevar, patru cititori: bara, Primii pasi, „hrana-scade" 
   // Bara si Primii pasi.
   assert.equal(rezumatColonie(w, R).hrana.zile, h.prognoza.zile)
   assert.equal(textPrognozaBara(h.prognoza), '~2,9 zile')
-  assert.equal(textPasiHrana(h.prognoza), 'Hrana ajunge ~2,9 zile (se strică); fără să se strice, ~3,6 zile. Nu se poate produce încă.')
+  assert.equal(textPasulCamarii(R, 12, 230, h.prognoza), 'Cămară: Zone (K) ▸ Cămară în pivniță (sub 5 °C), ~37 de celule — hrana ține ~3,6 zile, nu ~2,9')
+  assert.equal(textPasiHrana(h.prognoza), '')
+  assert.equal(textPasiHrana({ ...h.prognoza, puncte: 0 }), 'Nu mai ai hrană: în versiunea asta nu se poate produce.')
   assert.equal(h.prognoza.zileFaraAlterare, prognozaFaraAlterare(h.stare, R).zile)
 })
 

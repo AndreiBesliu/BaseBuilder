@@ -1015,8 +1015,8 @@ export function monteazaUI(ctx: ContextUI): UI {
     if (pasiInchise) return
     const hrana = memHrana.ia(w, rules)
     const items: [boolean, string][] = [
-      [pasi.camara, textPasulCamarii(rules, hrana.stare.colonisti, HRANA_PE_OM)],
-      [pasi.depozit, 'Pictează un depozit pentru piatră și pământ: Zone (K) ▸ Depozit, trage pe sol'],
+      [pasi.camara, textPasulCamarii(rules, hrana.stare.colonisti, HRANA_PE_OM, hrana.prognoza)],
+      [pasi.depozit, 'Depozit pentru piatră: Zone (K) ▸ Depozit'],
       [pasi.sapa, 'Sapă: unealta Sapă (D), trage peste câteva celule — piatra e în rocă, sub pământ'],
       [pasi.piesa, 'Construiește un perete: C, trage un dreptunghi'],
       [pasi.pion, 'Selectează un om (V, clic pe el): vezi ce face și de ce'],
@@ -1026,8 +1026,10 @@ export function monteazaUI(ctx: ContextUI): UI {
       listaPasi.dataset.cheie = cheie
       listaPasi.replaceChildren(...items.map(([gata, t]) => h('li', { class: gata ? 'facut' : '' }, t)))
     }
-    // Aceeași prognoză ca bara (UI-9), și cea fără alterare când diferă.
-    text(hranaPasi, textPasiHrana(hrana.prognoza))
+    // Prognoza stă în pasul cămării (aceeași ca bara, UI-9); dedesubt, doar „nu mai ai hrană".
+    const fara = textPasiHrana(hrana.prognoza)
+    text(hranaPasi, fara)
+    ascuns(hranaPasi, fara === '')
     if (items.every(([a]) => a)) { pasiInchise = true; scrieVizibilitatePasi() }
   }
 

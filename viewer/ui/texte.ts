@@ -843,16 +843,18 @@ export function randuriPragU(pragQ16: number, procent: string): readonly { reado
 }
 
 /**
- * Pasul camarii din „Primii pasi" (§5, J-11), INAINTEA depozitului general: unde, cum, de ce, si cat de mare — ~3 celule pe
- * om (`celule` = ⌈oameni × hrana pe om / itemStackMax⌉).
+ * Pasul camarii din „Primii pasi" (§5, J-11, UI-9), INAINTEA depozitului general, CU PROGNOZA: unde, cum, de ce, cat de mare
+ * (~3 celule pe om: `celule` = ⌈oameni × hrana pe om / itemStackMax⌉) si cat tine hrana in camara fata de cat tine acum —
+ * „Cămară: Zone (K) ▸ Cămară în pivniță (sub 5 °C), ~37 de celule — hrana ține ~3,6 zile, nu ~2,9". `cu` / `fara`
+ * = prognoza cu alterarea si fara (aceeasi `proiecteaza`); '' = fara prognoza (nu mananca nimeni, nu mai e hrana). Scurt:
+ * cardul are 300 px, iar cu un rand in plus intra sub coloana Hărți la 720 px (masurat, raportul D1).
  */
-export function textPasCamara(pragQ16: number, oameni: number, celule: number): string {
-  return `Cămara: sapă o pivniță, apoi Zone (K) ▸ Cămară — sub ${textGradeIntregi(pragQ16)} °C hrana nu se strică (~${cant(celule, 'celule', 'o celulă')} pentru ${cant(oameni, 'oameni', 'un om')})`
-}
-
-/** Randul hranei din „Primii pasi": prognoza cu alterarea si, cand difera, cea fara (aceeasi functie, `proiecteaza`). */
-export function textHranaPasi(cu: string, fara: string): string {
-  return cu === fara ? `Hrana ajunge ${cu}; nu se poate produce încă.` : `Hrana ajunge ${cu} (se strică); fără să se strice, ${fara}. Nu se poate produce încă.`
+export function textPasCamara(pragQ16: number, celule: number, cu: string, fara: string): string {
+  const baza = `Cămară: Zone (K) ▸ Cămară în pivniță (sub ${textGradeIntregi(pragQ16)} °C), ~${cant(celule, 'celule', 'o celulă')}`
+  if (cu === '' || fara === '') return baza
+  // „~3,6 zile, nu ~2,9": unitatea o data, cand e aceeasi.
+  const acum = cu.endsWith(' zile') && fara.endsWith(' zile') ? cu.slice(0, -5) : cu
+  return cu === fara ? `${baza} — hrana ține ${cu}` : `${baza} — hrana ține ${fara}, nu ${acum}`
 }
 
 /** Dialogul „Joc nou" (UI-9): hrana de start sta sub cer; aceeasi proiectie, si cea dintr-o camara. */

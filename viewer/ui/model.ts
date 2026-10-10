@@ -46,7 +46,7 @@ import type { Outcome } from '../../src/sim/result.ts'
 import { explicaCelula } from '../../src/sim/camere-explica.ts'
 import type { Celula, Explicatie } from '../../src/sim/camere-explica.ts'
 import { numePion } from './nume.ts'
-import { cant, NUME_GAND, NUME_ITEM, NUME_ITEM_MIC, NUME_PIESA, TEXT_ALTERARE_NECUNOSCUTA, TEXT_TEMPERATURA_NECUNOSCUTA, TEXT_TRAGERE_NECUNOSCUTA, textActivitate, textAlertaAlterare, textAlterare, textCanale, textHranaPasi, textHranaScade, textJocNouHrana, textMolozInCamara, textMotiv, textOameni, textPasCamara, textRatiunePion, textStricaCamaraAreLoc, textTemperaturaAcum, textTooltipHrana, textTragere, textZile } from './texte.ts'
+import { cant, NUME_GAND, NUME_ITEM, NUME_ITEM_MIC, NUME_PIESA, TEXT_ALTERARE_NECUNOSCUTA, TEXT_TEMPERATURA_NECUNOSCUTA, TEXT_TRAGERE_NECUNOSCUTA, textActivitate, textAlertaAlterare, textAlterare, textCanale, textHranaScade, textJocNouHrana, textMolozInCamara, textMotiv, textOameni, textPasCamara, textRatiunePion, textStricaCamaraAreLoc, textTemperaturaAcum, textTooltipHrana, textTragere, textZile } from './texte.ts'
 import type { Cifre, TextMotiv } from './texte.ts'
 import type { Semnal, Tinta } from './alerte.ts'
 
@@ -215,17 +215,19 @@ export function textPrognozaBara(p: PrognozaHrana): string {
   return Number.isFinite(p.zile) && p.puncte > 0 ? textZile(p.zile, p.plafonat) : ''
 }
 
-/** Randul hranei din „Primii pasi" (UI-9): aceeasi prognoza ca bara, si cea fara alterare cand difera. */
+/** Randul de sub pasii din „Primii pasi": doar cand nu mai e hrana (prognoza sta in pasul camarii, `textPasulCamarii`). */
 export function textPasiHrana(p: PrognozaHrana): string {
-  if (p.puncte <= 0) return 'Nu mai ai hrană: în versiunea asta nu se poate produce.'
-  if (!Number.isFinite(p.zile)) return ''
-  return textHranaPasi(textZile(p.zile, p.plafonat), textZile(p.zileFaraAlterare, p.plafonatFaraAlterare))
+  return p.puncte <= 0 ? 'Nu mai ai hrană: în versiunea asta nu se poate produce.' : ''
 }
 
-/** Pasul camarii din „Primii pasi", pentru `oameni` oameni: ~3 celule pe om (`hranaPeOm / itemStackMax`). */
-export function textPasulCamarii(rules: Rules, oameni: number, hranaPeOm: number): string {
+/**
+ * Pasul camarii din „Primii pasi" (UI-9: al patrulea cititor al prognozei), pentru `oameni` oameni: ~3 celule pe om
+ * (`hranaPeOm / itemStackMax`), si cat tine hrana fara alterare fata de acum — aceeasi `PrognozaHrana` ca bara.
+ */
+export function textPasulCamarii(rules: Rules, oameni: number, hranaPeOm: number, p: PrognozaHrana): string {
   const n = Math.max(1, oameni)
-  return textPasCamara(pragAlterare(rules), n, Math.ceil((n * hranaPeOm) / rules.itemStackMax))
+  const are = p.puncte > 0 && Number.isFinite(p.zile)
+  return textPasCamara(pragAlterare(rules), Math.ceil((n * hranaPeOm) / rules.itemStackMax), are ? textZile(p.zile, p.plafonat) : '', are ? textZile(p.zileFaraAlterare, p.plafonatFaraAlterare) : '')
 }
 
 /** Coada tooltip-ului randului Hrană (unitatile din bara + valoarea prognozei; un fapt, o functie: `hranaEcran`). */
