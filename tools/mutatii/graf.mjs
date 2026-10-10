@@ -5,7 +5,8 @@
  * Oracolul (graful incremental == graful integral al unui index nou, dupa fiecare lot) prinde tot ce strica SUMELE: o
  * contributie refolosita gresit (feliile de dincolo, inregistrarea, cursorul), indexul invers, scaderea, nodurile golite.
  * Oracolul NU vede regula de mostenire — ea schimba doar etichetele si costul (harta B5, panoul IDX); pe ea o prind testele
- * pe HARTIE (cine pastreaza nodul la unire, la despartire, la egalitate) si K05 (contoarele egale pe 7x7 si 13x13). C' pe
+ * pe HARTIE (cine pastreaza nodul la unire, la despartire, la egalitate) si K05 (contoarele egale pe 7x7 si 13x13; o bucla
+ * care nu trece prin contoare o prinde timpul deltei in lockstep, GRAF-3). C' pe
  * nod se compara cu `contoareComponentei` (o suma in afara grafului): integralul are acelasi cod de adunare, deci un C'
  * gresit in ambele trece pe langa „incremental == integral". SINE se vede doar fata de graful t.2a (alt cod).
  */
@@ -117,6 +118,15 @@ export const MUTATII = [
     f: F,
     a: '  for (const k of cand) {',
     b: '  for (const k of cand.slice(0, 0)) {',
+    t: TK, e: 'GRAF K05',
+  },
+  {
+    // GRAF-3: aceleași contoare, același graf — doar costul. Pasul (6) pe TOATE nodurile e O(așezare) pe lot: contoarele
+    // K05 trec, timpul în lockstep nu (raportul p50 13×13 / 7×7: 1,57–1,87 față de 1,04–1,10).
+    n: 'GRAF-3: pasul (6) al deltei parcurge TOATE nodurile, nu doar cele golite (cost O(asezare) pe lot, necontorizat)',
+    f: F,
+    a: '  for (const s of [...golite].sort((a, b) => a - b)) {',
+    b: '  for (const s of [...g.noduri.keys()].sort((a, b) => a - b)) {',
     t: TK, e: 'GRAF K05',
   },
   {
