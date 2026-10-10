@@ -644,12 +644,16 @@ test('PROVENIENTA K05 al evidentei (PROV-3): loturi DOAR-FETE (celula de suprafa
     lot(1)
     const a = w.camere.fete.stat.bucatiEvidenta
     for (let k = 2; k < 42; k++) lot(k)
-    return { citite: w.camere.fete.stat.bucatiEvidenta - a, bucati: w.camere.comp.get(hub)!.bucati.length }
+    return { incalzire: a, citite: w.camere.fete.stat.bucatiEvidenta - a, bucati: w.camere.comp.get(hub)!.bucati.length }
   }
   const mica = sarcina(64)
   const mare = sarcina(128)
   assert.deepEqual([mica.bucati, mare.bucati], [256, 1024], 'fixtura: minele')
-  assert.equal(mare.citite, mica.citite, `bucati citite de evidenta: ${mica.citite} pe ${mica.bucati}, ${mare.citite} pe ${mare.bucati}`)
+  // Contorul e viu: încălzirea adună C'-ul întreg (cel puțin o dată toate bucățile hub-ului). Fără aserțiunea asta, un contor
+  // lipsă (undefined − undefined = NaN, iar NaN == NaN) trecea testul pe codul de dinainte de reparație (F1, 10.10).
+  for (const s of [mica, mare]) assert.ok(Number.isInteger(s.incalzire) && s.incalzire >= s.bucati, `contorul evidentei la incalzire: ${s.incalzire} pe ${s.bucati} de bucati`)
+  // După încălzire, un lot doar-fețe pe componenta memorată nu mai adună niciun C' întreg: 0 bucăți, la orice mărime.
+  assert.deepEqual([mica.citite, mare.citite], [0, 0], `bucati citite de evidenta: ${mica.citite} pe ${mica.bucati}, ${mare.citite} pe ${mare.bucati}`)
 })
 
 test('PROVENIENTA depasirea: un lot de peste JURNAL_CAP editari care uneste doua pivnite — recalculul cu instantaneul indexului vechi; unirea primeste id-ul unei surse citite apoi de alta componenta (ordinea consumatorului)', () => {
