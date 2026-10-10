@@ -44,6 +44,9 @@ const ED = 'TERMIC ECRAN descompunerea: geometria memorata'
 const ET = 'TERMIC ECRAN componenta fara T'
 const ES = 'TERMIC ECRAN stepSimSigur'
 const EA = 'TERMIC ECRAN avanseazaSigur'
+const EGS = 'TERMIC ECRAN garda simularii'
+const EM = 'TERMIC ECRAN monitorul citit dupa FIECARE tick'
+const EF3 = 'TERMIC ECRAN randul F3 al temperaturii'
 const EL = 'TERMIC ECRAN legenda lui U: aerul de afara'
 const ELT = 'TERMIC ECRAN legenda lui U cu o componenta fara T'
 const E7 = 'TERMIC ECRAN ancorele pe hartie'
@@ -215,7 +218,7 @@ export const MUTATII = [
   {
     n: 'UI-6: alerta neemisa (tipul nou nu se raporteaza)',
     f: M,
-    a: '        tipuriNoi.push(st.ultimulInvariant)\n',
+    a: '          tipuriNoi.push(tip)\n',
     b: '',
     t: T, e: ET,
   },
@@ -229,23 +232,89 @@ export const MUTATII = [
   {
     n: 'UI-6: o alerta (si un console.error) la fiecare crestere, nu una pe tip',
     f: M,
-    a: '      if (noi > 0 && !tipuri.has(st.ultimulInvariant)) {',
-    b: '      if (noi > 0) {',
+    a: '          if (tipuri.has(tip)) continue\n',
+    b: '',
     t: T, e: ET,
   },
   {
     n: 'UI-6: stepSimSigur fara catch — o exceptie din tick ingheata cadrul',
     f: A,
-    a: '  try {\n    return stepSim(layer, world, rules, dtMs, simTick)\n  } catch (e) {\n    layer.rest = 0\n    raporteaza(e)\n    return 0\n  }\n',
+    a: '  try {\n    return stepSim(layer, world, rules, dtMs, simTick)\n  } catch (e) {\n    layer.rest = 0\n    opreste(garda, e, raporteaza)\n    return 0\n  }\n',
     b: '  return stepSim(layer, world, rules, dtMs, simTick)\n',
     t: T, e: ES,
   },
   {
     n: 'UI-6: datoria de timp pastrata dupa exceptie (cadrul urmator reia o rafala)',
     f: A,
-    a: '    layer.rest = 0\n    raporteaza(e)\n',
-    b: '    raporteaza(e)\n',
+    a: '    layer.rest = 0\n    opreste(garda, e, raporteaza)\n',
+    b: '    opreste(garda, e, raporteaza)\n',
     t: T, e: ES,
+  },
+  // --- recenzia t.2b, E4: garda simularii — o exceptie dupa stepAgents nu se reia pe jumatatea ei de lume
+  {
+    n: 'E4: stepSimSigur ignora garda (Spatiu reia stepAgents pe acelasi tick)',
+    f: A,
+    a: '  if (garda.oprita !== null) {\n    layer.rest = 0\n    return 0\n  }\n',
+    b: '',
+    t: T, e: EGS,
+  },
+  {
+    n: 'E4: exceptia nu inchide garda (se raporteaza, dar simularea poate porni din nou)',
+    f: A,
+    a: '  garda.oprita ??= e instanceof Error ? e.message : String(e)\n',
+    b: '',
+    t: T, e: EGS,
+  },
+  {
+    n: 'E4: avanseazaSigur ignora garda (avansul de proba trece peste simularea oprita)',
+    f: A,
+    a: '  if (garda.oprita !== null) return 0\n',
+    b: '',
+    t: T, e: EGS,
+  },
+  // --- recenzia t.2b, E5: monitorul dupa fiecare tick, cu multimea tipurilor
+  {
+    n: 'E5: tickul observat fara monitor (citit doar pe cadru: doi pasi ai cadrului pierd primul tip)',
+    f: M,
+    a: '    const m = monitor.verifica(w)\n    for (const tip of m.tipuriNoi) tipNou(tip, m.total)\n',
+    b: '',
+    t: T, e: EM,
+  },
+  {
+    n: 'E5: doar ultimul tip, nu multimea tipurilor tinuta de simulare (doua tipuri in acelasi pas)',
+    f: M,
+    a: '  return (st as StatTermic & { readonly tipuriInvarianti?: Iterable<string> }).tipuriInvarianti ?? [st.ultimulInvariant]',
+    b: '  return [st.ultimulInvariant]',
+    t: T, e: EM,
+  },
+  // --- recenzia t.2b, GRAF-1 / SAV-R2 (ecranul): randul F3 al temperaturii
+  {
+    n: 'F3: neconvergentele si resturile normalizate inversate',
+    f: X,
+    a: ' · neconvergente ${st.echilibreNeconvergente} · rest normalizat ${st.restNormalizat}',
+    b: ' · neconvergente ${st.restNormalizat} · rest normalizat ${st.echilibreNeconvergente}',
+    t: T, e: EF3,
+  },
+  {
+    n: 'F3: graful diferit la salvare nu face randul rosu',
+    f: X,
+    a: ' || st.grafDiferitLaSalvare > 0',
+    b: '',
+    t: T, e: EF3,
+  },
+  {
+    n: 'F3: taierile scrise 0 si cand simularea le numara',
+    f: X,
+    a: '  const taieri = (st as StatTermic & { readonly taieri?: number }).taieri ?? 0',
+    b: '  const taieri = 0 as number',
+    t: T, e: EF3,
+  },
+  {
+    n: 'E4: alerta exceptiei spune iar „Spațiu o pornește din nou" (lumea pe jumatate de tick)',
+    f: X,
+    a: 'deci nu mai pornește și nu se mai salvează: încarcă ultima salvare (Meniu ▸ Încarcă…).`',
+    b: 'Spațiu o pornește din nou.`',
+    t: T, e: E4R,
   },
   // --- §8 (B6 rec. 9): avansul de proba al viewer-ului, `__kinstead.avanseaza(n)` = `avanseazaSigur` + remesh
   {
@@ -265,7 +334,7 @@ export const MUTATII = [
   {
     n: 'avanseaza: fara catch — o exceptie din tick scapa in pagina (jocul nu trece pe pauza, nu se raporteaza)',
     f: A,
-    a: '  try {\n    for (; rulate < n; rulate++) simTick(world, rules)\n  } catch (e) {\n    raporteaza(e)\n  }\n',
+    a: '  try {\n    for (; rulate < n; rulate++) simTick(world, rules)\n  } catch (e) {\n    opreste(garda, e, raporteaza)\n  }\n',
     b: '  for (; rulate < n; rulate++) simTick(world, rules)\n',
     t: T, e: EA,
   },

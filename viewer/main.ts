@@ -37,9 +37,8 @@ import { cellKey } from '../src/sim/path.ts'
 import { createDensePanel, densePanelReport, PANEL_HZ, tickDensePanel } from './panel-dens.ts'
 import { isWalkable, rebuildDirty } from '../src/sim/regions.ts'
 import { DEFAULT_RULES } from '../src/sim/content.ts'
-import type { Rules } from '../src/sim/content.ts'
 import { meshHeightfield } from '../src/render/heightfield.ts'
-import { avanseazaSigur, createAgentLayer, spawnNear, stepSimSigur, updateAgentLayer } from './agenti.ts'
+import { avanseazaSigur, createAgentLayer, creeazaGardaSimulare, spawnNear, stepSimSigur, updateAgentLayer } from './agenti.ts'
 import { buildM10PeLume } from '../src/harness/fixture-m10.ts'
 import { SDIG_MAX_INCERCARI, SDIG_OFFSET_INCALZIRE, SDIG_SPAN_INCALZIRE, sapaturaUrmatoare } from '../src/harness/sdig.ts'
 import { decode, encode } from '../src/sim/save.ts'
@@ -55,8 +54,8 @@ import { actiuneTasta, tintaEditabila } from './ui/taste.ts'
 import type { Actiune } from './ui/taste.ts'
 import { normalizeaza, planDreptunghi, textPlan, Unealta } from './ui/dreptunghi.ts'
 import type { Lumea, PlanDreptunghi, UnealtaId } from './ui/dreptunghi.ts'
-import { textEroareSimulare, textEroareTemperatura, textMotiv } from './ui/texte.ts'
-import { cifreDinReguli, creeazaFiltruOameni, creeazaMonitorTermic } from './ui/model.ts'
+import { randTermicF3, textEroareSimulare, textEroareTemperatura, textMotiv, textSimulareOprita } from './ui/texte.ts'
+import { cifreDinReguli, creeazaFiltruOameni, creeazaMonitorTermic, creeazaTickObservat } from './ui/model.ts'
 import { citesteSalvare, listaSalvari, scrieSalvare, stergeSalvare } from './ui/salvari-idb.ts'
 import { FORMAT_SALVARE, numeFisier, valideazaSalvare } from './ui/salvari-plic.ts'
 import type { Salvare } from './ui/salvari-plic.ts'
@@ -830,20 +829,32 @@ scene.add(tempOverlay.group)
  * nu a lumii. Se hraneste dupa FIECARE tick (`tickObservat`), ca sa vada exact pozitiile pe care le-a folosit pasul.
  */
 const filtruOameni = creeazaFiltruOameni()
-/** Tickul simularii, urmat de esantionul oamenilor (daca a rulat pasul). Orice avans al lumii din viewer trece pe aici. */
-function tickObservat(w: World, r: Rules): void {
-  simTick(w, r)
-  filtruOameni.dupaTick(w)
-}
-/** Erorile temperaturii (§5.3, UI-6): invariantii numarati de simulare, cititi la fiecare cadru. */
+/**
+ * Erorile temperaturii (§5.3, UI-6): invariantii numarati de simulare, cititi dupa FIECARE tick (tickul observat; recenzia
+ * t.2b, E5: doi pasi ai aceluiasi cadru cu tipuri diferite pierdeau primul tip) si la fiecare cadru (ce se numara in afara
+ * tickului: incarcarea, salvarea).
+ */
 const monitorTermic = creeazaMonitorTermic()
+/** Un tip NOU de invariant al temperaturii: o alerta si UN `console.error` (monitorul, model.ts). */
+function tipNouTermic(tip: string, total: number): void {
+  console.error(`[temperatura] invariant incalcat (${total} in total): ${tip}`)
+  ui?.eroare(textEroareTemperatura())
+}
+/** Tickul simularii, urmat de esantionul oamenilor (daca a rulat pasul) si de monitor. Orice avans al lumii din viewer trece pe aici. */
+const tickObservat = creeazaTickObservat(simTick, filtruOameni, monitorTermic, tipNouTermic)
+/**
+ * Garda simularii pe pagina (recenzia t.2b, E4; agenti.ts): o exceptie din `tick()` o inchide, iar lumea ramasa pe
+ * jumatate de tick nu mai avanseaza (nici cadrele, nici `__kinstead.avanseaza`), nu mai porneste (`seteazaPauza`) si nu se
+ * mai salveaza (Ctrl+S, salvarea automata, descarcarea). Doar o pagina noua (Încarcă, Joc nou) are iar o lume intreaga.
+ */
+const gardaSim = creeazaGardaSimulare()
 /** Exceptii prinse din simulare (randul „temperatura" din F3) si mesajele deja raportate. */
 let exceptiiSim = 0
 const exceptiiVazute = new Set<string>()
 /**
- * O exceptie din `tick()` (§5.3, UI-6): jocul trece pe pauza — altfel tickul esuat s-ar relua la fiecare cadru (cu
- * `stepAgents` pe jumatate, pe acelasi tick), iar ecranul ar spune ca jocul merge. Randarea si UI-ul merg mai departe;
- * alerta in Jurnal la fiecare oprire, UN `console.error` pe mesaj, contorul in F3. Spatiu porneste din nou.
+ * O exceptie din `tick()` (§5.3, UI-6): jocul trece pe pauza, iar garda (inchisa de `stepSimSigur` / `avanseazaSigur`)
+ * nu-l mai lasa sa porneasca — tickul esuat s-ar relua pe jumatatea lui de lume (`stepAgents` din nou, pe acelasi tick).
+ * Randarea si UI-ul merg mai departe; alerta in Jurnal, UN `console.error` pe mesaj, contorul in F3.
  */
 function raporteazaExceptia(e: unknown): void {
   exceptiiSim++
@@ -865,18 +876,15 @@ function raporteazaExceptia(e: unknown): void {
  */
 function avanseaza(n: number): { tick: number; rulate: number; simMs: number; remeshMs: number } {
   const t0 = performance.now()
-  const rulate = avanseazaSigur(world, DEFAULT_RULES, n, tickObservat, raporteazaExceptia)
+  const rulate = avanseazaSigur(world, DEFAULT_RULES, n, tickObservat, raporteazaExceptia, gardaSim)
   const t1 = performance.now()
   remeshDinJurnal()
   return { tick: world.tick, rulate, simMs: t1 - t0, remeshMs: performance.now() - t1 }
 }
-/** La fiecare cadru: un tip NOU de invariant al temperaturii da o alerta si un `console.error` (monitorul, model.ts). */
+/** La fiecare cadru: ce s-a numarat in afara tickului (incarcarea, salvarea) — un tip NOU da alerta si `console.error`. */
 function verificaTemperatura(): void {
   const m = monitorTermic.verifica(world)
-  for (const tip of m.tipuriNoi) {
-    console.error(`[temperatura] invariant incalcat (${m.total} in total): ${tip}`)
-    ui?.eroare(textEroareTemperatura())
-  }
+  for (const tip of m.tipuriNoi) tipNouTermic(tip, m.total)
 }
 /** Cifrele lui U: stratul DOM se face la prima aprindere (o pagina de gate nu-l are niciodata). */
 let stratEtichete: StratEtichete | null = null
@@ -1839,6 +1847,11 @@ window.addEventListener('keydown', (ev) => {
 /** Viteza simularii (1×, 2×, 3×). `stepSim` primeste `dt × viteza`; plafonul de tickuri pe cadru ramane. */
 let viteza = salvareIncarcata !== null ? Math.max(1, Math.min(3, Math.round(salvareIncarcata.meta.viteza))) : 1
 function seteazaPauza(p: boolean): void {
+  // Simularea oprita de o exceptie (E4): nimic n-o mai porneste pe pagina asta — nici Spatiu, nici 1×–3×, nici butonul.
+  if (!p && gardaSim.oprita !== null) {
+    ui?.toast(textSimulareOprita(), true)
+    p = true
+  }
   if (p !== simPauza) golesteVitezaEfectiva()
   simPauza = p
   // In pauza, previzualizarile scumpe ale lui S se refac o data: costul nu se mai vede (panoul, CG-2).
@@ -2232,7 +2245,7 @@ function stepFrame(ts: number): void {
     // In pauza (Spatiu) simularea nu avanseaza deloc: nicio comanda nu se pierde, doar nu se misca nimeni.
     if (!simPauza) {
       // O exceptie din simulare nu ingheata cadrul (§5.3, UI-6): se raporteaza, jocul trece pe pauza.
-      noteazaTickuri(stepSimSigur(agentLayer, world, DEFAULT_RULES, dt * viteza, tickObservat, raporteazaExceptia), dt)
+      noteazaTickuri(stepSimSigur(agentLayer, world, DEFAULT_RULES, dt * viteza, tickObservat, raporteazaExceptia, gardaSim), dt)
       remeshDinJurnal()
     }
     // Si in pauza: pornit cu `?pauza=1`, stratul pionilor n-ar fi fost desenat niciodata (HUD: „0").
@@ -2348,10 +2361,10 @@ function stepFrame(ts: number): void {
       if (r.faraCarausi) el('jobs').textContent += ' · NIMENI NU CARA'
     }
     {
-      // Temperatura (§5.3, UI-6): pasii, invariantii incalcati (cu motivul ultimului) si exceptiile prinse din simulare.
-      const st = world.temperatura.stat
-      el('termic').textContent = `pasi ${st.pasi} · invarianti ${st.invarianti}${st.invarianti > 0 ? ` (ultimul: ${st.ultimulInvariant})` : ''}${exceptiiSim > 0 ? ` · exceptii ${exceptiiSim}` : ''}`
-      el('termic').className = st.invarianti > 0 || exceptiiSim > 0 ? 'warn' : ''
+      // Temperatura (§5.3, UI-6; recenzia t.2b GRAF-1, SAV-R2): contoarele simularii, exceptiile, simularea oprita (texte.ts).
+      const r = randTermicF3(world.temperatura.stat, exceptiiSim, gardaSim.oprita !== null)
+      el('termic').textContent = r.text
+      el('termic').className = r.avertizare ? 'warn' : ''
     }
     if (probe.invalid) {
       el('spot').textContent = `INVALID · ${probe.invalid}`
@@ -2466,6 +2479,7 @@ if (!MOD.faraUI && MOD_JOC !== 'gate') {
     filtruOameni,
     pauza: () => simPauza,
     seteazaPauza,
+    simulareOprita: () => gardaSim.oprita !== null,
     viteza: () => viteza,
     seteazaViteza,
     vitezaEfectiva: () => (simPauza ? 0 : vitezaEfectiva),
@@ -2499,6 +2513,8 @@ if (!MOD.faraUI && MOD_JOC !== 'gate') {
     comutaDiagnostic: () => { hud.hidden = !hud.hidden },
     tragere: () => tragere !== null || aplicare !== null,
     salveaza: async (id, nume, primiPasi) => {
+      // Lumea unei simulari oprite poate fi pe jumatate de tick (E4): nu se scrie peste nicio salvare.
+      if (gardaSim.oprita !== null) throw new Error(textSimulareOprita())
       const { s, ms } = plicSalvare(id, nume, primiPasi)
       await scrieSalvare(s)
       tickUltimaSalvare = s.tick
@@ -2506,6 +2522,7 @@ if (!MOD.faraUI && MOD_JOC !== 'gate') {
       return ms
     },
     descarca: (primiPasi) => {
+      if (gardaSim.oprita !== null) { ui?.toast(textSimulareOprita(), true); return }
       const { s } = plicSalvare(`fisier-${world.tick}`, `Kinstead · lumea ${world.seed}`, primiPasi)
       const a = document.createElement('a')
       a.href = URL.createObjectURL(new Blob([JSON.stringify(s)], { type: 'application/json' }))

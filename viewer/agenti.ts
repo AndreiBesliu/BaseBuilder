@@ -141,10 +141,34 @@ export function stepSim(
 }
 
 /**
- * `stepSim` care nu arunca (t.2b §5.3; panoul t.2b, UI-6): o exceptie din simulare se da lui `raporteaza`, datoria de
- * timp se arunca, iar cadrul merge mai departe — randarea, UI-ul, salvarea automata. Fara asta, un `tick()` care arunca
- * ingheta tot ecranul fara niciun mesaj (UI-6, masurat: ceasul oprit, `pauza` false, ~30 de erori pe secunda in consola).
- * Cine raporteaza decide ce face lumea (main.ts o pune pe pauza: tickul esuat s-ar relua la fiecare cadru).
+ * Garda simularii pe PAGINA (recenzia t.2b, E4). O exceptie din `tick()` lasa lumea pe JUMATATE de tick: vine dupa
+ * `stepAgents` (si dupa `sincronizeazaLumea`), inainte de `w.tick++`, iar nimic nu se da inapoi. Reluata (Spatiu),
+ * bucla rula din nou `stepAgents` pe acelasi tick — masurat: 5 apasari, 5 lumi diferite la tickul 40 —, iar dupa o eroare
+ * trecatoare jocul mergea mai departe pe o lume pe care nicio reluare n-o mai reproduce (la tickul 241, hash-ul altul
+ * decat al lumii fara eroare), si pe care salvarea automata o scria peste ultima salvare buna. Odata oprita, simularea nu
+ * mai avanseaza pe pagina asta: nici bucla de cadre (`stepSimSigur`), nici avansul de proba (`avanseazaSigur`); main.ts
+ * refuza pornirea si salvarile. Doar o pagina noua (Încarcă, Joc nou) are o lume intreaga.
+ */
+export interface GardaSimulare {
+  /** Mesajul exceptiei care a oprit simularea; `null` = simularea merge. */
+  oprita: string | null
+}
+
+export function creeazaGardaSimulare(): GardaSimulare {
+  return { oprita: null }
+}
+
+/** O exceptie din simulare: garda se inchide (primul mesaj ramane), apoi se raporteaza. */
+function opreste(garda: GardaSimulare, e: unknown, raporteaza: (e: unknown) => void): void {
+  garda.oprita ??= e instanceof Error ? e.message : String(e)
+  raporteaza(e)
+}
+
+/**
+ * `stepSim` care nu arunca (t.2b §5.3; panoul t.2b, UI-6): o exceptie din simulare inchide garda si se da lui
+ * `raporteaza`, datoria de timp se arunca, iar cadrul merge mai departe — randarea, UI-ul. Fara asta, un `tick()` care
+ * arunca ingheta tot ecranul fara niciun mesaj (UI-6, masurat: ceasul oprit, `pauza` false, ~30 de erori pe secunda in
+ * consola). Cu garda inchisa, nimic nu mai ruleaza (E4): tickul esuat nu se reia pe jumatatea lui de lume.
  */
 export function stepSimSigur(
   layer: AgentLayer,
@@ -153,22 +177,28 @@ export function stepSimSigur(
   dtMs: number,
   simTick: (w: World, r: Rules) => void,
   raporteaza: (e: unknown) => void,
+  garda: GardaSimulare,
 ): number {
+  if (garda.oprita !== null) {
+    layer.rest = 0
+    return 0
+  }
   try {
     return stepSim(layer, world, rules, dtMs, simTick)
   } catch (e) {
     layer.rest = 0
-    raporteaza(e)
+    opreste(garda, e, raporteaza)
     return 0
   }
 }
 
 /**
  * Avansul de proba al viewer-ului (`__kinstead.avanseaza(n)`, t.2b §8; B6 rec. 9): n tickuri REALE prin `simTick` —
- * aceeasi functie pe care main.ts o da lui `stepSim` (`tickObservat`: tickul simularii + esantionul filtrului oamenilor)
- * —, cu exceptia prinsa ca in `stepSimSigur`: se da lui `raporteaza`, iar avansul se opreste acolo. Fara acumulatorul de
- * timp si fara plafonul pe cadru: cine il cheama (bench/ui-fum.mjs, in pauza) decide cat timp trece. Inainte, proba sarea
- * timpul cu `world.tick +=`, fara niciun pas — iar temperatura, care e stare, statea pe loc. Intoarce cate tickuri au rulat.
+ * aceeasi functie pe care main.ts o da lui `stepSim` (`tickObservat`: tickul simularii, esantionul filtrului oamenilor,
+ * monitorul) —, cu exceptia prinsa ca in `stepSimSigur`: inchide garda si se da lui `raporteaza`, iar avansul se opreste
+ * acolo. Cu garda inchisa, niciun tick (E4). Fara acumulatorul de timp si fara plafonul pe cadru: cine il cheama
+ * (bench/ui-fum.mjs, in pauza) decide cat timp trece. Inainte, proba sarea timpul cu `world.tick +=`, fara niciun pas —
+ * iar temperatura, care e stare, statea pe loc. Intoarce cate tickuri au rulat.
  */
 export function avanseazaSigur(
   world: World,
@@ -176,13 +206,15 @@ export function avanseazaSigur(
   n: number,
   simTick: (w: World, r: Rules) => void,
   raporteaza: (e: unknown) => void,
+  garda: GardaSimulare,
 ): number {
   if (!Number.isSafeInteger(n) || n < 0) throw new RangeError(`avanseaza: n trebuie sa fie un intreg >= 0, nu ${String(n)}`)
+  if (garda.oprita !== null) return 0
   let rulate = 0
   try {
     for (; rulate < n; rulate++) simTick(world, rules)
   } catch (e) {
-    raporteaza(e)
+    opreste(garda, e, raporteaza)
   }
   return rulate
 }

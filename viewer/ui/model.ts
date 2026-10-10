@@ -31,6 +31,7 @@ import type { Componenta } from '../../src/sim/camere.ts'
 import { geometriaCanalelor } from '../../src/sim/termic.ts'
 import type { GeometrieCanale } from '../../src/sim/termic.ts'
 import { canaleAcum, oameniPeComponente, temperaturaAcum, tragerea, tragereCuOameni } from '../../src/sim/temperatura.ts'
+import type { StatTermic } from '../../src/sim/temperatura.ts'
 import { tAfara } from '../../src/sim/clima.ts'
 import type { Outcome } from '../../src/sim/result.ts'
 import { explicaCelula } from '../../src/sim/camere-explica.ts'
@@ -854,11 +855,20 @@ export interface CitireMonitor {
 
 /**
  * Monitorizarea erorilor temperaturii pe ecran (§5.3, UI-6): simularea nu aruncă din `tick()`, ci numără invarianții
- * încălcați (`statTermic(w).invarianti`, cu motivul ultimului). Viewer-ul citește contorul la fiecare cadru; un tip nou
- * (motivul) dă o alertă în Jurnal și UN `console.error` — nu unul pe cadru, nici unul pe pas —, iar contorul stă în F3.
+ * încălcați (`statTermic(w).invarianti`, cu motivul ultimului). Viewer-ul citește contorul după FIECARE tick (tickul
+ * observat) și la fiecare cadru (ce se numără în afara tickului: încărcarea, salvarea); un tip nou (motivul) dă o alertă în
+ * Jurnal și UN `console.error` — nu unul pe cadru, nici unul pe pas —, iar contorul stă în F3.
  */
 export interface MonitorTermic {
   verifica(w: World): CitireMonitor
+}
+
+/**
+ * Tipurile (motivele) invarianților văzute de simulare: mulțimea lor, dacă simularea o ține (`tipuriInvarianti`,
+ * TRANSIENT — cerută ramurii simulării, recenzia t.2b E5: două tipuri în ACELAȘI pas), altfel doar ultimul.
+ */
+function tipuriInvarianti(st: StatTermic): Iterable<string> {
+  return (st as StatTermic & { readonly tipuriInvarianti?: Iterable<string> }).tipuriInvarianti ?? [st.ultimulInvariant]
 }
 
 export function creeazaMonitorTermic(): MonitorTermic {
@@ -876,12 +886,35 @@ export function creeazaMonitorTermic(): MonitorTermic {
       const noi = total - vazute
       vazute = total
       const tipuriNoi: string[] = []
-      if (noi > 0 && !tipuri.has(st.ultimulInvariant)) {
-        tipuri.add(st.ultimulInvariant)
-        tipuriNoi.push(st.ultimulInvariant)
+      if (noi > 0) {
+        for (const tip of tipuriInvarianti(st)) {
+          if (tipuri.has(tip)) continue
+          tipuri.add(tip)
+          tipuriNoi.push(tip)
+        }
       }
       return { noi: Math.max(0, noi), tipuriNoi, total, ultimul: st.ultimulInvariant }
     },
+  }
+}
+
+/**
+ * Tickul observat al viewer-ului (main.ts; recenzia t.2b, E5): tickul simulării, apoi eșantionul filtrului oamenilor și
+ * citirea monitorului, cu fiecare tip nou dat lui `tipNou`. Orice avans al lumii din viewer trece pe aici (`stepSim`,
+ * `__kinstead.avanseaza`). Citit doar o dată pe cadru, monitorul vedea doar `ultimulInvariant`: doi pași ai aceluiași
+ * cadru (un cadru lung la 3×, avansul de probă) cu tipuri diferite pierdeau primul tip.
+ */
+export function creeazaTickObservat(
+  simTick: (w: World, r: Rules) => void,
+  filtru: FiltruOameni,
+  monitor: MonitorTermic,
+  tipNou: (tip: string, total: number) => void,
+): (w: World, r: Rules) => void {
+  return (w, r) => {
+    simTick(w, r)
+    filtru.dupaTick(w)
+    const m = monitor.verifica(w)
+    for (const tip of m.tipuriNoi) tipNou(tip, m.total)
   }
 }
 

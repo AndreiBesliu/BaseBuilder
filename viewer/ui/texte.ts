@@ -32,6 +32,7 @@ import { ClasaDir } from '../../src/sim/fete.ts'
 import type { ClasaDirId } from '../../src/sim/fete.ts'
 import { Destinatie, PONDERE_TOTALA } from '../../src/sim/termic.ts'
 import type { CanalTermic, DestinatieId } from '../../src/sim/termic.ts'
+import type { StatTermic } from '../../src/sim/temperatura.ts'
 
 /** Un motiv tradus: ce s-a intamplat, si ce poate face jucatorul. `actiune` gol = nimic de facut decat asteptat. */
 export interface TextMotiv {
@@ -573,9 +574,33 @@ export function textEroareTemperatura(): string {
   return `Temperatura: ${t.titlu} ${t.actiune}`
 }
 
-/** Alerta unei exceptii din simulare (§5.3, UI-6): jocul se pune pe pauza, randarea si UI-ul merg mai departe. */
+/**
+ * Alerta unei exceptii din simulare (§5.3, UI-6): jocul se pune pe pauza, randarea si UI-ul merg mai departe. NU mai spune
+ * „Spațiu o pornește din nou" (recenzia t.2b, E4): exceptia lasa lumea pe jumatate de tick, deci simularea ramane oprita
+ * pe pagina, iar salvarile se refuza — drumul inapoi e ultima salvare.
+ */
 export function textEroareSimulare(): string {
-  return `Simularea s-a oprit: eroare internă. ${textGeneric(Reason.INVARIANT_INCALCAT).actiune} Spațiu o pornește din nou.`
+  return `Simularea s-a oprit: eroare internă. ${textGeneric(Reason.INVARIANT_INCALCAT).actiune} Lumea de acum poate fi pe jumătate de pas, deci nu mai pornește și nu se mai salvează: încarcă ultima salvare (Meniu ▸ Încarcă…).`
+}
+
+/** Refuzul unei porniri (Spațiu, 1×–3×) sau al unei salvari cu simularea oprita (recenzia t.2b, E4). */
+export function textSimulareOprita(): string {
+  return 'Simularea e oprită după o eroare internă: lumea de acum poate fi pe jumătate de pas. Încarcă ultima salvare (Meniu ▸ Încarcă…).'
+}
+
+/**
+ * Randul „temperatura" din Diagnostic (F3; §5.3, UI-6; recenzia t.2b GRAF-1, SAV-R2): pasii, invariantii (cu motivul
+ * ultimului), taierile, echilibrele oprite la plafon, resturile normalizate la incarcare, diferentele grafului la salvare,
+ * exceptiile si simularea oprita. Toate contoarele se scriu mereu (0 inclus). `taieri` vine cu reparatiile simularii
+ * (ramura t2b-sim): unde lipseste, 0. Rosu (`avertizare`) la un semnal de eroare: invariant, taietura, graf diferit,
+ * exceptie, simulare oprita; echilibrele neconvergente si resturile normalizate sunt informatie.
+ */
+export function randTermicF3(st: StatTermic, exceptii: number, oprita: boolean): { text: string; avertizare: boolean } {
+  const taieri = (st as StatTermic & { readonly taieri?: number }).taieri ?? 0
+  const text = `pasi ${st.pasi} · invarianti ${st.invarianti}${st.invarianti > 0 ? ` (ultimul: ${st.ultimulInvariant})` : ''}`
+    + ` · taieri ${taieri} · neconvergente ${st.echilibreNeconvergente} · rest normalizat ${st.restNormalizat}`
+    + ` · graf diferit la salvare ${st.grafDiferitLaSalvare}${exceptii > 0 ? ` · exceptii ${exceptii}` : ''}${oprita ? ' · simularea OPRITA' : ''}`
+  return { text, avertizare: st.invarianti > 0 || taieri > 0 || st.grafDiferitLaSalvare > 0 || exceptii > 0 || oprita }
 }
 
 /** Cifra unei piese de incapere pe overlay-ul Temperatura: „4,5°". */

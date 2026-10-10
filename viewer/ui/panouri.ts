@@ -49,6 +49,8 @@ export interface ContextUI {
   readonly filtruOameni: FiltruOameni
   pauza(): boolean
   seteazaPauza(p: boolean): void
+  /** O exceptie din simulare a oprit-o pe pagina asta (recenzia t.2b, E4): nu porneste si nu se salveaza. */
+  simulareOprita(): boolean
   viteza(): number
   seteazaViteza(v: number): void
   /** Tickuri rulate pe secunda reala / `ticksPerSecond`, pe ultimele ~2 s; 0 in pauza. */
@@ -969,6 +971,9 @@ export function monteazaUI(ctx: ContextUI): UI {
     // titlul lasat deschis 6 minute, el scria salvarea automata peste jocul jucatorului (recenzia
     // UI-ului, INT-1). Ctrl+S il salveaza, daca vrea cineva.
     if (!salvareAutomataPermisa(ctx.mod)) return
+    // Simularea oprita (E4): lumea de acum poate fi pe jumatate de tick — nu se scrie peste ultima salvare buna. Alerta
+    // erorii a spus deja ce e de facut; fara un toast la fiecare moment linistit.
+    if (ctx.simulareOprita()) return
     if (!eTimpulSalvariiAutomate({ tick: w.tick, tickUltima: tickUltimaAutomata, ticksPerSecond: rules.ticksPerSecond, encodeMs, linistit, tragere: ctx.tragere(), golita: golita(w) })) return
     tickUltimaAutomata = w.tick
     ctx.salveaza(idAutomata(w.seed), `Salvare automată · ${textTimp(w.tick, rules.ticksPerSecond)} de joc`, primiPasi())

@@ -34,7 +34,7 @@ import { dig, fill, groundLevelM, WORLD_CELLS } from '../src/sim/terrain/terrain
 import { Destinatie, geometriaCanalelor, regimPermanent, statGraf, statMemorieTermica, temperaturaComponentei, temperaturiRezervoare } from '../src/sim/termic.ts'
 import { canaleAcum, oameniPeComponente, pasTermic, sincronizeazaLumea, statTermic, temperaturaAcum, tragerea, tragereCuOameni } from '../src/sim/temperatura.ts'
 import { createWorld, tick } from '../src/sim/world.ts'
-import { creeazaFiltruOameni, creeazaMemorieTermica, creeazaMonitorTermic, inspecteazaCelula, pasFiltru, termicLa } from '../viewer/ui/model.ts'
+import { creeazaFiltruOameni, creeazaMemorieTermica, creeazaMonitorTermic, creeazaTickObservat, inspecteazaCelula, pasFiltru, termicLa } from '../viewer/ui/model.ts'
 import type { FiltruOameni, StareFiltru } from '../viewer/ui/model.ts'
 import { cheieInspectorCelula, creeazaMemorieIncapere, usilePropuse } from '../viewer/ui/memorie-incapere.ts'
 import {
@@ -47,6 +47,7 @@ import {
   textGradeIntregi,
   textIntervalTemperatura,
   textOameni,
+  randTermicF3,
   textProcent,
   textTemperaturaAcum,
   textTragere,
@@ -56,7 +57,7 @@ import type { CanalTermic } from '../src/sim/termic.ts'
 import { actiuneTasta } from '../viewer/ui/taste.ts'
 import { avanseazaSigur, stepSimSigur } from '../viewer/agenti.ts'
 import { hashWorld } from '../src/sim/hash.ts'
-import type { AgentLayer } from '../viewer/agenti.ts'
+import type { AgentLayer, GardaSimulare } from '../viewer/agenti.ts'
 import {
   actualizeazaTemperaturaOverlay,
   alegeEtichete,
@@ -240,7 +241,7 @@ test('TERMIC ECRAN textele randurilor pe hartie: T si afara, „stabil" doar can
   assert.equal(textIntervalTemperatura(0, 0, 0, 12 * Q), 'Nimic acoperit pe nivelul ăsta · afară 12 °C')
   // Alertele (§5.3, UI-6): textul existent al invariantului, „Spune-i dezvoltatorului (Diagnostic, F3)".
   assert.equal(textEroareTemperatura(), 'Temperatura: Eroare internă (invariant). Spune-i dezvoltatorului (Diagnostic, F3).')
-  assert.equal(textEroareSimulare(), 'Simularea s-a oprit: eroare internă. Spune-i dezvoltatorului (Diagnostic, F3). Spațiu o pornește din nou.')
+  assert.equal(textEroareSimulare(), 'Simularea s-a oprit: eroare internă. Spune-i dezvoltatorului (Diagnostic, F3). Lumea de acum poate fi pe jumătate de pas, deci nu mai pornește și nu se mai salvează: încarcă ultima salvare (Meniu ▸ Încarcă…).')
 })
 
 test('TERMIC ECRAN textele: zecimile si gradele cu minus tipografic, rotunjire simetrica, fara „−0,0"; procentele; drumul', () => {
@@ -695,6 +696,60 @@ test('TERMIC ECRAN componenta fara T: randul 1 „Temperatura nu se știe (eroar
   assert.deepEqual(mon.verifica(w).tipuriNoi, ['indexul s-a sincronizat pe langa temperatura (punctul unic ocolit)'])
 })
 
+test('TERMIC ECRAN monitorul citit dupa FIECARE tick (tickul observat): doua tipuri noi in doi pasi ai aceluiasi cadru dau doua alerte; cu multimea tipurilor tinuta de simulare, si doua tipuri in acelasi pas', () => {
+  // Recenzia t.2b, E5. Citit doar o data pe cadru, monitorul vedea doar `ultimulInvariant`: doi pasi intr-un cadru (un
+  // cadru lung la 3×, avansul de proba) cu tipuri diferite pierdeau primul tip — niciun console.error, nicio alerta.
+  const { w, wx, wy, g } = sitPlat(12345, 12)
+  casa(w, wx, wy, g)
+  bun(sincronizeazaLumea(w, R), 'sincronizeazaLumea')
+  const id = componentaLa(w.camere, wx + 2, wy + 2, g + 1)!.id
+  const f = creeazaFiltruOameni()
+  const mon = creeazaMonitorTermic()
+  const alerte: string[] = []
+  // Al doilea invariant: la tickul 10, un lot sincronizat pe langa punctul unic (indexul refacut, temperatura nu); pasul de
+  // la tickul 20 il numara.
+  const simTick = (x: World, r: typeof R): void => {
+    if (x.tick === 10) {
+      assert.ok(fill(x.terrain, wx + 1, wy + 1, g + 2, P).ok)
+      sincronizeazaCamere(x.camere, x.terrain)
+    }
+    tick(x, r)
+  }
+  const tickObservat = creeazaTickObservat(simTick, f, mon, (tip) => alerte.push(tip))
+  // Primul invariant: componenta fara T, numarata de pasul de la tickul 0.
+  w.temperatura.slot.are[id] = 0
+  // UN cadru: 40 de tickuri (doi pasi) prin avansul de proba, apoi citirea de cadru a lui main.ts (`verificaTemperatura`).
+  assert.equal(avanseazaSigur(w, R, 40, tickObservat, (e) => { throw e }, { oprita: null }), 40)
+  for (const tip of mon.verifica(w).tipuriNoi) alerte.push(tip)
+  assert.equal(statTermic(w).invarianti, 2, 'fixtura: doi invarianti, cate unul pe pas')
+  assert.deepEqual(alerte, ['componenta fara T', 'indexul s-a sincronizat pe langa temperatura (punctul unic ocolit)'])
+  assert.equal(f.esantioane(), 1, 'tickul observat hraneste si filtrul')
+  // Doua tipuri in ACELASI pas: din contoare se vede doar ultimul motiv. Cand simularea tine si multimea tipurilor
+  // (`tipuriInvarianti`, TRANSIENT — ceruta ramurii simularii), monitorul le raporteaza pe toate cele noi, o data.
+  const st = { ...statTermic(w), invarianti: 5, ultimulInvariant: 'b', tipuriInvarianti: ['componenta fara T', 'a', 'b'] }
+  const lume = { temperatura: { stat: st } } as unknown as World
+  assert.deepEqual(mon.verifica(lume).tipuriNoi, ['a', 'b'])
+  st.invarianti = 6
+  assert.deepEqual(mon.verifica(lume).tipuriNoi, [], 'un tip vazut nu se mai raporteaza')
+})
+
+test('TERMIC ECRAN randul F3 al temperaturii: pasii, invariantii (cu ultimul), taierile, echilibrele neconvergente, resturile normalizate, graful diferit la salvare, exceptiile, simularea oprita — fiecare cu cifra lui; rosu doar la un semnal de eroare', () => {
+  // Recenzia t.2b, GRAF-1 si SAV-R2 (partea ecranului): reparatiile de la salvare, neconvergenta si normalizarea restului
+  // nu ajungeau pe ecran (randul avea doar pasii, invariantii si exceptiile). `taieri` vine cu ramura simularii: lipsa = 0.
+  const { w } = sitPlat(12345, 12)
+  const st0 = statTermic(w)
+  assert.deepEqual(randTermicF3(st0, 0, false), { text: 'pasi 0 · invarianti 0 · taieri 0 · neconvergente 0 · rest normalizat 0 · graf diferit la salvare 0', avertizare: false })
+  const st = { ...st0, pasi: 3, invarianti: 5, ultimulInvariant: 'componenta fara T', echilibreNeconvergente: 7, restNormalizat: 11, grafDiferitLaSalvare: 13, taieri: 17 }
+  assert.deepEqual(randTermicF3(st, 19, true), {
+    text: 'pasi 3 · invarianti 5 (ultimul: componenta fara T) · taieri 17 · neconvergente 7 · rest normalizat 11 · graf diferit la salvare 13 · exceptii 19 · simularea OPRITA',
+    avertizare: true,
+  })
+  // Fiecare semnal de eroare, singur, face randul rosu; neconvergenta si normalizarea sunt informatie.
+  const rosu = (x: Partial<typeof st>, exceptii = 0, oprita = false): boolean => randTermicF3({ ...st0, ...x }, exceptii, oprita).avertizare
+  assert.deepEqual([rosu({ invarianti: 1 }), rosu({ taieri: 1 }), rosu({ grafDiferitLaSalvare: 1 }), rosu({}, 1), rosu({}, 0, true)], [true, true, true, true, true])
+  assert.deepEqual([rosu({ echilibreNeconvergente: 1 }), rosu({ restNormalizat: 1 }), rosu({ pasi: 9 })], [false, false, false])
+})
+
 test('TERMIC ECRAN stepSimSigur: o exceptie din tick se raporteaza, cadrul nu arunca, datoria de timp se arunca; fara exceptie, tickurile ca stepSim', () => {
   const strat = { rest: 0 } as AgentLayer
   const w = {} as World
@@ -702,10 +757,11 @@ test('TERMIC ECRAN stepSimSigur: o exceptie din tick se raporteaza, cadrul nu ar
   let tickuri = 0
   // Trei pași de timp (1.000 / tps ms fiecare): trei tickuri, sub plafonul pe cadru.
   const dt = (3 * 1000) / R.ticksPerSecond
-  const n = stepSimSigur(strat, w, R, dt, () => { tickuri++ }, (e) => erori.push(e))
-  assert.deepEqual([n, tickuri, erori.length], [3, 3, 0])
+  const garda: GardaSimulare = { oprita: null }
+  const n = stepSimSigur(strat, w, R, dt, () => { tickuri++ }, (e) => erori.push(e), garda)
+  assert.deepEqual([n, tickuri, erori.length, garda.oprita], [3, 3, 0, null])
   let k = 0
-  const n2 = stepSimSigur(strat, w, R, dt, () => { if (++k === 3) throw new Error('invariant de proba') }, (e) => erori.push(e))
+  const n2 = stepSimSigur(strat, w, R, dt, () => { if (++k === 3) throw new Error('invariant de proba') }, (e) => erori.push(e), garda)
   assert.equal(n2, 0)
   assert.equal(erori.length, 1)
   assert.match(String(erori[0]), /invariant de proba/)
@@ -732,7 +788,7 @@ test('TERMIC ECRAN avanseazaSigur: n tickuri REALE prin functia data (tickObserv
   assert.ok(t0 !== null)
   // 61 de tickuri de la tickul 0: pasii la 0, 20, 40, 60 (4); filtrul ii esantioneaza pe ultimii 3 (primul tick doar ii
   // arata lumea — testul „X_tot cu oameni").
-  assert.equal(avanseazaSigur(a.w, R, 61, tickObservat, (e) => erori.push(e)), 61)
+  assert.equal(avanseazaSigur(a.w, R, 61, tickObservat, (e) => erori.push(e), { oprita: null }), 61)
   for (let i = 0; i < 61; i++) tick(b.w, R)
   assert.deepEqual([a.w.tick, statTermic(a.w).pasi, f.esantioane(), erori.length], [61, 4, 3, 0])
   assert.equal(hashWorld(a.w), hashWorld(b.w), 'aceeasi lume (cu temperatura) ca tickurile scrise aici')
@@ -740,12 +796,53 @@ test('TERMIC ECRAN avanseazaSigur: n tickuri REALE prin functia data (tickObserv
   assert.notEqual(temperaturaAcum(a.w, id), t0, 'avansul real muta T (timpul sarit nu l-ar misca)')
   // O exceptie la al 5-lea tick: raportata o data, avansul se opreste dupa 4, nimic nu arunca.
   let k = 0
-  const n = avanseazaSigur(a.w, R, 10, (w, r) => { if (++k === 5) throw new Error('invariant de proba'); tick(w, r) }, (e) => erori.push(e))
+  const n = avanseazaSigur(a.w, R, 10, (w, r) => { if (++k === 5) throw new Error('invariant de proba'); tick(w, r) }, (e) => erori.push(e), { oprita: null })
   assert.deepEqual([n, a.w.tick, erori.length], [4, 65, 1])
   assert.match(String(erori[0]), /invariant de proba/)
   // n nevalid: refuzat inainte de orice tick (un n fractionar ar rula ceil(n) tickuri, NaN niciunul, tacut).
-  for (const rau of [-1, 1.5, Number.NaN, 2 ** 53]) assert.throws(() => avanseazaSigur(a.w, R, rau, tick, () => {}), RangeError, String(rau))
-  assert.deepEqual([avanseazaSigur(a.w, R, 0, tick, () => {}), a.w.tick], [0, 65])
+  for (const rau of [-1, 1.5, Number.NaN, 2 ** 53]) assert.throws(() => avanseazaSigur(a.w, R, rau, tick, () => {}, { oprita: null }), RangeError, String(rau))
+  assert.deepEqual([avanseazaSigur(a.w, R, 0, tick, () => {}, { oprita: null }), a.w.tick], [0, 65])
+})
+
+test('TERMIC ECRAN garda simularii: o exceptie DUPA stepAgents (in pasul termic) opreste simularea pe pagina — nici cadrele (Spatiu), nici avansul de proba nu mai ating lumea pe jumatate de tick', () => {
+  // Recenzia t.2b, E4. Casa sigilata si 4 pioni afara; la tickul 40 vine pasul termic. Eroarea de program e simulata
+  // TRECATOARE (primele 2 citiri ale lui `pragBigInt` arunca, apoi nu), fara nimic stricat in stare: reluat, tickul ar
+  // trece, iar lumea ar merge mai departe pe o jumatate de tick in plus — vezi controlul de la final.
+  const lume = (): World => {
+    const { w, wx, wy, g } = sitPlat(12345, 16)
+    casa(w, wx, wy, g, false)
+    bun(sincronizeazaLumea(w, R), 'sincronizeazaLumea')
+    for (let i = 0; i < 4; i++) pune(w, wx + 8 + i, wy + 8, g + 1)
+    for (let i = 0; i < 40; i++) tick(w, R)
+    return w
+  }
+  const ref = lume()
+  const w = lume()
+  assert.equal(hashWorld(w), hashWorld(ref))
+  let rau = 2
+  const prag = w.temperatura.pragBigInt
+  Object.defineProperty(w.temperatura, 'pragBigInt', { configurable: true, get() { if (rau > 0) { rau--; throw new Error('eroare de program simulata in pas') } return prag } })
+  const strat = { rest: 0 } as AgentLayer
+  const erori: unknown[] = []
+  const raporteaza = (e: unknown): void => { erori.push(e) }
+  const garda: GardaSimulare = { oprita: null }
+  const dt = 1000 / R.ticksPerSecond
+  const h40 = hashWorld(w)
+  assert.equal(stepSimSigur(strat, w, R, dt, tick, raporteaza, garda), 0)
+  assert.deepEqual([w.tick, erori.length, rau, garda.oprita], [40, 1, 1, 'eroare de program simulata in pas'])
+  const h = hashWorld(w)
+  assert.notEqual(h, h40, 'fixtura: exceptia vine DUPA stepAgents — lumea s-a miscat, tickul nu')
+  // Spatiu (trei cadre noi) si avansul de proba: niciun tick, lumea neatinsa, nicio exceptie noua.
+  for (let k = 0; k < 3; k++) assert.equal(stepSimSigur(strat, w, R, dt, tick, raporteaza, garda), 0)
+  assert.equal(avanseazaSigur(w, R, 20, tick, raporteaza, garda), 0)
+  assert.deepEqual([w.tick, hashWorld(w), erori.length, rau, strat.rest], [40, h, 1, 1, 0], 'simularea oprita: nimic nu ruleaza')
+  // Controlul: o pagina FARA garda (fiecare cadru cu alta) relua tickul — a doua oara arunca din nou, a treia oara trece —, iar
+  // lumea de dupa nu mai e cea fara eroare.
+  for (let k = 0; k < 2; k++) stepSimSigur(strat, w, R, dt, tick, raporteaza, { oprita: null })
+  assert.deepEqual([w.tick, rau], [41, 0])
+  for (let i = 0; i < 200; i++) tick(w, R)
+  for (let i = 0; i < 201; i++) tick(ref, R)
+  assert.notEqual(hashWorld(w), hashWorld(ref), 'fixtura: reluat pe jumatatea lui de lume, tickul 40 duce in alta lume')
 })
 
 // --- 2. ancorele cifrelor ------------------------------------------------------------
