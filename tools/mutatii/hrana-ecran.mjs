@@ -6,7 +6,8 @@
  * adevar pentru patru cititori, camara (presetul in acelasi pas, „Se strică aici", groapa: locul, cauza pe moloz), harta U
  * (punctele), memoria hranei si cheia inspectorului (UI-10). Fiecare proba strica o garantie si numeste testul scris pentru ea.
  *
- * Probe omise ca echivalente sau fara forma de mutatie (motivul in raportul D1): ora in care se termina hrana interpolata
+ * Probe omise ca echivalente sau fara forma de mutatie (motivul in raportul D1): λ-ul orei din Simpson in loc de mijloc (≤ 0,0032
+ * zile fata de ≤ 0,0021 — de aceea s-a pastrat mijlocul, de doua ori mai ieftin); ora in care se termina hrana interpolata
  * liniar in loc de ln (≤ 0,0005 zile, sub banda testului); conditia formei inchise pe `valoare` in loc de `baza` (aceeasi,
  * cata vreme nu exista hrana neperisabila); verificarea „aceeasi cota" a lui `locGroapa` (pe un sit plat si fara gropi,
  * `celulaDeZonaPosibila` o acopera); stratul DOM din panouri.ts (bara, butoanele alertelor, elementele scrise pe loc,
@@ -60,10 +61,17 @@ export const MUTATII = [
     t: T, e: 'HRANA ECRAN forma inchisa contra pasului orar',
   },
   {
-    n: 'λ-ul orei doar de la mijlocul ei (λ e convexa in T: +0,023 zile la startul jocului nou)',
+    n: 'λ-ul orei de la inceputul ei, nu de la mijloc (pana la −0,136 zile)',
     f: P,
-    a: '    return ((l0 + 4 * lm + l1) / 6) * pePas',
-    b: '    return lm * pePas',
+    a: '  return (ora) => lambdaAlterare(rules, tAfara(seed, tick + ora * H + jum, rules)) * pePas',
+    b: '  return (ora) => lambdaAlterare(rules, tAfara(seed, tick + ora * H, rules)) * pePas',
+    t: T, e: 'HRANA ECRAN pasul orar sub cer',
+  },
+  {
+    n: 'UI-1: aerul de ACUM tinut constant pe tot orizontul (designul v1), nu aerul viitor',
+    f: P,
+    a: '  return (ora) => lambdaAlterare(rules, tAfara(seed, tick + ora * H + jum, rules)) * pePas',
+    b: '  return (ora) => lambdaAlterare(rules, tAfara(seed, tick, rules)) * pePas',
     t: T, e: 'HRANA ECRAN pasul orar sub cer',
   },
   {

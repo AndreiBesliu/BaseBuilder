@@ -149,8 +149,8 @@ test('HRANA ECRAN pasul orar sub cer, pe AERUL VIITOR: la 0,005 zile de modelul 
     const p = proiecteaza(b, R)
     assert.equal(p.formaInchisa, false)
     const adevar = proiectiaPe1Hz(b) / ZI
-    // Masurat: |dif| ≤ 0,0033 zile pe 16 cazuri (4 anotimpuri × 1/4/12 oameni, si un stoc amestecat); λ-ul de la mijlocul
-    // orei (prima versiune) dadea +0,023 la startul jocului nou: λ e convexa in T.
+    // Masurat: |dif| ≤ 0,0021 zile pe 16 cazuri (4 anotimpuri × 1/4/12 oameni, si un stoc amestecat). λ-ul de la inceputul
+    // orei: pana la −0,136 zile (vara, un om); aerul de ACUM tinut constant (designul v1): zile intregi (UI-1).
     assert.ok(Math.abs(p.zile - adevar) < 0.005, `${nume}: prognoza ${p.zile}, modelul de 1 Hz ${adevar}`)
     assert.ok(p.zile < 41400 / (oameni * OM) / ZI, `${nume}: sub cer se strica`)
   }
@@ -576,7 +576,9 @@ test('HRANA ECRAN harta U: puncte pe ≤ prag, slabe pe „aproape", niciunul pe
     w.temperatura.slot.t[comp] = mcLaQ16(mc)
     actualizeazaTemperaturaOverlay(o, w, R, z)
     assert.equal(o.clase.get(comp), clasa, `${mc}`)
-    assert.deepEqual(alfa(), new Array(6).fill(Math.fround(ALFA_PUNCT[clasa]!)), `${mc}: alfa punctelor`)
+    // Pe hartie: punct plin, punct slab, niciun punct (nu din constanta modulului, care s-ar strica odata cu el).
+    assert.deepEqual(alfa(), new Array(6).fill(Math.fround([1, 0.45, 0][clasa]!)), `${mc}: alfa punctelor`)
+    assert.equal(ALFA_PUNCT[clasa], [1, 0.45, 0][clasa])
     assert.equal(o.puncte[clasa], 1)
   }
   // Contrastul punctului cu tenta: inchis pe deschis, deschis pe inchis.

@@ -108,26 +108,17 @@ export function scadereOra(a: number): number {
 }
 
 /**
- * Cursorul aerului viitor de la `tick`: pentru ora `ora`, cat se strica dintr-O unitate sub cer in ora aceea (exponentul
- * pe ora) — λ-ul MEDIU al orei (Simpson pe capete si mijloc: λ e convexa in T, deci λ-ul de la mijlocul orei o subestima),
- * pe pasii de 1 Hz ai orei. Capatul unei ore e inceputul urmatoarei: citit o singura data cand orele vin la rand.
+ * Cursorul aerului viitor de la `tick`: pentru ora `ora`, cat se strica dintr-O unitate sub cer in ora aceea (exponentul pe
+ * ora) — λ-ul aerului de la MIJLOCUL orei (`tAfara`, pura de tick), pe pasii de 1 Hz ai orei. Masurat contra modelului pas cu
+ * pas de 1 Hz, pe 16 cazuri (4 anotimpuri × 1/4/12 oameni si un stoc amestecat): mijlocul orei |dif| ≤ 0,0021 zile; Simpson pe
+ * capete si mijloc (de doua ori mai scump) nu castiga nimic (≤ 0,0032); inceputul orei greseste cu pana la −0,136 zile (vara,
+ * un om).
  */
 function cursorCer(seed: number, tick: number, rules: Rules): (ora: number) => number {
   const H = tickuriPeOra(rules)
   const pePas = H / rules.ticksPerSecond / ONE_ALTERARE
   const jum = Math.floor(H / 2)
-  const lam = (t: number): number => lambdaAlterare(rules, tAfara(seed, t, rules))
-  let ultima = -2
-  let capat = 0
-  return (ora) => {
-    const t0 = tick + ora * H
-    const l0 = ora === ultima + 1 ? capat : lam(t0)
-    const lm = lam(t0 + jum)
-    const l1 = lam(t0 + H)
-    ultima = ora
-    capat = l1
-    return ((l0 + 4 * lm + l1) / 6) * pePas
-  }
+  return (ora) => lambdaAlterare(rules, tAfara(seed, tick + ora * H + jum, rules)) * pePas
 }
 
 /** Exponentul pierderii sub cer in ora `ora` de la `tick` (vezi `cursorCer`): aceeasi functie in proiectie si in inspector. */
