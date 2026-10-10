@@ -18,14 +18,14 @@ import assert from 'node:assert/strict'
 import { parseRules } from '../src/sim/content.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { applyCommand } from '../src/sim/commands.ts'
-import { componentaLa, listaComponente } from '../src/sim/camere.ts'
+import { componentaLa, listaComponente, sincronizeazaCamere } from '../src/sim/camere.ts'
 import { capacitateMu } from '../src/sim/fete.ts'
 import { hashWorld } from '../src/sim/hash.ts'
 import { decode, encode } from '../src/sim/save.ts'
 import type { World } from '../src/sim/state.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
-import { dig, fill, materialAt } from '../src/sim/terrain/terrain.ts'
-import { grafulIncremental } from '../src/sim/termic.ts'
+import { dig, fill, groundLevelM, materialAt } from '../src/sim/terrain/terrain.ts'
+import { actualizeazaGraful, grafulIncremental } from '../src/sim/termic.ts'
 import { amprentaCapacitatii, MOTIV_GRAF_LA_SALVARE, sincronizeazaLumea, statTermic } from '../src/sim/temperatura.ts'
 import { advance, createWorld, tick } from '../src/sim/world.ts'
 import { casaTermica } from './fixturi-temperatura.ts'
@@ -312,6 +312,50 @@ test('SALVARE compararea cu graful integral la encode (§6, IDX-4): o delta stri
   assert.deepEqual(tPeAncora(c), tPeAncora(w))
   encode(w)
   assert.equal(statTermic(w).grafDiferitLaSalvare, 1, 'la salvarea urmatoare graful e bun')
+})
+
+test('SALVARE compararea grafului doar dupa o schimbare (SAV-R6): in pauza si dupa loturi care nu ating indexul salvarea sare compararea, cu acelasi text; dupa pamant pe acoperis (epocaFete), o groapa in casa (epoca) sau o delta RATATA (indexul schimbat, graful nu) compara din nou — iar delta ratata e prinsa', () => {
+  // Recenzia SAV-R6: compararea cu graful integral (19–23 ms p50 pe M10) rula la FIECARE encode — pe M10 salvarea trecea de
+  // ENCODE_LENT_MS (50 ms), iar salvarea automată se rărea la 10 minute. Fără nicio schimbare ar da aceeași egalitate.
+  const s = casaTermica({ k: 1 })
+  const w = laEchilibru(s.w, 300000)
+  const [cx, cy, cz] = s.rep.casa!
+  const sarite = (): number => statTermic(w).comparariSarite
+  const t1 = encode(w)
+  assert.equal(sarite(), 0, 'prima salvare compara')
+  assert.equal(encode(w), t1, 'a doua salvare, in pauza: acelasi text')
+  assert.equal(sarite(), 1, 'a doua salvare, in pauza: compararea sarita')
+  // Un lot departe (o groapă la suprafață, nicio încăpere): indexul are alt `vazute`, aceleași (epoca, epocaFete).
+  const e0 = w.camere.epoca
+  const f0 = w.camere.epocaFete
+  const gd = bun(groundLevelM(w.terrain, cx + 40, cy + 40), 'cota')
+  assert.ok(applyCommand(w, { kind: 'dig', wx: cx + 40, wy: cy + 40, z: gd }, R).ok)
+  assert.deepEqual([w.camere.epoca, w.camere.epocaFete], [e0, f0], 'fixtura: lotul departe nu atinge indexul')
+  encode(w)
+  assert.equal(sarite(), 2, 'dupa un lot departe: sarita')
+  // Pământ pe acoperiș, deasupra interiorului: doar fețele (epocaFete), epoca pe loc.
+  assert.ok(applyCommand(w, { kind: 'fill', wx: cx, wy: cy, z: cz + 3, material: Material.PAMANT }, R).ok)
+  assert.deepEqual([w.camere.epoca, w.camere.epocaFete > f0], [e0, true], 'fixtura: doar fetele')
+  encode(w)
+  assert.equal(sarite(), 2, 'dupa pamant pe acoperis: compara')
+  // O groapă în podeaua casei: epoca.
+  assert.ok(applyCommand(w, { kind: 'dig', wx: cx + 1, wy: cy + 1, z: cz - 1 }, R).ok)
+  assert.ok(w.camere.epoca > e0, 'fixtura: epoca noua')
+  encode(w)
+  assert.equal(sarite(), 2, 'dupa groapa din casa: compara')
+  encode(w)
+  assert.equal(sarite(), 3, 'si apoi iar sarita')
+  assert.equal(statTermic(w).grafDiferitLaSalvare, 0, 'graful == integralul la fiecare comparare')
+  // O deltă RATATĂ: pământ pe acoperiș sincronizat cu bucățile rescrise ASCUNSE de delta — indexul are fețe noi (epocaFete),
+  // graful nu (nicio deltă). Ștampila temperaturii se aliniază de mână, ca după punctul unic (encode o cere).
+  assert.ok(fill(w.terrain, cx + 1, cy, cz + 3, Material.PAMANT).ok)
+  const sch = sincronizeazaCamere(w.camere, w.terrain)
+  assert.ok(sch.bucatiRescrise.length > 0 && sch.felii.length === 0, 'fixtura: un lot doar-fete')
+  assert.ok(actualizeazaGraful(w.camere, { ...sch, bucatiRescrise: [] }, R).ok)
+  w.temperatura.stampila = { idx: w.camere, vazute: w.camere.vazute, epoca: w.camere.epoca, epocaFete: w.camere.epocaFete }
+  encode(w)
+  assert.equal(sarite(), 3, 'dupa delta ratata: compara (epocaFete), nu sare')
+  assert.equal(statTermic(w).grafDiferitLaSalvare, 1, 'delta ratata e prinsa la salvare')
 })
 
 /** Casa cu pivniță la echilibru, cu C' al nodului casei din graful incremental stricat (+k fețe de construcție), pășită până când restul trece de C'-ul integral. */

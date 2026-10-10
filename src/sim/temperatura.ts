@@ -92,7 +92,7 @@ import type { ContoareMasa, MaseComponentaNoua, MaseComponentaVeche, MasaPeAdanc
 import { capacitateMu, PROV_CER, PROV_NEC_CER, PROV_NEC_SOL0, PROV_SOL0 } from './fete.ts'
 import { tAfara, tSol } from './clima.ts'
 import type { CanaleTermice, GeometrieCanale, GrafIncremental, NodTermic } from './termic.ts'
-import { actualizeazaGraful, BIN_AFARA, canaleDinGeometrie, comparaGrafulCuIntegral, grafTermic, grafulIncremental, numarRefaceriDeUrgenta, refaGrafulDeUrgenta, rezolvaRegim, temperaturiRezervoare } from './termic.ts'
+import { actualizeazaGraful, BIN_AFARA, canaleDinGeometrie, comparaGrafulCuIntegral, comparatiaLaZi, elibereazaGrafulT2a, grafTermic, grafulIncremental, numarRefaceriDeUrgenta, refaGrafulDeUrgenta, rezolvaRegim, temperaturiRezervoare } from './termic.ts'
 import { Hasher } from './hash.ts'
 import { cellOf } from './drumuri.ts'
 import type { World } from './state.ts'
@@ -435,6 +435,11 @@ export interface StatTermic {
   /** Salvări la care graful incremental a diferit de cel integral (înlocuit; IDX-4) și prima linie diferită (jurnalul). */
   grafDiferitLaSalvare: number
   ultimaDiferentaGraf: string
+  /**
+   * Salvări la care compararea grafului s-a SĂRIT: graful și indexul neschimbate de la ultima comparare reușită (SAV-R6 —
+   * pe M10 compararea e 19–23 ms dintr-un `encode` de 74–77 ms, iar fără nicio schimbare ar da aceeași egalitate).
+   */
+  comparariSarite: number
   /** La încărcare: componente cu restul pus la 0 fiindcă amprenta C' a salvării nu e a lumii (alt content sau cod; SAV-2). */
   restNormalizat: number
   /**
@@ -448,7 +453,7 @@ function statGol(): StatTermic {
   return {
     pasi: 0, pasiBigInt: 0, noduriBigInt: 0, oameniCautati: 0, adunariOameni: 0, rezervoareCitite: 0, modeleRefacute: 0, invarianti: 0, ultimulInvariant: '',
     loturi: 0, loturiDoarFete: 0, rezerva: 0, provenienteBigInt: 0, surseVechi: 0, surseSol: 0, surseCer: 0, surseNec: 0, echilibre: 0, echilibreNeconvergente: 0,
-    grafDiferitLaSalvare: 0, ultimaDiferentaGraf: '', restNormalizat: 0, taieri: 0,
+    grafDiferitLaSalvare: 0, ultimaDiferentaGraf: '', comparariSarite: 0, restNormalizat: 0, taieri: 0,
   }
 }
 
@@ -669,6 +674,8 @@ function solutiaEchilibrului(w: World, rules: Rules, tick: number, plafon: numbe
   const g = go.value
   const tRez = temperaturiRezervoare(w.seed, tick, rules)
   const s = rezolvaRegim(g, tRez, tRez[BIN_AFARA]!, false, plafon)
+  // Graful t.2a nu-l mai citește nimic după echilibru (GRAF-4: 2,0 MB pe M10, ținuți cât trăia indexul).
+  elibereazaGrafulT2a(w.camere)
   return accept({ comp: g.comp, t: s.t, treceri: s.treceri, convergent: s.convergent })
 }
 
@@ -771,7 +778,8 @@ function capacitatiPeAncora(g: GrafIncremental, lista: readonly Componenta[], ru
 /**
  * Blocul de scris la salvare (§7). Întâi: temperatura e la zi (ștampila, T în ambele direcții), iar graful incremental se
  * compară cu cel INTEGRAL (IDX-4: o deltă greșită fără asimetrie — un bin, un C' — ar lăsa lumea continuă pe alt graf decât
- * cea încărcată); la diferență, integralul îl înlocuiește, se numără (`grafDiferitLaSalvare` și ca invariant) și prima linie
+ * cea încărcată) — dacă graful sau indexul s-au schimbat de la ultima comparare reușită (`comparatiaLaZi`, SAV-R6: altfel ar
+ * da aceeași egalitate și se sare, numărat în `comparariSarite`); la diferență, integralul îl înlocuiește, se numără (`grafDiferitLaSalvare` și ca invariant) și prima linie
  * diferită intră în jurnal (`ultimaDiferentaGraf`), iar salvarea continuă pe graful bun: restul fiecărei componente se
  * normalizează EXACT pe C'-ul nou (GRAF-2, SAV-R1 — o deltă greșită de C' lăsa restul în [C'_bun, C'_greșit), iar `encode`
  * arunca la fiecare salvare până la pasul următor; în pauză, la nesfârșit). Apoi, pe fiecare componentă, în ordinea
@@ -782,7 +790,11 @@ export function blocTemperaturi(w: World): Outcome<BlocTemperaturi> {
   if (!z.ok) return z
   const st = w.temperatura
   const rules = st.reguli
-  const cmp = comparaGrafulCuIntegral(w.camere, rules)
+  // SAV-R6: fără nicio schimbare a grafului sau a indexului de la ultima comparare reușită, compararea ar da aceeași egalitate
+  // — se sare (o salvare în pauză, sau după loturi care n-au atins nicio încăpere).
+  const sarita = comparatiaLaZi(w.camere, rules)
+  const cmp: Outcome<unknown> = sarita ? accept() : comparaGrafulCuIntegral(w.camere, rules)
+  if (sarita) st.stat.comparariSarite++
   if (!cmp.ok) {
     if (cmp.params.motiv !== 'graful incremental difera de cel integral') return cmp
     st.stat.grafDiferitLaSalvare++

@@ -13,11 +13,12 @@ import { componentaLa, construiesteCamere, sincronizeazaCamere } from '../src/si
 import { decode, encode } from '../src/sim/save.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
 import { dig, fill } from '../src/sim/terrain/terrain.ts'
-import { construiesteGrafIncremental, formaCanonicaGrafIncremental, grafulIncremental, regimPermanent, statGraf } from '../src/sim/termic.ts'
+import { construiesteGrafIncremental, formaCanonicaGrafIncremental, grafulIncremental, memoriaGrafuluiT2a, regimPermanent, statGraf } from '../src/sim/termic.ts'
 import type { GrafIncremental } from '../src/sim/termic.ts'
 import { MOTIV_GRAF_URGENTA, MOTIV_TAIERE, pasTermic, PLAFON_ECHILIBRU, sincronizeazaLumea, statTermic, T_SIGURANTA, temperaturaLaEchilibru, verdictulLotului, verificaStampila } from '../src/sim/temperatura.ts'
 import { accept, Reason, refuse } from '../src/sim/result.ts'
 import { createWorld, tick } from '../src/sim/world.ts'
+import { buildM10PeLume } from '../src/harness/fixture-m10.ts'
 import { casaPompei, casaTermica, cicluIncrucisat, comanda, oraDeVara } from './fixturi-temperatura.ts'
 import { bun, faraInvarianti, hotel, laEchilibru, tPeAncora } from './fixturi-pas.ts'
 import { R, sitPlat } from './fixturi.ts'
@@ -178,6 +179,32 @@ test('STARE completeaza pe VALORI (§5.3, IDX-6, PAS-1): componenta fara T o pri
   assert.equal(statTermic(a.w).invarianti, 1)
   faraInvarianti(b.w, 'geamana')
   assert.deepEqual(tPeAncora(a.w), tPeAncora(b.w), 'casa de la echilibru, celelalte (T, rest) pastrate')
+})
+
+test('STARE echilibrul nu tine graful t.2a (GRAF-4): dupa lumea fara istorie (harnasamentul M10, temperaturaLaEchilibru) si dupa completeaza, indexul nu mai tine graful t.2a, contributiile si regimul; o cerere noua il reface de la zero, cu acelasi rezultat', () => {
+  // Recenzia GRAF-4: graful t.2a și contribuțiile (2,0 MB pe M10) rămâneau pe index după echilibru, cât trăia indexul, deși
+  // nimic nu le mai citea (viewer-ul citește graful simulării).
+  const gol = { graf: false, regim: false, contributii: 0 }
+  const m10 = createWorld(20260913)
+  assert.ok(applyCommand(m10, { kind: 'setFocus', cx: 300, cy: 300 }).ok)
+  buildM10PeLume(m10, R, 300, 300)
+  assert.ok(m10.camere.comp.size > 600, 'fixtura: M10')
+  assert.deepEqual(memoriaGrafuluiT2a(m10.camere), gol, 'M10 dupa harnasament')
+  const s = casaTermica({ k: 1, etaj: true })
+  const w = laEchilibru(s.w, 300000)
+  assert.deepEqual(memoriaGrafuluiT2a(w.camere), gol, 'dupa echilibru')
+  const t1 = tPeAncora(w)
+  laEchilibru(w, 300000)
+  assert.deepEqual(tPeAncora(w), t1, 'acelasi echilibru, refacut de la zero')
+  // completeaza: o componentă fără T o ia de la echilibru (tot `solutiaEchilibrului`).
+  w.temperatura.slot.are[componentaLa(w.camere, ...s.rep.casa!)!.id] = 0
+  pasTermic(w, R)
+  assert.equal(statTermic(w).invarianti, 1, 'fixtura: completeaza a rulat')
+  assert.deepEqual(memoriaGrafuluiT2a(w.camere), gol, 'dupa completeaza')
+  // Controlul pozitiv: cerut direct (regimPermanent, referința din teste), graful t.2a rămâne ținut — sonda îl vede.
+  assert.ok(regimPermanent(w, R, w.tick).ok)
+  const m = memoriaGrafuluiT2a(w.camere)
+  assert.ok(m.graf && m.regim && m.contributii > 0, `controlul: memoria vazuta ${JSON.stringify(m)}`)
 })
 
 test('STARE pasul nu arunca din tick (§5.3): o muchie stricata in graf fara niciun lot (asimetrica) — pasul o vede, reface graful de urgenta, numara si continua cu graful bun (== pasul pe o lume geamana)', () => {

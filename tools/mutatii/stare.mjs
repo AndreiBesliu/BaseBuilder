@@ -238,6 +238,51 @@ export const MUTATII = [
     b: '  if (m !== undefined) return m',
     t: TP, e: 'PAS T*',
   },
+  // --- compararea grafului la encode doar dupa o schimbare (recenzia SAV-R6). Clauza `delte` din comparatiaLaZi nu are
+  // proba: in joc orice delta vine cu (epoca, epocaFete) noi, deci scoasa singura e echivalenta (ramane ca aparare).
+  {
+    n: 't.2b §6, SAV-R6: compararea sarita fara (epoca, epocaFete) — o delta ratata (indexul schimbat, graful nu) nu se mai prinde la salvare',
+    f: TERMIC,
+    a: '  if (idx.epoca !== c.epoca || idx.epocaFete !== c.epocaFete) return false\n',
+    b: '',
+    t: TSV, e: 'SALVARE compararea grafului doar dupa o schimbare',
+  },
+  {
+    n: 't.2b §6, SAV-R6: compararea reusita nu se tine minte (se compara la fiecare salvare, ca inainte)',
+    f: TERMIC,
+    a: '        e.comparat = { inc: g, delte: g.delte, reguli: rules, epoca: idx.epoca, epocaFete: idx.epocaFete }\n',
+    b: '',
+    t: TSV, e: 'SALVARE compararea grafului doar dupa o schimbare',
+  },
+  {
+    n: 't.2b §6, SAV-R6: compararea se sare mereu (o delta gresita nu mai ajunge la plasa IDX-4)',
+    f: F,
+    a: '  const sarita = comparatiaLaZi(w.camere, rules)',
+    b: '  const sarita = true',
+    t: TSV, e: 'SALVARE compararea grafului doar dupa o schimbare',
+  },
+  // --- graful t.2a eliberat dupa echilibru (recenzia GRAF-4: 2,0 MB pe M10 tinuti cat traia indexul)
+  {
+    n: 't.2b §7, GRAF-4: echilibrul lasa graful t.2a pe index (nimic nu-l mai citeste)',
+    f: F,
+    a: '  elibereazaGrafulT2a(w.camere)\n',
+    b: '',
+    t: TS, e: 'STARE echilibrul nu tine graful t.2a',
+  },
+  {
+    n: 't.2b §7, GRAF-4: eliberarea pastreaza contributiile bucatilor',
+    f: TERMIC,
+    a: '  e.graf = null\n  e.contributii = []\n',
+    b: '  e.graf = null\n',
+    t: TS, e: 'STARE echilibrul nu tine graful t.2a',
+  },
+  {
+    n: 't.2b §7, GRAF-4: eliberarea pastreaza regimul memorat',
+    f: TERMIC,
+    a: '  e.reguliContributii = null\n  e.regim = null\n',
+    b: '  e.reguliContributii = null\n',
+    t: TS, e: 'STARE echilibrul nu tine graful t.2a',
+  },
   // --- modelul pasului cheiat pe deltele grafului, nu pe stampila (recenzia PAS-2)
   {
     n: 't.2b §5, PAS-2: orice lot cu editari reface modelul pasului (cheia inapoi pe stampila: un lot departe de orice incapere il reface degeaba)',
@@ -482,8 +527,8 @@ export const MUTATII = [
   {
     n: 't.2b §6, IDX-4: salvarea nu compara graful incremental cu cel integral (o delta gresita fara asimetrie trece)',
     f: F,
-    a: '  const cmp = comparaGrafulCuIntegral(w.camere, rules)',
-    b: '  const cmp = accept(null)',
+    a: '  const cmp: Outcome<unknown> = sarita ? accept() : comparaGrafulCuIntegral(w.camere, rules)',
+    b: '  const cmp: Outcome<unknown> = accept()',
     t: TSV, e: 'SALVARE compararea cu graful integral la encode',
   },
   {

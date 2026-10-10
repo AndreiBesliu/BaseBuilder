@@ -2,9 +2,15 @@
  * Graful termic al încăperilor și regimul lor permanent — S24-27, tăietura 2a (design-temperatura-v2 §4.2,
  * §5, §7) —, plus graful incremental al simulării din tăietura 2b (research/temperatura-t2b.md §6).
  *
- * Grafurile și regimul permanent sunt TRANSIENTE: nu intră în hash și nu se salvează. Graful t.2a și regimul le cere
- * viewer-ul (inspectorul, overlay-ul Temperatură), cel mult o dată pe secundă; graful incremental îl ține la zi
- * punctul unic de sincronizare al lumii (`sincronizeazaLumea`, temperatura.ts), la capătul tickului și după comenzi.
+ * Grafurile și regimul permanent sunt TRANSIENTE: nu intră în hash și nu se salvează. Graful incremental (t.2b) e al
+ * simulării și al ecranului: îl ține la zi punctul unic de sincronizare al lumii (`sincronizeazaLumea`, temperatura.ts), la
+ * capătul tickului și după comenzi; pasul de 1 Hz, proveniența și salvarea îl citesc, iar viewer-ul ia din el X (`tragerea`)
+ * și descompunerea (`geometriaCanalelor`). Graful t.2a are un singur consumator de producție: echilibrul „lumii fără
+ * istorie" (`solutiaEchilibrului`, temperatura.ts — migrarea salvărilor vechi, harnașamentul M10, reluarea după un
+ * invariant), care îl cere o dată și îl ELIBEREAZĂ imediat (`elibereazaGrafulT2a`, GRAF-4: 2,0 MB pe M10). Restul — regimul
+ * permanent cu memoria lui (`regimPermanent`), `canaleTermice`, `temperaturaComponentei`, `formaCanonicaGraf`,
+ * `statMemorieTermica` — e REFERINȚA testelor și a uneltelor (tests/, tools/), nu o mai cere ecranul (recenzia GRAF-5;
+ * până la t.2b valul 2 le cerea inspectorul și overlay-ul U).
  *
  * ## Conductanța unei fețe (§4.2), pe întregi
  *
@@ -46,8 +52,8 @@
  * `epoca` e 1 în orice lume nouă (panoul, L4-1). Se reface când (`epoca`, `epocaFete`, regulile) diferă de
  * ștampila lui — `epocaFete` fiindcă fețele se schimbă fără `epoca` nouă (pământ pe acoperiș: 169 din 169
  * de loturi de suprafață care schimbă fețe ies din sincronizare fără `epoca++`; panoul, L2-1/L1-02/L4-1).
- * Altfel se refolosește. Graful t.2a rămâne al viewer-ului (inspectorul, overlay-ul U) și al regimului permanent (migrarea
- * din t.2b); simularea are graful incremental de mai jos.
+ * Altfel se refolosește. Graful t.2a e al echilibrului (eliberat după el) și al referinței din teste; simularea și ecranul au
+ * graful incremental de mai jos.
  *
  * **Contribuția fiecărei bucăți** (Σg pe bin, Σg spre fiecare componentă de dincolo, fețele ei DESCHISE) se
  * memorează pe identitatea TABLOULUI ei de rânduri: fete.ts nu modifică un tablou de rânduri, îl înlocuiește,
@@ -94,8 +100,8 @@
  * neconvergente — la plafonul 20, un hotel 30×30×10 ar fi afișat 3,9 °C eroare (recenzia GRAF, L3-3).
  *
  * **Un regim pe (graf, tick).** Rezolvarea se memorează pe index, cheiată pe OBIECTUL grafului (refolosit doar
- * sub ștampila lui), seed, tick și plafon: overlay-ul și inspectorul (`canaleTermice`) împart aceeași rezolvare
- * (recenzia GRAF, L3-2). Regimul și agregarea pe componentă se citesc sub ACEEAȘI ștampilă: `canaleTermice` cere
+ * sub ștampila lui), seed, tick și plafon: cererile repetate (în t.2a, overlay-ul și inspectorul; azi, testele) împart aceeași
+ * rezolvare (recenzia GRAF, L3-2). Regimul și agregarea pe componentă se citesc sub ACEEAȘI ștampilă: `canaleTermice` cere
  * regimul indexului de acum, nu primește unul din afară — un regim de acum o secundă lângă agregarea de acum a dat
  * 25 de refuzuri și 6 citiri ale altei încăperi din 80 (verificatorul L4-2).
  *
@@ -375,6 +381,17 @@ interface IntrareGraf {
   readonly statMemorie: StatMemorieTermica
   /** Graful incremental (ii) al simulării (t.2b §6), ținut la zi pe lot de `actualizeazaGraful`. */
   inc: StareGraf | null
+  /** Ce era graful și indexul la ultima comparare REUȘITĂ cu integralul (`comparatiaLaZi`, SAV-R6). */
+  comparat: ComparareReusita | null
+}
+
+/** Graful incremental (obiectul și deltele lui), regulile și (epoca, epocaFete) ale indexului la o comparare reușită. */
+interface ComparareReusita {
+  readonly inc: StareGraf
+  readonly delte: number
+  readonly reguli: Rules
+  readonly epoca: number
+  readonly epocaFete: number
 }
 
 /** Graful fiecărui index, legat de OBIECTUL indexului — un index aruncat își ia graful cu el. */
@@ -392,6 +409,7 @@ function intrarea(idx: IndexCamere): IntrareGraf {
       reguliContributii: null,
       regim: null,
       statMemorie: { bucatiCalculate: 0, regimuriRezolvate: 0, regimuriRefolosite: 0 },
+      comparat: null,
     }
     GRAFURI.set(idx, e)
   }
@@ -416,6 +434,31 @@ export function numarRefaceriDeUrgenta(idx: IndexCamere): number {
 export function statMemorieTermica(idx: IndexCamere): StatMemorieTermica {
   const e = GRAFURI.get(idx)
   return e === undefined ? { bucatiCalculate: 0, regimuriRezolvate: 0, regimuriRefolosite: 0 } : { ...e.statMemorie }
+}
+
+/** Ce ține indexul din graful t.2a (GRAF-4): graful, regimul memorat și câte bucăți au contribuția memorată. Pentru teste. */
+export function memoriaGrafuluiT2a(idx: IndexCamere): { readonly graf: boolean; readonly regim: boolean; readonly contributii: number } {
+  const e = GRAFURI.get(idx)
+  if (e === undefined) return { graf: false, regim: false, contributii: 0 }
+  let n = 0
+  for (const c of e.contributii) if (c !== undefined) n++
+  return { graf: e.graf !== null, regim: e.regim !== null, contributii: n }
+}
+
+/**
+ * Eliberează graful t.2a al indexului și memoriile lui: contribuțiile bucăților și regimul (GRAF-4). Singurul lui consumator
+ * de producție e echilibrul „lumii fără istorie" (`solutiaEchilibrului`, temperatura.ts: migrarea, harnașamentul M10, reluarea
+ * după un invariant), care îl cere o dată și apoi nu-l mai citește nimic — ținut pe index cât trăia indexul, cântărea
+ * 2,0 MB pe M10. Următoarea cerere îl construiește de la zero (aceeași funcție a indexului, deci același graf).
+ */
+export function elibereazaGrafulT2a(idx: IndexCamere): void {
+  const e = GRAFURI.get(idx)
+  if (e === undefined) return
+  e.graf = null
+  e.contributii = []
+  e.epocaContributii = -1
+  e.reguliContributii = null
+  e.regim = null
 }
 
 /**
@@ -1323,7 +1366,26 @@ export function formaCanonicaGrafIncremental(idx: IndexCamere, g: GrafIncrementa
 }
 
 /**
- * Compararea „incremental == integral" pe ACELAȘI index (t.2b §6, la fiecare `encode`; 9–15 ms pe M10 [B5 §2.7]): o
+ * Graful incremental și indexul sunt EXACT cei de la ultima comparare reușită cu integralul (SAV-R6): același obiect de graf,
+ * aceleași delte, aceleași reguli, aceeași (`epoca`, `epocaFete`) a indexului — graful integral e funcție de ele, ca graful
+ * t.2a (antetul) —, iar graful e la zi cu indexul. Compararea ar da atunci aceeași egalitate, deci `encode` o poate sări.
+ * (`epoca`, `epocaFete`) apără și de o deltă RATATĂ (un lot care schimbă indexul, raportat fără bucăți); conținutul grafului
+ * se schimbă doar prin delte, deci o scriere directă în el (doar testele o fac) nu se vede aici.
+ */
+export function comparatiaLaZi(idx: IndexCamere, rules: Rules): boolean {
+  const e = GRAFURI.get(idx)
+  const c = e?.comparat ?? null
+  if (e === undefined || c === null || e.inc === null) return false
+  const g = e.inc
+  if (g !== c.inc || g.delte !== c.delte || g.reguli !== rules || c.reguli !== rules) return false
+  if (idx.epoca !== c.epoca || idx.epocaFete !== c.epocaFete) return false
+  return grafulIncremental(idx, rules).ok
+}
+
+/**
+ * Compararea „incremental == integral" pe ACELAȘI index (t.2b §6, la `encode`; 19–23 ms p50 pe M10, din care construcția
+ * integrală 14 ms — măsurat de recenzia GRAF-5 și din nou la 10.10; „9–15 ms" al lui B5 era sub-măsurat; `encode` o sare când
+ * `comparatiaLaZi`, SAV-R6): o
  * deltă greșită fără asimetrie (binuri, C') ar lăsa lumea continuă să integreze pe un graf greșit, iar cea încărcată pe
  * unul refăcut — M5 ar diverge fără alarmă [IDX-4]. Egale → graful incremental, neatins. Diferite (sau graful lipsește,
  * nu e la zi, ori refuză la citire) → graful integral îl ÎNLOCUIEȘTE, `refaceriDeUrgenta` crește și se întoarce refuzul
@@ -1332,6 +1394,8 @@ export function formaCanonicaGrafIncremental(idx: IndexCamere, g: GrafIncrementa
  */
 export function comparaGrafulCuIntegral(idx: IndexCamere, rules: Rules): Outcome<GrafIncremental> {
   const e = intrarea(idx)
+  // Ultima comparare reușită se rescrie doar la egalitate (mai jos): o înlocuire, un refuz, o construcție ratată o șterg.
+  e.comparat = null
   const nou = construiesteStare(idx, rules, statGol())
   if (!nou.ok) {
     e.inc = null
@@ -1352,7 +1416,10 @@ export function comparaGrafulCuIntegral(idx: IndexCamere, rules: Rules): Outcome
     else {
       let i = 0
       while (i < fg.value.length && i < fi.value.length && fg.value[i] === fi.value[i]) i++
-      if (i === fg.value.length && i === fi.value.length) return accept(g)
+      if (i === fg.value.length && i === fi.value.length) {
+        e.comparat = { inc: g, delte: g.delte, reguli: rules, epoca: idx.epoca, epocaFete: idx.epocaFete }
+        return accept(g)
+      }
       diferenta = (fg.value[i] ?? '(lipsa)').slice(0, 160)
     }
   }
@@ -1484,9 +1551,10 @@ export interface RegimPermanent extends SolutieRegim {
 /**
  * Regimul permanent al încăperilor lumii la `tick` (§5): unde AR ajunge temperatura fiecărei componente cu
  * rezervoarele de acum. Fără inerție și fără oameni (t.2b). Pornit MEREU din `T_afara(tick)` (antetul): o
- * funcție a stării, nu a istoriei cererilor. Memorat pe (graf, seed, tick, plafon): overlay-ul și inspectorul
- * împart rezolvarea. Refuz dacă graful refuză (fețe nepotrivite) și `CAPACITATE_DEPASITA` dacă Gauss–Seidel nu
- * ajunge la punctul fix în `plafon` treceri — cifre neconvergente nu ies de aici.
+ * funcție a stării, nu a istoriei cererilor. Memorat pe (graf, seed, tick, plafon): cererile repetate împart rezolvarea
+ * (azi doar referința din teste, antetul; echilibrul simulării cheamă `rezolvaRegim` direct). Refuz dacă graful refuză
+ * (fețe nepotrivite) și `CAPACITATE_DEPASITA` dacă Gauss–Seidel nu ajunge la punctul fix în `plafon` treceri — cifre
+ * neconvergente nu ies de aici.
  */
 export function regimPermanent(w: World, rules: Rules, tick: number, plafon = PLAFON_TRECERI): Outcome<RegimPermanent> {
   const go = grafTermic(w.camere, rules)
