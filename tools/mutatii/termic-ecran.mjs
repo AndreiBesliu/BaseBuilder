@@ -3,6 +3,9 @@
  * (research/temperatura-t2b.md §8, §5.3): inspectorul cu trei randuri fixe din STARE (T, „trage spre X_tot", oamenii
  * filtrati), descompunerea pe geometria memorata, oracolul „X din randuri == X din linia grafului", oamenii ecranului ==
  * caldura pasului, overlay-ul U din stare (fara cheie de tick), erorile (monitorul invariantilor, `stepSimSigur`).
+ * Recenzia t.2b: istoria filtrului pe aceeasi componenta (ancora si volumul; E1), filtrul pe ancora, nu pe id, si
+ * componenta fara istorie (E2), legenda lui U cu eroarea (E2), garda simularii dupa o exceptie (E4, agenti.ts), tickul
+ * observat care citeste monitorul dupa fiecare tick si multimea tipurilor (E5, model.ts), randul F3 (GRAF-1, SAV-R2).
  *
  * Probele t.2a ale mecanismului care a disparut (memoria termica cheiata pe tick, fereastra de o secunda L4-2, regimul
  * lui U cel mult o data pe secunda, valorile mutate prin celule, geometria necolorata pana la regimul urmator) au fost
@@ -10,10 +13,22 @@
  * in loc de T-ul lor, pragul gresit pentru „stabil", U pe cheia de tick, filtrul scos, randul 3 cu „+X °C", alerta
  * neemisa.
  *
- * Ce NU e aici: scrisul PE LOC in DOM, inaintea comparatiei cheii (panouri.ts), stratul DOM al cifrelor
- * (etichete-temperatura.ts), excluderea I/U, hranirea filtrului dupa fiecare tick si pauza la exceptie (main.ts) — in
- * node nu exista DOM si nici bucla de cadre. Le probeaza ui-fum (bench/ui-fum.mjs), pe pagina termica (`paginaTermica`). Aici:
- * bucla avansului de proba (`avanseazaSigur`, agenti.ts), pe care `__kinstead.avanseaza` o leaga de `tickObservat`.
+ * Ce NU e aici — in node nu exista DOM si nici bucla de cadre; le probeaza ui-fum (bench/ui-fum.mjs), pe pagina termica
+ * (`paginaTermica`), fiecare cu bifa ei:
+ * - scrisul PE LOC in DOM, inaintea comparatiei cheii (panouri.ts): „temperatura-fara-clic";
+ * - stratul DOM al cifrelor (etichete-temperatura.ts): „temperatura-etichete", „temperatura-etichete-la-zi",
+ *   „temperatura-U-la-3x" (cu proba negativa `U-la-3x`);
+ * - excluderea I/U: „temperatura-exclude-I";
+ * - bucla de cadre care hraneste filtrul (main.ts da `tickObservat` lui `stepSimSigur`): „filtru-bucla", cu proba negativa
+ *   `filtru-bucla` (recenzia t.2b, E3: pana atunci nicio bifa n-o vedea — pionul paginii e sigilat, deci un filtru
+ *   nehranit arata la fel);
+ * - exceptia din tick pe pagina (main.ts: pauza, alerta, F3; garda — Spatiu si 3× refuzate, `avanseaza` 0 tickuri,
+ *   Ctrl+S refuzat, salvarea automata suspendata): „exceptie-tick", cu proba negativa `exceptie-tick` (E3/E4: proba
+ *   negativa veche „exceptie" arunca in pasul PROBEI, nu in simulare);
+ * - randurile fixe ale inspectorului (ui.css; randul fara T, scris de panouri.ts fara clasa `num`): „latime-inspector", cu
+ *   proba negativa `latime` (E6), pe descompunerile reale cele mai lungi (bench/canale-lungi.mjs, la fiecare rulare).
+ * Aici: bucla avansului de proba (`avanseazaSigur`, agenti.ts), garda ei si a lui `stepSimSigur`, si tickul observat
+ * (`creeazaTickObservat`, model.ts), pe care main.ts le leaga de `__kinstead.avanseaza` si de bucla de cadre.
  */
 
 const T = 'tests/viewer-termic.test.ts'

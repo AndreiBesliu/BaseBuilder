@@ -48,13 +48,17 @@ const NEGATIVA = NEG === undefined ? null : NEG.includes('=') ? NEG.slice(NEG.in
  * sapa; temperatura-pauza — a doua apasare pe Spatiu lipseste (jocul merge cele 3 s); incapere-noua — Alt+clic-ul pe bloc
  * lipseste; U-la-3x — cifrele lui U se citesc la 400 ms DUPA starea cu care se compara (o cifra ramasa un pas in urma ar
  * arata asa, UI-3); alerta — invariantul nu se provoaca; incarca-m5 — lumea incarcata avanseaza 1686 de tickuri, nu 1687;
- * sertar — reparatia sertarului (485 px, `scrollbar-gutter`) e anulata in pagina printr-un stil.
+ * sertar — reparatia sertarului (485 px, `scrollbar-gutter`) e anulata in pagina printr-un stil. Recenzia t.2b (E3, E4,
+ * E6): filtru-bucla — cat jocul merge, `dupaTick` al filtrului oamenilor e golit in pagina (exact bucla care ar da
+ * `simTick` in locul tickului observat); exceptie-tick — exceptia din pas nu se provoaca; latime — CSS-ul randurilor fixe
+ * ale inspectorului (`nowrap` pe cele trei randuri, cele 3 randuri minime ale descompunerii) e anulat printr-un stil.
  */
 const TINTE_NEGATIVE = {
   sapa: 'sapa', pauza: 'pauza', salvare: 'salvare', desen: 'casa-desenata', exceptie: 'joc-nou',
   'se-misca': 'temperatura-se-misca', inertie: 'temperatura-inertie', 'temperatura-pauza': 'temperatura-pauza',
   'incapere-noua': 'temperatura-incapere-noua', 'U-la-3x': 'temperatura-U-la-3x', alerta: 'alerta-termica',
   'incarca-m5': 'incarca-m5', sertar: 'sertar-oameni-lung',
+  'filtru-bucla': 'filtru-bucla', 'exceptie-tick': 'exceptie-tick', latime: 'latime-inspector',
 }
 if (NEGATIVA !== null && !Object.hasOwn(TINTE_NEGATIVE, NEGATIVA)) { console.log(`proba negativa necunoscuta: ${NEGATIVA} (sunt: ${Object.keys(TINTE_NEGATIVE).join(', ')})`); process.exit(2) }
 const POZE = argv.find((a) => a.startsWith('--poze='))?.slice('--poze='.length) ?? null
@@ -1143,9 +1147,9 @@ async function paginaTermica() {
     // verificat mai jos pe graful incremental, care sta intr-un WeakMap de modul) si citirile pe Q16.
     await pT.js(`(async () => {
       const imp = (f) => import('/@fs/${REPO}/' + f)
-      const [T, S, C, Cl, Te, Cmd] = await Promise.all(['viewer/ui/texte.ts', 'src/sim/temperatura.ts', 'src/sim/camere.ts', 'src/sim/clima.ts', 'src/sim/termic.ts', 'src/sim/commands.ts'].map(imp))
+      const [T, S, C, Cl, Te, Cmd, H] = await Promise.all(['viewer/ui/texte.ts', 'src/sim/temperatura.ts', 'src/sim/camere.ts', 'src/sim/clima.ts', 'src/sim/termic.ts', 'src/sim/commands.ts', 'src/sim/hash.ts'].map(imp))
       globalThis.__t = {
-        T, S, C, Cl, Te, Cmd, casa: null, editariAmprenta: 0,
+        T, S, C, Cl, Te, Cmd, H, casa: null, editariAmprenta: 0,
         comp(x, y, z) { return C.componentaLa(__kinstead.world.camere, x, y, z) },
         compA() { const c = this.casa; return this.comp(c.x0 + 1, c.y0 + 1, c.s + 1) },
         // T, X (fara oameni), X_tot (cu oamenii aratati de filtru, ca inspectorul), afara, oamenii — Q16, din stare.
@@ -1339,6 +1343,89 @@ async function paginaTermica() {
     await pT.poza('8-temperatura-inspector.png')
   })
 
+  // --- 11b'. randurile FIXE ale inspectorului (recenzia t.2b, E6): pe ecran, in sertarul real, cu textele pe care jocul chiar
+  // le scrie — cele 40 de descompuneri distincte cele mai lungi de pe componente reale (bench/canale-lungi.mjs, scoase la
+  // FIECARE rulare: M10, casele fixturilor, mina) si variantele lor de iarna, plus randurile extreme —, apoi randul REAL fara
+  // T: casa A pierde T-ul in pauza (ca la „alerta-termica"), iar panouri.ts scrie „Temperatura nu se știe" fara clasa `num`
+  // (in monospatiat nu incape, V1). La 330 px (latimea sertarului) si la 315: butonul de sub descompunere („Arată nivelul")
+  // pe ACELASI y pentru toate, iar randurile netaiate. Textele sintetice se scriu in DOM pe rand, intr-o singura evaluare
+  // (nicio reimprospatare la mijloc), apoi se pun la loc; T-ul casei se pune la loc la final (in pauza nu ruleaza niciun pas).
+  await pas('latime-inspector', async () => {
+    const { canaleLungi } = await import('./canale-lungi.mjs')
+    const lungi = canaleLungi(40)
+    const canale = lungi.texte.map((c) => c.text)
+    // Iarna: fiecare „~N °C" negativ, pe doua cifre („~6 °C" → „~−16 °C", „~16 °C" → „~−16 °C") — cazul cel mai lat realist.
+    const iarna = canale.map((c) => c.replace(/~([0-9]+) °C/g, (_m, n) => `~−${n.length === 1 ? '1' + n : n} °C`))
+    const necunoscut = await pT.js('__t.T.TEXT_TEMPERATURA_NECUNOSCUTA')
+    // [T si afara, „trage spre", oamenii] — randuri cu T (randul 1 ramane in monospatiat, ca pe casa A).
+    const randuri = [['−16,8 °C · afară −17 °C', 'trage spre −16,8 °C ↘', 'oameni: 12 înăuntru'], ['−199,9 °C · afară −17 °C', 'trage spre: nu se știe', 'oameni: 100 înăuntru'],
+      ['4,4 °C · afară 4 °C', 'stabil', 'oameni: niciunul']]
+    // Masuratoarea, in pagina: `__t.latime(f)` pune sertarul pe 330 (latimea lui) si pe 315 px si, la fiecare, cheama `f`, care
+    // citeste y-ul butonului (`y()`) si randurile taiate (`taiat()`).
+    await pT.js(`(() => {
+      const q = (s) => document.querySelector(s)
+      __t.latime = (f) => {
+        const t = q('.ui-termic-t'), x = q('.ui-termic-x'), o = q('.ui-termic-o'), k = q('.ui-termic-canale'), dr = q('.ui-dreapta')
+        const b = [...document.querySelectorAll('.ui-inspector button')].find((e) => /Arată nivelul/.test(e.textContent))
+        if (!t || !x || !o || !k || !b || !dr) return { lipsa: [!!t, !!x, !!o, !!k, !!b, !!dr] }
+        const y = () => Math.round(b.getBoundingClientRect().y * 10) / 10
+        const taiat = () => [t, x, o].filter((e) => e.scrollWidth > e.clientWidth).map((e) => e.textContent)
+        const out = []
+        for (const latime of [null, 315]) {
+          dr.style.width = latime === null ? '' : latime + 'px'
+          out.push({ latime: Math.round(dr.getBoundingClientRect().width), ...f({ t, x, o, k, y, taiat }) })
+        }
+        dr.style.width = ''
+        return { m: out }
+      }
+      return true
+    })()`)
+    if (NEGATIVA === 'latime') await pT.js(`(() => { const s = document.createElement('style'); s.id = 'proba-latime'; s.textContent = '.ui-termic-t, .ui-termic-x, .ui-termic-o { white-space: normal !important; min-height: 0 !important } .ui-termic-canale { min-height: 0 !important }'; document.head.append(s); return true })()`)
+    let sint = null, real = null, inapoi = null, fixtura = null
+    try {
+      fixtura = await pT.js(`({ pauza: __kinstead.stare().pauza, ...__t.randuri() })`)
+      sint = await pT.js(`__t.latime(({ t, x, o, k, y, taiat }) => {
+        const vechi = [t.textContent, x.textContent, o.textContent, k.textContent]
+        const r = { ys: [], taiate: [], hMax: 0 }
+        for (const c of [...${JSON.stringify(canale)}, ...${JSON.stringify(iarna)}]) {
+          k.textContent = c
+          r.ys.push(y())
+          r.hMax = Math.max(r.hMax, Math.round(k.getBoundingClientRect().height * 10) / 10)
+        }
+        k.textContent = vechi[3]
+        for (const [a, c, d] of ${JSON.stringify(randuri)}) {
+          t.textContent = a; x.textContent = c; o.textContent = d
+          r.ys.push(y())
+          r.taiate.push(...taiat())
+        }
+        t.textContent = vechi[0]; x.textContent = vechi[1]; o.textContent = vechi[2]
+        r.ys = [...new Set(r.ys)]
+        return r
+      })`)
+      // Randul REAL fara T: slotul casei A fara temperatura (ce face un invariant), apoi reimprospatarea sertarului.
+      const id = await pT.js(`(() => { const A = __t.compA(), sl = __kinstead.world.temperatura.slot; if (A === null) return null; __t.areVechi = sl.are[A.id]; sl.are[A.id] = 0; return A.id })()`)
+      if (id !== null) {
+        try {
+          await astepta(600)
+          real = await pT.js(`__t.latime(({ t, x, o, k, y, taiat }) => ({ y: y(), taiate: taiat(), linie: t.textContent, num: t.classList.contains('num'), gol: [x.textContent, o.textContent, k.textContent].every((s) => s === '') }))`)
+        } finally {
+          await pT.js(`(() => { __kinstead.world.temperatura.slot.are[${id}] = __t.areVechi; return true })()`)
+        }
+        await astepta(600)
+        inapoi = await pT.js(`({ T: __t.casaA()?.t ?? null, ...__t.randuri() })`)
+      }
+    } finally {
+      if (NEGATIVA === 'latime') await pT.js(`(() => { document.getElementById('proba-latime')?.remove(); return true })()`)
+    }
+    const bunSint = (m) => m !== undefined && m.ys.length === 1 && m.taiate.length === 0
+    const bunReal = (m, i) => m !== undefined && m.taiate.length === 0 && m.linie === necunoscut && !m.num && m.gol && sint.m[i] !== undefined && m.y === sint.m[i].ys[0]
+    const latimi = (r) => r !== null && r.lipsa === undefined && r.m[0].latime === 330 && r.m[1].latime === 315
+    bifa('latime-inspector', fixtura !== null && fixtura.pauza && fixtura.num && latimi(sint) && sint.m.every(bunSint) && latimi(real) && real.m.every(bunReal)
+      && inapoi !== null && inapoi.T !== null && inapoi.num && inapoi.linie !== necunoscut,
+      `rândurile fixe ale inspectorului, pe ecran: ${canale.length} descompuneri reale (${canale[0]?.length}…${canale[canale.length - 1]?.length} caractere, din ${lungi.componente} componente) + ${canale.length} de iarnă + 3 rânduri extreme, apoi rândul REAL fără T (scris de panouri.ts, fără „num"), la 330 și la 315 px — butonul de sub descompunere pe ACELAȘI y, niciun rând tăiat; T-ul casei pus la loc`,
+      JSON.stringify({ fixtura, sint, real, inapoi }))
+  })
+
   // --- 11c. avansul real muta T-ul casei (spre „trage spre"), iar cifra lui U urmeaza starea ---
   await pas('temperatura-se-misca', async () => {
     let A = await casaA()
@@ -1460,14 +1547,17 @@ async function paginaTermica() {
   await pas('temperatura-pauza', async () => {
     const inst = () => pT.js(`(() => {
       const K = __kinstead, w = K.world, A = __t.compA()
-      return { tick: w.tick, pauza: K.stare().pauza, pasi: w.temperatura.stat.pasi, stat: JSON.stringify(w.temperatura.stat), graf: JSON.stringify(__t.Te.statGraf(w.camere)), casa: A === null ? null : JSON.stringify(__t.termic(A.id)),
+      return { esant: K.filtruOameni.esantioane(), tick: w.tick, pauza: K.stare().pauza, pasi: w.temperatura.stat.pasi, stat: JSON.stringify(w.temperatura.stat), graf: JSON.stringify(__t.Te.statGraf(w.camere)), casa: A === null ? null : JSON.stringify(__t.termic(A.id)),
         ecran: JSON.stringify({ valori: [...K.tempOverlay.valori].sort((a, b) => a[0] - b[0]), recolorari: K.tempOverlay.recolorari, cifre: (__t.cifre() ?? []).map((x) => x.text), randuri: __t.randuri() }) }
     })()`)
     const p0 = await inst()
+    // Sabotajul „filtru-bucla": cat jocul merge, filtrul nu mai e hranit (ca o bucla de cadre care da `simTick`, nu tickul observat).
+    if (NEGATIVA === 'filtru-bucla') await pT.js(`(() => { const f = __kinstead.filtruOameni; f.__dupaTick = f.dupaTick; f.dupaTick = () => {}; return true })()`)
     // La 1× un pas termic vine la 20 de tickuri (1 s): 1,5 s pornit cuprinde cel putin unul.
     await pT.tasta(' ')
     await astepta(1500)
     const p1 = await inst()
+    if (NEGATIVA === 'filtru-bucla') await pT.js(`(() => { const f = __kinstead.filtruOameni; f.dupaTick = f.__dupaTick; delete f.__dupaTick; return true })()`)
     if (NEGATIVA !== 'temperatura-pauza') await pT.tasta(' ')
     await astepta(400)
     const a = await inst()
@@ -1477,6 +1567,10 @@ async function paginaTermica() {
     bifa('temperatura-pauza', p0.pauza && !p1.pauza && p1.pasi > p0.pasi && a.pauza && b.pauza && a.tick === b.tick && a.stat === b.stat && a.graf === b.graf && a.casa === b.casa && a.ecran === b.ecran,
       'pauza (Spatiu): 3 s fara niciun pas termic si fara refacere de graf (contoarele simularii identice), T si X ale casei identice pe Q16, la fel cifrele lui U, recolorarile si randurile inspectorului; cu jocul pornit, pasii cresc (contorul e viu)',
       JSON.stringify({ pornit: { pasi: [p0.pasi, p1.pasi], pauza: [p0.pauza, p1.pauza] }, pauza: { tick: [a.tick, b.tick], pasi: [a.pasi, b.pasi], statEgal: a.stat === b.stat, grafEgal: a.graf === b.graf, casaEgala: a.casa === b.casa, ecranEgal: a.ecran === b.ecran } }))
+    // Recenzia t.2b, E3: cu jocul pornit (bucla de cadre, nu avanseaza), filtrul oamenilor ia cate un esantion la FIECARE pas
+    // termic — pionul casei e sigilat, deci un filtru nehranit ar arata la fel; aici se numara esantioanele.
+    bifa('filtru-bucla', p1.esant - p0.esant >= 1 && p1.esant - p0.esant === p1.pasi - p0.pasi,
+      'cu jocul pornit (bucla de cadre), filtrul oamenilor primeste exact cate un esantion pe pas termic', JSON.stringify({ esant: [p0.esant, p1.esant], pasi: [p0.pasi, p1.pasi] }))
   })
 
   // --- 11i. cu jocul pornit la 3×: fiecare cifra a lui U == T-ul din stare, la fiecare citire (UI-3) ---
@@ -1548,8 +1642,9 @@ async function paginaTermica() {
     for (let i = 0; i < 3 && await pT.js('__kinstead.ui.modalDeschis()'); i++) await pT.tasta('Escape')
     const nr = (s) => Number(/\((\d+)\)/.exec(s)?.[1] ?? 0)
     bifa('alerta-termica', inainte.inv === 0 && faraT >= 1 && pasul.rulate === 20 && dupa.inv >= 1 && /componenta fara T/.test(dupa.ultimul) && noi.length === 1 && noi[0].startsWith('[temperatura] invariant incalcat')
-      && nr(dupa.jurnal) >= nr(inainte.jurnal) + 1 && jurnal.includes(dupa.asteptat) && dupa.toast && dupa.f3warn && /invarianti [1-9]/.test(dupa.f3) && dupa.T !== null,
-      'un invariant provocat prin __kinstead (componenta fara T): U n-o deseneaza, pasul il numara si il repara, iar ecranul il spune — o intrare in Jurnal cu textul erorii interne, toastul, UN console.error „[temperatura] invariant incalcat", randul F3 rosu',
+      && nr(dupa.jurnal) >= nr(inainte.jurnal) + 1 && jurnal.includes(dupa.asteptat) && dupa.toast && dupa.f3warn && /invarianti [1-9]/.test(dupa.f3) && dupa.T !== null
+      && / · taieri [0-9]+ · neconvergente [0-9]+ · rest normalizat [0-9]+ · graf diferit la salvare [0-9]+/.test(dupa.f3),
+      'un invariant provocat prin __kinstead (componenta fara T): U n-o deseneaza, pasul il numara si il repara, iar ecranul il spune — o intrare in Jurnal cu textul erorii interne, toastul, UN console.error „[temperatura] invariant incalcat", randul F3 rosu (cu taierile, neconvergentele, resturile normalizate si graful diferit la salvare)',
       JSON.stringify({ tinta, faraT, inainte, dupa, consola: noi, jurnal: jurnal.slice(0, 200) }))
     // Erorile ASTEPTATE ies din lista: „consola-termica" de la final vede doar ce n-a provocat proba.
     for (let i = pT.erori.length - 1; i >= n0; i--) if (pT.erori[i].startsWith('[temperatura] invariant incalcat')) pT.erori.splice(i, 1)
@@ -1583,6 +1678,48 @@ async function paginaTermica() {
     bifa('temperatura-inertie', Math.abs(A.afara - A.t) >= Q && Math.abs(A.afara - A.xTot) >= Q && px !== null && ok,
       'gaura in acoperis (Alt+clic, in pauza; precondiții |afară − T| ≥ 1 °C si |afară − X| ≥ 1 °C): T-ul casei NU sare spre X — se muta doar cu masa podelei care iese, pe hartie (±0,005 °C) —, „trage spre" se muta spre aerul de afara; dupa o ora de avans real, T e mai aproape de X',
       JSON.stringify({ px, preconditie: pre.length, inainte: { T: grade(A.t), Xtot: grade(A.xTot), afara: grade(A.afara), volum: A.volum }, gaura: { T: grade(A1?.t), hartie: grade(tHartie), Xtot: grade(A1?.xTot), afara: grade(A1?.afara), volum: A1?.volum, deschise: A1?.deschise, tSol0: grade(h.ts) }, oOraDupa: { T: grade(A2?.t), Xtot: grade(A2?.xTot) } }))
+  })
+
+  // --- 11m. o exceptie in tick() (ULTIMA: simularea ramane oprita pe pagina; recenzia t.2b, E3 si E4) ---
+  // Eroarea de program, simulata TRECATOARE: prima citire a lui `pragBigInt` intr-un tick de pas (tick % 20 == 0) arunca,
+  // apoi nu — fara nimic stricat in stare. Exceptia vine dupa `stepAgents`, deci lumea ramane pe jumatate de tick: jocul
+  // trece pe pauza, iar Spatiu, 3×, avansul de proba, Ctrl+S si salvarea automata nu mai ating nici lumea, nici salvarile.
+  await pas('exceptie-tick', async () => {
+    const n0 = pT.erori.length
+    const salvari = async () => (await pT.js('__f.salvari()')).map((s) => `${s.id}@${s.tick}`).sort()
+    const s0 = await salvari()
+    const j0 = await pT.js(`document.querySelector('.ui-alerte-antet button')?.textContent ?? ''`)
+    if (NEGATIVA !== 'exceptie-tick') await pT.js(`(() => { const st = __kinstead.world.temperatura, v = st.pragBigInt; let rau = 1; Object.defineProperty(st, 'pragBigInt', { configurable: true, get() { if (rau > 0 && __kinstead.world.tick % 20 === 0) { rau--; throw new Error('proba: eroare in pas') } return v } }); return true })()`)
+    if (await pT.js('__kinstead.stare().pauza')) await pT.tasta(' ')
+    for (let j = 0; j < 40 && !(await pT.js('__kinstead.stare().pauza')); j++) await astepta(100)
+    await astepta(500)
+    const stare = () => pT.js(`({ pauza: __kinstead.stare().pauza, tick: __kinstead.world.tick, hash: __t.H.hashWorld(__kinstead.world), f3: document.getElementById('termic')?.textContent ?? '', f3warn: document.getElementById('termic')?.className === 'warn', jurnal: document.querySelector('.ui-alerte-antet button')?.textContent ?? '', toasturi: [...document.querySelectorAll('.ui-toast')].map((e) => e.textContent) })`)
+    const a = await stare()
+    // Spatiu, apoi 3×: refuzate; avansul de proba: niciun tick.
+    await pT.tasta(' ')
+    await astepta(1000)
+    await pT.tasta('3')
+    await astepta(1000)
+    const av = await pT.js('__kinstead.avanseaza(20)')
+    const b = await stare()
+    // Ctrl+S: refuzat, cu mesajul. Salvarea automata: 11 minute de joc sarite pe ceas (ca la 10c), in pauza — momentul ei.
+    await pT.tasta('s', ['control'])
+    await astepta(800)
+    await pT.js('__kinstead.world.tick += 20 * 60 * 11; true')
+    await astepta(1500)
+    const c = { salvari: await salvari(), toasturi: await pT.js(`[...document.querySelectorAll('.ui-toast')].map((e) => e.textContent)`) }
+    const noi = pT.erori.slice(n0)
+    const alerta = await pT.js('__t.T.textEroareSimulare()')
+    const refuz = await pT.js('__t.T.textSimulareOprita()')
+    const nr = (s) => Number(/[(]([0-9]+)[)]/.exec(s)?.[1] ?? 0)
+    bifa('exceptie-tick', a.pauza && /exceptii 1/.test(a.f3) && /simularea OPRITA/.test(a.f3) && a.f3warn && nr(a.jurnal) >= nr(j0) + 1 && a.toasturi.includes(alerta)
+      && noi.length === 1 && noi[0].startsWith('[simulare] exceptie in tick')
+      && b.pauza && b.tick === a.tick && b.hash === a.hash && av.rulate === 0 && b.toasturi.includes(refuz)
+      && JSON.stringify(c.salvari) === JSON.stringify(s0) && c.toasturi.includes(`Salvarea n-a mers: ${refuz}`) && !c.toasturi.some((t) => t.startsWith('Salvarea automată')),
+      'o exceptie in tick(), cu jocul pornit: pauza, UN console.error „[simulare] exceptie in tick", alerta in Jurnal si toast („încarcă ultima salvare"), F3 „exceptii 1 · simularea OPRITA"; apoi Spatiu si 3× refuzate, avansul de proba 0 tickuri — tickul si hashWorld nu se misca —, Ctrl+S refuzat cu mesajul, salvarea automata suspendata (nicio salvare scrisa)',
+      JSON.stringify({ a: { ...a, hash: undefined }, b: { pauza: b.pauza, tick: b.tick, hashEgal: b.hash === a.hash, toasturi: b.toasturi }, avans: av, salvari: { inainte: s0.length, dupa: c.salvari.length, egale: JSON.stringify(c.salvari) === JSON.stringify(s0) }, toasturi: c.toasturi, consola: noi }))
+    // Erorile ASTEPTATE ies din lista (vezi „alerta-termica").
+    for (let i = pT.erori.length - 1; i >= n0; i--) if (pT.erori[i].startsWith('[simulare] exceptie in tick')) pT.erori.splice(i, 1)
   })
   if (pT.erori.length) bifa('consola-termica', false, 'fara erori in consola (pagina termica)', pT.erori.join(' | '))
 }
