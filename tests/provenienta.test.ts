@@ -571,6 +571,11 @@ test('PROVENIENTA oracol: pe un lot DOAR-FETE (fill PIATRA pe apa de sub podeaua
   }
   for (let z = -39; z <= -38; z++) for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) if (dx === 0 || dy === 0 || dx === 4 || dy === 4) ok(fill(t, x0 + dx, y0 + dy, z, P), 'perete')
   for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) ok(fill(t, x0 + dx, y0 + dy, -37, P), 'acoperis')
+  // Indexul construit de la ZERO, ca la o încărcare: obiectele componentelor n-au C' memorat, deci primul lot doar-fețe
+  // adună C'-ul pe toate bucățile (calea plină, unde stă proba IDX-3 a înregistrării de dinainte de D+), iar următoarele
+  // două iau memoria de pe obiect (PROV-3). Pe indexul lumii, casa zidită intra în memorie la zidire, iar proba IDX-3 ieșea
+  // RATATĂ pe acest test (prinsă doar de alte 8 din fișier; F1, 10.10).
+  w.camere = construiesteCamere(t, R.termic.kCelule, R.termic.dSolMasivM)
   const b = new Banca(w, cutie(x0, y0, -40, x0 + 4, y0 + 4, -37))
   const epoca = w.camere.epoca
   const sch = b.lot(() => ok(fill(t, x0 + 2, y0 + 2, -40, P), 'fill pe apa'), 'fill pe apa')
