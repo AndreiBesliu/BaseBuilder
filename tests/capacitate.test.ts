@@ -17,11 +17,11 @@ import { ziuaValului } from '../src/sim/clima.ts'
 import type { Componenta } from '../src/sim/camere.ts'
 import { celuleComponentei, componentaLa, construiesteCamere, decodeazaCelula, listaComponente, sincronizeazaCamere } from '../src/sim/camere.ts'
 import type { ContoareMasa } from '../src/sim/fete.ts'
-import { capacitateMu, contoareComponentei, D_SOL_MASIV_IMPLICIT, formaCanonicaFete, formaCanonicaFeteRecalculata } from '../src/sim/fete.ts'
+import { capacitateMu, ClasaMasei, clasaMasei, contoareComponentei, D_SOL_MASIV_IMPLICIT, formaCanonicaFete, formaCanonicaFeteRecalculata } from '../src/sim/fete.ts'
 import { decode, encode } from '../src/sim/save.ts'
 import { pasTermic, sincronizeazaLumea, temperaturaLaEchilibru } from '../src/sim/temperatura.ts'
 import type { World } from '../src/sim/state.ts'
-import { eSolNatural, Material } from '../src/sim/terrain/chunk.ts'
+import { Material, MATERIAL_MAX } from '../src/sim/terrain/chunk.ts'
 import { bazaVoxeli, dig, fill, groundLevelM, materialAt, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 import { createWorld } from '../src/sim/world.ts'
 import type { CasaTermica } from './fixturi-temperatura.ts'
@@ -40,6 +40,12 @@ function contoare(w: World, x: number, y: number, z: number): ContoareMasa {
   assert.ok(n.ok, JSON.stringify(n))
   return { nAer: n.value.nAer, nConstr: n.value.nConstr, nSolMasiv: n.value.nSolMasiv, nApa: n.value.nApa }
 }
+
+/**
+ * Solul natural al numărătorii independente, scris AICI (§4: ROCA, PĂMÂNT, IARBĂ) — nu `eSolNatural`, funcția producției:
+ * o numărătoare care împarte clasificarea cu codul probat nu e independentă (PROV-2).
+ */
+const SOL_NATURAL: ReadonlySet<number> = new Set([Material.ROCA, Material.PAMANT, Material.IARBA])
 
 /**
  * Numărătoarea INDEPENDENTĂ a componentei (design §4, din materialAt și din heightfield): fiecare celulă, apoi
@@ -73,7 +79,7 @@ function numaraIndependent(w: World, c: Componenta, dSolMasiv: number): Contoare
       }
       if (m === Material.AER) continue
       if (m === Material.APA) n.nApa++
-      else if (eSolNatural(m) && d >= dSolMasiv) n.nSolMasiv++
+      else if (SOL_NATURAL.has(m) && d >= dSolMasiv) n.nSolMasiv++
       else n.nConstr++
     }
   }
@@ -95,6 +101,40 @@ function egalCuRecalculul(w: World, mesaj: string): void {
 }
 
 // --- contoarele, pe hârtie ------------------------------------------------------------
+
+/**
+ * Clasa de masă a FIECĂRUI material, scrisă aici după tabelul §4 (nu din `eSolNatural` / `esteMaterialDeStructura`):
+ * construit (PIATRA, GRINDA, UȘA, LEMN, MOLOZ) → CONSTR la orice adâncime; solul natural → SOL_SUPRAFATA sub `dSolMasiv`,
+ * SOL_MASIV de la el; apa → APA; aerul → nimic. Cheile sunt exact 0..MATERIAL_MAX: un material nou fără rând înroșește testul.
+ */
+const SOL = 'sol' as const
+const CLASA_PE_HARTIE: Readonly<Record<number, number | typeof SOL>> = {
+  [Material.AER]: ClasaMasei.NIMIC,
+  [Material.ROCA]: SOL,
+  [Material.PAMANT]: SOL,
+  [Material.IARBA]: SOL,
+  [Material.APA]: ClasaMasei.APA,
+  [Material.LEMN_CONSTRUIT]: ClasaMasei.CONSTR,
+  [Material.PIATRA_CONSTRUITA]: ClasaMasei.CONSTR,
+  [Material.MOLOZ]: ClasaMasei.CONSTR,
+  [Material.GRINDA]: ClasaMasei.CONSTR,
+  [Material.USA]: ClasaMasei.CONSTR,
+}
+
+test('CAPACITATE pe hartie: clasa de masa a fiecarui material (§4, PROV-2) — un rand pe fiecare material 0..MATERIAL_MAX; construit (PIATRA, GRINDA, USA, LEMN, MOLOZ) CONSTR la orice adancime, solul natural SOL_SUPRAFATA sub dSolMasiv si SOL_MASIV de la el, apa APA, aerul nimic — la d {0, dSol−1, dSol, dSol+1, 64}, dSolMasiv 1 si 3', () => {
+  // Până la PROV-2, GRINDA/LEMN → SOL_SUPRAFATA (aceeași masă, doar rutarea C3) și MOLOZ → SOL_MASIV (masă ×16,7) treceau
+  // toată suita: nicio scenă nu le punea lângă aer acoperit, iar oracolele foloseau `eSolNatural`, ca producția.
+  assert.deepEqual(Object.keys(CLASA_PE_HARTIE).map(Number).sort((a, b) => a - b), Array.from({ length: MATERIAL_MAX + 1 }, (_, i) => i), 'un rand pentru fiecare material')
+  for (const dSol of [1, 3]) {
+    for (let m = 0; m <= MATERIAL_MAX; m++) {
+      for (const d of [0, dSol - 1, dSol, dSol + 1, 64]) {
+        const e = CLASA_PE_HARTIE[m]!
+        const astept = e === SOL ? (d >= dSol ? ClasaMasei.SOL_MASIV : ClasaMasei.SOL_SUPRAFATA) : e
+        assert.equal(clasaMasei(m, d, dSol), astept, `materialul ${m} la d ${d} (dSolMasiv ${dSol})`)
+      }
+    }
+  }
+})
 
 test('CAPACITATE pe hartie: casa de piatra 5x5x2 cu usa — 50 de celule de aer si 90 de fete cu masa constructiei (65 de pereti, usa si acoperis + 25 de podea IARBA la d 0, stratul de suprafata), C\' = 50·16 + 90·238 = 22.220 μ', () => {
   const s = casaTermica()

@@ -4,8 +4,12 @@
  * Commit-ul 1, capacitatea (§4): masele pe clasa derivate la parsare (src/sim/content.ts), clasa de masa a unei
  * fete si contoarele pe bucata (src/sim/fete.ts), dSolMasivM luat din content (world.ts, save.ts), calibrarea
  * (τ pe scenele numite, valul de frig pe benzi). Contoarele ținute la zi le prinde oracolul fetelor (forma
- * canonica le poarta); clasificarea, fiind aceeasi in ambele parti ale oracolului, o prind testele pe HARTIE si
- * numaratoarea independenta (materialAt + groundLevelM + bazaVoxeli).
+ * canonica le poarta). Clasificarea (aceeasi in ambele parti ale oracolului fetelor) o prinde TABELUL pe hartie al
+ * clasei, exhaustiv pe 0..MATERIAL_MAX (tests/capacitate.test.ts), iar in context fuzzul de suprafata al provenientei,
+ * care umple cu toate materialele construibile. Oracolele nu impart `eSolNatural` cu productia: numaratoarea
+ * independenta (materialAt + groundLevelM + bazaVoxeli) si oracolul provenientei isi scriu lista solului natural.
+ * Pana la recenzia PROV-2 antetul spunea ca „testele pe hartie si numaratoarea independenta" prind clasificarea:
+ * era fals pentru GRINDA, LEMN, MOLOZ si pentru `eSolNatural` insusi (mutantii treceau 1056/1056).
  *
  * Commit-ul 2, proveninta (§3): jurnalul cu materialul vechi (terrain.ts), evidenta C3 a maselor pe lot
  * (fete.ts, camere.ts) si aritmetica (temperatura.ts). Le prinde oracolul pe forta bruta din
@@ -76,6 +80,35 @@ export const MUTATII = [
     a: '  if (m === Material.APA) return ClasaMasei.APA',
     b: '  if (m === Material.APA) return ClasaMasei.SOL_MASIV',
     t: TC, e: 'CAPACITATE pe hartie: pivnita 3x3x2 sapata direct sub apa',
+  },
+  // PROV-2: clasa fiecarui material construibil sau ramas din joc (GRINDA e piesa de azi, MOLOZ vine din prabusire).
+  {
+    n: 't.2b §4, PROV-2: GRINDA clasificata sol de suprafata (aceeasi masa, dar intra si iese la T_sol)',
+    f: F,
+    a: '  return ClasaMasei.CONSTR',
+    b: '  return m === Material.GRINDA ? ClasaMasei.SOL_SUPRAFATA : ClasaMasei.CONSTR',
+    t: TC, e: 'CAPACITATE pe hartie: clasa de masa a fiecarui material',
+  },
+  {
+    n: 't.2b §4, PROV-2: LEMN clasificat sol de suprafata (aceeasi masa, rutarea C3 la T_sol)',
+    f: F,
+    a: '  return ClasaMasei.CONSTR',
+    b: '  return m === Material.LEMN_CONSTRUIT ? ClasaMasei.SOL_SUPRAFATA : ClasaMasei.CONSTR',
+    t: TP, e: 'PROVENIENTA oracol: fuzzul de SUPRAFATA',
+  },
+  {
+    n: 't.2b §4, PROV-2: MOLOZ clasificat sol masiv (masa ×16,7, intrarea la T_sol)',
+    f: F,
+    a: '  return ClasaMasei.CONSTR',
+    b: '  return m === Material.MOLOZ ? ClasaMasei.SOL_MASIV : ClasaMasei.CONSTR',
+    t: TP, e: 'PROVENIENTA oracol: fuzzul de SUPRAFATA',
+  },
+  {
+    n: 't.2b §4, PROV-2: eSolNatural extins cu MOLOZ (oracolele care o imparteau cu productia erau oarbe)',
+    f: 'src/sim/terrain/chunk.ts',
+    a: '  return m === Material.ROCA || m === Material.PAMANT || m === Material.IARBA',
+    b: '  return m === Material.ROCA || m === Material.PAMANT || m === Material.IARBA || m === Material.MOLOZ',
+    t: TP, e: 'PROVENIENTA oracol: fuzzul de SUPRAFATA',
   },
   {
     n: 't.2b §4: aerul celulei nu intra in capacitate',

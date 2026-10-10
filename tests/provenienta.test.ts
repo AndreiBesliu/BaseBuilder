@@ -76,11 +76,18 @@ function adancime(w: World, x: number, y: number, z: number): number {
   return Math.max(0, Math.min(64, g.value - z))
 }
 
+/**
+ * Solul natural, scris în oracol (§4: ROCA, PĂMÂNT, IARBĂ) — NU `eSolNatural`, funcția producției: un oracol care
+ * împarte clasificarea cu codul probat e orb exact la greșelile ei (PROV-2: `eSolNatural` extins cu MOLOZ trecea toată
+ * suita).
+ */
+const SOL_NATURAL_ORACOL: ReadonlySet<number> = new Set([Material.ROCA, Material.PAMANT, Material.IARBA])
+
 /** Clasa de masă, scrisă din nou după tabelul §4: 0 nimic, 1 construit, 2 sol de suprafață, 3 sol masiv, 4 apă. */
 function clasaOracol(m: number, d: number): number {
   if (m === Material.AER) return 0
   if (m === Material.APA) return 4
-  if (eSolNatural(m)) return d >= R.termic.dSolMasivM ? 3 : 2
+  if (SOL_NATURAL_ORACOL.has(m)) return d >= R.termic.dSolMasivM ? 3 : 2
   return 1
 }
 
@@ -505,7 +512,14 @@ test('PROVENIENTA oracol: casa peste pivnita — pivnita sapata, casa zidita pes
   assert.ok(b.ev.peLoc > 0 && b.ev.uniri > 0 && b.ev.moarte > 0, JSON.stringify(b.ev))
 })
 
-test('PROVENIENTA oracol: fuzzul de SUPRAFATA — umpleri si sapaturi in loturi de 1–4, pe varful coloanelor peste o pivnita si o camera zidita, de-a curmezisul unei granite de bloc', () => {
+/**
+ * Umpluturile fuzzului de suprafață: toate materialele construibile sau rămase din joc (PIATRA, PĂMÂNT, UȘA, GRINDA, MOLOZ
+ * din prăbușire, LEMN), nu doar PIATRA și PĂMÂNT — clasa de masă a GRINZII, a MOLOZULUI și a LEMNULUI n-o vedea nicio
+ * poartă (PROV-2). Un singur `rnd()` pe alegere, ca înainte.
+ */
+const UMPLUTURI = [P, Material.PAMANT, Material.USA, Material.GRINDA, Material.MOLOZ, Material.LEMN_CONSTRUIT] as const
+
+test('PROVENIENTA oracol: fuzzul de SUPRAFATA — umpleri (cu toate materialele construibile) si sapaturi in loturi de 1–4, pe varful coloanelor peste o pivnita si o camera zidita, de-a curmezisul unei granite de bloc', () => {
   for (const seed of [12345, 777]) {
     const { w, wx, wy, g } = sitPlat(seed, 24)
     const t = w.terrain
@@ -527,7 +541,7 @@ test('PROVENIENTA oracol: fuzzul de SUPRAFATA — umpleri si sapaturi in loturi 
           while (z > g - 4 && materialConv(w, x, y, z) === Material.AER) z--
           if (rnd() < 0.5) {
             if (z > g - 4 && materialConv(w, x, y, z) !== Material.APA) dig(t, x, y, z)
-          } else if (z + 1 <= g + 4) fill(t, x, y, z + 1, rnd() < 0.5 ? P : Material.PAMANT)
+          } else if (z + 1 <= g + 4) fill(t, x, y, z + 1, UMPLUTURI[Math.floor(rnd() * UMPLUTURI.length)]!)
         }
       }, `seed ${seed} lotul ${lot}`)
     }
