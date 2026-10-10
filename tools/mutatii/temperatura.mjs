@@ -14,6 +14,11 @@
  * Commit-ul 2, proveninta (§3): jurnalul cu materialul vechi (terrain.ts), evidenta C3 a maselor pe lot
  * (fete.ts, camere.ts) si aritmetica (temperatura.ts). Le prinde oracolul pe forta bruta din
  * tests/provenienta.test.ts (evidenta exacta, T, energia), poarta pompei si scenele de rezerva si de recalcul.
+ *
+ * Poarta pompei probeaza doar ciclurile de UN fel (sapat + astupat): acolo C3 n-are pompa. Ciclurile INCRUCISATE
+ * (zidit → sapat → scos → astupat, sau doar piatra pusa si scoasa pe comenzi) POMPEAZA — regula, nu codul (recenzia
+ * PROV-1). C3 s-a pastrat (decizia lead-ului, 10.10); testele „POMPA C3" fixeaza cifrele masurate ca verdict, iar
+ * probele lor (C4 pe jumatate, regula B cu timpul pornit) arata ca o alta regula le inroseste.
  */
 
 const TC = 'tests/capacitate.test.ts'
@@ -238,6 +243,22 @@ export const MUTATII = [
     b: '  const ramas = capacitateMu(s.persista, rules.termic.mase)',
     e2: [{ f: 'src/sim/temperatura.ts', a: '  return adun(peRamas, neg(energiaSolului(s.solIese, tick, rules, c)), c)', b: '  return peRamas' }],
     t: TP, e: 'POARTA POMPEI',
+  },
+  // PROV-1 (decizia lead-ului: C3 se pastreaza): verdictele pompei incrucisate, pe acelasi tick si cu timpul pornit.
+  {
+    n: 't.2b §3, PROV-1: C4 pe jumatate — masa aparuta intra la T_afara, nu la T-ul rezultat (verdictul se schimba)',
+    f: 'src/sim/temperatura.ts',
+    a: '  if (W > 0) return descompune(W === Cy ? h : rs(inm(h, Cy, c), W, c), Cy)',
+    b: '  if (W > 0) return descompune(adun(h, inm(capacitateMu(y.aparuta, mase), tAfara(seed, tick, rules), c), c), Cy)',
+    t: TP, e: 'POMPA C3 — verdictul pe acelasi tick',
+  },
+  {
+    n: 't.2b §3, PROV-1: regula B cu timpul pornit — solul iese la T-ul incaperii (verdictul limitei se schimba)',
+    f: 'src/sim/temperatura.ts',
+    a: '  const ramas = capacitateMu(s.persista, rules.termic.mase) + masaSolului(s.solIese, rules)',
+    b: '  const ramas = capacitateMu(s.persista, rules.termic.mase)',
+    e2: [{ f: 'src/sim/temperatura.ts', a: '  return adun(peRamas, neg(energiaSolului(s.solIese, tick, rules, c)), c)', b: '  return peRamas' }],
+    t: TP, e: 'POMPA C3 cu timpul pornit',
   },
   {
     n: 't.2b §3, IDX-7: peLoc pastreaza T (id pastrat luat drept „aceeasi incapere")',

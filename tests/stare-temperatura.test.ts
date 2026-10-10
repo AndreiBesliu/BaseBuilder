@@ -15,9 +15,9 @@ import { Material } from '../src/sim/terrain/chunk.ts'
 import { dig, fill } from '../src/sim/terrain/terrain.ts'
 import { construiesteGrafIncremental, formaCanonicaGrafIncremental, grafulIncremental, regimPermanent, statGraf } from '../src/sim/termic.ts'
 import type { GrafIncremental } from '../src/sim/termic.ts'
-import { pasTermic, PLAFON_ECHILIBRU, sincronizeazaLumea, statTermic, temperaturaLaEchilibru, verificaStampila } from '../src/sim/temperatura.ts'
+import { MOTIV_TAIERE, pasTermic, PLAFON_ECHILIBRU, sincronizeazaLumea, statTermic, T_SIGURANTA, temperaturaLaEchilibru, verificaStampila } from '../src/sim/temperatura.ts'
 import { createWorld, tick } from '../src/sim/world.ts'
-import { casaTermica } from './fixturi-temperatura.ts'
+import { casaPompei, casaTermica, cicluIncrucisat, comanda, oraDeVara } from './fixturi-temperatura.ts'
 import { bun, faraInvarianti, hotel, laEchilibru, tPeAncora } from './fixturi-pas.ts'
 import { R } from './fixturi.ts'
 
@@ -204,6 +204,40 @@ test('STARE migrarea (schema 7 -> 8, §7): o salvare fara blocul temperaturii po
   assert.ok(verificaStampila(d).ok)
   for (let i = 0; i < 40; i++) tick(d, R)
   faraInvarianti(d, 'dupa incarcare')
+})
+
+test('STARE plasa de siguranta ±1000 °C (PROV-1 b): exploitul pompei C3 — ciclul incrucisat K=24, o comanda pe tick, cu timpul pornit — T nu trece de 1000 °C dupa nicio comanda si niciun tick, fiecare taiere numarata (taieri, invariant); salvarea merge, iar lumea incarcata continua identic', () => {
+  // Măsurat (10.10, F1): FĂRĂ plasă, T trece de 1000 °C la tickul 8.272 și ajunge la 249.724 °C la 20.000, iar `encode`
+  // aruncă („temperatura nu se poate salva (temperaturi.t)", T ≥ 2^31 Q16 = 32.768 °C) — la nesfârșit, cât ține jocul.
+  const c = casaPompei(24, oraDeVara(15))
+  const w = c.w
+  const prog = cicluIncrucisat(c)
+  let max = -Infinity
+  const vede = (): void => {
+    const t = w.temperatura.slot.t[c.id()]!
+    if (t > max) max = t
+  }
+  let j = 0
+  const pas = (x: typeof w, k: number): void => {
+    comanda(x, prog[k % prog.length]!)
+    if (x === w) vede()
+    tick(x, R)
+    if (x === w) vede()
+  }
+  for (let i = 0; i < 10000; i++) pas(w, j++)
+  assert.ok(max <= T_SIGURANTA, `T a trecut de plasa: ${max / 65536} °C`)
+  assert.equal(max, T_SIGURANTA, 'fixtura: pompa a ajuns la plasa')
+  const st = statTermic(w)
+  assert.ok(st.taieri > 0, JSON.stringify(st))
+  assert.equal(st.invarianti, st.taieri, 'fiecare taiere e un invariant (un lot sau un pas taie o singura componenta aici)')
+  assert.equal(st.ultimulInvariant, MOTIV_TAIERE)
+  // Salvarea merge, iar lumea încărcată continuă identic (plasa e în lumea continuă și în cea încărcată, deterministă).
+  const d = bun(decode(encode(w), R), 'decode')
+  for (let i = 0; i < 400; i++) {
+    pas(w, j)
+    pas(d, j++)
+  }
+  assert.deepEqual(tPeAncora(d), tPeAncora(w))
 })
 
 test('STARE temperaturaLaEchilibru cere indexul la zi (refuz), iar la plafon (SAV-9) da ultima iterata, determinista, cu contor — hotelul 10x10x4 la 3 treceri', () => {

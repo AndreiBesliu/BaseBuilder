@@ -32,6 +32,11 @@
  * - Un invariant încălcat dă `INVARIANT_INCALCAT`, dar NU aruncă din `tick()`: se numără în `statTermic(w).invarianti`
  *   (cu motivul în `ultimulInvariant`), graful se reface integral, temperaturile pierdute se reiau de la echilibru, și
  *   simularea continuă. `encode` aruncă (o salvare nu se scrie dintr-o stare care nu e a lumii).
+ * - **Plasa de siguranță** (PROV-1 b): după proveniență și după pas, un |T| peste `T_SIGURANTA` (1000 °C) se taie la el,
+ *   cu restul 0 — numărat în `taieri` și ca invariant (alerta). Regula C3 păstrată are o pompă încrucișată (zidit →
+ *   săpat → scos → astupat urcă T-ul pe același tick; tests/provenienta.test.ts, „POMPA C3"): un exploit deliberat (8+
+ *   pioni pe același ciclu, ore în șir) ar duce T-ul peste marginea salvabilă (2^31 Q16 = 32.768 °C), iar `encode` ar
+ *   arunca la nesfârșit. Plasa ține starea salvabilă oricât ar pompa cineva.
  *
  * ## Starea pe slot
  *
@@ -45,6 +50,12 @@
  * - orice altă masă care dispare iese la T-ul sursei ei (nu schimbă T-ul celor rămase);
  * - orice altă masă care apare (construcția nouă, aerul unei celule alipite) ia T-ul REZULTAT și nu intră în ponderi;
  * - ponderea unei surse = masa ei care PERSISTĂ (`P_{s→Y}`, din evidența maselor a sincronizării).
+ *
+ * Solul (aditiv, la T_sol) și construcția (neutră, la T-ul de atunci) NU comută: ciclurile încrucișate pe aceeași
+ * geometrie — zidit → săpat → scos → astupat, sau pietre puse și scoase pe rând — POMPEAZĂ (recenzia PROV-1; vara, 8 pietre
+ * într-o casă la 20 °C: +4,9 °C în 20 de cicluri pe același tick, +4,3 °C în 24 h cu o comandă la 20 de tickuri). C3 s-a
+ * păstrat (decizia din 10.10: C4 comută, dar holul zidit iarna urcă cu +12,6…+27,7 °C și decizia 3 se rupe); verdictele
+ * sunt în tests/provenienta.test.ts („POMPA C3"), iar plasa de siguranță ține starea salvabilă.
  *
  * Pe un lot: `Ĥ_s = H_s·(P_s + S_s)/C'_s − Σ_{sol care iese} m·T_sol(d)` (S_s = solul care iese; ce rămâne din
  * C'_s iese la T_s) rămâne pe masa persistentă `P_s`; `H_Y^cunoscut = Σ_s Ĥ_s·P_{s→Y}/P_s + Σ_{sol care intră}
@@ -341,6 +352,28 @@ export const PRAG_NUMBER = 4_503_599_627_370_496
 /** Plafonul trecerilor Gauss–Seidel ale echilibrului „lumii fără istorie" (§7, SAV-9): determinist, nu un număr de joc. */
 export const PLAFON_ECHILIBRU = 5000
 
+/**
+ * Plasa de siguranță a temperaturii (PROV-1 b): 1000 °C în Q16. O constantă de SIGURANȚĂ, nu de joc — nicio regulă nu se
+ * sprijină pe ea. T-ul jocului stă în marginea climei (±45,6 °C) plus căldura oamenilor (o nișă cu 6 pioni: 72 °C, recenzia
+ * PAS); 1000 °C e de peste 13 ori peste orice T fizic al jocului și de 32 de ori sub marginea salvabilă (2^31 Q16 =
+ * 32.768 °C, pe care `encode` o refuză). Un T dincolo de ea vine doar dintr-o pompă (C3, cicluri încrucișate deliberate)
+ * sau dintr-un content instabil; se taie, cu restul 0, și se numără (`taieri`, plus un invariant).
+ */
+export const T_SIGURANTA = 65_536_000
+
+/** Motivul invariantului plasei de siguranță (jurnalul, F3). */
+export const MOTIV_TAIERE = 'T taiat la plasa de siguranta (±1000 °C)'
+
+/** Taie T-ul slotului `id` la ±`T_SIGURANTA` (restul 0). Întoarce true dacă a tăiat. */
+function taieT(sl: TemperaturiSlot, id: number): boolean {
+  const t = sl.t[id]!
+  if (t > T_SIGURANTA) sl.t[id] = T_SIGURANTA
+  else if (t < -T_SIGURANTA) sl.t[id] = -T_SIGURANTA
+  else return false
+  sl.rest[id] = 0
+  return true
+}
+
 /** Ștampila sincronizării: OBIECTUL indexului și contoarele lui la ultima trecere prin punctul unic. TRANSIENT. */
 export interface StampilaTemperaturii {
   readonly idx: IndexCamere
@@ -389,13 +422,18 @@ export interface StatTermic {
   ultimaDiferentaGraf: string
   /** La încărcare: componente cu restul pus la 0 fiindcă amprenta C' a salvării nu e a lumii (alt content sau cod; SAV-2). */
   restNormalizat: number
+  /**
+   * T-uri tăiate la plasa de siguranță (±`T_SIGURANTA`, PROV-1 b), după proveniență și după pas: 0 în orice joc. Fiecare lot
+   * sau pas care taie se numără și ca invariant (`MOTIV_TAIERE`).
+   */
+  taieri: number
 }
 
 function statGol(): StatTermic {
   return {
     pasi: 0, pasiBigInt: 0, noduriBigInt: 0, oameniCautati: 0, adunariOameni: 0, rezervoareCitite: 0, invarianti: 0, ultimulInvariant: '',
     loturi: 0, loturiDoarFete: 0, rezerva: 0, provenienteBigInt: 0, surseVechi: 0, surseSol: 0, surseCer: 0, surseNec: 0, echilibre: 0, echilibreNeconvergente: 0,
-    grafDiferitLaSalvare: 0, ultimaDiferentaGraf: '', restNormalizat: 0,
+    grafDiferitLaSalvare: 0, ultimaDiferentaGraf: '', restNormalizat: 0, taieri: 0,
   }
 }
 
@@ -527,9 +565,12 @@ export function sincronizeazaLumea(w: World, rules: Rules): Outcome<Sincronizare
   }
   let noi = 0
   let surseFaraT = 0
+  let taiate = 0
   if (sch.mase.noi.length > 0 || sch.moarte.length > 0) {
     const p = provenientaTemperaturii(st.slot, sch, w.tick, w.seed, rules, st.pragBigInt === 0)
     st.slot = p.stare
+    // Plasa de siguranță (PROV-1 b), pe componentele noi ale lotului (doar ele și-au schimbat T-ul): O(lot).
+    for (const y of sch.mase.noi) if (taieT(st.slot, y.id)) taiate++
     noi = sch.mase.noi.length
     surseFaraT = p.surseFaraT
     st.stat.loturi++
@@ -545,6 +586,12 @@ export function sincronizeazaLumea(w: World, rules: Rules): Outcome<Sincronizare
   else if (sch.mase.abateri > 0) o = refuse(Reason.INVARIANT_INCALCAT, { motiv: 'evidenta maselor nu se inchide', abateri: sch.mase.abateri })
   else if (!graf.ok) o = graf
   if (!o.ok) invariant(st, o)
+  if (taiate > 0) {
+    const t = refuse(Reason.INVARIANT_INCALCAT, { motiv: MOTIV_TAIERE, componente: taiate })
+    st.stat.taieri += taiate
+    invariant(st, t)
+    if (o.ok) o = t
+  }
   return o
 }
 
@@ -838,6 +885,8 @@ export interface RaportPas {
   readonly sumaP: number
   readonly noduriBigInt: number
   readonly muchiiBigInt: number
+  /** Noduri cu T tăiat la plasa de siguranță după pas (PROV-1 b): atunci ΔΣH ≠ ΣF_r + ΣP. 0 în orice joc. */
+  readonly taieri: number
 }
 
 /** Opțiunile de probă ale pasului. */
@@ -1073,14 +1122,16 @@ function pasPeGraf(w: World, g: GrafIncremental, rules: Rules, o: OptiuniPas): R
     // siguri, iar T* (sumă de doi întregi siguri) e cel mult un întreg exact de double: BigInt(T*) nu aruncă.
     if (!Number.isSafeInteger(T[i]!) || !Number.isSafeInteger(rest[i]!)) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'T iese din intregii siguri', comp: m.comp[i]! })
   }
-  // Scrierea, la sfârșit.
+  // Scrierea, la sfârșit; plasa de siguranță (PROV-1 b) taie un |T| peste 1000 °C (numărat de `pasTermic`).
+  let taieri = 0
   for (let i = 0; i < n; i++) {
     sl.t[m.comp[i]!] = T[i]!
     sl.rest[m.comp[i]!] = rest[i]!
+    if (taieT(sl, m.comp[i]!)) taieri++
   }
   if (bigN > 0 || big.v > 0) st.stat.pasiBigInt++
   st.stat.noduriBigInt += bigN
-  return { noduri: n, sumaFr, sumaP, noduriBigInt: bigN, muchiiBigInt: big.v }
+  return { noduri: n, sumaFr, sumaP, noduriBigInt: bigN, muchiiBigInt: big.v, taieri }
 }
 
 /**
@@ -1091,7 +1142,8 @@ function pasPeGraf(w: World, g: GrafIncremental, rules: Rules, o: OptiuniPas): R
  * NU aruncă (§5.3): o ștampilă care nu e a indexului (sau un index rămas în urma terenului) reia temperatura de la
  * echilibru; o componentă fără T o primește de la echilibru, un slot mort se golește; un graf care nu e la zi sau refuză la
  * citire (o muchie asimetrică) se reface integral, de urgență — fiecare numărat în `statTermic(w).invarianti`, apoi pasul
- * continuă. Întoarce raportul pasului (sau null: nimic de făcut / graful nu se poate reface).
+ * continuă. După pas, plasa de siguranță taie un |T| peste 1000 °C (numărat în `taieri` și ca invariant, PROV-1 b).
+ * Întoarce raportul pasului (sau null: nimic de făcut / graful nu se poate reface).
  */
 export function pasTermic(w: World, rules: Rules, o: OptiuniPas = {}): RaportPas | null {
   if (w.camere.comp.size === 0) return null
@@ -1133,6 +1185,10 @@ export function pasTermic(w: World, rules: Rules, o: OptiuniPas = {}): RaportPas
     }
   }
   st.stat.pasi++
+  if (r.taieri > 0) {
+    st.stat.taieri += r.taieri
+    invariant(st, refuse(Reason.INVARIANT_INCALCAT, { motiv: MOTIV_TAIERE, componente: r.taieri }))
+  }
   return r
 }
 

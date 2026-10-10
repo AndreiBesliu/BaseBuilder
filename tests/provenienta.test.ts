@@ -10,8 +10,15 @@
  * apărută la T-ul rezultat − masa ieșită la T-ul sursei (± rotunjirea). Între loturi, T-urile se „relaxează" la
  * valori distincte, ca orice confuzie de surse să se vadă.
  *
- * Plus POARTA POMPEI (C3 n-are pompă: săpat + astupat pe același tick întoarce T-ul), rezerva W_Y = 0 (CER / SOL),
- * jurnalul cu materialul vechi și „Number == BigInt".
+ * Plus POARTA POMPEI (ciclurile de UN singur fel — săpat + astupat pe același tick — întorc T-ul), rezerva W_Y = 0
+ * (CER / SOL), jurnalul cu materialul vechi și „Number == BigInt".
+ *
+ * **C3 ARE o pompă încrucișată** (recenzia PROV-1, verificată independent): construcția apare și iese la T-ul de atunci,
+ * solul intră și iese la T_sol, iar cele două nu comută — zidit → săpat → scos → astupat pe aceeași geometrie urcă T-ul
+ * vara (și ordinea inversă îl coboară), fără limită. Decizia lead-ului (10.10): C3 se PĂSTREAZĂ (C4 costă mai mult: holul
+ * zidit iarna +12,6 / +27,7 °C, decizia 3 ruptă). Testele „POMPA C3" fixează comportamentul măsurat ca VERDICT (cu cifrele
+ * în comentariu): o schimbare a regulii le înroșește și cere decizia din nou. Plasa de siguranță (±1000 °C, temperatura.ts)
+ * ține starea salvabilă oricât ar pompa cineva (tests/stare-temperatura.test.ts).
  *
  * Loturile se fac direct pe teren + `sincronizeazaCamere` (o comandă `dig` / `fill` e exact un lot), cu proveniența
  * aplicată de bancă pe starea ei. Banca „lume" (commit-ul 4, SAV-7) face loturile prin COMENZI (`applyCommand`, deci prin
@@ -34,9 +41,11 @@ import type { World } from '../src/sim/state.ts'
 import type { MaterialId } from '../src/sim/terrain/chunk.ts'
 import { eSolNatural, Material } from '../src/sim/terrain/chunk.ts'
 import { bazaVoxeli, dig, fill, groundLevelM, JURNAL_CAP, materialAt, WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
-import { createWorld } from '../src/sim/world.ts'
+import { encode } from '../src/sim/save.ts'
+import { createWorld, tick } from '../src/sim/world.ts'
 import { sitPlat } from './fixturi.ts'
-import { casaTermica } from './fixturi-temperatura.ts'
+import type { CasaPompei } from './fixturi-temperatura.ts'
+import { casaPompei, casaTermica, cicluIncrucisat, comanda, oraDeVara } from './fixturi-temperatura.ts'
 
 const R = DEFAULT_RULES
 const Q = 65536
@@ -794,6 +803,104 @@ test('POARTA POMPEI: 20 de cicluri sapat → astupat in podeaua casei 5x5x2, pe 
   })
   const tsB = pompa(P, 6, B)
   assert.ok(tsB[0]! - tsB[5]! > 1 * Q, `B trebuie sa pompeze: ${(tsB[0]! / Q).toFixed(2)} → ${(tsB[5]! / Q).toFixed(2)} °C`)
+})
+
+// --- pompa încrucișată a lui C3: verdictul (decizia 2, PROV-1) ------------------------------------------------------
+
+/** N cicluri pe casa pompei (casa la 20 °C), pe același tick, prin punctul unic; T-ul casei (Q16, cu restul) după fiecare. */
+function cicluri(K: number, tick: number, n: number, ciclu: (c: CasaPompei) => void): number[] {
+  const c = casaPompei(K, tick)
+  const out = [c.tQ()]
+  for (let k = 0; k < n; k++) {
+    ciclu(c)
+    out.push(c.tQ())
+  }
+  assert.equal(statTermic(c.w).invarianti, 0, statTermic(c.w).ultimulInvariant)
+  return out
+}
+
+const zidesteToate = (c: CasaPompei): void => {
+  // Toate K pietrele într-un SINGUR lot: editările terenului, apoi punctul unic (ca un tick în care zidesc K pioni).
+  for (const [x, y, z] of c.zid) ok(fill(c.w.terrain, x, y, z, P), 'zid')
+  ok(sincronizeazaLumea(c.w, R), 'lotul pietrelor')
+}
+const scoateToate = (c: CasaPompei): void => {
+  for (const [x, y, z] of c.zid) ok(dig(c.w.terrain, x, y, z), 'scos')
+  ok(sincronizeazaLumea(c.w, R), 'lotul scoaterii')
+}
+const sapaGroapa = (c: CasaPompei): void => comanda(c.w, { kind: 'dig', wx: c.cx, wy: c.cy, z: c.z1 - 1 })
+const astupaGroapa = (c: CasaPompei): void => comanda(c.w, { kind: 'fill', wx: c.cx, wy: c.cy, z: c.z1 - 1, material: Material.PAMANT })
+const zidestePeRand = (c: CasaPompei): void => {
+  for (const [x, y, z] of c.zid) comanda(c.w, { kind: 'fill', wx: x, wy: y, z, material: P })
+}
+const scoatePeRand = (c: CasaPompei): void => {
+  for (const [x, y, z] of c.zid) comanda(c.w, { kind: 'dig', wx: x, wy: y, z })
+}
+
+test('POMPA C3 — verdictul pe acelasi tick (decizia 2, PROV-1): ciclurile INCRUCISATE pompeaza; doar solul nu — casa 5x5x2 la 20 °C, vara 15:00 (afara 25,48, T_sol(0) 11,70), 20 de cicluri prin punctul unic, geometria identica la capatul fiecaruia', () => {
+  // VERDICT, nu poartă de corectitudine: fixează comportamentul MĂSURAT al regulii C3 păstrate (10.10, F1, pe HEAD; recenzia
+  // PROV și verificatorul ei au aceleași cifre). Cu altă regulă (C4: 0,0000 peste tot) testul se înroșește — atunci decizia
+  // 2 se ia din nou, cu cifrele noi. Banda ±0,01 °C: aritmetica e exactă pe întregi, cifrele sunt deterministe.
+  const banda = 0.01 * Q
+  const verdict = (ts: number[], asteptat: number, ce: string): void => {
+    assert.ok(Math.abs(ts[ts.length - 1]! - asteptat * Q) <= banda, `${ce}: ${(ts[ts.length - 1]! / Q).toFixed(4)} °C, verdictul ${asteptat} °C`)
+  }
+  // (a) Încrucișat, pietrele într-un lot, K = 8: zidite → groapă → scoase → astupat. 20,00 → 20,21 → 20,42 → … → 24,86 °C.
+  const a = cicluri(8, oraDeVara(15), 20, (c) => {
+    zidesteToate(c)
+    sapaGroapa(c)
+    scoateToate(c)
+    astupaGroapa(c)
+  })
+  verdict(a, 24.8603, 'incrucisat, intr-un lot, K 8')
+  // (b) DOAR PIATRĂ, fără săpătură, pe comenzi (o piatră pe comandă, ca un pion), scoase în aceeași ordine (FIFO): fiecare
+  // piatră ascunde o față de sol, care iese la T_sol — 20,00 → 20,49 °C. Într-un singur lot ar fi 20,0000 (martorul lentilei).
+  const b = cicluri(8, oraDeVara(15), 20, (c) => {
+    zidestePeRand(c)
+    scoatePeRand(c)
+  })
+  verdict(b, 20.4927, 'doar piatra, FIFO, pe comenzi, K 8')
+  // (c) Ordinea INVERSĂ (săpat → zidit → astupat → scos), pe comenzi: răcește — 20,00 → 17,47 °C (100 de cicluri: 10,68),
+  // „aerul condiționat gratuit" pe care designul îl dădea drept respins.
+  const c = cicluri(8, oraDeVara(15), 20, (x) => {
+    sapaGroapa(x)
+    zidestePeRand(x)
+    astupaGroapa(x)
+    scoatePeRand(x)
+  })
+  verdict(c, 17.4667, 'ordinea inversa, K 8')
+  // (d) Poarta pompei de azi (DOAR SOL: săpat → astupat), pe comenzi, la 15:00 și la 03:00 (casa mai caldă decât aerul, 14,95,
+  // și decât solul, 10,81 — o regulă cu plafoane ar tăia astuparea): EXACT 20 °C după fiecare ciclu, cu restul.
+  for (const h of [15, 3]) {
+    const d = cicluri(0, oraDeVara(h), 20, (x) => {
+      sapaGroapa(x)
+      astupaGroapa(x)
+    })
+    for (let k = 1; k < d.length; k++) assert.equal(d[k], d[0], `doar sol, ${h}:00: ciclul ${k}`)
+  }
+})
+
+test('POMPA C3 cu timpul pornit — verdictul limitei (PROV-1): incrucisat K=8, o comanda la 20 de tickuri (un pion sapa o celula in 40), 24 h de joc — casa sta cu +4,30 °C peste martorul fara comenzi; fara invarianti, fara taieri, salvarea merge', () => {
+  // Măsurat (10.10, F1; verificatorul PROV-1: +4,30): casa 24,06 °C, martorul 19,76 °C. Pragul de fugă e între o comandă la
+  // 10 tickuri (+11 °C în 24 h) și una la 5 (89,6 °C în 24 h, 255 °C în 120 h): un exploit deliberat (8+ pioni pe ciclu).
+  // Banda ±0,1 °C în jurul valorii măsurate: verdict, ca testul de mai sus.
+  const a = casaPompei(8, oraDeVara(15))
+  const m = casaPompei(8, oraDeVara(15))
+  const prog = cicluIncrucisat(a)
+  let j = 0
+  for (let i = 0; i < R.calendar.ziTicks; i++) {
+    if (i % 20 === 0) {
+      comanda(a.w, prog[j]!)
+      j = (j + 1) % prog.length
+    }
+    tick(a.w, R)
+    tick(m.w, R)
+  }
+  const dif = (a.tQ() - m.tQ()) / Q
+  assert.ok(Math.abs(dif - 4.3018) <= 0.1, `casa fata de martor: ${dif.toFixed(4)} °C, verdictul +4,30`)
+  assert.deepEqual([statTermic(a.w).invarianti, statTermic(a.w).taieri], [0, 0], statTermic(a.w).ultimulInvariant)
+  assert.ok(statTermic(a.w).loturi >= 2016, 'fixtura: o comanda la 20 de tickuri, o zi')
+  assert.doesNotThrow(() => encode(a.w))
 })
 
 // --- rezerva W_Y = 0 ----------------------------------------------------------------------------

@@ -14,6 +14,10 @@
 
 import assert from 'node:assert/strict'
 import type { Rules } from '../src/sim/content.ts'
+import { Anotimp, panaLaAnotimp, tickuriPeOra } from '../src/sim/calendar.ts'
+import type { Command } from '../src/sim/commands.ts'
+import { applyCommand } from '../src/sim/commands.ts'
+import { stergeItem } from '../src/sim/iteme.ts'
 import { componentaLa } from '../src/sim/camere.ts'
 import { capacitateMu, contoareComponentei } from '../src/sim/fete.ts'
 import type { GrafTermic } from '../src/sim/termic.ts'
@@ -150,4 +154,66 @@ export function modelFloat(w: World, rules: Rules, scalaC = 1): ModelFloat {
 export function tauLoc(m: ModelFloat, compId: number): number {
   const i = m.gr.nodDupaComp[compId]!
   return m.C[i]! / (m.gr.sumaG[i]! / Q16)
+}
+
+// --- pompa incrucisata a regulii C3 (PROV-1): casa, ciclurile, prin COMENZI --------------------------------------------
+
+/** Vara anului 1 (jocul incepe toamna), ziua 2, la ora `h`: 15:00 → T_afara 25,48 °C, T_sol(0) 11,70 °C; 03:00 → 14,95 / 10,81. */
+export function oraDeVara(h: number, rules: Rules = R): number {
+  return panaLaAnotimp(0, Anotimp.VARA, rules) + rules.calendar.ziTicks + h * tickuriPeOra(rules)
+}
+
+/** Casa pompei: `casaTermica()` (5×5×2 de piatra, cu usa, pe IARBA) la `tick`, casa la 20 °C cu restul 0. */
+export interface CasaPompei {
+  readonly w: World
+  /** Celula din centrul podelei (groapa se sapa sub ea, la z1 − 1). */
+  readonly cx: number
+  readonly cy: number
+  readonly z1: number
+  /** Celulele de zidit, pe podea: inelul de langa pereti, apoi inelul interior (fara centru), primele K. */
+  readonly zid: readonly (readonly [number, number, number])[]
+  /** Id-ul componentei casei, acum. */
+  id(): number
+  /** T-ul casei cu restul, in Q16 (fractionar). */
+  tQ(): number
+}
+
+export function casaPompei(K: number, tick: number): CasaPompei {
+  const s = casaTermica()
+  const w = s.w
+  w.tick = tick
+  const [cx, cy, z1] = s.rep.casa!
+  const id = (): number => componentaLa(w.camere, cx, cy, z1)!.id
+  w.temperatura.slot.t[id()] = 20 * Q16
+  w.temperatura.slot.rest[id()] = 0
+  const zid: [number, number, number][] = []
+  for (const inel of [1, 2]) for (let dy = 1; dy <= 5; dy++) for (let dx = 1; dx <= 5; dx++) {
+    const r = Math.max(Math.abs(dx - 3), Math.abs(dy - 3))
+    if (r === 3 - inel && zid.length < K) zid.push([s.x0 + dx, s.y0 + dy, z1])
+  }
+  assert.equal(zid.length, K, `fixtura: K ${K} prea mare`)
+  const tQ = (): number => w.temperatura.slot.t[id()]! + w.temperatura.slot.rest[id()]! / capacitateaComponentei(w, id(), R)
+  return { w, cx, cy, z1, zid, id, tQ }
+}
+
+/** Mormanele sapaturii, carate (un pion le-ar cara; temperatura nu le vede): altfel `fill` pe aceeasi celula refuza. */
+export function cara(w: World): void {
+  for (let i = 0; i < w.iteme.count; i++) if (w.iteme.alive[i] === 1) stergeItem(w.iteme, i)
+}
+
+/** O comanda `dig` / `fill` (punctul unic), acceptata; dupa `dig`, mormanul carat. */
+export function comanda(w: World, c: Command): void {
+  ok(applyCommand(w, c, R), `${c.kind}`)
+  if (c.kind === 'dig') cara(w)
+}
+
+/** Programul ciclului INCRUCISAT, o comanda pe pas: K pietre zidite → groapa in podea → cele K scoase (FIFO) → groapa astupata cu PAMANT. */
+export function cicluIncrucisat(c: CasaPompei): Command[] {
+  const P = Material.PIATRA_CONSTRUITA
+  return [
+    ...c.zid.map(([x, y, z]): Command => ({ kind: 'fill', wx: x, wy: y, z, material: P })),
+    { kind: 'dig', wx: c.cx, wy: c.cy, z: c.z1 - 1 },
+    ...c.zid.map(([x, y, z]): Command => ({ kind: 'dig', wx: x, wy: y, z })),
+    { kind: 'fill', wx: c.cx, wy: c.cy, z: c.z1 - 1, material: Material.PAMANT },
+  ]
 }

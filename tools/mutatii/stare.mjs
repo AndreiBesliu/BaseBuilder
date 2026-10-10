@@ -6,6 +6,10 @@
  * marginea dinamica, comutatorul BigInt, modelul memorat), echilibrul „lumii fara istorie". Le prind testele pe hartie
  * (tests/pas-termic.test.ts, tests/stare-temperatura.test.ts) si oracolele: referinta independenta a pasului pe BigInt,
  * Number == BigInt, orientarea inversata, punctul fix.
+ *
+ * Plasa de siguranta (recenzia PROV-1 b): C3 are o pompa incrucisata, deci un exploit deliberat poate urca T-ul fara
+ * limita; dupa provenienta si dupa pas T se taie la ±1000 °C, numarat (taieri + invariant). O prind exploitul K=24 cu
+ * timpul pornit (stare) si divergenta celulei-cruce (pas).
  */
 
 const TP = 'tests/pas-termic.test.ts'
@@ -173,11 +177,40 @@ export const MUTATII = [
     t: TP, e: 'PAS Number == BigInt',
   },
   {
-    n: 't.2b §5.3: un T in afara intregilor siguri nu refuza pasul (starea care diverge se scrie, iar la ±Infinity BigInt arunca din tick)',
+    n: 't.2b §5.3: un T in afara intregilor siguri nu refuza pasul (o stare stricata se scrie, taiata de plasa, in loc sa fie refuzata)',
     f: F,
     a: '    if (!Number.isSafeInteger(T[i]!) || !Number.isSafeInteger(rest[i]!)) return refuse(',
     b: '    if (false) return refuse(',
+    t: TP, e: 'PAS T in afara intregilor siguri',
+  },
+  // --- plasa de siguranta ±1000 °C (PROV-1 b)
+  {
+    n: 't.2b PROV-1 b: plasa nu taie dupa provenienta (pompa C3 duce T peste 1000 °C intre doi pasi, apoi peste marginea salvabila)',
+    f: F,
+    a: '    for (const y of sch.mase.noi) if (taieT(st.slot, y.id)) taiate++',
+    b: '    for (const y of sch.mase.noi.slice(0, 0)) if (taieT(st.slot, y.id)) taiate++',
+    t: TS, e: 'STARE plasa de siguranta',
+  },
+  {
+    n: 't.2b PROV-1 b: plasa nu taie dupa pas (un content instabil diverge pana la intregii nesiguri)',
+    f: F,
+    a: '    if (taieT(sl, m.comp[i]!)) taieri++',
+    b: '    if (false) taieri++',
     t: TP, e: 'PAS garda 6·g_max',
+  },
+  {
+    n: 't.2b PROV-1 b: plasa taie doar in sus (−1000 °C nu e o margine)',
+    f: F,
+    a: '  else if (t < -T_SIGURANTA) sl.t[id] = -T_SIGURANTA',
+    b: '  else if (false) sl.t[id] = -T_SIGURANTA',
+    t: TP, e: 'PAS garda 6·g_max',
+  },
+  {
+    n: 't.2b PROV-1 b: taierea dupa provenienta nu se numara ca invariant (nicio alerta)',
+    f: F,
+    a: '    invariant(st, t)\n    if (o.ok) o = t',
+    b: '    if (o.ok) o = t',
+    t: TS, e: 'STARE plasa de siguranta',
   },
   // --- commit-ul 5: salvarea (§7, §9)
   {

@@ -26,7 +26,7 @@ import type { World } from '../src/sim/state.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
 import { fill } from '../src/sim/terrain/terrain.ts'
 import { regimPermanent } from '../src/sim/termic.ts'
-import { pasTermic, PRAG_NUMBER, statTermic } from '../src/sim/temperatura.ts'
+import { MOTIV_TAIERE, pasTermic, PRAG_NUMBER, statTermic, T_SIGURANTA } from '../src/sim/temperatura.ts'
 import { createWorld, tick } from '../src/sim/world.ts'
 import { casaTermica, compLa, modelFloat, tauLoc } from './fixturi-temperatura.ts'
 import { avanseazaTermic, bun, cruce, energia, faraInvarianti, hotel, laEchilibru, mina192, pasReferinta, tPeAncora } from './fixturi-pas.ts'
@@ -128,14 +128,20 @@ test('PAS marginea dinamica (§5.3, NUM-5): mina 192x192x3 (un nod, Σg ≈ 2^34
   assert.ok(statTermic(a).pasiBigInt > 0, `mina trebuie sa treaca singura pe BigInt: ${JSON.stringify(statTermic(a))}`)
   assert.deepEqual(tPeAncora(a), tPeAncora(b))
   // Marginea e pe |T*|, nu pe M (oamenii pot duce T peste marginea climei, B1 §2.8): o casă la 30.000 °C trece singură pe
-  // BigInt (S·(M + |T*|) ≈ 2^57) și dă același rezultat ca totul pe BigInt; pe Number, X ar fi rotunjit tăcut.
+  // BigInt. Măsurat (recenzia PAS-5): S = 4.847.393 (2^22,2), deci S·(M + |T*|) = 2^53,1 — nu 2^57, cum scria aici. Cu
+  // marginea STATICĂ (S·M) nodul ar merge pe Number, iar rezultatul ar fi totuși IDENTIC bit cu bit (până la 140.000 °C,
+  // |X| ≤ 2^55,3: eroarea lui X pe double dispare în rs(X, 2^16)) — marginea dinamică apără doar dincolo de rezerva de 2× a
+  // pragului. Contractul pe care testul îl prinde e deci RUTAREA (nodul pe BigInt, numărat); sumele fluxurilor trebuie să
+  // fie ale BigInt-ului total. Plasa de siguranță (PROV-1 b) taie apoi T-ul la 1000 °C, după calcul.
   const ca = laEchilibru(casaTermica().w, 0)
   const cb = laEchilibru(casaTermica().w, 0)
   cb.temperatura.pragBigInt = 0
   for (const w of [ca, cb]) for (const c of w.camere.comp.values()) w.temperatura.slot.t[c.id] = 30000 * Q + 12345
   const ra = pasTermic(ca, R)!
-  pasTermic(cb, R)
+  const rb = pasTermic(cb, R)!
   assert.equal(ra.noduriBigInt, 1, 'casa fierbinte: nodul pe BigInt')
+  assert.deepEqual([ra.sumaFr, ra.sumaP], [rb.sumaFr, rb.sumaP], 'fluxurile, inainte de plasa')
+  assert.deepEqual([ra.taieri, rb.taieri], [1, 1], 'plasa de siguranta a taiat casa la 1000 °C')
   assert.deepEqual(tPeAncora(ca), tPeAncora(cb))
 })
 
@@ -185,7 +191,7 @@ function faraMasa(cAer: number): Rules {
   return { ...R, termic: { ...t, mase: maseTermice(cAer, 0, 0) } }
 }
 
-test('PAS garda 6·g_max < 1 (NUM-8): celula-cruce fara masa pe fete, +10 °C — la c_aer 460 (garda trece) ramane intre rezervoare si vecini; la 200 (garda refuza) oscileaza si diverge', () => {
+test('PAS garda 6·g_max < 1 (NUM-8): celula-cruce fara masa pe fete, +10 °C — la c_aer 460 (garda trece) ramane intre rezervoare si vecini; la 200 (garda refuza) oscileaza si diverge pana la plasa de siguranta (±1000 °C), care o taie la fiecare pas, numarat', () => {
   assert.ok(parseRules(faraMasa(460)).ok, 'c_aer 460: garda trece')
   assert.ok(!parseRules(faraMasa(200)).ok, 'c_aer 200: garda refuza')
   for (const [cAer, stabil] of [[460, true], [200, false]] as const) {
@@ -213,13 +219,36 @@ test('PAS garda 6·g_max < 1 (NUM-8): celula-cruce fara masa pe fete, +10 °C �
       assert.equal(semne, 0, `c_aer ${cAer}: ${semne} schimbari de semn`)
       assert.ok(max <= 10 * Q, `c_aer ${cAer}: |ΔT| a crescut la ${max / Q} °C`)
     } else {
-      // Divergența: oscilație cu amplitudine crescătoare, până când T iese din întregii siguri — atunci pasul se refuză
-      // (numărat), nu aruncă din tick.
-      assert.ok(semne > 20 && max > 1000 * Q, `c_aer ${cAer}: ${semne} schimbari de semn, max ${max / Q} °C — garda refuza un pas instabil`)
-      assert.equal(statTermic(w).ultimulInvariant, 'T iese din intregii siguri')
+      // Divergența: oscilație cu amplitudine crescătoare (măsurat: 11 schimbări de semn de la +10 la ±1000 °C), până la plasa
+      // de siguranță (PROV-1 b), care taie T-ul la ±1000 °C după pas — numărat, nu aruncă din tick. Înainte de plasă, T
+      // ajungea până la ieșirea din întregii siguri, unde pasul se refuza (garda aceea are acum testul ei, mai jos).
+      assert.ok(semne >= 8 && max > 990 * Q, `c_aer ${cAer}: ${semne} schimbari de semn, max ${max / Q} °C — garda refuza un pas instabil`)
+      assert.equal(statTermic(w).ultimulInvariant, MOTIV_TAIERE)
+      const t0Taieri = statTermic(w).taieri
+      assert.ok(t0Taieri >= 1)
+      for (let k = 0; k < 200; k++) {
+        assert.doesNotThrow(() => pasTermic(w, rules))
+        assert.ok(Math.abs(w.temperatura.slot.t[id]!) <= T_SIGURANTA, `pasul ${k}: T ${w.temperatura.slot.t[id]! / Q} °C peste plasa`)
+      }
+      assert.ok(statTermic(w).taieri > t0Taieri, 'plasa taie la fiecare pas cat timp diverge')
       assert.doesNotThrow(() => tick(w, rules))
     }
   }
+})
+
+test('PAS T in afara intregilor siguri (§5.3): o stare stricata (T = 2^60 pe casa, peste orice pas) — pasul se refuza intreg, nu scrie nimic (nici taierea plasei), numarat, si nu arunca din tick', () => {
+  // Plasa de siguranță (±1000 °C) taie un T fizic divergent înainte să iasă din întregii siguri; garda asta rămâne pentru o
+  // stare stricată (o salvare veche, o scriere greșită): un T nesigur nu se poate calcula exact, deci pasul nu scrie nimic.
+  const s = casaTermica()
+  const w = laEchilibru(s.w, 0)
+  const c = componentaLa(w.camere, ...s.rep.casa!)!.id
+  w.temperatura.slot.t[c] = 2 ** 60
+  w.temperatura.slot.rest[c] = 0
+  assert.equal(pasTermic(w, R), null)
+  assert.equal(statTermic(w).ultimulInvariant, 'T iese din intregii siguri')
+  assert.equal(statTermic(w).taieri, 0, 'nimic scris, nimic taiat')
+  assert.equal(w.temperatura.slot.t[c], 2 ** 60, 'starea neatinsa')
+  assert.doesNotThrow(() => tick(w, R))
 })
 
 test('PAS oamenii pe hartie (§5.1, B4): un pion in casa da ΣP = rs(100·2^16·tps·86.400·16 / (ziTicks·c_aer)) pe pas; doi pioni, o conversie pe 200 W; in tocul usii sau afara, nimic', () => {
