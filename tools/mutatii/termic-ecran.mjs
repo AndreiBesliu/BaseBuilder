@@ -27,6 +27,10 @@
  *   negativa veche „exceptie" arunca in pasul PROBEI, nu in simulare);
  * - randurile fixe ale inspectorului (ui.css; randul fara T, scris de panouri.ts fara clasa `num`): „latime-inspector", cu
  *   proba negativa `latime` (E6), pe descompunerile reale cele mai lungi (bench/canale-lungi.mjs, la fiecare rulare).
+ * Fiecare bifa de mai sus a iesit rosie si pe un mutant REAL al codului pe care il numeste, nu doar pe sabotajul din pagina
+ * (recenzia t.2b, 10.10.2026, 10 rulari ui-fum pe o clona): scrisul dupa cheie, cifrele inghetate, I si U impreuna, bucla
+ * pe `simTick`, exceptia fara pauza si fara alerta, pornirea / Ctrl+S / salvarea automata neoprite, CSS-ul randurilor scos,
+ * clasa `num` si pe randul fara T.
  * Aici: bucla avansului de proba (`avanseazaSigur`, agenti.ts), garda ei si a lui `stepSimSigur`, si tickul observat
  * (`creeazaTickObservat`, model.ts), pe care main.ts le leaga de `__kinstead.avanseaza` si de bucla de cadre.
  */

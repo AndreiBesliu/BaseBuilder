@@ -16,7 +16,8 @@
  * iesi rosie (pauza) nu se vedea (recenzia UI-ului, T-02).
  *
  * Temperatura (t.2b §8) ruleaza pe PAGINA EI, la final, pe o lume cu contract scris (vezi `paginaTermica`): timpul trece
- * doar prin `__kinstead.avanseaza(n)` (tickuri reale) sau cu jocul pornit, niciodata prin `world.tick +=`.
+ * doar prin `__kinstead.avanseaza(n)` (tickuri reale) sau cu jocul pornit, niciodata prin `world.tick +=` — in afara de
+ * ultimul pas („exceptie-tick"), care sare ceasul DUPA ce simularea s-a oprit, doar ca sa vina momentul salvarii automate.
  *
  * Fiecare pas ruleaza in `pas()`: o exceptie e o bifa ROSIE cu numele pasului, nu sfarsitul rularii
  * (recenzia incaperilor, ECR-10).
@@ -1132,7 +1133,9 @@ async function ruleaza() {
  * fac pe sferturi de ora.) Nicio desemnare, nicio piatra: nimeni n-are
  * de lucru; fiecare avans numara editarile din AMPRENTA caselor (±1), citite din `terrain.jurnal`, iar bifa
  * „temperatura-fara-clic" le cere 0. Timpul trece doar prin `__kinstead.avanseaza(n)` (tickuri reale, aceeasi cale ca
- * `stepSim`) sau cu jocul pornit — niciun `world.tick +=` (sabotajul „se-misca" il foloseste tocmai ca sa iasa rosu).
+ * `stepSim`) sau cu jocul pornit — niciun `world.tick +=` (sabotajul „se-misca" il foloseste tocmai ca sa iasa rosu; iar
+ * „exceptie-tick", ULTIMUL pas, sare ceasul 11 minute DUPA ce simularea s-a oprit, ca sa vina momentul salvarii automate:
+ * lumea aceea nu mai e citita de nicio bifa).
  * Conditiile se scriu pe Q16, citite prin `__kinstead` din stare, cu preconditii (|T_afara − T| ≥ 1 °C) asteptate cel mult
  * 12 h de joc (cu pionul inauntru, X_tot sta la ~1,7 °C peste X: ziua, „trage spre" e chiar aerul de afara) si bucle de
  * cel mult 4 h de joc pana la o schimbare, pe CASA: o pivnita si-ar schimba textul o data la ~14 min reale (B6).
