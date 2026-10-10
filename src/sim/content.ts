@@ -15,7 +15,7 @@ import { accept, refuse, Reason } from './result.ts'
 import { REGION_SIZE } from './regions.ts'
 import { esteMaterialDeStructura, isSolid, Material } from './terrain/chunk.ts'
 import type { MaterialId } from './terrain/chunk.ts'
-import { Gand, GAND_PENTRU_NEVOIE, GANDURI, Item, ITEME, Nevoie, NEVOI, Piesa } from './state.ts'
+import { Gand, GAND_PENTRU_NEVOIE, GANDURI, Item, ITEME, Nevoie, NEVOI, ONE_ALTERARE, Piesa } from './state.ts'
 import { Anotimp, ANOTIMPURI, MINUTE_PE_ZI, NUME_ANOTIMPURI } from './calendar.ts'
 import type { AnotimpId } from './calendar.ts'
 import { tabeleClima } from './clima.ts'
@@ -200,6 +200,71 @@ export function maseTermice(cAerJPeK: number, cConstrJPeK: number, cSolJPeK: num
   return { aer: MASA_AER_MU, constr: masaInMu(cConstrJPeK, cAerJPeK), sol: masaInMu(cSolJPeK, cAerJPeK) }
 }
 
+/**
+ * Curba alterarii (S24-27 t.3 §3), ca TABEL: punctele `[T in m°C, pierderea in milionimi pe zi]`, cu T STRICT crescator.
+ * Primul punct e PRAGUL, cu pierderea 0 — la el si sub el nu se strica nimic; intre puncte, interpolare liniara (pe λ,
+ * `lambdaPeCurba`); peste ultimul, valoarea lui. Pierderea e rata ZILNICA liniarizata, in milionimi din cantitate: pe
+ * pasul de 1 Hz se strica `pierdere / 10^6 / pasi pe zi` din fiecare unitate (in starea simularii: λ, in 1/ONE).
+ *
+ * Tabel, nu formula: forma ramane a continutului (alternativa exponentiala din decizia 1 e alt tabel, nu alt cod), iar
+ * grila implicita e DEASA la prag (verif-P2: o grila la 5 °C e o DREAPTA pe [5; 10], de 7–10 ori peste parabola langa
+ * prag). Milionimi, nu miimi: in miimi intregi, punctele dese de langa prag ies 0 si banda moarta ajunge la 0,5 °C.
+ */
+export interface ReguliAlterare {
+  readonly pierderePeMilionZilnic: readonly (readonly [number, number])[]
+}
+
+/** λ-ul curbei, DERIVAT din tabel, `ticksPerSecond` si `ziTicks` (nu se scrie in fisier). */
+export interface CurbaAlterare {
+  /** T-ul punctelor, Q16 °C: `round(mC · 65536 / 1000)`. */
+  readonly tQ16: readonly number[]
+  /** λ-ul punctelor: 1/ONE dintr-o unitate, pe unitate si pe pasul de 1 Hz — `floor(ppm · ONE · tps / (10^6 · ziTicks))`. */
+  readonly lambda: readonly number[]
+}
+
+/** Plaja T-ului unui punct, m°C. Plafonul tine produsul interpolarii (Δλ ≤ ONE = 2^29) × (ΔT ≤ 150 °C ≈ 2^23,2 Q16) sub 2^53. */
+const ALTERARE_T_MIN_MC = -50000
+const ALTERARE_T_MAX_MC = 100000
+/** Plafonul pierderii unui punct, milionimi pe zi: ppm · ONE · tps ramane BigInt doar la derivare, nu in pas. */
+const ALTERARE_PPM_MAX = 10_000_000
+/** Cate puncte poate avea curba (cautarea e binara; plafonul e al fisierului, nu al costului). */
+const ALTERARE_PUNCTE_MAX = 256
+/** Cat de aproape de prag trebuie sa fie λ ≥ 1 (banda moarta, t.3 §3): 0,05 °C in Q16, rotunjit in sus. */
+export const ALTERARE_BANDA_Q16 = 3277
+
+/** λ-ul punctelor curbei (o functie: parsarea si pasul de alterare o cheama pe aceeasi). */
+export function curbaAlterarii(puncte: readonly (readonly [number, number])[], tps: number, ziTicks: number): CurbaAlterare {
+  const tQ16: number[] = []
+  const lambda: number[] = []
+  // BigInt doar aici (o data pe reguli): ppm · ONE · tps ajunge la 10^7 · 2^29 · 240 ≈ 1,3e18, peste 2^53.
+  const numitor = 1_000_000n * BigInt(ziTicks)
+  for (const [mc, ppm] of puncte) {
+    tQ16.push(Math.floor((mc * 65536 + 500) / 1000))
+    lambda.push(Number((BigInt(ppm) * BigInt(ONE_ALTERARE) * BigInt(tps)) / numitor))
+  }
+  return { tQ16, lambda }
+}
+
+/**
+ * λ(T) pe curba derivata: 0 la prag si sub el, valoarea ultimului punct peste el, iar intre doua puncte
+ * `λa + floor((λb − λa) · (T − Ta) / (Tb − Ta))` — pe λ, nu pe ppm (ONE · Δppm · ΔT ar trece de 2^53, STARE-6 b).
+ */
+export function lambdaPeCurba(c: CurbaAlterare, tQ16: number): number {
+  const t = c.tQ16
+  const n = t.length
+  if (n === 0 || tQ16 <= t[0]!) return 0
+  if (tQ16 >= t[n - 1]!) return c.lambda[n - 1]!
+  let lo = 0
+  let hi = n - 1
+  while (hi - lo > 1) {
+    const m = (lo + hi) >> 1
+    if (t[m]! < tQ16) lo = m
+    else hi = m
+  }
+  const la = c.lambda[lo]!
+  return la + Math.floor(((c.lambda[hi]! - la) * (tQ16 - t[lo]!)) / (t[hi]! - t[lo]!))
+}
+
 export interface Rules {
   /** Cati agenti incap. Plafon dur, verificat de comanda de spawn. */
   readonly agentCapacity: number
@@ -352,6 +417,13 @@ export interface Rules {
   readonly nevoieScanRadiusCells: number
   /** Cate intrari PARCURGE cel mult o cautare de nevoie. Plafon pe intrari, nu pe potriviri. */
   readonly nevoieScanMaxCandidates: number
+  /**
+   * Raza A DOUA cautari de mancare (t.3 §5, J-8), in celule (Manhattan): doar cand in `nevoieScanRadiusCells` nu e nimic.
+   * Hrana adunata intr-o singura camara, iar hoinareala neancorata: pionii plecau de foame la 101–289 de celule de camara
+   * plina. Egala cu raza de nevoie = fara a doua cautare. Mai mare decat discul de acoperire: un morman fara regiune
+   * calculata ori in alta componenta se sare, ca la prima cautare.
+   */
+  readonly mancareScanRadiusLargCells: number
   /** Cate unitati mananca un pion dintr-o data. Sub `itemStackMax`. */
   readonly portieMancare: number
   /** Cate tickuri ii ia o portie. La 20 Hz, 60 = 3 secunde; o masa intreaga ~3 portii. */
@@ -462,6 +534,8 @@ export interface Rules {
    * nu-l declara perisabil se incarca cu S = 0, numarat (`alterareNormalizata`) — nu refuzata.
    */
   readonly perisabil: readonly boolean[]
+  /** Curba alterarii (S24-27 t.3 §3): cat se strica pe zi dintr-un morman perisabil, dupa T-ul locului. */
+  readonly alterare: ReguliAlterare
 
   // --- temperatura (S24-27, taietura 2a) ---
   //
@@ -475,7 +549,7 @@ export interface Rules {
 type FieldSpec = { min: number; max: number }
 
 /** Sectiunile-obiect, validate fiecare de parserul ei. */
-const SECTIUNI = ['digYield', 'piese', 'nevoi', 'nutritie', 'perisabil', 'ganduri', 'calendar', 'clima', 'termic'] as const
+const SECTIUNI = ['digYield', 'piese', 'nevoi', 'nutritie', 'perisabil', 'alterare', 'ganduri', 'calendar', 'clima', 'termic'] as const
 
 /** Campurile NUMERICE. `digYield`, `nevoi`, `nutritie` si `perisabil` sunt tabele si se valideaza separat. */
 const RULES_SPEC: Record<Exclude<keyof Rules, (typeof SECTIUNI)[number]>, FieldSpec> = {
@@ -531,6 +605,7 @@ const RULES_SPEC: Record<Exclude<keyof Rules, (typeof SECTIUNI)[number]>, FieldS
   nevoieRetryTicks: { min: 0, max: 1000000 },
   nevoieScanRadiusCells: { min: 1, max: 4096 },
   nevoieScanMaxCandidates: { min: 1, max: 100000 },
+  mancareScanRadiusLargCells: { min: 1, max: 4096 },
   portieMancare: { min: 1, max: 1000000 },
   mancatTicks: { min: 1, max: 1000000 },
   mancatoriPeMorman: { min: 1, max: 64 },
@@ -877,6 +952,66 @@ function parsePerisabil(raw: unknown): Outcome<boolean[]> {
 }
 
 /**
+ * Sectiunea `alterare` (t.3 §3): tabelul curbei. Forma: punctele `[m°C, ppm pe zi]`, intregi, T strict crescator in
+ * [−50; 100] °C, pierderea in [0; 10^7]. Legile curbei, fiecare cu refuzul ei:
+ *   - primul punct are pierderea 0 (el e PRAGUL: la el si sub el nimic);
+ *   - ratele NEDESCRESCATOARE (mai cald nu strica mai putin) si pantele nedescrescatoare (convexa: pe [prag; prag+1 °C]
+ *     o dreapta ar pierde de 7–10 ori cat parabola, verif-P2 — pantele inegale in sus lasa forma continutului);
+ *   - λ-ul ultimului punct ≤ ONE (cel mult o unitate pe unitate si pe pas: k se taie oricum la q);
+ *   - BANDA MOARTA: λ(prag + 0,05 °C) ≥ 1, cu `ziTicks` si `ticksPerSecond` de acum — o curba care ar ramane 0 pe
+ *     zecimi de grad peste prag ar face pivnita „aproape rece" gratuita (verif-P2, STARE-6 a).
+ */
+function parseAlterare(raw: unknown, tps: number, ziTicks: number): Outcome<ReguliAlterare> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return refuse(Reason.LIPSA_MATERIAL, { camp: 'alterare', asteptat: 'obiect', primit: Array.isArray(raw) ? 'tablou' : typeof raw })
+  }
+  const obj = raw as Record<string, unknown>
+  for (const key of Object.keys(obj).sort()) {
+    if (key !== 'pierderePeMilionZilnic') return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: `alterare.${key}`, cunoscute: 'pierderePeMilionZilnic' })
+  }
+  const p = obj.pierderePeMilionZilnic
+  const camp = 'alterare.pierderePeMilionZilnic'
+  if (p === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp })
+  if (!Array.isArray(p) || p.length < 2 || p.length > ALTERARE_PUNCTE_MAX) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp, asteptat: `tablou de 2..${ALTERARE_PUNCTE_MAX} puncte [m°C, ppm pe zi]`, primit: Array.isArray(p) ? `${p.length} puncte` : typeof p })
+  }
+  const puncte: [number, number][] = []
+  for (let i = 0; i < p.length; i++) {
+    const e = p[i] as unknown
+    if (!Array.isArray(e) || e.length !== 2 || !e.every((x) => typeof x === 'number' && Number.isInteger(x))) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `${camp}[${i}]`, asteptat: 'pereche de intregi [m°C, ppm pe zi]', primit: JSON.stringify(e) ?? String(e) })
+    }
+    const [mc, ppm] = e as [number, number]
+    if (mc < ALTERARE_T_MIN_MC || mc > ALTERARE_T_MAX_MC) return refuse(Reason.CAPACITATE_DEPASITA, { camp: `${camp}[${i}][0]`, valoare: mc, min: ALTERARE_T_MIN_MC, max: ALTERARE_T_MAX_MC })
+    if (ppm < 0 || ppm > ALTERARE_PPM_MAX) return refuse(Reason.CAPACITATE_DEPASITA, { camp: `${camp}[${i}][1]`, valoare: ppm, min: 0, max: ALTERARE_PPM_MAX })
+    puncte.push([mc, ppm])
+  }
+  if (puncte[0]![1] !== 0) return refuse(Reason.VALOARE_INVALIDA, { camp: `${camp}[0]`, motiv: 'primul punct e PRAGUL: pierderea lui trebuie sa fie 0', valoare: puncte[0]![1] })
+  for (let i = 1; i < puncte.length; i++) {
+    const [ta, pa] = puncte[i - 1]!
+    const [tb, pb] = puncte[i]!
+    if (tb <= ta) return refuse(Reason.VALOARE_INVALIDA, { camp: `${camp}[${i}]`, motiv: 'T-ul punctelor trebuie sa fie strict crescator', anterior: ta, valoare: tb })
+    if (pb < pa) return refuse(Reason.VALOARE_INVALIDA, { camp: `${camp}[${i}]`, motiv: 'pierderea nu poate scadea cand T creste', anterior: pa, valoare: pb })
+    if (i >= 2) {
+      const [t0, p0] = puncte[i - 2]!
+      // Panta (pa − p0)/(ta − t0) ≤ (pb − pa)/(tb − ta), inmultit in cruce (numitori pozitivi; produse ≤ 1,5e12).
+      if ((pa - p0) * (tb - ta) > (pb - pa) * (ta - t0)) {
+        return refuse(Reason.VALOARE_INVALIDA, { camp: `${camp}[${i}]`, motiv: 'pantele curbei trebuie sa fie nedescrescatoare (convexa)' })
+      }
+    }
+  }
+  const c = curbaAlterarii(puncte, tps, ziTicks)
+  if (c.lambda[c.lambda.length - 1]! > ONE_ALTERARE) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: `${camp}[${puncte.length - 1}]`, motiv: 'mai mult de o unitate pe unitate si pe pas (λ > ONE)', lambda: c.lambda[c.lambda.length - 1]!, max: ONE_ALTERARE })
+  }
+  const laBanda = lambdaPeCurba(c, c.tQ16[0]! + ALTERARE_BANDA_Q16)
+  if (laBanda < 1) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp, motiv: 'banda moarta: la 0,05 °C peste prag curba trebuie sa strice ceva pe pas (λ ≥ 1), cu ziTicks si ticksPerSecond de acum', lambda: laBanda, prag: puncte[0]![0] })
+  }
+  return accept({ pierderePeMilionZilnic: puncte })
+}
+
+/**
  * Tabelul `digYield` din fisier → tablou indexat cu `MaterialId`. Fiecare
  * material SOLID trebuie sa aiba o intrare; AER si APA nu au voie sa aiba.
  */
@@ -1185,6 +1320,11 @@ export function parseRules(raw: unknown): Outcome<Rules> {
   const calendarOut = parseCalendar(obj.calendar)
   if (!calendarOut.ok) return calendarOut
   out.calendar = calendarOut.value
+  // Dupa calendar: banda moarta a curbei se judeca pe λ, care depinde de pasii pe zi (`ziTicks` / `ticksPerSecond`).
+  if (obj.alterare === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'alterare' })
+  const alterareOut = parseAlterare(obj.alterare, out.ticksPerSecond as number, calendarOut.value.ziTicks)
+  if (!alterareOut.ok) return alterareOut
+  out.alterare = alterareOut.value
   if (obj.clima === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'clima' })
   const climaOut = parseClima(obj.clima, calendarOut.value)
   if (!climaOut.ok) return climaOut
@@ -1439,6 +1579,11 @@ export function parseRules(raw: unknown): Outcome<Rules> {
       maxim: (r.agentRegionRadiusBlocks + r.jobRegionRadiusBlocks + 2) * REGION_SIZE,
     })
   }
+  // A doua cautare de mancare (t.3, J-8) e mai LARGA decat prima, sau nu e deloc (egala): una mai mica ar cauta
+  // de doua ori in acelasi disc.
+  if (r.mancareScanRadiusLargCells < r.nevoieScanRadiusCells) {
+    return refuse(Reason.VALOARE_INVALIDA, { camp: 'mancareScanRadiusLargCells', valoare: r.mancareScanRadiusLargCells, min: r.nevoieScanRadiusCells, motiv: 'a doua cautare de mancare nu poate fi mai stransa decat prima' })
+  }
 
   // STABILITATEA PASULUI EXPLICIT din t.2b: 6 · g_max < 1 pe MUCHII (panoul, L1-06; design §9;
   // recenzia t.2a, L2-2).
@@ -1571,6 +1716,8 @@ export const DEFAULT_RULES: Rules = {
   nevoieRetryTicks: 500,
   nevoieScanRadiusCells: 96,
   nevoieScanMaxCandidates: 64,
+  // A doua cautare de mancare, la de 4 ori raza de nevoie (J-8: 0 plecari timpurii in 21 de rulari cu pivnita, pe trei seminte).
+  mancareScanRadiusLargCells: 384,
   portieMancare: 20,
   mancatTicks: 60,
   mancatoriPeMorman: 2,
@@ -1594,6 +1741,16 @@ export const DEFAULT_RULES: Rules = {
   nutritie: [0, 0, 0, 15],
   // Indexat cu `Item`. Doar hrana se strica (t.3).
   perisabil: [false, false, false, true],
+  // Curba alterarii (t.3 §3, decizia 1): PATRATICA, t½(15 °C) = 4 zile — pierderea = 10^6 · (ln 2 / 4) · ((T − 5)/10)² pe
+  // zi, rotunjita, pe grila DEASA la prag: 0,1 °C pe [5; 6], 0,5 °C pe [6; 10], 5 °C de la 10 la 45 (26 de puncte). Fata de
+  // parabola, pe toate valorile Q16 din [5,2; 45] °C: ×0,934…×1,125 (testul pe continutul implicit). λ ≥ 1 de la 5,025 °C.
+  alterare: {
+    pierderePeMilionZilnic: [
+      [5000, 0], [5100, 17], [5200, 69], [5300, 156], [5400, 277], [5500, 433], [5600, 624], [5700, 849], [5800, 1109], [5900, 1404],
+      [6000, 1733], [6500, 3899], [7000, 6931], [7500, 10830], [8000, 15596], [8500, 21228], [9000, 27726], [9500, 35091],
+      [10000, 43322], [15000, 173287], [20000, 389895], [25000, 693147], [30000, 1083042], [35000, 1559581], [40000, 2122763], [45000, 2772589],
+    ],
+  },
   // Dispozitia, pe ACEEASI scara ca nevoile: 0..1000.
   //
   // Bara se misca la 500 de tickuri (25 s), cu 120 in sus si 80 in jos, deci de

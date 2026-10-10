@@ -95,6 +95,8 @@ import type { CanaleTermice, GeometrieCanale, GrafIncremental, NodTermic } from 
 import { actualizeazaGraful, BIN_AFARA, canaleDinGeometrie, comparaGrafulCuIntegral, comparatiaLaZi, elibereazaGrafulT2a, grafTermic, grafulIncremental, numarRefaceriDeUrgenta, refaGrafulDeUrgenta, rezolvaRegim, temperaturiRezervoare } from './termic.ts'
 import { Hasher } from './hash.ts'
 import { cellOf } from './drumuri.ts'
+import { materialFast } from './regions.ts'
+import { Material } from './terrain/chunk.ts'
 import type { World } from './state.ts'
 import type { Terrain } from './terrain/terrain.ts'
 import type { Outcome, Refusal } from './result.ts'
@@ -1386,4 +1388,67 @@ export function oameniPeComponente(w: World): Map<number, number> {
     if (c !== null) out.set(c.id, (out.get(c.id) ?? 0) + 1)
   }
   return out
+}
+
+// ---------------------------------------------------------------------------
+// T-ul locului unui morman (S24-27 t.3 §2): citiri PURE, pentru pasul de alterare și (commit-ul D) pentru ecran
+// ---------------------------------------------------------------------------
+
+/** Locul unei celule de morman, după `loculCelulei`: un id de componentă (≥ 0), sau unul din acestea. */
+export const LOC_CER = -1
+export const LOC_TOC = -2
+
+/**
+ * Unde stă o celulă de morman, pentru T-ul ei: în componenta de aer acoperit cu id-ul întors; sub cer (`LOC_CER`); sau în
+ * tocul unei uși (`LOC_TOC` — celula e chiar voxelul USA: o ușă se desenează și se zidește PESTE un morman, STARE-2). UN
+ * adevăr pentru clasificare, citit de `temperaturaCelulei` și de pasul de alterare (care memorează rata pe componentă).
+ */
+export function loculCelulei(w: World, x: number, y: number, z: number): number {
+  const c = componentaLa(w.camere, x, y, z)
+  if (c !== null) return c.id
+  return materialFast(w.terrain, x, y, z) === Material.USA ? LOC_TOC : LOC_CER
+}
+
+/** T-ul din stare al componentei (Q16 °C), sau null dacă n-are T. Fără ștampilă: apelantul o verifică O DATĂ. */
+export function tDinStare(w: World, compId: number): number | null {
+  const sl = w.temperatura.slot
+  if (compId < 0 || compId >= sl.are.length || sl.are[compId] !== 1) return null
+  return sl.t[compId]!
+}
+
+const VECINI_TOC = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] as const
+
+/**
+ * Regula TOCULUI (t.3 §2, decizia 5; STARE-2, STARE-12) — PERMANENTĂ, nu de migrare: un morman pe celula unei uși are
+ * T-ul PĂRȚII MAI CALDE — maximul T-urilor vecinilor pe cele 6 direcții care au componentă, și T_afara dacă vreunul e aer
+ * sub cer. Ușa pivniței vara: casa (15 °C), nu aerul de afară (25 °C) și nici pivnița (4,4 °C). Un vecin cu componentă
+ * fără T (sau ștampila nevalidă) → null: nu se ghicește. Fără niciun vecin de aer: T_afara, ca sub cer.
+ */
+export function tTocului(w: World, x: number, y: number, z: number, tA: number, stampilaOk: boolean): number | null {
+  let max: number | null = null
+  for (const [dx, dy, dz] of VECINI_TOC) {
+    const c = componentaLa(w.camere, x + dx, y + dy, z + dz)
+    if (c !== null) {
+      const t = stampilaOk ? tDinStare(w, c.id) : null
+      if (t === null) return null
+      if (max === null || t > max) max = t
+    } else if (materialFast(w.terrain, x + dx, y + dy, z + dz) === Material.AER) {
+      // Aer fără componentă = sub cer (orice aer acoperit e într-o componentă, după sincronizarea de la capătul tickului).
+      if (max === null || tA > max) max = tA
+    }
+  }
+  return max ?? tA
+}
+
+/**
+ * T-ul celulei (x, y, z) a unui morman (t.3 §2), Q16 °C, sau null — PURĂ: nu scrie nimic în lume (pasul de alterare
+ * numără ce iese null; ecranul arată „nu se știe"). Într-o componentă: T-ul ei din stare (null fără T sau cu ștampila
+ * nevalidă); în tocul unei uși: `tTocului`; sub cer: `tA` (T_afara de acum, dat de apelant — o dată pe trecere).
+ */
+export function temperaturaCelulei(w: World, x: number, y: number, z: number, tA: number): number | null {
+  const loc = loculCelulei(w, x, y, z)
+  if (loc === LOC_CER) return tA
+  const ok = verificaStampila(w).ok
+  if (loc === LOC_TOC) return tTocului(w, x, y, z, tA, ok)
+  return ok ? tDinStare(w, loc) : null
 }

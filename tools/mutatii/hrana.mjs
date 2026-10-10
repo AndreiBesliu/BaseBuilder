@@ -1,6 +1,7 @@
 /**
- * Mutatii: S24-27 t.3, commit-ul A — formatul alterarii (research/hrana-t3.md §1, §7, §9). Rata e 0 peste tot: S-ul il
- * scriu testele, iar fiecare proba strica o garantie a FORMATULUI si numeste testul scris pentru ea.
+ * Mutatii: S24-27 t.3 — commit-ul A, formatul alterarii (research/hrana-t3.md §1, §7, §9: S-ul il scriu testele, rata 0),
+ * si commit-ul B, curba si pasul (§2, §3, §5: tabelul din content, pasul de 1 Hz, tocul, predicatul indexului, a doua
+ * cautare de mancare). Fiecare proba strica o garantie si numeste testul scris pentru ea.
  *
  * Doua familii de porti de conservare, cu probe separate: G1S (oracolul pe S, cu contoare) prinde ce iese NENUMARAT din S
  * (despartirea fara parte, mancatul nenumarat), pompa (Σ S exact, fara contoare) prinde ce se pierde sau se dubleaza la
@@ -12,6 +13,7 @@
  */
 
 const T = 'tests/hrana-format.test.ts'
+const TP = 'tests/hrana-pas.test.ts'
 
 export const MUTATII = [
   // --- aritmetica ---
@@ -179,10 +181,11 @@ export const MUTATII = [
 
   // --- mana ---
   {
-    n: 'mana se strica (bucla pe maini a prototipului H1, la 1 Hz)',
-    f: 'src/sim/world.ts',
-    a: '  if (w.tick % rules.ticksPerSecond === 0) pasTermic(w, rules)\n',
-    b: '  if (w.tick % rules.ticksPerSecond === 0) pasTermic(w, rules)\n  if (w.tick % rules.ticksPerSecond === 0) for (let i = 0; i < w.agents.count; i++) if (w.agents.caraCantitate[i]! > 0) w.agents.caraAlterare[i] = w.agents.caraAlterare[i]! + w.agents.caraCantitate[i]!\n',
+    // Commit-ul B: mutantul REAL (la A, fara pas, proba era o bucla inserata in tick). Testul ruleaza cu rata implicita.
+    n: 'mana se strica: pasul de alterare strange S si pe mainile pline (bucla pe maini a prototipului H1)',
+    f: 'src/sim/alterare.ts',
+    a: '  // Faza 2: unitatile intregi strinse pleaca; moartea se reconciliaza acum.\n',
+    b: '  for (let s = 0; s < w.agents.count; s++) if (w.agents.caraCantitate[s]! > 0 && rules.perisabil[w.agents.caraKind[s]!] === true) w.agents.caraAlterare[s] = w.agents.caraAlterare[s]! + w.agents.caraCantitate[s]! * Math.max(0, lambdaCer)\n  // Faza 2: unitatile intregi strinse pleaca; moartea se reconciliaza acum.\n',
     t: T, e: 'mana nu se strica',
   },
   {
@@ -446,5 +449,311 @@ export const MUTATII = [
     a: '  s.refuzate[slot] = 0\n',
     b: '',
     t: T, e: 'slotul de zona REFOLOSIT',
+  },
+
+  // =======================================================================================================
+  // commit-ul B: curba si pasul (research/hrana-t3.md §2, §3, §5, §9)
+  // =======================================================================================================
+
+  // --- curba: validarea continutului (content.ts) ---
+  {
+    n: 'curba: primul punct cu pierdere nenula trece (pragul n-ar mai fi prag)',
+    f: 'src/sim/content.ts',
+    a: '  if (puncte[0]![1] !== 0) return refuse(',
+    b: '  if (false) return refuse(',
+    t: TP, e: 'curba: validarea',
+  },
+  {
+    n: 'curba: T-ul punctelor nestrict crescator trece',
+    f: 'src/sim/content.ts',
+    a: '    if (tb <= ta) return refuse(',
+    b: '    if (false) return refuse(',
+    t: TP, e: 'curba: validarea',
+  },
+  {
+    n: 'curba: o pierdere care scade cand T creste trece',
+    f: 'src/sim/content.ts',
+    a: '    if (pb < pa) return refuse(',
+    b: '    if (false) return refuse(',
+    t: TP, e: 'curba: validarea',
+  },
+  {
+    n: 'curba: pantele descrescatoare trec (o curba concava)',
+    f: 'src/sim/content.ts',
+    a: '      if ((pa - p0) * (tb - ta) > (pb - pa) * (ta - t0)) {',
+    b: '      if (false) {',
+    t: TP, e: 'curba: validarea',
+  },
+  {
+    n: 'curba: λ peste ONE trece (mai mult de o unitate pe unitate si pe pas)',
+    f: 'src/sim/content.ts',
+    a: '  if (c.lambda[c.lambda.length - 1]! > ONE_ALTERARE) {',
+    b: '  if (false) {',
+    t: TP, e: 'curba: validarea',
+  },
+  {
+    n: 'curba: a doua raza de mancare sub prima trece',
+    f: 'src/sim/content.ts',
+    a: '  if (r.mancareScanRadiusLargCells < r.nevoieScanRadiusCells) {',
+    b: '  if (false) {',
+    t: TP, e: 'curba: validarea',
+  },
+  {
+    n: 'curba: banda moarta nevalidata la parsare',
+    f: 'src/sim/content.ts',
+    a: '  if (laBanda < 1) {',
+    b: '  if (false) {',
+    t: TP, e: 'curba: banda moarta',
+  },
+  {
+    n: 'curba: banda moarta judecata la 0,5 °C peste prag, nu la 0,05',
+    f: 'src/sim/content.ts',
+    a: '  const laBanda = lambdaPeCurba(c, c.tQ16[0]! + ALTERARE_BANDA_Q16)',
+    b: '  const laBanda = lambdaPeCurba(c, c.tQ16[0]! + 10 * ALTERARE_BANDA_Q16)',
+    t: TP, e: 'curba: banda moarta',
+  },
+  {
+    n: 'curba: λ derivat cu pasii pe zi FICSI (ziTicks si tps ignorate)',
+    f: 'src/sim/content.ts',
+    a: '    lambda.push(Number((BigInt(ppm) * BigInt(ONE_ALTERARE) * BigInt(tps)) / numitor))',
+    b: "    lambda.push(Number((BigInt(ppm) * BigInt(ONE_ALTERARE) * 20n) / (1_000_000n * 40320n)))",
+    t: TP, e: 'curba: banda moarta',
+  },
+
+  // --- curba: interpolarea (content.ts) ---
+  {
+    n: 'curba: interpolarea cu round in loc de floor',
+    f: 'src/sim/content.ts',
+    a: '  return la + Math.floor(((c.lambda[hi]! - la) * (tQ16 - t[lo]!)) / (t[hi]! - t[lo]!))',
+    b: '  return la + Math.round(((c.lambda[hi]! - la) * (tQ16 - t[lo]!)) / (t[hi]! - t[lo]!))',
+    t: TP, e: 'curba: interpolarea pe λ e EXACTA',
+  },
+  {
+    n: 'curba: λ in TREPTE (fara interpolare intre puncte)',
+    f: 'src/sim/content.ts',
+    a: '  return la + Math.floor(((c.lambda[hi]! - la) * (tQ16 - t[lo]!)) / (t[hi]! - t[lo]!))',
+    b: '  return la',
+    t: TP, e: 'curba: tabelul implicit e parabola declarata',
+  },
+  {
+    n: 'curba: peste ultimul punct, rata 0 (cel mai cald loc nu se mai strica)',
+    f: 'src/sim/content.ts',
+    a: '  if (tQ16 >= t[n - 1]!) return c.lambda[n - 1]!',
+    b: '  if (tQ16 >= t[n - 1]!) return 0',
+    t: TP, e: 'curba: interpolarea pe λ e EXACTA',
+  },
+  {
+    n: 'pragul mutat cu +0,1 °C (banda moarta de o zecime de grad)',
+    f: 'src/sim/content.ts',
+    a: '  if (n === 0 || tQ16 <= t[0]!) return 0',
+    b: '  if (n === 0 || tQ16 <= t[0]! + 6554) return 0',
+    t: TP, e: 'curba: banda moarta',
+  },
+  {
+    n: 'pragul mutat cu −0,1 °C (sub prag se interpoleaza: λ negativ)',
+    f: 'src/sim/content.ts',
+    a: '  if (n === 0 || tQ16 <= t[0]!) return 0',
+    b: '  if (n === 0 || tQ16 <= t[0]! - 6554) return 0',
+    t: TP, e: 'pragul:',
+  },
+
+  // --- pasul: locul in tick (world.ts) ---
+  {
+    n: 'pasul de alterare lipseste din tick',
+    f: 'src/sim/world.ts',
+    a: '  if (w.tick % rules.ticksPerSecond === 0) pasAlterare(w, rules)\n',
+    b: '',
+    t: TP, e: 'pasul: ordinea in tick',
+  },
+  {
+    n: 'pasul de alterare INAINTE de pasul termic (T-ul de dinaintea pasului, P10)',
+    f: 'src/sim/world.ts',
+    a: '  if (w.tick % rules.ticksPerSecond === 0) pasTermic(w, rules)\n  // Alterarea hranei',
+    b: '  if (w.tick % rules.ticksPerSecond === 0) pasAlterare(w, rules)\n  if (w.tick % rules.ticksPerSecond === 0) pasTermic(w, rules)\n  // Alterarea hranei',
+    e2: [{ f: 'src/sim/world.ts', a: '  if (w.tick % rules.ticksPerSecond === 0) pasAlterare(w, rules)\n  w.tick++', b: '  w.tick++' }],
+    t: TP, e: 'pasul: ordinea in tick',
+  },
+  {
+    n: 'faza pasului de alterare alta decat cea a pasului termic (% tps === 1)',
+    f: 'src/sim/world.ts',
+    a: '  if (w.tick % rules.ticksPerSecond === 0) pasAlterare(w, rules)',
+    b: '  if (w.tick % rules.ticksPerSecond === 1) pasAlterare(w, rules)',
+    t: TP, e: 'pasul: ordinea in tick',
+  },
+
+  // --- pasul (alterare.ts) ---
+  {
+    n: 'perisabilitatea ignorata: si piatra strange S',
+    f: 'src/sim/alterare.ts',
+    a: '    if (it.alive[i] !== 1 || rules.perisabil[it.kind[i]!] !== true) continue',
+    b: '    if (it.alive[i] !== 1) continue',
+    t: TP, e: 'pasul: ordinea in tick',
+  },
+  {
+    n: 'pasul strange pe o cantitate gresita (q + 1)',
+    f: 'src/sim/alterare.ts',
+    a: '    const dS = q * lambda',
+    b: '    const dS = (q + 1) * lambda',
+    t: TP, e: 'pasul: ordinea in tick',
+  },
+  {
+    n: 'unitatile stricate nu ajung in raportul tickului',
+    f: 'src/sim/alterare.ts',
+    a: '    raport.unitatiStricate += n\n',
+    b: '',
+    t: TP, e: 'pasul: ordinea in tick',
+  },
+  {
+    n: 'S-ul strans de pas nu se numara in alterareAcumulata (G1S)',
+    f: 'src/sim/alterare.ts',
+    a: '    w.ratiune.alterareAcumulata += dS\n',
+    b: '',
+    t: T, e: 'G1S + G1 la FIECARE tick',
+  },
+  {
+    n: 'rata evaluata pe fiecare MORMAN, nu o data pe componenta si trecere (J-3)',
+    f: 'src/sim/alterare.ts',
+    a: '      if (l === undefined) {',
+    b: '      if (true) {',
+    t: TP, e: 'K05 pe contoare: la fiecare pas',
+  },
+  {
+    n: 'rata cerului evaluata pe fiecare morman de sub cer',
+    f: 'src/sim/alterare.ts',
+    a: '        if (lambdaCer < 0) {',
+    b: '        if (true) {',
+    t: TP, e: 'K05 pe contoare: la fiecare pas',
+  },
+  {
+    n: 'componenta fara T: mormanul sare, dar nu se numara',
+    f: 'src/sim/alterare.ts',
+    a: '      if (l < 0) { st.faraT++; continue }',
+    b: '      if (l < 0) continue',
+    t: TP, e: 'componenta fara T',
+  },
+  {
+    n: 'componenta fara T: se ghiceste T_afara',
+    f: 'src/sim/alterare.ts',
+    a: '        l = t === null ? -1 : lambdaPeCurba(curba, t)',
+    b: '        l = lambdaPeCurba(curba, t ?? tAfara(w.seed, w.tick, rules))',
+    t: TP, e: 'componenta fara T',
+  },
+  {
+    n: 'tocul cu un vecin fara T: se ghiceste T_afara',
+    f: 'src/sim/alterare.ts',
+    a: '        if (t === null) { st.faraT++; continue }\n        lambda = lambdaPeCurba(curba, t)',
+    b: '        lambda = lambdaPeCurba(curba, t ?? tA)',
+    t: TP, e: 'componenta fara T',
+  },
+  {
+    n: 'la λ = 0 nu se realizeaza S ≥ ONE (P14 neaplicat)',
+    f: 'src/sim/alterare.ts',
+    a: '    if (k > 0) {\n      ids.push(',
+    b: '    if (k > 0 && lambda > 0) {\n      ids.push(',
+    t: TP, e: 'pivnita sub casa, un anotimp intreg',
+  },
+  {
+    n: 'moartea din alterare fara reconciliazaTintaMoarta (job zombi, rezervare orfana)',
+    f: 'src/sim/alterare.ts',
+    a: '      reconciliazaTintaMoarta(w, rules, id)\n',
+    b: '',
+    t: TP, e: 'moartea din alterare',
+  },
+
+  // --- tocul (temperatura.ts) si a treia trecere (iteme.ts) ---
+  {
+    n: 'tocul: regula ignorata (T_afara, ca la v1)',
+    f: 'src/sim/temperatura.ts',
+    a: '  return max ?? tA\n}',
+    b: '  return tA\n}',
+    t: TP, e: 'tocul: regula PERMANENTA',
+  },
+  {
+    n: 'tocul: partea mai RECE in loc de cea mai calda',
+    f: 'src/sim/temperatura.ts',
+    a: '      if (max === null || t > max) max = t',
+    b: '      if (max === null || t < max) max = t',
+    t: TP, e: 'tocul: regula PERMANENTA',
+  },
+  {
+    n: 'tocul: vecinul sub cer ignorat',
+    f: 'src/sim/temperatura.ts',
+    a: '      if (max === null || tA > max) max = tA\n',
+    b: '',
+    t: TP, e: 'tocul: regula PERMANENTA',
+  },
+  {
+    n: 'tocul: un vecin fara T se sare (in loc de null)',
+    f: 'src/sim/temperatura.ts',
+    a: '      if (t === null) return null\n',
+    b: '      if (t === null) continue\n',
+    t: TP, e: 'tocul: regula PERMANENTA',
+  },
+  {
+    n: 'asazaItem: tocul in prima trecere (marfa pe usa desi e loc langa)',
+    f: 'src/sim/iteme.ts',
+    a: '          if (trecere === 2 ? !toc : toc) continue\n',
+    b: '          if (trecere === 2) continue\n',
+    t: TP, e: 'asazaItem: tocul usii e a TREIA trecere',
+  },
+  {
+    n: 'asazaItem: tocul interzis (v1: marfa se pierde cand vecinii sunt plini)',
+    f: 'src/sim/iteme.ts',
+    a: '          if (trecere === 2 ? !toc : toc) continue\n',
+    b: '          if (toc) continue\n',
+    t: TP, e: 'asazaItem: tocul usii e a TREIA trecere',
+  },
+
+  // --- indexul de zone: predicatul X (zone.ts) si costul (iteme.ts) ---
+  {
+    n: 'indexul (M): stricaciunea murdareste doar la moarte',
+    f: 'src/sim/zone.ts',
+    a: '  if (ix.murdar) return false\n  const it = w.iteme\n',
+    b: '  return false\n  const it = w.iteme\n',
+    t: TP, e: 'indexul de zone, predicatul EXACT',
+  },
+  {
+    n: 'indexul: fara clauza (a) — mormanul PLIN de pe o celula de depozit',
+    f: 'src/sim/zone.ts',
+    a: '    if (q0 >= rules.itemStackMax) return true\n',
+    b: '',
+    t: TP, e: 'indexul de zone, predicatul EXACT',
+  },
+  {
+    n: 'indexul: fara clauza (b) — locul nou peste maxLocLiber',
+    f: 'src/sim/zone.ts',
+    a: '    if (rules.itemStackMax - q1 > ix.maxLocLiber[zs * ITEME + k]!) return true\n',
+    b: '',
+    t: TP, e: 'indexul de zone, predicatul EXACT',
+  },
+  {
+    n: 'indexul: fara clauza (c) — apartenenta proprie la deMutat',
+    f: 'src/sim/zone.ts',
+    a: '  return inainte !== dupa\n',
+    b: '  return false\n',
+    t: TP, e: 'indexul de zone, predicatul EXACT',
+  },
+  {
+    n: 'indexul (D): orice unitate stricata murdareste indexul (112–130 de pasi de index pe tick)',
+    f: 'src/sim/iteme.ts',
+    a: '  if (schimba) marcheazaZoneMurdare(w)\n',
+    b: '  marcheazaZoneMurdare(w)\n',
+    t: TP, e: 'K05 pe contoare (verif-P3)',
+  },
+
+  // --- a doua cautare de mancare (joburi.ts) ---
+  {
+    n: 'a doua cautare de mancare lipseste (J-8)',
+    f: 'src/sim/joburi.ts',
+    a: '  return cautaMancareInRaza(w, rules, slot, rules.mancareScanRadiusLargCells)\n',
+    b: '  return null\n',
+    t: TP, e: 'a doua cautare de mancare',
+  },
+  {
+    n: 'cautarea de mancare fara raza (toata lumea, si dincolo de a doua raza)',
+    f: 'src/sim/joburi.ts',
+    a: '    if (d > raza) continue\n',
+    b: '',
+    t: TP, e: 'a doua cautare de mancare',
   },
 ]

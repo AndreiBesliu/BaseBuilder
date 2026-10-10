@@ -27,6 +27,7 @@ import { memorieSprijin } from './stabilitate.ts'
 import { memorieAcces } from './acces.ts'
 import { indexCamere } from './camere.ts'
 import { pasTermic, sincronizeazaLumea, temperaturaGoala } from './temperatura.ts'
+import { pasAlterare } from './alterare.ts'
 
 /**
  * Creeaza o lume. NU incarca teren: `createTerrain` aloca doar structura goala,
@@ -91,6 +92,8 @@ export function tick(w: World, rules: Rules = DEFAULT_RULES): void {
   // Pasul de 1 Hz, DUPĂ sincronizare: căldura oamenilor intră în componenta de după lot (B4, F5). Faza e globală, pe
   // tick (o lume încărcată pășește la aceleași tickuri ca cea continuă).
   if (w.tick % rules.ticksPerSecond === 0) pasTermic(w, rules)
+  // Alterarea hranei (t.3 §2): DUPA pasul termic, pe T-ul de dupa pas, cu aceeasi faza globala — pe o linie proprie.
+  if (w.tick % rules.ticksPerSecond === 0) pasAlterare(w, rules)
   w.tick++
 }
 

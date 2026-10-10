@@ -90,8 +90,22 @@ export function sapaPivnita(tStart: number, casaDeLa: 'regim' | 'acoperis'): Sap
   return { w, tInchidere: w.tick, piv: p.piv, casa: p.casa }
 }
 
-/** O lume cu geometria FINALĂ zidită direct (casa, rampa, pivnița, ușa), la echilibru în tickul 0. */
-function geometriaFinala(): { w: World; piv: [number, number, number] } {
+/** Geometria finală: lumea și celulele numite (pivnița, casa, ușa pivniței jos, ușa casei jos, un loc sub cer, cota). */
+export interface GeometriaFinala {
+  readonly w: World
+  readonly piv: [number, number, number]
+  readonly casa: [number, number, number]
+  readonly usaPivnitei: [number, number, number]
+  readonly usaCasei: [number, number, number]
+  readonly afara: [number, number, number]
+  readonly g: number
+}
+
+/**
+ * O lume cu geometria FINALĂ zidită direct (casa, rampa, pivnița, ușa), la echilibru în tickul `tick` (implicit 0). Exportată
+ * pentru t.3 (hrana în casă, în pivniță, în toc și sub cer, pe aceeași geometrie ca acceptanța pivniței).
+ */
+export function geometriaFinala(tick = 0): GeometriaFinala {
   const { w, wx, wy, g } = sitPlat(12345, 22)
   const hx = wx + 4, hy = wy + 4
   casa(w, hx, hy, g)
@@ -99,8 +113,8 @@ function geometriaFinala(): { w: World; piv: [number, number, number] } {
   for (const [x, y, z] of p.sapa) assert.ok(dig(w.terrain, x, y, z).ok)
   for (const [x, y, z] of p.usi) assert.ok(fill(w.terrain, x, y, z, Material.USA).ok)
   bun(sincronizeazaLumea(w, R), 'geometria finala')
-  laEchilibru(w, 0)
-  return { w, piv: p.piv }
+  laEchilibru(w, tick)
+  return { w, piv: p.piv, casa: p.casa, usaPivnitei: p.usi[0]!, usaCasei: [hx + 3, hy, g + 1], afara: [hx + 3, hy - 3, g + 1], g }
 }
 
 /**

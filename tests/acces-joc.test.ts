@@ -665,9 +665,12 @@ test('hash de referinta al accesului vertical: casa cu doua etaje dupa 12.000 de
   // deschisa, cu pionii inauntru la 236 din 600 de pasi, B1/B4) — se muta si la o recalibrare termica.
   // fe597a27 -> c62b4aee (S24-27 t.3, commit-ul A, schema 9): doar formatul (schema 9, campurile alterarii, zero) — functia
   // de hash de dinainte, pe lumea noua cu schema proiectata pe 8, da tot fe597a27.
+  // c62b4aee -> 84be6e5e (S24-27 t.3, commit-ul B): EFECTUL — hrana scenei sta sub cer 12.000 de tickuri si se strica (56 de
+  // unitati). Cu rata 0 (tabelul curbei pe zero), codul B da tot c62b4aee; a doua cautare de mancare nu-l atinge. Literalul
+  // vede rata: se muta si la o recalibrare a curbei.
   const { w } = santier(12345, casaCuEtaj(true))
   advance(w, 12000, R)
-  assert.equal(hashWorld(w), 'c62b4aee')
+  assert.equal(hashWorld(w), '84be6e5e')
 })
 
 // ---------------------------------------------------------------------------

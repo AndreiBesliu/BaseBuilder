@@ -57,6 +57,7 @@
   "nevoieRetryTicks": 500,
   "nevoieScanRadiusCells": 96,
   "nevoieScanMaxCandidates": 64,
+  "mancareScanRadiusLargCells": 384,
   "portieMancare": 20,
   "mancatTicks": 60,
   "mancatoriPeMorman": 2,
@@ -67,6 +68,13 @@
   },
   "nutritie": { "PIATRA": 0, "PAMANT": 0, "LEMN": 0, "HRANA": 15 },
   "perisabil": { "PIATRA": false, "PAMANT": false, "LEMN": false, "HRANA": true },
+  "alterare": {
+    "pierderePeMilionZilnic": [
+      [5000, 0], [5100, 17], [5200, 69], [5300, 156], [5400, 277], [5500, 433], [5600, 624], [5700, 849], [5800, 1109], [5900, 1404],
+      [6000, 1733], [6500, 3899], [7000, 6931], [7500, 10830], [8000, 15596], [8500, 21228], [9000, 27726], [9500, 35091],
+      [10000, 43322], [15000, 173287], [20000, 389895], [25000, 693147], [30000, 1083042], [35000, 1559581], [40000, 2122763], [45000, 2772589]
+    ]
+  },
   "dispozitieMax": 1000,
   "dispozitieBaza": 500,
   "dispozitieTicks": 500,

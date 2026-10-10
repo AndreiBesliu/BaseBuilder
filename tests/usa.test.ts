@@ -330,9 +330,12 @@ function prabusireSubUsa(cuUsa: boolean, buiandrug: boolean, morman: boolean): {
   zid(x, y, g + 3)
   zid(x - 1, y, g + 3)
   for (let z = g + 4; z <= g + sus; z++) { zid(x - 1, y, z); zid(x - 2, y, z) }
+  // Mormanul din toc pe calea VIE (t.3, STARE-2/STARE-5): lasat in gol, apoi usa zidita PESTE el. Lasat direct pe usa,
+  // `asazaItem` il pune acum pe USA doar ca a treia trecere — aici ar fi ajuns pe stalpul T, langa usa.
+  if (morman) assert.ok(applyCommand(w, { kind: 'lasaItem', fel: Item.PIATRA, cantitate: 20, wx: x, wy: y, z: g + 4 }, R).ok)
   if (cuUsa) { zid(x, y, g + 4, Material.USA); zid(x, y, g + 5, Material.USA) }
   if (buiandrug) zid(x, y, g + 6)
-  if (morman) assert.ok(applyCommand(w, { kind: 'lasaItem', fel: Item.PIATRA, cantitate: 20, wx: x, wy: y, z: g + 4 }, R).ok)
+  if (morman) assert.notEqual(itemLaCelula(w.iteme, x, y, g + 4), -1, 'premisa: mormanul e in toc (sau in golul de aer)')
   else assert.ok(applyCommand(w, { kind: 'spawnAgent', x: x * 1000 + 500, y: y * 1000 + 500, z: g + 4, faction: Faction.ASEZARE }, R).ok)
   assert.ok(applyCommand(w, { kind: 'dig', wx: x + 1, wy: y, z: g + 1 }, R).ok)
   return { w, x, y, g }
@@ -445,10 +448,11 @@ function cameraCuToc(seed: number, gol: boolean): { w: World; wx: number; wy: nu
 test('USA toc (USA-1): usa de sus se zideste peste un morman din toc (usa de jos zidita), fara asteptare', () => {
   for (const seed of [12345, 777]) {
     const { w, wx, wy, g, x0, y0, pioni } = cameraCuToc(seed, true)
+    // Pamant: nu e materialul niciunei piese, deci nimeni nu-l ia din toc ca sursa. Lasat in gol INAINTE de usa de jos
+    // (t.3: `asazaItem` pune pe USA doar ca a treia trecere — calea vie e usa zidita peste morman, STARE-2).
+    assert.ok(applyCommand(w, { kind: 'lasaItem', fel: Item.PAMANT, cantitate: 20, wx: x0 + 2, wy: y0, z: g + 1 }, R).ok)
     assert.ok(applyCommand(w, { kind: 'fill', wx: x0 + 2, wy: y0, z: g + 1, material: Material.USA }, R).ok)
     assert.ok(applyCommand(w, { kind: 'desemneaza', wx: x0 + 2, wy: y0, z: g + 2, piesa: Piesa.USA }, R).ok)
-    // Pamant: nu e materialul niciunei piese, deci nimeni nu-l ia din toc ca sursa.
-    assert.ok(applyCommand(w, { kind: 'lasaItem', fel: Item.PAMANT, cantitate: 20, wx: x0 + 2, wy: y0, z: g + 1 }, R).ok)
     assert.notEqual(itemLaCelula(w.iteme, x0 + 2, y0, g + 1), -1, 'premisa: mormanul e in toc')
     lasaItem(w, Item.PIATRA, 20, wx + 1, wy + 1)
     pioni()

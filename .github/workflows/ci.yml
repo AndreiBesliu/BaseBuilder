@@ -100,13 +100,19 @@ jobs:
       # b38229fd -> fd188574 (S24-27 t.3, commit-ul A, schema 9): DOAR formatul — schema 9 si campurile alterarii in hash
       # (toate zero: rata e 0). Comportamentul e identic: functia de hash de dinainte, pe lumea noua cu schema proiectata
       # pe 8, da b38229fd la FIECARE din cele 100.000 de tickuri; mancate 4.397, plecati 8, hrana ramasa 628, ca inainte.
+      #
+      # fd188574 -> c4a6c1dc (S24-27 t.3, commit-ul B): EFECTUL — hrana scenariului sta sub cer, toamna, si se strica
+      # (1.164 de unitati, 18,5%); hrana scenariului × 1,25 (decizia 12), a doua cautare de mancare la 384 de celule.
+      # Mancate 4.397 -> 4.445, plecati 8 -> 7, hrana ramasa 628 -> 696. Cu rata 0, hrana de dinainte si fara a doua
+      # cautare, codul B da tot fd188574 (pasul, tocul, predicatul indexului: neutre). Hash-ul standard VEDE acum clima de
+      # afara (nu si incaperile: 0 componente); literalul hranei intr-o incapere e „S+ hrana" (tests/hrana-pas.test.ts).
       - name: hash de referinta
         if: ${{ !cancelled() }}
         run: |
           OUT=$(node src/harness/cli.ts --seed 12345 --ticks 100000 --agents 40)
           echo "$OUT"
           HASH=$(echo "$OUT" | awk '/^hash/ {print $2}')
-          EXPECTED=fd188574
+          EXPECTED=c4a6c1dc
           if [ "$HASH" != "$EXPECTED" ]; then
             echo "::error::hash-ul de referinta s-a schimbat: $HASH (asteptat $EXPECTED)"
             echo "Daca schimbarea e intentionata, actualizeaza EXPECTED in acest workflow"

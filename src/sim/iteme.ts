@@ -34,22 +34,20 @@ import type { Rules } from './content.ts'
 import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import type { World } from './state.ts'
+import { ONE_ALTERARE } from './state.ts'
 import { cellKey } from './path.ts'
 import { seSapaLa } from './desemnari.ts'
-import { isWalkable } from './regions.ts'
+import { isWalkable, materialFast } from './regions.ts'
+import { Material } from './terrain/chunk.ts'
 import { rezervariPentru, Strat } from './rezervari.ts'
-import { celulaDeZonaLa, marcheazaZoneMurdare, subSantier } from './zone.ts'
+import { celulaDeZonaLa, marcheazaZoneMurdare, scadereaSchimbaIndexul, subSantier } from './zone.ts'
 
 // ---------------------------------------------------------------------------
 // alterarea (S24-27 t.3, research/hrana-t3.md §1) — aritmetica, o functie pe fapt
 // ---------------------------------------------------------------------------
 
-/**
- * O unitate intreaga de alterare: S-ul unui morman e in 1/ONE dintr-o unitate. 2^29: rata cuantizata e nenula de
- * la ~5,02 °C (t.3 §3), iar la `itemStackMax` maxim (10^6) q·ONE ≈ 5,4e14 ramane sub 2^53 — intregi exacti in
- * Float64, fara BigInt. Intra in FORMAT: o schimbare de ONE cere o migrare a salvarilor.
- */
-export const ONE_ALTERARE = 536870912
+/** O unitate intreaga de alterare (definita in state.ts, ca s-o citeasca si parsarea curbei; vezi acolo). */
+export { ONE_ALTERARE }
 
 /**
  * Partea de alterare care pleaca cu `k` din `q` unitati ale unui morman (sau ale unei maini) cu alterarea `S`:
@@ -309,10 +307,11 @@ export interface Depunere {
  * Depune `cantitate` unitati de felul `kind`, cat mai aproape de (wx, wy, z).
  *
  * Ordine FIXA: celula data, apoi cei 4 vecini orizontali la z, apoi la z+1, z−1,
- * … pana la ±maxStepM. Doua treceri peste aceeasi ordine: intai celulele a caror
+ * … pana la ±maxStepM. Trei treceri peste aceeasi ordine: intai celulele a caror
  * podea NU e o desemnare vie (mormanul de acolo ar cadea la sapat), apoi si
  * alea — un al doilea strat desemnat dinainte n-are voie sa piarda yield-ul
- * primului. O celula e buna daca e calcabila, nu e destinatie rezervata de
+ * primului —, iar la urma tocul usilor (t.3: hrana din toc are temperatura partii
+ * mai calde). O celula e buna daca e calcabila, nu e destinatie rezervata de
  * altcineva, si e goala sau tine acelasi fel cu loc. Se contopeste cat incape,
  * restul merge pe urmatoarea celula din ordine. Ce nu incape nicaieri se numara
  * in `ratiune.itemePierdute` (zavor per lume).
@@ -331,7 +330,11 @@ export function asazaItem(w: World, rules: Rules, kind: number, cantitate: numbe
   let sursaS = alterare
   let ultimulSlot = -1
   const pas = Math.max(0, Math.min(4, rules.maxStepM))
-  for (let trecere = 0; trecere < 2 && ramas > 0; trecere++) {
+  // Trei treceri: a TREIA e tocul usilor (t.3 §2, STARE-5) — marfa ajunge pe celula unei usi doar daca nu e alt loc. Nu
+  // e interzisa: cu laturile ocupate, interdictia pierdea marfa (un pion ucis in toc cu 50 de HRANA: +50 pierdute). Un
+  // morman ramas in toc are temperatura partii mai calde (`tTocului`), regula care ramane oricum, fiindca o usa se
+  // zideste si PESTE un morman.
+  for (let trecere = 0; trecere < 3 && ramas > 0; trecere++) {
     for (let dz = 0; dz <= pas && ramas > 0; dz++) {
       for (const zs of dz === 0 ? [z] : [z + dz, z - dz]) {
         for (const [dx, dy] of dz === 0 ? [[0, 0], ...DIRECTII] as const : DIRECTII) {
@@ -350,6 +353,8 @@ export function asazaItem(w: World, rules: Rules, kind: number, cantitate: numbe
           // refuza si la cap — aceeasi intrebare ca indexul de zone si `lasa` (recenzia
           // incaperilor, USA-5: „o functie, un adevar").
           if (subSantier(w, rules, nx, ny, zs)) continue
+          const toc = materialFast(w.terrain, nx, ny, zs) === Material.USA
+          if (trecere === 2 ? !toc : toc) continue
           if (trecere === 0 && podeaDesemnata) continue
           if (trecere === 1 && !podeaDesemnata) continue
           const loc = locPeCelula(w, rules, kind, nx, ny, zs)
@@ -414,10 +419,13 @@ export function iaDinItem(w: World, rules: Rules, slot: number, cantitate: numbe
  * regula de despartire a lui `iaDinItem`, care, luata literal, lasa S ≥ ONE si strica o unitate la aproape fiecare
  * pas (de 26 de ori mai repede: STARE-4). `k = min(q, floor(S/ONE))`; un `k` mai mare se taie acolo, deci S nu
  * ajunge niciodata negativ. Unitatile se numara in `w.hranaStricata`; daca mormanul moare, restul lui de S iese
- * numarat (`alterareDisparuta`). Imparte cu `iaDinItem` DOAR contabilitatea de store (zonele, moartea);
+ * numarat (`alterareDisparuta`). Imparte cu `iaDinItem` DOAR contabilitatea mortii (`scadeDinMorman`);
  * `reconciliazaTintaMoarta` e a apelantului, ca la `iaDinItem`. Intoarce cantitatea ramasa (0 = mort).
  *
- * La commit-ul A al t.3 nu o cheama niciun pas (rata e 0 peste tot): o cheama testele, pe S scris de ele.
+ * Indexul de zone, pe un morman care SUPRAVIETUIESTE: se murdareste doar daca s-ar schimba (predicatul exact
+ * `scadereaSchimbaIndexul`, verif-P3). Regula lui `iaDinItem` („orice unitate pe o celula de zona") e corecta, dar intr-un
+ * depozit cald cu mormane desincronizate o unitate se strica in 599 de pasi din 600: 112–130 de pasi de index pe tick, de
+ * 4 ori peste pragul care leaga azi (30); predicatul exact da 0–4,1, cu 0 pasi invechiti in 11.400.
  */
 export function scadeStricate(w: World, rules: Rules, slot: number, k: number): number {
   const s = w.iteme
@@ -429,14 +437,20 @@ export function scadeStricate(w: World, rules: Rules, slot: number, k: number): 
   if (n === q) {
     w.ratiune.alterareDisparuta += s.alterare[slot]!
     s.alterare[slot] = 0
+    scadeDinMorman(w, rules, slot, n)
+    return 0
   }
-  scadeDinMorman(w, rules, slot, n)
-  return s.cantitate[slot]!
+  // Evaluat INAINTE de scadere, pe indexul de dinainte (curat = la zi cu lumea de dinainte).
+  const schimba = scadereaSchimbaIndexul(w, rules, slot, q, q - n)
+  s.cantitate[slot] = q - n
+  if (schimba) marcheazaZoneMurdare(w)
+  return q - n
 }
 
 /**
  * Contabilitatea de STORE a unei scaderi din morman, comuna lui `iaDinItem` si `scadeStricate`: cantitatea,
- * moartea (`stergeItem`) si murdarirea indexului de zone. Alterarea e a apelantului.
+ * moartea (`stergeItem`) si murdarirea indexului de zone. Alterarea e a apelantului. `scadeStricate` o cheama doar la
+ * moarte: pe un morman care supravietuieste stricaciunii, indexul are predicatul exact (`scadereaSchimbaIndexul`).
  */
 function scadeDinMorman(w: World, rules: Rules, slot: number, luat: number): void {
   const s = w.iteme

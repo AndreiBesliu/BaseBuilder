@@ -86,8 +86,10 @@ export function runScenario(s: Scenario): RunReport {
  * cu `HEIGHT_SCALE_DM` mutat de la 1800 la 1900 — adica tot relieful lumii
  * schimbat cu 5,5% — hash-ul ramanea `5bc3ca4c`. O poarta care nu poate sa pice
  * nu e o poarta.
+ *
+ * `hranaPeSit` exista pentru masuratori (t.3: aceeasi lume cu hrana de dinainte, 450); referinta e implicitul.
  */
-export function standardScenario(seed: number, ticks: number, agents = 20): Scenario {
+export function standardScenario(seed: number, ticks: number, agents = 20, hranaPeSit = HRANA_PE_SIT): Scenario {
   const commands: LoggedCommand[] = []
 
   // Siturile se aleg INAINTE de agenti, fiindca agentii se nasc pe ele.
@@ -204,13 +206,24 @@ export function standardScenario(seed: number, ticks: number, agents = 20): Scen
     // exact ce nu trebuie sa descrie cifrele de referinta.
     //
     // Productia de hrana nu exista inca; pana atunci mancarea se pune cu comanda.
-    for (let m = 0; m < 6; m++) {
+    //
+    // × 1,25 de la alterare (S24-27 t.3 §6, decizia 12): hrana scenariului sta sub cer, toamna, si cu curba implicita se
+    // strica ~17% din ea; cu aceeasi hrana, plecarile se dublau, toate din foame (J-6: 2/3/2/8 → 13/7/9/15 pe semintele
+    // 1/2/3/12345) — adica cifrele de referinta ar fi descris exact colonia infometata pe care comentariul de mai sus o
+    // interzice. Cu un sfert in plus, invariantul ramane adevarat (masurat in DEVLOG, t.3 B). Cele 6 mormane pline de
+    // dinainte raman pe locurile lor (cu `hranaPeSit` 450, lumea e exact cea de dinainte); sfertul vine pe randul al
+    // treilea, in mormane pline si restul in ultimul.
+    let inPlus = hranaPeSit - 6 * 75
+    for (let m = 0; m < 9; m++) {
+      if (m >= 6 && inPlus <= 0) break
       const hz = celulaBuna(scratch, s.wx - 3 - (m % 3), s.wy + 1 + Math.floor(m / 3))
       if (!hz) continue
       const cheie = hz.wx * 100000 + hz.wy
       if (celuleFolosite.has(cheie)) continue
       celuleFolosite.add(cheie)
-      commands.push({ tick: t + 9, cmd: { kind: 'lasaItem', fel: Item.HRANA, cantitate: 75, wx: hz.wx, wy: hz.wy, z: hz.z } })
+      const q = m < 6 ? 75 : Math.min(75, inPlus)
+      if (m >= 6) inPlus -= q
+      commands.push({ tick: t + 9, cmd: { kind: 'lasaItem', fel: Item.HRANA, cantitate: q, wx: hz.wx, wy: hz.wy, z: hz.z } })
     }
     const pz = celulaBuna(scratch, s.wx - 5, s.wy - 5)
     if (pz) commands.push({ tick: t + 10, cmd: { kind: 'picteazaZona', x0: pz.wx, y0: pz.wy, x1: pz.wx + 1, y1: pz.wy + 1, z: pz.z, prioritate: 3, fel: Zona.DORMIT } })
@@ -252,6 +265,9 @@ interface Site {
 
 /** Cate situri de fiecare semn. Ambele semne conteaza: `Math.floor` pe centimetri negativi. */
 const SITES_PER_SIGN = 6
+
+/** Hrana pusa langa fiecare sit: 6 mormane pline (450 de unitati) × 1,25 de la alterare (t.3 §6) = 563. */
+const HRANA_PE_SIT = Math.round(6 * 75 * 1.25)
 
 /**
  * Alege situri de sapat: jumatate sub cota zero, jumatate peste.

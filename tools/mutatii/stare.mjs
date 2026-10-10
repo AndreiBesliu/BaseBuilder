@@ -207,7 +207,8 @@ export const MUTATII = [
     f: 'src/sim/world.ts',
     a: '  sincronizeazaLumea(w, rules)\n  // Pasul de 1 Hz',
     b: '  if (w.tick % rules.ticksPerSecond === 0) pasTermic(w, rules)\n  sincronizeazaLumea(w, rules)\n  // Pasul de 1 Hz',
-    e2: [{ f: 'src/sim/world.ts', a: '  if (w.tick % rules.ticksPerSecond === 0) pasTermic(w, rules)\n  w.tick++', b: '  w.tick++' }],
+    // Re-ancorata la t.3 (commit-ul B): dupa pasul termic sta acum, pe linia ei, alterarea hranei (research/hrana-t3.md §9).
+    e2: [{ f: 'src/sim/world.ts', a: '  if (w.tick % rules.ticksPerSecond === 0) pasTermic(w, rules)\n  // Alterarea', b: '  // Alterarea' }],
     t: TP, e: 'PAS oamenii dupa lot',
   },
   {

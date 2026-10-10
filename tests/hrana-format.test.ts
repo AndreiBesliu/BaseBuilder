@@ -29,6 +29,14 @@ import { laSit, lasaItem, patratPlat, picteaza, R, sitPlat, solid, solidLaDistan
 const ONE = ONE_ALTERARE
 const H = Item.HRANA
 
+/**
+ * Rata 0 peste tot (t.3, commit-ul B): un content cu tabelul curbei pe ZERO. Parsarea l-ar refuza (banda moarta: λ la
+ * 0,05 °C peste prag trebuie sa fie ≥ 1), deci e scris direct — portile FORMATULUI (pompa, nutritia pe hartie, rezervarea
+ * pe valoare, zidirea perisabila, lumea migrata) vor S-ul scris de ele neatins de pas. Pasul ruleaza oricum (la λ = 0
+ * realizeaza doar S ≥ ONE), deci sunt si o proba ca la rata 0 nu apare nimic.
+ */
+const R0: Rules = { ...R, alterare: { pierderePeMilionZilnic: [[5000, 0], [100000, 0]] } }
+
 /** Σ S si Σ unitati de HRANA, pe mormanele vii si in mainile tuturor sloturilor. */
 function sume(w: World): { S: number; u: number } {
   let S = 0
@@ -82,16 +90,22 @@ test('parteDinAlterare: proprietatea pe 200.000 de trageri, cu BigInt — parte�
   assert.ok(peste53 > 1000, `doar ${peste53} trageri cu S·k peste 2^53: proba nu atinge depasirea`)
 })
 
-test('nutritia pe hartie (verif-P7, recalculat cu ONE = 2^29 si ceil): q = 30, S = 7·2^29 + 7 → 229 apoi 114; q = 1, S = ONE − 1 → 0; control S = 0 → 300 + 150', () => {
+test('nutritia pe hartie (verif-P7; la B cu S < ONE, singurul S care traieste pana la o imbucatura): q = 30, S = 2^29 − 41 → 290 apoi 145; q = 1, S = ONE − 1 → 0; control S = 0 → 300 + 150', () => {
+  // La commit-ul B pasul ruleaza la fiecare secunda si realizeaza orice S ≥ ONE (si la λ = 0, P14): un morman care
+  // supravietuieste unui pas are S < ONE. Cifrele lui A (q = 30, S = 7·2^29 + 7 → 229/114) erau pe o stare pe care pasul o
+  // strica la tickul 0 (7 unitati), deci S-ul scris aici e sub o unitate, cu ACELASI rest la 30 (21).
   // Pe HARTIE, nu cu formula din cod (nut = 15, portie = 20, deci 20 + 10 unitati):
-  //   S = 3.758.096.391 = 7·2^29 + 7; S mod 30 = 21, deci termenul de rest al despartirii conteaza.
-  //   imbucatura 1: parte = floor(S·20/30) = 2.505.397.594; parte·15 = 37.580.963.910 = 70·2^29 + 70 ⇒ ceil = 71 ⇒ 300 − 71 = 229
-  //   imbucatura 2: S ramas = 1.252.698.797; ·15 = 18.790.481.955 = 35·2^29 + 35 ⇒ ceil = 36 ⇒ 150 − 36 = 114
+  //   S = 536.870.871 = 2^29 − 41; floor(S/30) = 17.895.695, S mod 30 = 21 (termenul de rest al despartirii conteaza).
+  //   imbucatura 1: parte = 17.895.695·20 + floor(21·20/30) = 357.913.900 + 14 = 357.913.914;
+  //                 parte·15 = 5.368.708.710 = 9·2^29 + 536.870.502 ⇒ ceil = 10 ⇒ 300 − 10 = 290
+  //   imbucatura 2: S ramas = 178.956.957; ·15 = 2.684.354.355 = 4·2^29 + 536.870.707 ⇒ ceil = 5 ⇒ 150 − 5 = 145
   //   q = 1, S = 2^29 − 1: (2^29 − 1)·15 = 15·2^29 − 15 ⇒ ceil = 15 ⇒ 15 − 15 = 0 (mancatorul nu castiga restul)
-  // Mutantii familiei (verif-P7, recalculati): floor 230/115 si 1; nereduse 300/150 si 15; S-ul intreg 194; S-ul ramas
-  // 264/150; partea fara rest 230; trunchierea pe unitate 240/120 — toti difera de 229/114/0.
-  // Scurgerea FOAMEI e 0, ca diferenta de FOAME pe tickul imbucaturii sa fie EXACT creditul.
-  const fara: Rules = { ...R, nevoi: R.nevoi.map((n, i) => (i === Nevoie.FOAME ? { ...n, scurgere: 0 } : n)) }
+  // Mutantii familiei (recalculati in intregi exacti, agentB/03-hartie-nutritie.py): floor 291/146 (si 1); nereduse
+  // 300/150 (si 15); S-ul intreg al mormanului 285/145; partea fara rest 290/144 (S ramas 178.956.971, ·15 = 5·2^29 + 5
+  // ⇒ 6) — toti difera de 290/145/0.
+  // Scurgerea FOAMEI e 0, ca diferenta de FOAME pe tickul imbucaturii sa fie EXACT creditul; rata 0 (R0), ca S-ul scris
+  // sa fie exact cel de pe hartie la fiecare imbucatura.
+  const fara: Rules = { ...R0, nevoi: R.nevoi.map((n, i) => (i === Nevoie.FOAME ? { ...n, scurgere: 0 } : n)) }
   assert.equal(ONE, 536870912, 'ONE nu e 2^29: valorile de pe hartie nu mai sunt valabile')
   function caz(q: number, S: number): { luat: number; dF: number }[] {
     const { w, wx, wy, g } = sitPlat(7, 12)
@@ -112,24 +126,28 @@ test('nutritia pe hartie (verif-P7, recalculat cu ONE = 2^29 si ceil): q = 30, S
     }
     return imb
   }
-  assert.deepEqual(caz(30, 3758096391), [{ luat: 20, dF: 229 }, { luat: 10, dF: 114 }])
+  assert.deepEqual(caz(30, 536870871), [{ luat: 20, dF: 290 }, { luat: 10, dF: 145 }])
   assert.deepEqual(caz(1, ONE - 1), [{ luat: 1, dF: 0 }])
   assert.deepEqual(caz(30, 0), [{ luat: 20, dF: 300 }, { luat: 10, dF: 150 }])
   // Si functia, pe aceleasi cifre (fara mancator), si la maximele content-ului (portie 10^6, nutritie 10^4), unde produsul
   // naiv parte·nut ar fi 5,4e18: la S = q·(ONE − 1) valoarea e q/ONE, deci creditul e floor(10^10 / 2^29) = 18.
-  assert.equal(nutritieEfectiva(20, 2505397594, 15), 229)
+  assert.equal(nutritieEfectiva(20, 357913914, 15), 290)
   assert.equal(nutritieEfectiva(1_000_000, 1_000_000 * (ONE - 1), 10_000), 18)
 })
 
-test('cautaMancare pe VALOARE: q = 75 cu S = 30·ONE si o lipsa de 610 rezerva 68 de unitati (pe hrana proaspata 41)', () => {
-  // Pe hartie: k = 68 ⇒ parte = floor(30·ONE·68/75) = 14.602.888.806, ·15 = 219.043.332.090 < 408·2^29 ⇒ ceil 408,
-  // 1020 − 408 = 612 ≥ 610; k = 67 ⇒ parte = 14.388.140.441, ·15/2^29 = 401,99… ⇒ 402, 1005 − 402 = 603 < 610.
-  // Proaspat: ceil(610/15) = 41. Scurgerea FOAMEI 0, ca lipsa sa fie exact 610 la scanare.
-  const fara: Rules = { ...R, nevoi: R.nevoi.map((n, i) => (i === Nevoie.FOAME ? { ...n, scurgere: 0 } : n)) }
+test('cautaMancare pe VALOARE: q = 75 cu S = ONE − 1 si o lipsa de 610 rezerva 42 de unitati (pe hrana proaspata 41); functia, si cu S = 30·ONE: 68', () => {
+  // Functia, pe hartie: k = 68 ⇒ parte = floor(30·ONE·68/75) = 14.602.888.806, ·15 = 219.043.332.090 < 408·2^29 ⇒ ceil
+  // 408, 1020 − 408 = 612 ≥ 610; k = 67 ⇒ parte = 14.388.140.441, ·15/2^29 = 401,99… ⇒ 402, 1005 − 402 = 603 < 610.
+  // In lume (commit-ul B), S ≥ ONE nu traieste pana la scanare (pasul il realizeaza la tickul 0), deci S = 2^29 − 1:
+  // floor(S/75) = 7.158.278, rest 61. k = 41 ⇒ parte = 7.158.278·41 + floor(61·41/75) = 293.489.431, ·15 = 8·2^29 +
+  // 107.374.169 ⇒ ceil 9, 615 − 9 = 606 < 610; k = 42 ⇒ parte = 300.647.710, ·15 = 8·2^29 + 214.748.354 ⇒ 9, 630 − 9 =
+  // 621 ≥ 610 ⇒ 42. Proaspat: ceil(610/15) = 41. Scurgerea FOAMEI 0, ca lipsa sa fie exact 610 la scanare; rata 0 (R0).
+  const fara: Rules = { ...R0, nevoi: R.nevoi.map((n, i) => (i === Nevoie.FOAME ? { ...n, scurgere: 0 } : n)) }
   assert.equal(unitatiPentruNutritie(30 * ONE, 75, 15, 610), 68)
   assert.equal(unitatiPentruNutritie(0, 75, 15, 610), 41)
   assert.equal(unitatiPentruNutritie(30 * ONE, 75, 15, 0), 0, 'fara lipsa, nimic (ca formula veche)')
-  for (const [S, asteptat] of [[30 * ONE, 68], [0, 41]] as const) {
+  assert.equal(unitatiPentruNutritie(ONE - 1, 75, 15, 610), 42)
+  for (const [S, asteptat] of [[ONE - 1, 42], [0, 41]] as const) {
     const { w, wx, wy, g } = sitPlat(7, 12)
     assert.ok(applyCommand(w, { kind: 'spawnAgent', x: (wx + 2) * 1000 + 500, y: (wy + 2) * 1000 + 500, z: g + 1, faction: 0 }, fara).ok)
     w.agents.nevoi[0 * NEVOI + Nevoie.FOAME] = 390
@@ -206,136 +224,159 @@ test('asazaItem: o portiune refuzata pe capacitate nu-si pierde partea — se sc
 interface Evenimente { injectii: number; ucisi: number; abandonuri: number; sapat: number; realizari: number; incarcari: number; nasteri: number; lasari: number; mancateCuS: number; mancate: number }
 
 test('G1S + G1 la FIECARE tick: Σ S scris + acumulat == Σ S + ONE·stricat + mancat + pierdut + disparut, si unitatile pe fel — cu ucideri cu marfa, abandon, sapat sub morman, mormane de 1 u, salvare, toate devreme si in afara grilei de 1 Hz', () => {
-  const ev: Evenimente = { injectii: 0, ucisi: 0, abandonuri: 0, sapat: 0, realizari: 0, incarcari: 0, nasteri: 0, lasari: 0, mancateCuS: 0, mancate: 0 }
-  for (const seed of [8801, 4242]) {
-    const r = lcg(seed)
-    const { w: w0, sit } = laSit(seed, 6)
-    let w = w0
-    let zona = picteaza(w, sit.wx + 2, sit.wy + 3, 3)
-    // Registrele testului: ce a PUS (unitati) si ce a SCRIS (S) — singurele intrari in lume, la rata 0.
-    let puse = 0
-    let scris = 0
-    const pune = (fel: number, q: number, wx: number, wy: number, frac: number): number => {
-      const g = solid(w, wx, wy)
-      if (g === null) return -1
-      const o = applyCommand(w, { kind: 'lasaItem', fel, cantitate: q, wx, wy, z: g + 1 }, R)
-      if (!o.ok) return -1
-      puse += q
-      const slot = slotItem(w.iteme, o.value)
-      if (slot !== -1) scris += scrieS(w, slot, Math.min(q, w.iteme.cantitate[slot]!), frac)
-      return slot
-    }
-    for (const [d, q] of [[12, 75], [14, 40], [16, 30], [10, 20]] as const) {
-      const c = solidLaDistanta(w, sit.wx + (d % 3), sit.wy, sit.g, d, d + 4)
-      pune(H, q, c.wx, c.wy, 0.2 + 0.7 * r())
-    }
-    for (let i = 0; i < w.agents.count; i++) if (i % 2 === 0) w.agents.nevoi[i * NEVOI + Nevoie.FOAME] = 200
-    // Baza: tot ce e transient porneste de la zero; S scris e in `scris`.
-    let baza = { S: 0, scris: 0, acc: 0, man: 0, pie: 0, dis: 0, str: w.hranaStricata }
-    let mancate = 0
-    let pierduteVechi = 0
-    let ucis = false
-    let abandonat = false
-    let sapat = 0
-    let incarcat = false
-    let nascut = false
-    for (let t = 0; t < 2600; t++) {
-      const off = w.tick % R.ticksPerSecond !== 0
-      // Mormane de 1 u cu S aproape de o unitate, in afara grilei: fragmentarea pe care o nutritie fara ceil o lasa gratis.
-      if (off && w.tick % 97 === 13 && w.tick < 2200) {
-        const c = solidLaDistanta(w, sit.wx + 1 + (ev.injectii % 5), sit.wy + 1, sit.g, 5, 9)
-        if (pune(H, 1, c.wx, c.wy, 0.999 + r() * 0.001) !== -1) ev.injectii++
+  // De doua ori (t.3, commit-ul B): la rata 0 (S-ul il scrie doar testul; contoarele de viata ale cailor, ca la A) si cu
+  // rata IMPLICITA — acum pasul de alterare strange S (termenul „acumulat"), realizeaza unitati si omoara mormane.
+  const evPe = new Map<string, Evenimente>()
+  const pasPe = new Map<string, { acumulat: number; stricate: number; morti: number }>()
+  for (const [nume, reguli] of [['rata 0', R0], ['rata implicita', R]] as const) {
+    const ev: Evenimente = { injectii: 0, ucisi: 0, abandonuri: 0, sapat: 0, realizari: 0, incarcari: 0, nasteri: 0, lasari: 0, mancateCuS: 0, mancate: 0 }
+    const pas = { acumulat: 0, stricate: 0, morti: 0 }
+    evPe.set(nume, ev)
+    pasPe.set(nume, pas)
+    for (const seed of [8801, 4242]) {
+      const r = lcg(seed)
+      const { w: w0, sit } = laSit(seed, 6)
+      let w = w0
+      let zona = picteaza(w, sit.wx + 2, sit.wy + 3, 3)
+      // Registrele testului: ce a PUS (unitati) si ce a SCRIS (S) — singurele intrari in lume, la rata 0.
+      let puse = 0
+      let scris = 0
+      const pune = (fel: number, q: number, wx: number, wy: number, frac: number): number => {
+        const g = solid(w, wx, wy)
+        if (g === null) return -1
+        const o = applyCommand(w, { kind: 'lasaItem', fel, cantitate: q, wx, wy, z: g + 1 }, R)
+        if (!o.ok) return -1
+        puse += q
+        const slot = slotItem(w.iteme, o.value)
+        if (slot !== -1) scris += scrieS(w, slot, Math.min(q, w.iteme.cantitate[slot]!), frac)
+        return slot
       }
-      // Ucidere cu marfa: primul pion cu HRANA si S > 0 in mana care sta INCA pe mormanul din care a ridicat (cu S, in afara
-      // oricarei zone — o celula de depozit poate fi rezervata ca destinatie, si atunci `asazaItem` o sare), dupa tickul 150:
-      // marfa lasata la picioare se UNESTE cu restul mormanului — `asazaItem` pe calea de unire, cu S pe ambele parti.
-      if (off && !ucis && w.tick > 150) {
-        const a = w.agents
-        for (let s = 0; s < a.count; s++) {
-          if (a.alive[s] !== 1 || a.caraKind[s] !== H || a.caraCantitate[s]! === 0 || a.caraAlterare[s]! === 0) continue
-          const sub = itemLaCelula(w.iteme, cellOf(a.x[s]!), cellOf(a.y[s]!), a.z[s]!)
-          if (sub === -1 || w.iteme.kind[sub] !== H || w.iteme.alterare[sub] === 0) continue
-          if (celulaDeZonaLa(w.zone, cellOf(a.x[s]!), cellOf(a.y[s]!), a.z[s]!) !== -1) continue
-          assert.ok(applyCommand(w, { kind: 'killAgent', id: a.id[s]! }, R).ok)
-          ucis = true
-          ev.ucisi++
-          break
+      for (const [d, q] of [[12, 75], [14, 40], [16, 30], [10, 20]] as const) {
+        const c = solidLaDistanta(w, sit.wx + (d % 3), sit.wy, sit.g, d, d + 4)
+        pune(H, q, c.wx, c.wy, 0.2 + 0.7 * r())
+      }
+      for (let i = 0; i < w.agents.count; i++) if (i % 2 === 0) w.agents.nevoi[i * NEVOI + Nevoie.FOAME] = 200
+      // Baza: tot ce e transient porneste de la zero; S scris e in `scris`.
+      let baza = { S: 0, scris: 0, acc: 0, man: 0, pie: 0, dis: 0, str: w.hranaStricata }
+      let mancate = 0
+      let pierduteVechi = 0
+      let ucis = false
+      let abandonat = false
+      let sapat = 0
+      let incarcat = false
+      let nascut = false
+      for (let t = 0; t < 2600; t++) {
+        const off = w.tick % R.ticksPerSecond !== 0
+        // Mormane de 1 u cu S aproape de o unitate, in afara grilei: fragmentarea pe care o nutritie fara ceil o lasa gratis.
+        if (off && w.tick % 97 === 13 && w.tick < 2200) {
+          const c = solidLaDistanta(w, sit.wx + 1 + (ev.injectii % 5), sit.wy + 1, sit.g, 5, 9)
+          if (pune(H, 1, c.wx, c.wy, 0.999 + r() * 0.001) !== -1) ev.injectii++
         }
-      }
-      // Un nou-nascut in slotul mortului (golesteMana la nastere).
-      if (off && ucis && !nascut && w.tick > 400) {
-        const g = solid(w, sit.wx, sit.wy)!
-        assert.ok(applyCommand(w, { kind: 'spawnAgent', x: sit.wx * 1000 + 500, y: sit.wy * 1000 + 500, z: g + 1, faction: 0 }, R).ok)
-        nascut = true
-        ev.nasteri++
-      }
-      // Abandon: depozitul sters sub un caraus cu HRANA in mana spre el; apoi pictat la loc (slotul de zona refolosit).
-      if (off && !abandonat && w.tick > 200) {
-        const a = w.agents
-        for (let s = 0; s < a.count; s++) {
-          if (a.alive[s] === 1 && a.jobKind[s] === FelJob.CARA && a.jobStep[s] === PasCara.MERGE_DEST && a.caraKind[s] === H && a.caraAlterare[s]! > 0) {
-            assert.ok(applyCommand(w, { kind: 'stergeZona', id: zona }, R).ok)
-            zona = picteaza(w, sit.wx + 5, sit.wy + 5, 3)
-            abandonat = true
-            ev.abandonuri++
+        // Ucidere cu marfa: primul pion cu HRANA si S > 0 in mana care sta INCA pe mormanul din care a ridicat (cu S, in afara
+        // oricarei zone — o celula de depozit poate fi rezervata ca destinatie, si atunci `asazaItem` o sare), dupa tickul 150:
+        // marfa lasata la picioare se UNESTE cu restul mormanului — `asazaItem` pe calea de unire, cu S pe ambele parti.
+        if (off && !ucis && w.tick > 150) {
+          const a = w.agents
+          for (let s = 0; s < a.count; s++) {
+            if (a.alive[s] !== 1 || a.caraKind[s] !== H || a.caraCantitate[s]! === 0 || a.caraAlterare[s]! === 0) continue
+            const sub = itemLaCelula(w.iteme, cellOf(a.x[s]!), cellOf(a.y[s]!), a.z[s]!)
+            if (sub === -1 || w.iteme.kind[sub] !== H || w.iteme.alterare[sub] === 0) continue
+            if (celulaDeZonaLa(w.zone, cellOf(a.x[s]!), cellOf(a.y[s]!), a.z[s]!) !== -1) continue
+            assert.ok(applyCommand(w, { kind: 'killAgent', id: a.id[s]! }, R).ok)
+            ucis = true
+            ev.ucisi++
             break
           }
         }
-      }
-      // Sapat sub mormane (mutaItem), in afara oricarei zone.
-      if (off && sapat < 2 && w.tick > 300 + 400 * sapat) {
-        const it = w.iteme
-        for (let i = it.count - 1; i >= 0; i--) {
-          if (it.alive[i] !== 1 || it.kind[i] !== H || it.alterare[i] === 0) continue
-          if (applyCommand(w, { kind: 'dig', wx: it.wx[i]!, wy: it.wy[i]!, z: it.z[i]! - 1 }, R).ok) { sapat++; ev.sapat++; break }
+        // Un nou-nascut in slotul mortului (golesteMana la nastere).
+        if (off && ucis && !nascut && w.tick > 400) {
+          const g = solid(w, sit.wx, sit.wy)!
+          assert.ok(applyCommand(w, { kind: 'spawnAgent', x: sit.wx * 1000 + 500, y: sit.wy * 1000 + 500, z: g + 1, faction: 0 }, R).ok)
+          nascut = true
+          ev.nasteri++
         }
-      }
-      // Realizarea scrisa de test: unitatile intregi strinse (S ≥ ONE) se strica prin `scadeStricate` — termenul ONE·stricat.
-      if (off && w.tick % 211 === 7) {
-        const it = w.iteme
-        for (let i = 0; i < it.count; i++) {
-          if (it.alive[i] !== 1 || it.kind[i] !== H) continue
-          const k = Math.floor(it.alterare[i]! / ONE)
-          if (k > 0) { scadeStricate(w, R, i, k); ev.realizari++ }
+        // Abandon: depozitul sters sub un caraus cu HRANA in mana spre el; apoi pictat la loc (slotul de zona refolosit).
+        if (off && !abandonat && w.tick > 200) {
+          const a = w.agents
+          for (let s = 0; s < a.count; s++) {
+            if (a.alive[s] === 1 && a.jobKind[s] === FelJob.CARA && a.jobStep[s] === PasCara.MERGE_DEST && a.caraKind[s] === H && a.caraAlterare[s]! > 0) {
+              assert.ok(applyCommand(w, { kind: 'stergeZona', id: zona }, R).ok)
+              zona = picteaza(w, sit.wx + 5, sit.wy + 5, 3)
+              abandonat = true
+              ev.abandonuri++
+              break
+            }
+          }
         }
+        // Sapat sub mormane (mutaItem), in afara oricarei zone.
+        if (off && sapat < 2 && w.tick > 300 + 400 * sapat) {
+          const it = w.iteme
+          for (let i = it.count - 1; i >= 0; i--) {
+            if (it.alive[i] !== 1 || it.kind[i] !== H || it.alterare[i] === 0) continue
+            if (applyCommand(w, { kind: 'dig', wx: it.wx[i]!, wy: it.wy[i]!, z: it.z[i]! - 1 }, R).ok) { sapat++; ev.sapat++; break }
+          }
+        }
+        // Realizarea scrisa de test: unitatile intregi strinse (S ≥ ONE) se strica prin `scadeStricate` — termenul ONE·stricat.
+        if (off && w.tick % 211 === 7) {
+          const it = w.iteme
+          for (let i = 0; i < it.count; i++) {
+            if (it.alive[i] !== 1 || it.kind[i] !== H) continue
+            const k = Math.floor(it.alterare[i]! / ONE)
+            if (k > 0) { scadeStricate(w, R, i, k); ev.realizari++ }
+          }
+        }
+        // Salvare si incarcare in afara grilei: contoarele TRANSIENT pornesc de la zero, deci o BAZA noua.
+        if (!incarcat && w.tick >= 1013 && off) {
+          pierduteVechi += w.ratiune.pierdutePeFel[H]!
+          const out = decode(encode(w), reguli)
+          assert.ok(out.ok, `incarcarea: ${JSON.stringify(out)}`)
+          if (!out.ok) return
+          w = out.value
+          incarcat = true
+          ev.incarcari++
+          baza = { S: sume(w).S, scris, acc: 0, man: 0, pie: 0, dis: 0, str: w.hranaStricata }
+        }
+        const mancatInainte = w.ratiune.alterareMancata
+        const st0 = { acc: w.ratiune.alterareAcumulata, str: w.ratiune.statAlterare.stricate, morti: w.ratiune.statAlterare.morti }
+        tick(w, reguli)
+        pas.acumulat += w.ratiune.alterareAcumulata - st0.acc
+        pas.stricate += w.ratiune.statAlterare.stricate - st0.str
+        pas.morti += w.ratiune.statAlterare.morti - st0.morti
+        const rap = lastJobReport()
+        mancate += rap.unitatiMancate
+        ev.mancate += rap.unitatiMancate
+        if (w.ratiune.alterareMancata > mancatInainte) ev.mancateCuS++
+        ev.lasari += rap.itemeMutate
+        const { S, u } = sume(w)
+        const rt = w.ratiune
+        // G1S, cu baza: tot ce a intrat in S (scris de test + acumulat de pas) == unde e acum + pe unde a iesit.
+        const stanga = (scris - baza.scris) + (rt.alterareAcumulata - baza.acc)
+        const dreapta = (S - baza.S) + ONE * (w.hranaStricata - baza.str) + (rt.alterareMancata - baza.man) + (rt.alterarePierduta - baza.pie) + (rt.alterareDisparuta - baza.dis)
+        assert.equal(dreapta, stanga, `${nume}, seed ${seed}, tickul ${w.tick}: G1S — S a aparut sau a disparut nenumarat (Σ S ${S}, baza ${baza.S})`)
+        // G1, pe unitati, cu pierdutele PE FEL: pusa == mancata + stricata + ramasa + pierduta.
+        assert.equal(mancate + w.hranaStricata + u + pierduteVechi + rt.pierdutePeFel[H]!, puse, `${nume}, seed ${seed}, tickul ${w.tick}: G1 pe unitati`)
       }
-      // Salvare si incarcare in afara grilei: contoarele TRANSIENT pornesc de la zero, deci o BAZA noua.
-      if (!incarcat && w.tick >= 1013 && off) {
-        pierduteVechi += w.ratiune.pierdutePeFel[H]!
-        const out = decode(encode(w), R)
-        assert.ok(out.ok, `incarcarea: ${JSON.stringify(out)}`)
-        if (!out.ok) return
-        w = out.value
-        incarcat = true
-        ev.incarcari++
-        baza = { S: sume(w).S, scris, acc: 0, man: 0, pie: 0, dis: 0, str: w.hranaStricata }
-      }
-      const mancatInainte = w.ratiune.alterareMancata
-      tick(w, R)
-      const rap = lastJobReport()
-      mancate += rap.unitatiMancate
-      ev.mancate += rap.unitatiMancate
-      if (w.ratiune.alterareMancata > mancatInainte) ev.mancateCuS++
-      ev.lasari += rap.itemeMutate
-      const { S, u } = sume(w)
-      const rt = w.ratiune
-      // G1S, cu baza: tot ce a intrat in S (scris de test + acumulat de pas) == unde e acum + pe unde a iesit.
-      const stanga = (scris - baza.scris) + (rt.alterareAcumulata - baza.acc)
-      const dreapta = (S - baza.S) + ONE * (w.hranaStricata - baza.str) + (rt.alterareMancata - baza.man) + (rt.alterarePierduta - baza.pie) + (rt.alterareDisparuta - baza.dis)
-      assert.equal(dreapta, stanga, `seed ${seed}, tickul ${w.tick}: G1S — S a aparut sau a disparut nenumarat (Σ S ${S}, baza ${baza.S})`)
-      // G1, pe unitati, cu pierdutele PE FEL: pusa == mancata + stricata + ramasa + pierduta.
-      assert.equal(mancate + w.hranaStricata + u + pierduteVechi + rt.pierdutePeFel[H]!, puse, `seed ${seed}, tickul ${w.tick}: G1 pe unitati`)
     }
   }
-  // Contoarele de viata: fiecare cale pretinsa chiar a rulat.
+  // Contoarele de viata: fiecare cale pretinsa chiar a rulat — la rata 0, ca la A (S-ul scris de test e singura intrare).
+  const ev = evPe.get('rata 0')!
   assert.ok(ev.ucisi >= 2, `ucideri cu marfa: ${ev.ucisi}`)
   assert.ok(ev.abandonuri >= 2, `abandonuri cu hrana in mana: ${ev.abandonuri}`)
   assert.ok(ev.sapat >= 3, `sapat sub morman: ${ev.sapat}`)
   assert.ok(ev.injectii >= 20, `mormane de 1 u: ${ev.injectii}`)
-  assert.ok(ev.realizari >= 3, `realizari scrise de test: ${ev.realizari}`)
+  // Realizarile: scrise de test in afara grilei, si ale pasului la λ = 0 (uniri si mormane de 1 u peste o unitate, P14).
+  const pas0 = pasPe.get('rata 0')!
+  assert.ok(ev.realizari >= 1 && ev.realizari + pas0.stricate >= 3, `realizari scrise de test: ${ev.realizari}, ale pasului la rata 0: ${pas0.stricate}`)
   assert.ok(ev.nasteri >= 2 && ev.incarcari >= 2, `nasteri ${ev.nasteri}, incarcari ${ev.incarcari}`)
   assert.ok(ev.lasari >= 4, `LASA in depozit: ${ev.lasari}`)
   assert.ok(ev.mancateCuS >= 4, `imbucaturi cu S: ${ev.mancateCuS} (din ${ev.mancate} unitati mancate)`)
+  // Cu rata implicita: pasul chiar a strans S, a stricat unitati si a omorat mormane (mormanele de 1 u injectate cu S
+  // aproape de o unitate); caile mari (mancatul cu S, LASA) au rulat si aici.
+  const ev1 = evPe.get('rata implicita')!
+  const pas = pasPe.get('rata implicita')!
+  assert.ok(pas0.acumulat === 0, 'la rata 0 pasul nu strange nimic')
+  assert.ok(pas.acumulat > 0 && pas.stricate >= 20 && pas.morti >= 10, `pasul cu rata: ${JSON.stringify(pas)}`)
+  assert.ok(ev1.injectii >= 20 && ev1.mancateCuS >= 4 && ev1.lasari >= 4 && ev1.incarcari >= 2, `caile cu rata: ${JSON.stringify(ev1)}`)
 })
 
 // ---------------------------------------------------------------------------
@@ -354,7 +395,8 @@ function scenaPompa(seed: number): { w: World; A: number; B: number; S0: number;
   const r = lcg(seed + 1)
   for (const [dx, dy, q] of [[0, 0, 75], [1, 0, 60], [2, 0, 75], [0, 1, 40], [1, 1, 30], [2, 2, 75]] as const) {
     const slot = slotItem(w.iteme, lasaItem(w, H, q, sit.wx + 2 + dx, sit.wy + 3 + dy))
-    w.iteme.alterare[slot] = Math.floor(q * (ONE - 1) * (0.1 + 0.85 * r()))
+    // Sub o unitate pe morman (t.3 B): un S ≥ ONE l-ar realiza pasul la tickul 0 (si la λ = 0, P14). Uniri le aduc peste.
+    w.iteme.alterare[slot] = Math.floor((ONE - 1) * (0.1 + 0.85 * r()))
   }
   const { S, u } = sume(w)
   return { w, A, B, S0: S, u0: u }
@@ -388,10 +430,12 @@ test('poarta pompei de prospetime: S scris, rata 0, pionii satui — Σ S EXACT 
           if (applyCommand(w, { kind: 'dig', wx: it.wx[i]!, wy: it.wy[i]!, z: it.z[i]! - 1 }, R).ok) { sapat++; sapatAici++; break }
         }
       }
-      tick(w, R)
+      tick(w, R0)
       const { S, u } = sume(w)
-      assert.equal(S, S0, `seed ${seed}, tickul ${w.tick}: Σ S ${S} != ${S0} — o cale a creat sau a sters prospetime`)
-      assert.equal(u, u0, `seed ${seed}, tickul ${w.tick}: unitatile`)
+      // Rata 0: S iese doar prin realizarea unei uniri care trece de o unitate (P14) — cu EXACT ONE pe unitate (si restul
+      // unui morman mort din ea). Orice alta diferenta e o cale care a creat sau a sters prospetime.
+      assert.equal(S + ONE * w.hranaStricata + w.ratiune.alterareDisparuta, S0, `seed ${seed}, tickul ${w.tick}: Σ S ${S} (+ realizat) != ${S0} — o cale a creat sau a sters prospetime`)
+      assert.equal(u + w.hranaStricata, u0, `seed ${seed}, tickul ${w.tick}: unitatile`)
       const it = w.iteme
       for (let i = 0; i < it.count; i++) {
         if (it.alive[i] !== 1 || it.kind[i] !== H) continue
@@ -734,10 +778,10 @@ test('migrarea 8 -> 9: hrana porneste PROASPATA (mormane si maini la 0), fiecare
   assert.ok(din9.ok)
   if (!din9.ok) return
   assert.equal(hashWorld(din9.value), hashWorld(w))
-  // Lumea migrata merge: carausii lasa, mancatorul mananca, S ramane 0 (rata 0), nimic pierdut.
+  // Lumea migrata merge: carausii lasa, mancatorul mananca, S ramane 0 (rata 0: R0), nimic pierdut.
   const u0 = sume(w).u
   let mancate = 0
-  for (let t = 0; t < 600; t++) { tick(w, R); mancate += lastJobReport().unitatiMancate }
+  for (let t = 0; t < 600; t++) { tick(w, R0); mancate += lastJobReport().unitatiMancate }
   assert.equal(sume(w).S, 0)
   assert.equal(sume(w).u + mancate, u0)
   assert.equal(w.ratiune.itemePierdute, 0)
@@ -792,12 +836,14 @@ test('nasterea pe un slot refolosit goleste mana CU alterarea ei (golesteMana)',
 })
 
 test('zidirea unui material PERISABIL: S-ul lui iese din lume numarat (disparut), mana ramane goala cu S 0', () => {
-  // Azi niciun fel perisabil nu se zideste; un content in care PIATRA se strica face calea vizibila.
-  const piatraPerisabila: Rules = { ...R, perisabil: [true, false, false, true] }
+  // Azi niciun fel perisabil nu se zideste; un content in care PIATRA se strica face calea vizibila. Rata 0 (R0): S-ul
+  // scris de test trebuie sa ajunga INTREG la zidire, nu realizat pe drum de pas.
+  const piatraPerisabila: Rules = { ...R0, perisabil: [true, false, false, true] }
   const { w, sit } = laSit(12345, 1, [], piatraPerisabila)
   const id = lasaItem(w, Item.PIATRA, 20, sit.wx + 1, sit.wy + 1, piatraPerisabila)
   const is = slotItem(w.iteme, id)
-  const S = 20 * (ONE - 1) - 999
+  // Sub o unitate (t.3 B): mai mult l-ar realiza pasul (si la λ = 0) inainte de zidire.
+  const S = ONE - 999
   w.iteme.alterare[is] = S
   const g = solid(w, sit.wx + 4, sit.wy + 1)!
   assert.ok(applyCommand(w, { kind: 'desemneaza', wx: sit.wx + 4, wy: sit.wy + 1, z: g + 1, piesa: Piesa.PERETE }, piatraPerisabila).ok)

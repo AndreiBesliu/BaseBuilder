@@ -454,6 +454,41 @@ function incapeUndeva(s: ZoneStore, ix: IndexZone, kind: number, cant: number, p
   return false
 }
 
+/**
+ * Predicatul EXACT al stricaciunii (S24-27 t.3 §2, verif-P3): s-ar schimba indexul — CURAT, deci la zi cu lumea de
+ * dinainte — daca mormanul viu `slot` ar scadea de la `q0` la `q1 > 0` unitati, fara alta schimbare? Fara nicio structura
+ * intretinuta: indexul ramane refacut integral, doar sarit cand n-ar iesi altfel. Trei cauze, si atat:
+ *
+ *   (a) mormanul era PLIN pe o celula de DEPOZIT: celula intra in `libere` si `acceptante` (si poate in `maxPrioLibera`);
+ *   (b) locul nou (`itemStackMax − q1`) trece de `maxLocLiber` al zonei pe felul lui: se muta poarta „incape cat car?"
+ *       pentru toate celelalte mormane (`deMutat`);
+ *   (c) `min(q, haulCarryMax)` se schimba SI odata cu el apartenenta proprie la `deMutat` (deci si la `peJosFaraDepozit`).
+ *
+ * Restul indexului (`comestibile`, `peFel`, depozitele, paturile) se schimba doar la moarte, care murdareste ca azi. Un
+ * index deja murdar: nimic de facut. Probele negative (cate o clauza scoasa) lasa indexul invechit: fara (a) 36–138 de pasi
+ * invechiti din 600, fara (b) 459–555, fara (c) 91–125; „doar la moarte" 567–600 (verif-P3).
+ */
+export function scadereaSchimbaIndexul(w: World, rules: Rules, slot: number, q0: number, q1: number): boolean {
+  const s = w.zone
+  const ix = s.index
+  if (ix.murdar) return false
+  const it = w.iteme
+  const k = it.kind[slot]!
+  const cs = celulaDeZonaLa(s, it.wx[slot]!, it.wy[slot]!, it.z[slot]!)
+  const zs = cs === -1 ? -1 : slotZona(s, s.celule.zonaId[cs]!)
+  if (zs !== -1 && s.kind[zs] === Zona.DEPOZIT) {
+    if (q0 >= rules.itemStackMax) return true
+    if (rules.itemStackMax - q1 > ix.maxLocLiber[zs * ITEME + k]!) return true
+  }
+  const c0 = Math.min(q0, rules.haulCarryMax)
+  const c1 = Math.min(q1, rules.haulCarryMax)
+  if (c0 === c1) return false
+  const p = prioritateaLocului(s, it.wx[slot]!, it.wy[slot]!, it.z[slot]!)
+  const inainte = ix.maxPrioLibera[k]! > p && incapeUndeva(s, ix, k, c0, p)
+  const dupa = ix.maxPrioLibera[k]! > p && incapeUndeva(s, ix, k, c1, p)
+  return inainte !== dupa
+}
+
 /** TRANSIENT, scratch al lui `indexZone`: 1 = celula de zona (pe slot) de sub un santier viu. Rescris la fiecare reconstructie. */
 let subSantierScratch = new Uint8Array(0)
 

@@ -109,6 +109,7 @@ import type { Cerere } from './rezervari.ts'
 import { elibereaza, elibereazaTinta, elibereazaUna, poateRezerva, rezervaToate, rezervatPe, Strat, sumaRezervata } from './rezervari.ts'
 import { asazaItem, creeazaItem, DetaliuItem, iaDinItem, itemLaCelula, locPeCelula, numaraPierdute, nutritieEfectiva, parteDinAlterare, slotItem, stergeItem, unitatiPentruNutritie } from './iteme.ts'
 import { celulaDeZonaLa, indexZone, marcheazaZoneMurdare, prioritateaLocului, slotCelulaDeZona, slotZona, stergeCelulaDeZona, subSantier } from './zone.ts'
+import type { StatAlterare } from './alterare.ts'
 
 // ---------------------------------------------------------------------------
 // ratiunea — TRANSIENT
@@ -220,6 +221,13 @@ export interface RatiuneStore {
   readonly pierdutePeFel: Float64Array
   /** Sloturi (mormane si maini) cu S ≠ 0 pe un fel pe care content-ul de ACUM nu-l declara perisabil, puse pe 0 la incarcare. */
   alterareNormalizata: number
+  /** Contoarele pasului de alterare (t.3 §2, K05 pe contoare): cati pasi, cate mormane, cate evaluari de rata, cate sarite. */
+  readonly statAlterare: StatAlterare
+}
+
+/** Contoarele pasului de alterare, de la zero (TRANSIENT: o lume incarcata porneste cu ele goale). */
+function statAlterareGol(): StatAlterare {
+  return { pasi: 0, mormane: 0, mormaneUltimulPas: 0, evaluariRata: 0, evaluariUltimulPas: 0, faraT: 0, stricate: 0, morti: 0, realizariFaraRata: 0 }
 }
 
 export function makeRatiuneStore(capacity: number): RatiuneStore {
@@ -235,6 +243,7 @@ export function makeRatiuneStore(capacity: number): RatiuneStore {
     alterareDisparuta: 0,
     pierdutePeFel: new Float64Array(ITEME),
     alterareNormalizata: 0,
+    statAlterare: statAlterareGol(),
     joburiFaraProgres: 0,
     itemePierdute: 0,
     unitatiZidite: 0,
@@ -302,6 +311,8 @@ export interface JobTickReport {
   joburiDeNevoie: number
   /** Cate unitati de hrana s-au consumat. Cu ea se poate asserta conservarea mancarii. */
   unitatiMancate: number
+  /** Cate unitati s-au stricat in pasul de alterare al tickului (t.3 §4; totalul PERSISTED e `w.hranaStricata`). */
+  unitatiStricate: number
   /** Cati voxeli s-au prabusit (S20-23). */
   voxeliPrabusiti: number
   /** Cate piese s-au zidit in tickul asta. */
@@ -343,7 +354,7 @@ const raport: JobTickReport = {
   tickuriDeLucru: 0, locuriDeLucruRefacute: 0, refuzuriDrum: 0,
   faraMuncitor: 0, preaDeparte: 0, inaccesibil: 0, rezervat: 0, faraDepozit: 0, refuzatLaStart: 0,
   evaluariDestinatie: 0, itemeProduse: 0, unitatiProduse: 0, itemeMutate: 0, lasateLaPicioare: 0,
-  joburiDeNevoie: 0, unitatiMancate: 0, pasiNevoi: 0, plecati: 0, voxeliPrabusiti: 0, pioniCazuti: 0, pioniCoborati: 0, pieseZidite: 0, santierOcupat: 0,
+  joburiDeNevoie: 0, unitatiMancate: 0, unitatiStricate: 0, pasiNevoi: 0, plecati: 0, voxeliPrabusiti: 0, pioniCazuti: 0, pioniCoborati: 0, pieseZidite: 0, santierOcupat: 0,
   cautariSursa: 0, pasiCautareSursa: 0, pasiRezumat: 0,
 }
 
@@ -2801,7 +2812,7 @@ function mutaItem(w: World, rules: Rules, is: number, wx: number, wy: number, z:
  * La `mananca` nu se exclude nimeni oricum: mancatorul ramas fara morman TREBUIE
  * incheiat, si asta e exact ce face lumea continua un tick mai tarziu.
  */
-function reconciliazaTintaMoarta(w: World, rules: Rules, id: number): void {
+export function reconciliazaTintaMoarta(w: World, rules: Rules, id: number): void {
   const a = w.agents
   for (const claimant of elibereazaTinta(w.rezervari, id)) {
     for (let i = 0; i < a.count; i++) {
@@ -3582,6 +3593,14 @@ export function cereriDoarme(celulaId: number): readonly Cerere[] {
  * ascunde singura masa a asezarii de toata lumea, pentru cauza unui singur pion.
  */
 function cautaMancare(w: World, rules: Rules, slot: number): { is: number; cant: number } | null {
+  const aproape = cautaMancareInRaza(w, rules, slot, rules.nevoieScanRadiusCells)
+  if (aproape !== null || rules.mancareScanRadiusLargCells <= rules.nevoieScanRadiusCells) return aproape
+  // A doua cautare, LARGA (t.3 §5, J-8): doar daca in raza de nevoie nu e nimic. Hrana se aduna acum intr-o camara, iar
+  // hoinareala nu e ancorata: pe seed 7, 10 din 12 pioni plecau de foame la 101–289 de celule de camara plina.
+  return cautaMancareInRaza(w, rules, slot, rules.mancareScanRadiusLargCells)
+}
+
+function cautaMancareInRaza(w: World, rules: Rules, slot: number, raza: number): { is: number; cant: number } | null {
   const a = w.agents
   const it = w.iteme
   const ax = cellOf(a.x[slot]!)
@@ -3602,7 +3621,7 @@ function cautaMancare(w: World, rules: Rules, slot: number): { is: number; cant:
     raport.pasiNevoi++
     if (it.alive[i] === 0) continue
     const d = Math.abs(it.wx[i]! - ax) + Math.abs(it.wy[i]! - ay) + Math.abs(it.z[i]! - az)
-    if (d > rules.nevoieScanRadiusCells) continue
+    if (d > raza) continue
     if (best !== -1 && d >= bestD) continue
     if (esteEvitata(w, slot, it.id[i]!)) continue
     const nut = rules.nutritie[it.kind[i]!]!

@@ -225,6 +225,15 @@ export const Item = {
 export type ItemId = (typeof Item)[keyof typeof Item]
 export const ITEME = 4
 
+/**
+ * O unitate intreaga de alterare (S24-27 t.3): S-ul unui morman e in 1/ONE dintr-o unitate. 2^29: rata cuantizata e
+ * nenula de la ~5,025 °C (t.3 §3), iar la `itemStackMax` maxim (10^6) q·ONE ≈ 5,4e14 ramane sub 2^53 — intregi exacti
+ * in Float64, fara BigInt. Intra in FORMAT: o schimbare de ONE cere o migrare a salvarilor. Sta aici (modul fara
+ * importuri de valori) ca s-o poata citi si `content.ts` (λ-ul curbei se deriva la parsare), fara un ciclu de module;
+ * `iteme.ts` o reexporta.
+ */
+export const ONE_ALTERARE = 536870912
+
 /** Un milimetru e unitatea de baza. O celula de 1 m = 1000. */
 export const MM_PER_CELL = 1000
 
