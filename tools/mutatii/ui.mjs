@@ -248,10 +248,10 @@ export const MUTATII = [
     t: LUME, e: 'model: prioritatile personale se citesc pe pionul lui',
   },
   {
-    n: 'prognoza hranei uita tickurile pe secunda',
-    f: 'viewer/ui/model.ts',
-    a: '  const consumPeMin = colonisti * rules.nevoi[Nevoie.FOAME]!.scurgere * rules.ticksPerSecond * 60 / rules.nevoiTicks',
-    b: '  const consumPeMin = colonisti * rules.nevoi[Nevoie.FOAME]!.scurgere * 60 / rules.nevoiTicks',
+    n: 'prognoza hranei uita perioada nevoilor (consumul pe tick, nu pe `nevoiTicks`)',
+    f: 'src/sim/prognoza.ts',
+    a: '  const consumPeTick = (colonisti * rules.nevoi[Nevoie.FOAME]!.scurgere) / rules.nevoiTicks',
+    b: '  const consumPeTick = colonisti * rules.nevoi[Nevoie.FOAME]!.scurgere',
     t: LUME, e: 'model: prognoza hranei pe puncte de nutritie',
   },
   {

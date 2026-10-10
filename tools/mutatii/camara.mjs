@@ -138,8 +138,8 @@ export const MUTATII = [
   {
     n: 'inspectorul intreaba locul cu un fel gresit (hrana): piatra din camara „În depozit."',
     f: 'viewer/ui/model.ts',
-    a: "  if (prioritateaLocului(w.zone, it.wx[is]!, it.wy[is]!, it.z[is]!, it.kind[is]!) > 0) return { titlu: 'În depozit.', actiune: '' }",
-    b: "  if (prioritateaLocului(w.zone, it.wx[is]!, it.wy[is]!, it.z[is]!, 3) > 0) return { titlu: 'În depozit.', actiune: '' }",
+    a: '  const aici = prioritateaLocului(w.zone, it.wx[is]!, it.wy[is]!, it.z[is]!, it.kind[is]!)\n',
+    b: '  const aici = prioritateaLocului(w.zone, it.wx[is]!, it.wy[is]!, it.z[is]!, 3)\n',
     t: T, e: 'poarta-camara: inspectorul',
   },
   {

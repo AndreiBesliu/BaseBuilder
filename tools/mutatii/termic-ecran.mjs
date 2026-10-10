@@ -575,15 +575,15 @@ export const MUTATII = [
   {
     n: 'UI-3: U pe cheia de tick floor(tick/tps) — cifrele raman un pas in urma (cheia se schimba inaintea pasului)',
     f: O,
-    a: '  const citite = citesteValorile(o, w)\n',
-    b: '  const cheieTick = Math.floor(w.tick / rules.ticksPerSecond)\n  const vechi = (o as unknown as { cheieTick?: number }).cheieTick\n  ;(o as unknown as { cheieTick?: number }).cheieTick = cheieTick\n  const citite = cheieTick !== vechi ? citesteValorile(o, w) : false\n',
+    a: '  const citite = citesteValorile(o, w, rules)\n',
+    b: '  const cheieTick = Math.floor(w.tick / rules.ticksPerSecond)\n  const vechi = (o as unknown as { cheieTick?: number }).cheieTick\n  ;(o as unknown as { cheieTick?: number }).cheieTick = cheieTick\n  const citite = cheieTick !== vechi ? citesteValorile(o, w, rules) : false\n',
     t: T, e: E12,
   },
   {
     n: 'U inghetat: valorile citite din stare doar la geometrie noua',
     f: O,
-    a: '  const citite = citesteValorile(o, w)\n',
-    b: '  const citite = geometrie ? citesteValorile(o, w) : false\n',
+    a: '  const citite = citesteValorile(o, w, rules)\n',
+    b: '  const citite = geometrie ? citesteValorile(o, w, rules) : false\n',
     t: T, e: E12,
   },
   {
@@ -645,8 +645,8 @@ export const MUTATII = [
   {
     n: 'U: geometria noua nu goleste valorile (raman pe id-uri vechi, rotite)',
     f: O,
-    a: '  o.valori.clear()\n  o.faraT = 0\n',
-    b: '  o.faraT = 0\n',
+    a: '  o.valori.clear()\n  o.clase.clear()\n',
+    b: '  o.clase.clear()\n',
     t: T, e: E12,
   },
   {

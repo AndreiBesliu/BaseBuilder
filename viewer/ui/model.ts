@@ -12,14 +12,23 @@
  */
 
 import type { Rules } from '../../src/sim/content.ts'
-import { CATEGORII, Faction, FelJob, Gand, GAND_PENTRU_NEVOIE, ITEME, NEVOI, Nevoie, pasDeMers, Piesa, slotOf } from '../../src/sim/state.ts'
+import { CATEGORII, Faction, FelJob, Gand, GAND_PENTRU_NEVOIE, Item, ITEME, NEVOI, Nevoie, pasDeMers, Piesa, slotOf } from '../../src/sim/state.ts'
 import type { World } from '../../src/sim/state.ts'
+import type { Command } from '../../src/sim/commands.ts'
 import { Desemnare, desemnareLaCelula, DetaliuMotiv } from '../../src/sim/desemnari.ts'
 import { DetaliuItem, itemLaCelula } from '../../src/sim/iteme.ts'
-import { celulaDeZonaLa, prioritateaLocului, slotZona, vedereFaraDepozit, Zona } from '../../src/sim/zone.ts'
+import { celulaDeZonaLa, prioritateaLocului, primesteFel, rangZona, slotZona, subSantier, vedereFaraDepozit, Zona } from '../../src/sim/zone.ts'
 import type { VedereFaraDepozit } from '../../src/sim/zone.ts'
 import { rezervariPentru, Strat } from '../../src/sim/rezervari.ts'
-import { categoriiActive, constructiaPrevizualizata, StareRatiune, tintaDispozitiei } from '../../src/sim/joburi.ts'
+import { categoriiActive, celulaDeZonaPosibila, constructiaPrevizualizata, StareRatiune, tintaDispozitiei } from '../../src/sim/joburi.ts'
+import { groapaDeMoloz } from '../../src/sim/camara.ts'
+import type { GroapaDeMoloz } from '../../src/sim/camara.ts'
+import { mormanulDeHrana, pragAlterare, prognozaFaraAlterare, proiecteaza, rataZilnica, stareaHranei } from '../../src/sim/prognoza.ts'
+import type { MormanHrana, Prognoza, StareHrana } from '../../src/sim/prognoza.ts'
+import { tickuriPeAn } from '../../src/sim/calendar.ts'
+import { CHUNK_CELLS, isSolid } from '../../src/sim/terrain/chunk.ts'
+import { chunkKey, groundLevelM, voxelRangeM } from '../../src/sim/terrain/terrain.ts'
+import { LOC_CER } from '../../src/sim/temperatura.ts'
 import { CauzaAcces } from '../../src/sim/acces.ts'
 import { sustinutAcum } from '../../src/sim/stabilitate.ts'
 import { motivDinCod, Reason } from '../../src/sim/result.ts'
@@ -37,7 +46,7 @@ import type { Outcome } from '../../src/sim/result.ts'
 import { explicaCelula } from '../../src/sim/camere-explica.ts'
 import type { Celula, Explicatie } from '../../src/sim/camere-explica.ts'
 import { numePion } from './nume.ts'
-import { cant, NUME_GAND, NUME_ITEM_MIC, NUME_PIESA, TEXT_TEMPERATURA_NECUNOSCUTA, TEXT_TRAGERE_NECUNOSCUTA, textActivitate, textCanale, textMinute, textMotiv, textOameni, textRatiunePion, textTemperaturaAcum, textTragere } from './texte.ts'
+import { cant, NUME_GAND, NUME_ITEM, NUME_ITEM_MIC, NUME_PIESA, TEXT_ALTERARE_NECUNOSCUTA, TEXT_TEMPERATURA_NECUNOSCUTA, TEXT_TRAGERE_NECUNOSCUTA, textActivitate, textAlertaAlterare, textAlterare, textCanale, textHranaPasi, textHranaScade, textJocNouHrana, textMolozInCamara, textMotiv, textOameni, textPasCamara, textRatiunePion, textStricaCamaraAreLoc, textTemperaturaAcum, textTooltipHrana, textTragere, textZile } from './texte.ts'
 import type { Cifre, TextMotiv } from './texte.ts'
 import type { Semnal, Tinta } from './alerte.ts'
 
@@ -77,18 +86,29 @@ export interface Marfa {
 }
 
 export interface PrognozaHrana {
-  /** Puncte de nutritie in lume (mormane + maini), `cantitate × nutritie[fel]`. */
+  /**
+   * VALOAREA hranei, in puncte de nutritie EFECTIVA (mormane + mainile oamenilor; `nutritieEfectiva`): „cat ne mai
+   * hraneste". Cifra din bara ramane in UNITATI (ce se vede in mormane, ca inspectorul si capacitatea camarii); prognoza si
+   * aceasta valoare sunt pe valoare — o hrana faramitata pastreaza unitatile vizibile, dar pierde valoare (masurat la B).
+   */
   readonly puncte: number
-  /** Cat consuma coloniștii vii pe minut de joc, in puncte. 0 = nimeni. */
-  readonly consumPeMin: number
-  /** Minute de joc pana se termina, sau Infinity cand nu consuma nimeni. */
-  readonly minute: number
+  /** Puncte mancate pe zi de calendar de toata asezarea. 0 = nimeni. */
+  readonly consumPeZi: number
+  /** Zile de calendar pana se termina hrana (`proiecteaza`, src/sim/prognoza.ts), Infinity cand nu mananca nimeni. */
+  readonly zile: number
+  /** Peste plafon (un an): „peste un an". */
+  readonly plafonat: boolean
+  /** Aceeasi hrana fara alterare (tot stocul la rata 0) — „cat ar tine intr-o camara", tot prin `proiecteaza`. */
+  readonly zileFaraAlterare: number
+  readonly plafonatFaraAlterare: boolean
 }
 
 export interface RezumatColonie {
   /** Pe fel (`Item`). */
   readonly marfa: readonly Marfa[]
   readonly hrana: PrognozaHrana
+  /** Starea hranei din care vine `hrana` (alerta alterarii, F3, tooltip-ul barei citesc din ea). */
+  readonly hranaEcran: HranaEcran
   readonly colonisti: number
   readonly jefuitori: number
   readonly flamanzi: number
@@ -100,31 +120,367 @@ export interface RezumatColonie {
   readonly plecati: number
 }
 
+// ---------------------------------------------------------------------------------------------
+// hrana: prognoza, clasele alterarii, alerta (S24-27 t.3 §8)
+// ---------------------------------------------------------------------------------------------
+
 /**
- * Hrana, pe PUNCTE de nutritie, nu pe unitati de HRANA: corecta si cand va exista alt fel de
- * mancare (panoul, JN-1). Consumul: fiecare colonist pierde `nevoi.FOAME.scurgere` la fiecare
- * `nevoiTicks`; un punct de nutritie reda un punct de nevoie. Masurat de panou: 12 oameni cu 600 de
- * hrana ⇒ 26,0 min prognozat, 27,9 min pana la 0 in simulare.
+ * Sub atata pierdere pe zi, hrana de peste prag „se pastreaza APROAPE" (UI-2, decizia 9): 0,1% pe zi — la 5,76 °C pe curba
+ * implicita. Prag de PREZENTARE: clasa se calculeaza din rata simularii (`rataZilnica`), nu dintr-un °C scris aici.
  */
-export function prognozaHrana(w: World, rules: Rules): PrognozaHrana {
-  let puncte = 0
-  const it = w.iteme
-  for (let i = 0; i < it.count; i++) {
-    if (it.alive[i] !== 1) continue
-    puncte += it.cantitate[i]! * (rules.nutritie[it.kind[i]!] ?? 0)
-  }
-  const a = w.agents
-  let colonisti = 0
-  for (let i = 0; i < a.count; i++) {
-    if (!esteColonist(w, i)) continue
-    colonisti++
-    if (a.caraCantitate[i]! > 0) puncte += a.caraCantitate[i]! * (rules.nutritie[a.caraKind[i]!] ?? 0)
-  }
-  const consumPeMin = colonisti * rules.nevoi[Nevoie.FOAME]!.scurgere * rules.ticksPerSecond * 60 / rules.nevoiTicks
-  return { puncte, consumPeMin, minute: consumPeMin > 0 ? puncte / consumPeMin : Infinity }
+export const PRAG_APROAPE_ZI = 0.001
+/** Alerta „Hrana se strică" se aprinde la o pierdere medie de peste 1% din stoc pe zi (decizia 10, UI-2). */
+export const PRAG_ALERTA_ZI = 0.01
+/**
+ * Pragurile prognozei, in zile de calendar (UI-14), traduse din minutele reale de dinainte: atentie 30 min la 1× = 0,893
+ * zile, critic si „hrana-scade" 10 min = 0,298 zile. Verif-UI-9: se aprind la ±2 h de adevar in toate cele 10 scene.
+ */
+export const PRAG_ATENTIE_ZILE = 0.893
+export const PRAG_CRITIC_ZILE = 0.298
+
+/** Cele trei clase ale alterarii (UI-2, UI-6), dupa rata EFECTIVA: indexul etichetei din `ETICHETA_ALTERARE` (texte.ts). */
+export const Clasa = {
+  /** La prag sau sub el (in incapere); sub cer: nimic in urmatoarele 24 h. */
+  PASTREAZA: 0,
+  /** Peste prag, dar sub `PRAG_APROAPE_ZI`: „se strica foarte incet". */
+  APROAPE: 1,
+  /** Cel putin `PRAG_APROAPE_ZI`. */
+  STRICA: 2,
+} as const
+export type ClasaId = (typeof Clasa)[keyof typeof Clasa]
+
+/** Clasa unui loc cu T-ul `tQ16` (o incapere, harta U): ≤ prag; peste, dupa rata CUANTIZATA a simularii. */
+export function clasaLaT(rules: Rules, tQ16: number): ClasaId {
+  if (tQ16 <= pragAlterare(rules)) return Clasa.PASTREAZA
+  return rataZilnica(rules, tQ16) < PRAG_APROAPE_ZI ? Clasa.APROAPE : Clasa.STRICA
 }
 
-export function rezumatColonie(w: World, rules: Rules): RezumatColonie {
+/**
+ * Clasa unui morman de hrana: in incaperi si in toc, a T-ului locului (`clasaLaT`); sub cer, a pierderii URMATOARELOR 24 h
+ * (UI-5: noaptea, „se pastreaza" cu T-ul de acum, iar ziua care vine pierdea 0,37–7,95 u). null = neperisabil sau loc fara T.
+ */
+export function clasaMormanului(rules: Rules, m: MormanHrana): ClasaId | null {
+  if (rules.perisabil[m.kind] !== true) return null
+  if (m.loc === LOC_CER) return m.rataZi === 0 ? Clasa.PASTREAZA : m.rataZi < PRAG_APROAPE_ZI ? Clasa.APROAPE : Clasa.STRICA
+  if (m.tQ16 === null) return null
+  return clasaLaT(rules, m.tQ16)
+}
+
+/** Tot ce arata ecranul despre hrana, dintr-o singura trecere (`stareaHranei`): prognoza, alerta, F3, tooltip-ul. */
+export interface HranaEcran {
+  readonly stare: StareHrana
+  readonly prognoza: PrognozaHrana
+  /** Mormanele care pierd cel putin 0,1% pe zi (clasa STRICA): N din alerta si „în pericol" din F3. */
+  readonly pericol: number
+  /** Pierderea medie a stocului, fractie pe zi (pierderea asteptata / valoare); 0 fara hrana. */
+  readonly pierdereMedie: number
+  /** Slotul mormanului care pierde cel mai mult (ținta alertei), sau -1. */
+  readonly tinta: number
+}
+
+/**
+ * Hrana, pe VALOARE (puncte de nutritie efectiva) si in ZILE DE CALENDAR, cu alterarea: `stareaHranei` + `proiecteaza`
+ * (src/sim/prognoza.ts) — aceeasi functie pentru bara, „Primii pasi", alerta „hrana-scade" si dialogul „Joc nou" (UI-9).
+ * Consumul: fiecare colonist pierde `nevoi.FOAME.scurgere` la fiecare `nevoiTicks`; un punct de nutritie reda un punct.
+ */
+export function hranaEcran(w: World, rules: Rules): HranaEcran {
+  const s = stareaHranei(w, rules)
+  const p = proiecteaza(s, rules)
+  const f = prognozaFaraAlterare(s, rules)
+  let pericol = 0
+  let tinta = -1
+  let max = 0
+  for (const m of s.mormane) {
+    if (clasaMormanului(rules, m) !== Clasa.STRICA) continue
+    pericol++
+    const pierdere = m.cantitate * (rules.nutritie[m.kind] ?? 0) * m.rataZi
+    if (pierdere > max) { max = pierdere; tinta = m.slot }
+  }
+  return {
+    stare: s,
+    prognoza: { puncte: s.valoare, consumPeZi: s.consumPeTick * rules.calendar.ziTicks, zile: p.zile, plafonat: p.plafonat, zileFaraAlterare: f.zile, plafonatFaraAlterare: f.plafonat },
+    pericol,
+    pierdereMedie: s.valoare > 0 ? s.pierderePeZi / s.valoare : 0,
+    tinta,
+  }
+}
+
+/** Prognoza hranei (vezi `hranaEcran`). */
+export function prognozaHrana(w: World, rules: Rules, h: HranaEcran = hranaEcran(w, rules)): PrognozaHrana {
+  return h.prognoza
+}
+
+/** Textul prognozei din bara de sus: '' cand nu mananca nimeni sau nu mai e hrana (alerta critica spune tot). */
+export function textPrognozaBara(p: PrognozaHrana): string {
+  return Number.isFinite(p.zile) && p.puncte > 0 ? textZile(p.zile, p.plafonat) : ''
+}
+
+/** Randul hranei din „Primii pasi" (UI-9): aceeasi prognoza ca bara, si cea fara alterare cand difera. */
+export function textPasiHrana(p: PrognozaHrana): string {
+  if (p.puncte <= 0) return 'Nu mai ai hrană: în versiunea asta nu se poate produce.'
+  if (!Number.isFinite(p.zile)) return ''
+  return textHranaPasi(textZile(p.zile, p.plafonat), textZile(p.zileFaraAlterare, p.plafonatFaraAlterare))
+}
+
+/** Pasul camarii din „Primii pasi", pentru `oameni` oameni: ~3 celule pe om (`hranaPeOm / itemStackMax`). */
+export function textPasulCamarii(rules: Rules, oameni: number, hranaPeOm: number): string {
+  const n = Math.max(1, oameni)
+  return textPasCamara(pragAlterare(rules), n, Math.ceil((n * hranaPeOm) / rules.itemStackMax))
+}
+
+/** Coada tooltip-ului randului Hrană (unitatile din bara + valoarea prognozei; un fapt, o functie: `hranaEcran`). */
+export function tooltipHrana(rules: Rules, h: HranaEcran): string {
+  const nut = rules.nutritie[Item.HRANA] ?? 0
+  return nut > 0 && h.stare.valoare > 0 ? textTooltipHrana(Math.round(h.stare.valoare / nut), h.pierdereMedie, textPrognozaBara(h.prognoza)) : ''
+}
+
+/**
+ * Prognoza dialogului „Joc nou" (UI-9): lumea nu exista inca, deci bazinele se scriu din formular — toata hrana sub cer, la
+ * tickul 0 (startul jocului nou: toamna, ziua 1, 08:00), si aceeasi hrana intr-o camara (rata 0). Aceeasi `proiecteaza`.
+ */
+export function prognozaJocNou(rules: Rules, seed: number, oameni: number, hrana: number): { readonly subCer: Prognoza; readonly inCamara: Prognoza; readonly text: string } {
+  const nut = rules.nutritie[Item.HRANA] ?? 0
+  const v = hrana * nut
+  const consumPeTick = (oameni * rules.nevoi[Nevoie.FOAME]!.scurgere) / rules.nevoiTicks
+  const subCer = proiecteaza({ seed, tick: 0, subCer: { valoare: v, baza: rules.perisabil[Item.HRANA] === true ? v : 0 }, incaperi: { valoare: 0, pierderePeTick: 0 }, consumPeTick }, rules)
+  const inCamara = proiecteaza({ seed, tick: 0, subCer: { valoare: 0, baza: 0 }, incaperi: { valoare: v, pierderePeTick: 0 }, consumPeTick }, rules)
+  return { subCer, inCamara, text: textJocNouHrana(textZile(subCer.zile, subCer.plafonat), textZile(inCamara.zile, inCamara.plafonat)) }
+}
+
+/** Clasa barei: 'critic' sub `PRAG_CRITIC_ZILE`, 'atentie' sub `PRAG_ATENTIE_ZILE`, altfel ''. */
+export function clasaPrognozei(p: PrognozaHrana): 'critic' | 'atentie' | '' {
+  if (!Number.isFinite(p.zile) || p.plafonat || p.puncte <= 0) return ''
+  return p.zile < PRAG_CRITIC_ZILE ? 'critic' : p.zile < PRAG_ATENTIE_ZILE ? 'atentie' : ''
+}
+
+/**
+ * Memoria hranei a ecranului (nu a lumii): bara (4 Hz), „Primii pasi" (4 Hz) si alertele (2 Hz) citesc ACEEASI trecere — O(mormane)
+ * —, refacuta cel mult o data pe SECUNDA DE JOC (pasul alterarii e de 1 Hz; ce se mananca intre doi pasi muta prognoza cu
+ * minute de joc, nu cu zile) si la o schimbare in pauza (mormane si oameni prin comenzi): cheia e (lumea, ⌊tick / tps⌋,
+ * iteme.count, iteme.vii, agents.count). La 1× asta e o trecere pe secunda reala, nu una pe citire. Nu scrie nimic in World.
+ */
+export function creeazaMemorieHrana(): { ia(w: World, rules: Rules): HranaEcran; calcule(): number } {
+  let cheie = ''
+  let lume: World | null = null
+  let ultima: HranaEcran | null = null
+  let n = 0
+  return {
+    ia(w, rules) {
+      const k = `${Math.floor(w.tick / rules.ticksPerSecond)}|${w.iteme.count}|${w.iteme.vii}|${w.agents.count}`
+      if (ultima !== null && lume === w && cheie === k) return ultima
+      lume = w
+      cheie = k
+      ultima = hranaEcran(w, rules)
+      n++
+      return ultima
+    },
+    calcule: () => n,
+  }
+}
+
+/** Textul alterarii unui morman perisabil, pentru inspector (scris PE LOC, in afara cheii: UI-10). */
+export interface AlterareMorman {
+  readonly clasa: ClasaId | null
+  readonly eticheta: string
+  readonly valoare: string
+}
+
+/** Randul de alterare al mormanului din slotul `slot`, din aceeasi functie ca prognoza (`mormanulDeHrana`); null = nu se strica. */
+export function alterareaMormanului(w: World, rules: Rules, slot: number): AlterareMorman | null {
+  const m = mormanulDeHrana(w, rules, slot)
+  if (m === null || rules.perisabil[m.kind] !== true) return null
+  const clasa = clasaMormanului(rules, m)
+  if (clasa === null || m.tQ16 === null) return { clasa: null, ...TEXT_ALTERARE_NECUNOSCUTA }
+  const prag = pragAlterare(rules)
+  const t = textAlterare({
+    clasa,
+    cer: m.loc === LOC_CER,
+    subPrag: m.tQ16 <= prag,
+    tQ16: m.tQ16,
+    pragQ16: prag,
+    n: m.cantitate * Math.min(1, m.rataZi),
+    zileAn: tickuriPeAn(rules) / rules.calendar.ziTicks,
+  })
+  return { clasa, ...t }
+}
+
+/** Ce scrie inspectorul PE LOC despre mormanul de pe (wx, wy, z + 1): cantitatea si alterarea; null = niciun morman. */
+export function mormanPeLoc(w: World, rules: Rules, wx: number, wy: number, z: number): { readonly id: number; readonly cantitate: string; readonly alterare: AlterareMorman | null } | null {
+  const is = itemLaCelula(w.iteme, wx, wy, z + 1)
+  if (is === -1) return null
+  const fel = w.iteme.kind[is]!
+  return { id: w.iteme.id[is]!, cantitate: cant(w.iteme.cantitate[is]!, NUME_ITEM[fel]?.toLowerCase() ?? ''), alterare: alterareaMormanului(w, rules, is) }
+}
+
+// ---------------------------------------------------------------------------------------------
+// camara (S24-27 t.3 §5, §8): presetul, comutatorul, groapa, „se strica aici"
+// ---------------------------------------------------------------------------------------------
+
+/** Filtrul camarii, ca masca REFUZATA (`setFiltruZona`): toate felurile in afara de HRANA. */
+export const MASCA_DOAR_HRANA = ((1 << ITEME) - 1) & ~(1 << Item.HRANA)
+
+/** E o camara: un depozit viu cu filtru (refuza ceva) care primeste hrana. */
+export function esteCamara(w: World, zs: number): boolean {
+  const s = w.zone
+  return s.alive[zs] === 1 && s.kind[zs] === Zona.DEPOZIT && s.refuzate[zs]! !== 0 && primesteFel(s, zs, Item.HRANA)
+}
+
+/** Cate celule are zona `zs`. */
+function celuleleZonei(w: World, zs: number): number {
+  const c = w.zone.celule
+  const id = w.zone.id[zs]!
+  let n = 0
+  for (let i = 0; i < c.count; i++) if (c.alive[i] === 1 && c.zonaId[i] === id) n++
+  return n
+}
+
+/** Cati oameni hraneste o camara plina (J-11): celule × itemStackMax / hrana pe om. */
+export function capacitateCamara(w: World, rules: Rules, zs: number, hranaPeOm: number): number {
+  return hranaPeOm > 0 ? Math.floor((celuleleZonei(w, zs) * rules.itemStackMax) / hranaPeOm) : 0
+}
+
+/**
+ * Locul pentru felul `fel` in zona `zs`, in unitati — aceeasi idee de celula libera ca indexul si groapa de moloz
+ * (`groapaDeMoloz`): nerezervata ca destinatie (LUCRU), nu sub un santier viu; goala = `itemStackMax`, una partiala doar pe
+ * felul ei. Citire pura (indexul nu se reconstruieste din UI).
+ */
+function locInZona(w: World, rules: Rules, zs: number, fel: number): number {
+  const s = w.zone
+  if (!primesteFel(s, zs, fel)) return 0
+  const c = s.celule
+  const id = s.id[zs]!
+  const it = w.iteme
+  let loc = 0
+  for (let cs = 0; cs < c.count; cs++) {
+    if (c.alive[cs] !== 1 || c.zonaId[cs] !== id) continue
+    if (rezervariPentru(w.rezervari, c.id[cs]!, Strat.LUCRU).length > 0) continue
+    if (subSantier(w, rules, c.wx[cs]!, c.wy[cs]!, c.z[cs]!)) continue
+    const i = itemLaCelula(it, c.wx[cs]!, c.wy[cs]!, c.z[cs]!)
+    if (i === -1) loc += rules.itemStackMax
+    else if (it.kind[i] === fel && it.cantitate[i]! < rules.itemStackMax) loc += rules.itemStackMax - it.cantitate[i]!
+  }
+  return loc
+}
+
+/**
+ * Cea mai buna camara (rang maxim, id mic) care are loc pentru `fel`, ALTA decat zona `faraZs` (cea in care sta deja
+ * mormanul: o camara calda nu-si e singura sfat); prioritatea si rangul ei; null = niciuna.
+ */
+export function camaraCuLoc(w: World, rules: Rules, fel: number, faraZs = -1): { readonly zs: number; readonly rang: number; readonly prioritate: number; readonly loc: number } | null {
+  const s = w.zone
+  let best: { zs: number; rang: number; prioritate: number; loc: number } | null = null
+  for (let zs = 0; zs < s.count; zs++) {
+    if (zs === faraZs || !esteCamara(w, zs) || !primesteFel(s, zs, fel)) continue
+    const rang = rangZona(s, zs)
+    if (best !== null && (rang < best.rang || (rang === best.rang && s.id[zs]! > s.id[best.zs]!))) continue
+    const loc = locInZona(w, rules, zs, fel)
+    if (loc > 0) best = { zs, rang, prioritate: s.prioritate[zs]!, loc }
+  }
+  return best
+}
+
+/** Groapa de moloz a zonei de pe celula (wx, wy, z), daca e o camara: `groapaDeMoloz` (src/sim/camara.ts). */
+function groapaZoneiLa(w: World, rules: Rules, wx: number, wy: number, z: number): { readonly zs: number; readonly g: GroapaDeMoloz } | null {
+  const cs = celulaDeZonaLa(w.zone, wx, wy, z)
+  if (cs === -1) return null
+  const zid = w.zone.celule.zonaId[cs]!
+  const zs = slotZona(w.zone, zid)
+  if (zs === -1 || w.zone.kind[zs] !== Zona.DEPOZIT || w.zone.refuzate[zs] === 0) return null
+  const g = groapaDeMoloz(w, rules, zid)
+  return g === null ? null : { zs, g }
+}
+
+/**
+ * Solidul de sus al coloanei (wx, wy): pe un chunk promovat, din voxeli, de sus in jos (`groundLevelM` e relieful neatins:
+ * nu stie de sapaturi si de ziduri); pe unul nepromovat, relieful. O functie pentru dreptunghiul din main.ts si groapa.
+ */
+export function suprafataColoanei(w: World, wx: number, wy: number): number | null {
+  const iv = voxelRangeM(w.terrain, wx, wy)
+  if (!iv.ok) return null
+  const g = groundLevelM(w.terrain, wx, wy)
+  const c = w.terrain.chunks.get(chunkKey(Math.floor(wx / CHUNK_CELLS), Math.floor(wy / CHUNK_CELLS)))
+  if (!c || c.voxels === null) return g.ok ? g.value : null
+  for (let z = iv.value.max; z >= iv.value.min; z--) {
+    const r = materialAt(w.terrain, wx, wy, z)
+    if (r.ok && isSolid(r.value)) return z
+  }
+  return null
+}
+
+/** Cat de departe (Chebyshev, in celule) de camara cauta `locGroapa` un patrat liber. */
+export const RAZA_GROAPA = 24
+
+/**
+ * Unde se poate picta groapa de moloz (`latura` × `latura`), langa camara `zonaId`: primul patrat, pe inele tot mai largi in
+ * jurul ei, in care fiecare celula e pe suprafata (aceeasi cota), poate tine o zona (`celulaDeZonaPosibila`, ca
+ * `picteazaZona`), nu e deja intr-o zona si nu are o desemnare. null = niciunul in `RAZA_GROAPA` (inspectorul spune ce sa
+ * faca). Citire pura; costul e al unui clic (cel mult ~(2R)² patrate).
+ */
+export function locGroapa(w: World, rules: Rules, zonaId: number, latura: number): { readonly x0: number; readonly y0: number; readonly z: number } | null {
+  const s = w.zone
+  const c = s.celule
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
+  for (let i = 0; i < c.count; i++) {
+    if (c.alive[i] !== 1 || c.zonaId[i] !== zonaId) continue
+    x0 = Math.min(x0, c.wx[i]!); x1 = Math.max(x1, c.wx[i]!); y0 = Math.min(y0, c.wy[i]!); y1 = Math.max(y1, c.wy[i]!)
+  }
+  if (!Number.isFinite(x0) || latura <= 0) return null
+  const bun = (ax: number, ay: number): number | null => {
+    const s0 = suprafataColoanei(w, ax, ay)
+    if (s0 === null) return null
+    const z = s0 + 1
+    for (let dy = 0; dy < latura; dy++) {
+      for (let dx = 0; dx < latura; dx++) {
+        const x = ax + dx, y = ay + dy
+        if (suprafataColoanei(w, x, y) !== s0) return null
+        if (!celulaDeZonaPosibila(w.terrain, x, y, z, rules) || celulaDeZonaLa(s, x, y, z) !== -1) return null
+        if (desemnareLaCelula(w.desemnari, x, y, z) !== -1 || desemnareLaCelula(w.desemnari, x, y, s0) !== -1) return null
+      }
+    }
+    return z
+  }
+  // Inelul d: patratele care incep la distanta d de dreptunghiul camarii (Chebyshev), in ordine fixa (y, apoi x).
+  for (let d = 1; d <= RAZA_GROAPA; d++) {
+    for (let ay = y0 - d - latura + 1; ay <= y1 + d; ay++) {
+      for (let ax = x0 - d - latura + 1; ax <= x1 + d; ax++) {
+        const dx = Math.max(x0 - (ax + latura - 1), ax - x1, 0)
+        const dy = Math.max(y0 - (ay + latura - 1), ay - y1, 0)
+        if (Math.max(dx, dy) !== d) continue
+        const z = bun(ax, ay)
+        if (z !== null) return { x0: ax, y0: ay, z }
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * Bucatile unei zone noi (legate de prima) si, pentru o CAMARA (`filtru` ≠ 0), filtrul ei — in ACELASI pas, fara niciun tick
+ * intre ele (contractul C: niciun job nu apuca sa porneasca spre o camara fara filtru). `aplica` e `applyCommand` pe lumea
+ * paginii. Filtrul se pune doar pe zona creata aici; un refuz al picturii nu trimite niciun filtru.
+ */
+export function aplicaZona(
+  aplica: (c: Command) => Outcome<number>,
+  bucati: readonly { readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number; readonly z: number }[],
+  fel: number,
+  filtru: number,
+): { zonaId: number | null; aplicate: number; refuzuri: Outcome<number>[] } {
+  let zonaId: number | null = null
+  let aplicate = 0
+  const refuzuri: Outcome<number>[] = []
+  for (const b of bucati) {
+    const out = aplica({ kind: 'picteazaZona', x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, z: b.z, fel, zonaId: zonaId ?? undefined })
+    if (out.ok) { zonaId = out.value; aplicate++ } else refuzuri.push(out)
+  }
+  if (zonaId !== null && filtru !== 0) {
+    const out = aplica({ kind: 'setFiltruZona', id: zonaId, refuzate: filtru })
+    if (out.ok) aplicate++
+    else refuzuri.push(out)
+  }
+  return { zonaId, aplicate, refuzuri }
+}
+
+export function rezumatColonie(w: World, rules: Rules, h: HranaEcran = hranaEcran(w, rules)): RezumatColonie {
   const acc = Array.from({ length: ITEME }, () => ({ inDepozit: 0, peJos: 0, inMaini: 0 }))
   const it = w.iteme
   for (let i = 0; i < it.count; i++) {
@@ -150,7 +506,7 @@ export function rezumatColonie(w: World, rules: Rules): RezumatColonie {
     if (tintaDispozitiei(w, rules, i) < rules.dispozitiePragAvertisment) pleacaCurand++
   }
   const marfa = acc.map((m) => ({ ...m, total: m.inDepozit + m.peJos + m.inMaini }))
-  return { marfa, hrana: prognozaHrana(w, rules), colonisti, jefuitori, flamanzi, obositi, nefericiti, pleacaCurand, plecati: w.plecatiTotal }
+  return { marfa, hrana: h.prognoza, hranaEcran: h, colonisti, jefuitori, flamanzi, obositi, nefericiti, pleacaCurand, plecati: w.plecatiTotal }
 }
 
 /** O insigna a barei de sus, langa „Oameni": clasa (atentie / critic), textul si tooltip-ul ('' = fara). */
@@ -516,10 +872,14 @@ export function stareDesemnare(w: World, rules: Rules, ds: number, previz: Previ
   return { fel: 'libera', text: { titlu: 'Liberă: vine primul om care are voie la munca asta.', actiune: '' } }
 }
 
+/**
+ * Mormanul din inspector, FARA cantitate (UI-10): ea scade acum singura (alterarea), iar in cheia inspectorului (`JSON` al
+ * inspectiei) reconstruia tot corpul — cu butoanele — de fiecare data. Cantitatea si randul de alterare se scriu PE LOC
+ * (`mormanPeLoc`).
+ */
 export interface InspectieMorman {
   readonly id: number
   readonly fel: number
-  readonly cantitate: number
   readonly rezervat: number
   readonly stare: TextMotiv
 }
@@ -533,7 +893,8 @@ export interface InspectieCelula {
   readonly materialDeasupra: number | null
   readonly desemnari: readonly InspectieDesemnare[]
   readonly morman: InspectieMorman | null
-  readonly zona: { readonly id: number; readonly fel: number; readonly prioritate: number } | null
+  /** `refuzate` = masca filtrului (t.3, camara; 0 = primeste tot) — scrisa PE LOC in inspector, deci scoasa din cheie. */
+  readonly zona: { readonly id: number; readonly fel: number; readonly prioritate: number; readonly refuzate: number } | null
 }
 
 /**
@@ -550,7 +911,24 @@ function stareMorman(w: World, rules: Rules, is: number, vedere: VedereFaraDepoz
     const constructor = rez.find((r) => { const s = slotOf(w.agents, r.claimant); return s !== -1 && w.agents.jobKind[s] === FelJob.CONSTRUIESTE })
     return { titlu: constructor ? `Luat pentru construit — ${numePion(constructor.claimant)}.` : 'În drum spre depozit.', actiune: '' }
   }
-  if (prioritateaLocului(w.zone, it.wx[is]!, it.wy[is]!, it.z[is]!, it.kind[is]!) > 0) return { titlu: 'În depozit.', actiune: '' }
+  const aici = prioritateaLocului(w.zone, it.wx[is]!, it.wy[is]!, it.z[is]!, it.kind[is]!)
+  if (aici > 0) {
+    // Se strica intr-un depozit, iar o camara are loc pe care caraușii nu-l folosesc: rangul ei nu e mai mare (UI-3).
+    const m = rules.perisabil[it.kind[is]!] === true ? mormanulDeHrana(w, rules, is) : null
+    if (m !== null && clasaMormanului(rules, m) === Clasa.STRICA) {
+      const zs = slotZona(w.zone, w.zone.celule.zonaId[celulaDeZonaLa(w.zone, it.wx[is]!, it.wy[is]!, it.z[is]!)]!)
+      const cam = camaraCuLoc(w, rules, it.kind[is]!, zs)
+      if (cam !== null && cam.rang <= aici) return textStricaCamaraAreLoc(cam.prioritate, zs === -1 ? 0 : w.zone.prioritate[zs]!)
+    }
+    return { titlu: 'În depozit.', actiune: '' }
+  }
+  // Moloz pe o camara care nu-l primeste, cand ALT depozit ii primeste felul dar n-are loc: cauza cu cifrele gropii (§5,
+  // verif-J-2), in locul lui „pline" — si inaintea racirii, care spunea doar „Reîncearcă". Cand niciun depozit nu-i
+  // primeste felul, ramane FEL_REFUZAT („Schimbă filtrul…"): „nu mai e loc" ar fi fost fals (poarta-camara).
+  if (((vedere.primeste >> it.kind[is]!) & 1) === 1) {
+    const gz = groapaZoneiLa(w, rules, it.wx[is]!, it.wy[is]!, it.z[is]!)
+    if (gz !== null && gz.g.propusa > 0 && ((gz.g.feluri >> it.kind[is]!) & 1) === 1) return textMolozInCamara(it.kind[is]!, gz.g)
+  }
   const cod = motivDinCod(it.ultimulMotiv[is]!)
   const s = Math.ceil((it.reincercaLaTick[is]! - w.tick) / rules.ticksPerSecond)
   if (cod !== null && s > 0) {
@@ -589,14 +967,14 @@ export function inspecteazaCelula(w: World, rules: Rules, wx: number, wy: number
     let rezervat = 0
     for (const r of rezervariPentru(w.rezervari, it.id[is]!, Strat.CARAT)) rezervat += r.count
     for (const r of rezervariPentru(w.rezervari, it.id[is]!, Strat.MANCAT)) rezervat += r.count
-    morman = { id: it.id[is]!, fel: it.kind[is]!, cantitate: it.cantitate[is]!, rezervat, stare: stareMorman(w, rules, is, vedereFaraDepozit(w, rules)) }
+    morman = { id: it.id[is]!, fel: it.kind[is]!, rezervat, stare: stareMorman(w, rules, is, vedereFaraDepozit(w, rules)) }
   }
   let zona: InspectieCelula['zona'] = null
   const cs = celulaDeZonaLa(w.zone, wx, wy, z + 1)
   if (cs !== -1) {
     const zid = w.zone.celule.zonaId[cs]!
     const zs = slotZona(w.zone, zid)
-    if (zs !== -1) zona = { id: zid, fel: w.zone.kind[zs]!, prioritate: w.zone.prioritate[zs]! }
+    if (zs !== -1) zona = { id: zid, fel: w.zone.kind[zs]!, prioritate: w.zone.prioritate[zs]!, refuzate: w.zone.refuzate[zs]! }
   }
   return { wx, wy, z, material: mat.ok ? mat.value : null, materialDeasupra: sus.ok ? sus.value : null, desemnari, morman, zona }
 }
@@ -931,9 +1309,9 @@ const RAZA_BLOCATE = 8
  * Ce spune lumea ACUM despre fiecare regula din `REGULI_ALERTE`. Pragurile de CANTITATE sunt aici,
  * cele de TIMP in tabel. Cu asezarea golita, toate tac (`golita` are cardul ei).
  */
-export function semnaleAlerte(w: World, rules: Rules, previz: Previz | null): Map<string, Semnal> {
+export function semnaleAlerte(w: World, rules: Rules, previz: Previz | null, h: HranaEcran = hranaEcran(w, rules)): Map<string, Semnal> {
   const m = new Map<string, Semnal>()
-  const r = rezumatColonie(w, rules)
+  const r = rezumatColonie(w, rules, h)
   if (r.colonisti === 0) return m
   const a = w.agents
   const fo = rules.nevoi[Nevoie.FOAME]!
@@ -942,8 +1320,15 @@ export function semnaleAlerte(w: World, rules: Rules, previz: Previz | null): Ma
   m.set('fara-hrana', hrana.puncte <= 0
     ? { activ: true, text: 'Nu mai e hrană. În versiunea asta hrana nu se poate produce; oamenii flămânzi vor pleca.', tinta: null }
     : inactiv)
-  m.set('hrana-scade', hrana.puncte > 0 && hrana.minute < 10
-    ? { activ: true, text: `Hrana ajunge ${textMinute(hrana.minute)} și nu se poate produce încă. După aceea oamenii pleacă.`, tinta: null }
+  // Aceeasi prognoza si aceeasi unitate ca bara (UI-9): zile de calendar, pragul critic (UI-14).
+  m.set('hrana-scade', hrana.puncte > 0 && !hrana.plafonat && hrana.zile < PRAG_CRITIC_ZILE
+    ? { activ: true, text: textHranaScade(textZile(hrana.zile, hrana.plafonat)), tinta: null }
+    : inactiv)
+  // Hrana se strica (§8, UI-4): pierderea MEDIE a stocului peste 1% pe zi (sub cer, pe urmatoarele 24 h: nu clipeste cu ziua
+  // si noaptea), N = mormanele care pierd cel putin 0,1% pe zi; tinta = mormanul care pierde cel mai mult, citita la clic.
+  const tintaH = h.tinta
+  m.set('hrana-se-strica', hrana.puncte > 0 && h.pericol > 0 && h.pierdereMedie > PRAG_ALERTA_ZI && tintaH !== -1
+    ? { activ: true, text: textAlertaAlterare(h.pericol), tinta: { fel: 'celula', wx: w.iteme.wx[tintaH]!, wy: w.iteme.wy[tintaH]!, z: w.iteme.z[tintaH]! - 1 } }
     : inactiv)
 
   // Flamanzii care AU CAUTAT si n-au gasit (`nevoieReincercaLaTick`): cine mananca sau merge la

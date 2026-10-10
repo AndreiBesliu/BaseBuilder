@@ -21,7 +21,8 @@ import { tick } from '../src/sim/world.ts'
 import type { World } from '../src/sim/state.ts'
 import { Zona } from '../src/sim/zone.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
-import { cauzaGolirii, creeazaPrevizualizare, golita, inspecteazaCelula, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte, stareDesemnare } from '../viewer/ui/model.ts'
+import { alterareaMormanului, camaraCuLoc, capacitateCamara, cauzaGolirii, creeazaPrevizualizare, golita, hranaEcran, inspecteazaCelula, inspecteazaPion, locGroapa, mormanPeLoc, prognozaHrana, prognozaJocNou, randuriOameni, rezumatColonie, semnaleAlerte, stareDesemnare, textPasiHrana } from '../viewer/ui/model.ts'
+import { groapaDeMoloz } from '../src/sim/camara.ts'
 import { locDemo, locJocNou } from '../viewer/ui/loc.ts'
 import { planDreptunghi, normalizeaza, Unealta } from '../viewer/ui/dreptunghi.ts'
 import { actualizeaza, creeazaAlerte, REGULI_ALERTE } from '../viewer/ui/alerte.ts'
@@ -87,6 +88,17 @@ function trecereUI(w: World): Map<string, Semnal> {
   prognozaHrana(w, R)
   golita(w)
   cauzaGolirii(w, R)
+  // Hrana (t.3 §8): prognoza, alterarea pe fiecare morman, camara, groapa si locul ei, dialogul Joc nou.
+  textPasiHrana(hranaEcran(w, R).prognoza)
+  for (let i = 0; i < w.iteme.count; i++) if (w.iteme.alive[i]) { alterareaMormanului(w, R, i); mormanPeLoc(w, R, w.iteme.wx[i]!, w.iteme.wy[i]!, w.iteme.z[i]! - 1) }
+  for (let zs = 0; zs < w.zone.count; zs++) {
+    if (w.zone.alive[zs] !== 1 || w.zone.kind[zs] !== Zona.DEPOZIT) continue
+    capacitateCamara(w, R, zs, 230)
+    groapaDeMoloz(w, R, w.zone.id[zs]!)
+    locGroapa(w, R, w.zone.id[zs]!, 3)
+  }
+  camaraCuLoc(w, R, Item.HRANA)
+  prognozaJocNou(R, w.seed, 12, 2760)
   const s = { wx: w.agents.x[0]! / 1000 | 0, wy: w.agents.y[0]! / 1000 | 0 }
   const lumea = {
     solid: () => true, suprafata: () => 1, calcabil: () => true, desemnare: () => -1, inZona: () => false,
@@ -135,6 +147,12 @@ test('model: nu scrie in World (instantaneu complet inainte si dupa o trecere a 
   const feluri = new Set<string>()
   for (let i = 0; i < d.count; i++) if (d.alive[i]) feluri.add(stareDesemnare(w, R, i, previz).fel)
   assert.deepEqual([...feluri].sort(), ['asteapta', 'faraAcces', 'imposibila', 'libera', 'lucru', 'motiv'], 'fixtura nu atinge fiecare ramura')
+  // Hrana in lume (sub cer si intr-o camara cu moloz), ca alterarea, camara si groapa sa aiba ce citi.
+  for (let i = 0; i < 3; i++) lasaItem(w, Item.HRANA, 75, sit.wx + 4 + i, sit.wy - 3)
+  const cam = patratPlat(w, sit, 3, 40, 100)!
+  const camara = picteaza(w, cam.x0, cam.y0, 3)
+  assert.ok(applyCommand(w, { kind: 'setFiltruZona', id: camara, refuzate: 7 }, R).ok)
+  lasaItem(w, Item.PIATRA, 75, cam.x0, cam.y0)
   const semnale = faraScriere(w, 'lumea bogata')
   for (const id of ['imposibile', 'blocate']) assert.equal(semnale.get(id)?.activ, true, id)
 
@@ -155,15 +173,19 @@ test('model: nu scrie in World (instantaneu complet inainte si dupa o trecere a 
   assert.equal(faraScriere(f.w, 'index la zi').get('fara-depozit')?.activ, true)
 })
 
-test('model: prognoza hranei pe puncte de nutritie (12 oameni, 600 de hrana ⇒ 26,0 min)', () => {
+test('model: prognoza hranei pe puncte de nutritie, in zile de calendar (12 oameni, 600 de hrana ⇒ 0,775 zile fara alterare)', () => {
   const { w, sit } = laSit(777, 12)
   for (let i = 0; i < 8; i++) lasaItem(w, Item.HRANA, 75, sit.wx + i, sit.wy + 9)
   const p = prognozaHrana(w, R)
-  // Pe hartie: 600 × 15 = 9.000 de puncte; 12 × 6 × (20 × 60 / 250) = 345,6 pe minut.
+  // Pe hartie: 600 × 15 = 9.000 de puncte (proaspete: valoarea = cantitatea); 12 × 6 / 250 × 40.320 = 11.612,16 pe zi;
+  // fara alterare 9.000 / 11.612,16 = 0,77505 zile (azi, in minute reale la 1×: 26,04 min). Mormanele stau sub cer la
+  // ~15 °C (tickul 0, toamna 08:00): cu alterarea, prognoza e mai scurta.
   assert.equal(p.puncte, 9000)
-  assert.ok(Math.abs(p.consumPeMin - 345.6) < 1e-9, String(p.consumPeMin))
-  assert.ok(Math.abs(p.minute - 26.04) < 0.01, String(p.minute))
-  assert.equal(rezumatColonie(w, R).hrana.minute, p.minute)
+  assert.ok(Math.abs(p.consumPeZi - 11612.16) < 1e-6, String(p.consumPeZi))
+  assert.ok(Math.abs(p.zileFaraAlterare - 9000 / 11612.16) < 1e-9, String(p.zileFaraAlterare))
+  assert.ok(Math.abs(p.zileFaraAlterare * 33.6 - 26.04) < 0.01, 'in minute reale la 1×, cifra de dinainte')
+  assert.ok(p.zile < p.zileFaraAlterare && p.zile > 0.6, `cu alterarea sub cer: ${p.zile} (masurat 0,697)`)
+  assert.equal(rezumatColonie(w, R).hrana.zile, p.zile)
 })
 
 test('model: o desemnare rezervata nu arata un motiv vechi; o piesa fara sprijin nu spune „libera"', () => {

@@ -107,6 +107,15 @@ export function actualizeaza(a: Alerte, reguli: readonly RegulaAlerta[], semnale
   return out
 }
 
+/**
+ * Cheia listei de alerte de pe ecran (t.3 §8, UI-4): DOAR id-urile, in ordinea afisarii. Textul se scrie pe loc, iar tinta
+ * se citeste la clic din `stari`: cu `id|text`, o alerta cu un numar care curge (N mormane care se strica) refacea toata
+ * lista — si butoanele celorlalte alerte — la fiecare schimbare, iar un clic cazut intre mousedown si mouseup se pierdea.
+ */
+export function cheieListei(afisate: readonly StareAlerta[]): string {
+  return afisate.map((a) => a.id).join('\n')
+}
+
 /** Un eveniment (ceva s-a INTAMPLAT, nu o stare): direct in jurnal. */
 export function eveniment(a: Alerte, id: string, text: string, tick: number): void {
   scrie(a, { tick, id, severitate: Severitate.EVENIMENT, text, tip: 'eveniment' })
@@ -123,6 +132,9 @@ export const REGULI_ALERTE: readonly RegulaAlerta[] = [
   { id: 'infometati', severitate: Severitate.CRITIC, intarziereS: 5, racireS: 30 },
   { id: 'pleaca', severitate: Severitate.CRITIC, intarziereS: 5, racireS: 30 },
   { id: 'hrana-scade', severitate: Severitate.ATENTIE, intarziereS: 2, racireS: 60 },
+  // Hrana se strica (t.3 §8): semnalul e pe pierderea MEDIE a urmatoarelor 24 h, deci nu clipeste cu ziua si noaptea (H5:
+  // 2 aparitii pe an sub cer, fata de 7 cu T-ul de acum); intarzierea si racirea, ca la „dorm-pe-jos".
+  { id: 'hrana-se-strica', severitate: Severitate.ATENTIE, intarziereS: 10, racireS: 60 },
   // 30 s > `nevoieRetryTicks` (25 s): un om care n-a prins loc la un morman ocupat (2 mancatori pe
   // morman) reincearca si mananca inainte ca alerta sa apara; unul la care mancarea nu ajunge deloc,
   // nu. Cu 10 s, 4 flamanzi la un morman aprindeau alerta desi mancarea era acolo (testul).

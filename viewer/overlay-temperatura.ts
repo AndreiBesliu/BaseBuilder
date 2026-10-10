@@ -3,8 +3,11 @@
  * fiecare spațiu acoperit — încăpere sau spațiu deschis — tentat după temperatura lui de ACUM (starea simulării,
  * `w.temperatura`, din t.2b), cu valoarea purtată de LUMINOZITATE (închis = rece, deschis = cald; nu roșu→verde), plus o
  * cifră pe fiecare piesă a lui. Separat de Încăperi (I): DESIGN §9.5 le dă câte o tastă, iar hașura e deja a lui I
- * („spațiu acoperit deschis"). NICIO hașură, niciun prag de 5 °C și nicio săgeată aici: pragul vine cu efectul, în t.3
- * (panoul t.2a, L5-5); săgeata ar cere X pentru toate componentele de la nivel (t.2b §8).
+ * („spațiu acoperit deschis"). NICIO hașură și nicio săgeată aici (săgeata ar cere X pentru toate componentele de la
+ * nivel, t.2b §8). Pragul a venit cu efectul (t.3 §8, UI-2): PUNCTE pe spațiile unde hrana se păstrează (T ≤ prag), un punct
+ * mai SLAB unde se strică foarte încet (peste prag, sub 0,1% pe zi) și nimic peste — trei clase după rata EFECTIVĂ a
+ * simulării (`clasaLaT`, model.ts), nu un prag binar de 5,000 °C: pe M10, 316–424 din 677 de încăperi stau la ±0,5 °C de
+ * prag, iar pivnița unei case locuite pierde 0,02%/zi la 5,2 °C (verif-UI-2). Informația rară e unde se PĂSTREAZĂ (H5).
  *
  * Partea asta e PURĂ față de DOM (three rulează în node): piesele, ancorele, tenta, alegerea etichetelor de
  * arătat. Stratul DOM al cifrelor e în `etichete-temperatura.ts`.
@@ -56,6 +59,8 @@ import { WORLD_CELLS } from '../src/sim/terrain/terrain.ts'
 import { aceeasiAmprenta, amprentaNivel } from './overlay-camere.ts'
 import type { AmprentaNivel } from './overlay-camere.ts'
 import { TEXT_TEMPERATURA_NECUNOSCUTA, textIntervalTemperatura, textZecimi } from './ui/texte.ts'
+import { Clasa, clasaLaT } from './ui/model.ts'
+import type { ClasaId } from './ui/model.ts'
 
 /** Numele grupului în scenă: proba de pe ecran (bench/ui-fum.mjs) îl caută după el. */
 export const NUME_GRUP_TEMPERATURA = 'overlay-temperatura'
@@ -68,6 +73,25 @@ export const INTERVAL_MIN_Q16 = 2 * 65536
 /** Capetele tentei, în sRGB: fiecare canal crește de la rece la cald, deci și luminozitatea. */
 export const CULOARE_RECE: readonly [number, number, number] = [0.1, 0.15, 0.32]
 export const CULOARE_CALDA: readonly [number, number, number] = [1, 0.91, 0.72]
+/** Numele plasei punctelor de păstrare (t.3 §8): proba de pe ecran o caută după el, în grupul overlay-ului. */
+export const NUME_PUNCTE = 'puncte-pastrare'
+/** Latura punctului, în celule (centrat): un semn de FORMĂ, nu doar de culoare (DESIGN §9 regula 9), altul decât hașura lui I. */
+export const LATURA_PUNCT = 0.28
+/** Alfa punctului pe clasă (PASTREAZA, APROAPE, STRICA): plin, slab, deloc. */
+export const ALFA_PUNCT: readonly number[] = [1, 0.45, 0]
+/**
+ * Punctul se vede pe orice tentă: închis pe tenta deschisă, deschis pe cea închisă (luminanța sRGB a tentei peste
+ * `PRAG_LUMINA_PUNCT`). Tenta e relativă la nivel (`intervalCuAfara`), deci o pivniță rece poate fi deschisă la culoare.
+ */
+export const PRAG_LUMINA_PUNCT = 0.45
+export const PUNCT_INCHIS: readonly [number, number, number] = [0.07, 0.07, 0.09]
+export const PUNCT_DESCHIS: readonly [number, number, number] = [0.97, 0.96, 0.92]
+
+/** Culoarea (sRGB) a punctului pe o tentă (sRGB): contrastul cu ea. */
+export function culoarePunct(tenta: readonly [number, number, number]): readonly [number, number, number] {
+  const l = 0.2126 * tenta[0] + 0.7152 * tenta[1] + 0.0722 * tenta[2]
+  return l > PRAG_LUMINA_PUNCT ? PUNCT_INCHIS : PUNCT_DESCHIS
+}
 
 // ---------------------------------------------------------------------------------------------
 // piesele și ancorele
@@ -262,7 +286,12 @@ export interface OverlayTemperatura {
   faraT: number
   /** Ce spune legenda în locul intervalului; '' = nimic. */
   eroare: string
+  /** Clasa alterării fiecărei componente de la nivel (t.3 §8: punctele), din T-ul ei; lipsește = fără T. */
+  readonly clase: Map<number, ClasaId>
+  /** Câte componente de la nivel sunt în fiecare clasă (PASTREAZA, APROAPE, STRICA). */
+  puncte: [number, number, number]
   readonly material: THREE.MeshBasicMaterial
+  readonly materialPuncte: THREE.MeshBasicMaterial
   /** Contoare: geometrii refăcute, citiri ale stării (una pe actualizare), recolorări (doar la schimbare). */
   reconstructii: number
   citiri: number
@@ -277,9 +306,11 @@ export function createTemperaturaOverlay(): OverlayTemperatura {
   // Culoarea pe varf are ALFA (itemSize 4): un patrat fara valoare are alfa 0, iar `alphaTest` il arunca de tot
   // (nici culoare, nici adancime) — nu e un gri care se confunda cu mijlocul rampei (recenzia t.2a, L4-4).
   const material = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.7, alphaTest: 0.01, depthTest: false, side: THREE.DoubleSide })
+  // Punctele: tot culoare cu alfa pe vârf (alfa 0 = fără punct, aruncat de `alphaTest`), peste tentă.
+  const materialPuncte = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, alphaTest: 0.01, depthTest: false, side: THREE.DoubleSide })
   return {
     group, visible: false, nivel: undefined, epoca: -1, amprenta: null, ancore: [], comps: [], quadComp: new Int32Array(0), valori: new Map(),
-    min: 0, max: 0, tAfara: 0, faraT: 0, eroare: '', material, reconstructii: 0, citiri: 0, recolorari: 0,
+    min: 0, max: 0, tAfara: 0, faraT: 0, eroare: '', clase: new Map(), puncte: [0, 0, 0], material, materialPuncte, reconstructii: 0, citiri: 0, recolorari: 0,
   }
 }
 
@@ -300,14 +331,21 @@ function reconstruieste(o: OverlayTemperatura, w: World, z: number | null, ampre
   o.comps = []
   o.quadComp = new Int32Array(0)
   o.valori.clear()
+  o.clase.clear()
+  o.puncte = [0, 0, 0]
   o.faraT = 0
   if (z === null) return
   const pos: number[] = []
+  const posP: number[] = []
   const comp: number[] = []
   const y0 = z + 0.03
+  const yP = z + 0.04
+  const m0 = (1 - LATURA_PUNCT) / 2, m1 = (1 + LATURA_PUNCT) / 2
   celuleLaNivel(w.camere, z, (x, y, c) => {
     const a = x + 0.06, b = x + 0.94, p = y + 0.06, q = y + 0.94
     pos.push(a, y0, p, b, y0, p, b, y0, q, a, y0, p, b, y0, q, a, y0, q)
+    const pa = x + m0, pb = x + m1, pp = y + m0, pq = y + m1
+    posP.push(pa, yP, pp, pb, yP, pp, pb, yP, pq, pa, yP, pp, pb, yP, pq, pa, yP, pq)
     comp.push(c.id)
   })
   o.quadComp = Int32Array.from(comp)
@@ -320,13 +358,20 @@ function reconstruieste(o: OverlayTemperatura, w: World, z: number | null, ampre
   const m = new THREE.Mesh(geo, o.material)
   m.renderOrder = 6
   o.group.add(m)
+  const geoP = new THREE.BufferGeometry()
+  geoP.setAttribute('position', new THREE.BufferAttribute(new Float32Array(posP), 3))
+  geoP.setAttribute('color', new THREE.BufferAttribute(new Float32Array((posP.length / 3) * 4), 4))
+  const mp = new THREE.Mesh(geoP, o.materialPuncte)
+  mp.name = NUME_PUNCTE
+  mp.renderOrder = 7
+  o.group.add(mp)
 }
 
 /**
  * T-ul componentelor de la nivel, din STARE (`temperaturaAcum`): comparat direct cu ce e desenat. Întoarce true dacă s-a
  * schimbat ceva (o valoare, o componentă rămasă fără T); atunci și minimul, maximul și eroarea legendei.
  */
-function citesteValorile(o: OverlayTemperatura, w: World): boolean {
+function citesteValorile(o: OverlayTemperatura, w: World, rules: Rules): boolean {
   o.citiri++
   let schimbat = false
   let faraT = 0
@@ -335,10 +380,13 @@ function citesteValorile(o: OverlayTemperatura, w: World): boolean {
     if (t === null) {
       faraT++
       if (o.valori.delete(id)) schimbat = true
+      o.clase.delete(id)
       continue
     }
     if (o.valori.get(id) !== t) {
       o.valori.set(id, t)
+      // Clasa se schimbă doar cu T-ul: recalculată odată cu el (o căutare pe curbă), nu pe cadru.
+      o.clase.set(id, clasaLaT(rules, t))
       schimbat = true
     }
   }
@@ -356,6 +404,9 @@ function citesteValorile(o: OverlayTemperatura, w: World): boolean {
   o.min = Number.isFinite(min) ? min : 0
   o.max = Number.isFinite(max) ? max : 0
   o.eroare = faraT > 0 ? TEXT_TEMPERATURA_NECUNOSCUTA : ''
+  const n: [number, number, number] = [0, 0, 0]
+  for (const c of o.clase.values()) n[c]++
+  o.puncte = n
   return true
 }
 
@@ -375,16 +426,21 @@ function recoloreaza(o: OverlayTemperatura): void {
   const { lo, hi } = intervalCuAfara(o.min, o.max, o.tAfara)
   // Culoarea fiecărei componente (liniară; alfa 0 = fără valoare), o dată.
   const culori = new Map<number, readonly [number, number, number, number]>()
+  const puncte = new Map<number, readonly [number, number, number, number]>()
   for (const id of o.comps) {
     const t = o.valori.get(id)
     if (t === undefined) {
       culori.set(id, [0, 0, 0, 0])
+      puncte.set(id, [0, 0, 0, 0])
       continue
     }
     const [r, g, b] = culoareTemperatura(t, lo, hi)
     // Vârfurile sunt în spațiul liniar: culoarea sRGB trece prin THREE.Color, ca la tenta lui I.
     c3.setRGB(r, g, b, THREE.SRGBColorSpace)
     culori.set(id, [c3.r, c3.g, c3.b, 1])
+    const pc = culoarePunct([r, g, b])
+    c3.setRGB(pc[0], pc[1], pc[2], THREE.SRGBColorSpace)
+    puncte.set(id, [c3.r, c3.g, c3.b, ALFA_PUNCT[o.clase.get(id) ?? Clasa.STRICA] ?? 0])
   }
   for (let i = 0; i < o.quadComp.length; i++) {
     const c = culori.get(o.quadComp[i]!)!
@@ -396,6 +452,20 @@ function recoloreaza(o: OverlayTemperatura): void {
     }
   }
   atr.needsUpdate = true
+  const mp = o.group.children[1] as THREE.Mesh | undefined
+  if (mp === undefined) return
+  const atrP = mp.geometry.getAttribute('color') as THREE.BufferAttribute
+  const arrP = atrP.array as Float32Array
+  for (let i = 0; i < o.quadComp.length; i++) {
+    const c = puncte.get(o.quadComp[i]!)!
+    for (let k = 0, j = i * 24; k < 6; k++, j += 4) {
+      arrP[j] = c[0]
+      arrP[j + 1] = c[1]
+      arrP[j + 2] = c[2]
+      arrP[j + 3] = c[3]
+    }
+  }
+  atrP.needsUpdate = true
 }
 
 /**
@@ -414,7 +484,7 @@ export function actualizeazaTemperaturaOverlay(o: OverlayTemperatura, w: World, 
   o.epoca = w.camere.epoca
   if (geometrie) reconstruieste(o, w, z, z === null ? null : (amprenta ?? amprentaNivel(w.camere, z)))
   if (z === null) return
-  const citite = citesteValorile(o, w)
+  const citite = citesteValorile(o, w, rules)
   const afara = tAfara(w.seed, w.tick, rules)
   if (geometrie || citite || textZecimi(afara) !== textZecimi(o.tAfara)) {
     o.tAfara = afara

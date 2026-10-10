@@ -18,7 +18,7 @@ import { describe } from '../src/sim/result.ts'
 import type { Refusal } from '../src/sim/result.ts'
 import { CHUNK_CELLS, isSolid, Material, promotedBaseM, VOXEL_LEVELS } from '../src/sim/terrain/chunk.ts'
 import type { Chunk } from '../src/sim/terrain/chunk.ts'
-import { groundLevelM, inWorld, materialAt, voxelRangeM } from '../src/sim/terrain/terrain.ts'
+import { groundLevelM, inWorld, materialAt } from '../src/sim/terrain/terrain.ts'
 import { Face, meshChunk } from '../src/render/mesher.ts'
 import type { ChunkNeighbours } from '../src/render/mesher.ts'
 import { AO_FACTOR, quadColor, variatiaLocului } from '../src/render/palette.ts'
@@ -54,8 +54,9 @@ import { actiuneTasta, tintaEditabila } from './ui/taste.ts'
 import type { Actiune } from './ui/taste.ts'
 import { normalizeaza, planDreptunghi, textPlan, Unealta } from './ui/dreptunghi.ts'
 import type { Lumea, PlanDreptunghi, UnealtaId } from './ui/dreptunghi.ts'
-import { randTermicF3, textEroareSimulare, textEroareTemperatura, textMotiv, textSimulareOprita } from './ui/texte.ts'
-import { cifreDinReguli, creeazaFiltruOameni, creeazaMonitorTermic, creeazaTickObservat } from './ui/model.ts'
+import { randTermicF3, textEroareSimulare, textEroareTemperatura, textHranaF3, textMotiv, textSimulareOprita } from './ui/texte.ts'
+import { alterareaMormanului, aplicaZona, cifreDinReguli, clasaLaT, clasaMormanului, creeazaFiltruOameni, creeazaMonitorTermic, creeazaTickObservat, hranaEcran, mormanPeLoc, prognozaJocNou, semnaleAlerte, suprafataColoanei, textPrognozaBara } from './ui/model.ts'
+import { mormanulDeHrana, prognozaFaraAlterare, stareaHranei } from '../src/sim/prognoza.ts'
 import { citesteSalvare, listaSalvari, scrieSalvare, stergeSalvare } from './ui/salvari-idb.ts'
 import { FORMAT_SALVARE, numeFisier, valideazaSalvare } from './ui/salvari-plic.ts'
 import type { Salvare } from './ui/salvari-plic.ts'
@@ -1169,6 +1170,8 @@ interface Tragere {
   readonly unealta: UnealtaId
   /** Felul zonei, fixat la APASARE: Z eliberat inaintea butonului picta altceva decat arata (INT-11). */
   readonly zonaFel: number
+  /** Filtrul zonei (Cămară: „doar hrană"), fixat tot la APASARE; 0 = depozit general (si cu Z tinut). */
+  readonly zonaFiltru: number
   readonly start: { readonly wx: number; readonly wy: number; readonly z: number }
   readonly m: Modificatori
   colt: { wx: number; wy: number } | null
@@ -1238,16 +1241,8 @@ const lumeaDreptunghiului: Lumea = {
  * relieful neatins: nu stie de sapaturi si de ziduri); pe unul nepromovat, relieful.
  */
 function suprafata(wx: number, wy: number): number | null {
-  const iv = voxelRangeM(world.terrain, wx, wy)
-  if (!iv.ok) return null
-  const g = groundLevelM(world.terrain, wx, wy)
-  const c = world.terrain.chunks.get(Math.floor(wy / CHUNK_CELLS) * 512 + Math.floor(wx / CHUNK_CELLS))
-  if (!c || c.voxels === null) return g.ok ? g.value : null
-  for (let z = iv.value.max; z >= iv.value.min; z--) {
-    const r = materialAt(world.terrain, wx, wy, z)
-    if (r.ok && isSolid(r.value)) return z
-  }
-  return null
+  // O singura functie (model.ts): aceeasi cota o cauta si groapa de moloz din inspectorul camarii (t.3 §8).
+  return suprafataColoanei(world, wx, wy)
 }
 
 function optiuniDreptunghi(u: UnealtaId, zonaFel?: number): Parameters<typeof planDreptunghi>[1] {
@@ -1345,6 +1340,8 @@ interface Aplicare {
   /** Id-urile desemnarilor create: „Anuleaza" din toast le retrage exact pe ele. */
   readonly create: number[]
   zonaId: number | null
+  /** Filtrul pus pe zona noua (camara), pentru toast. */
+  readonly zonaFiltru: number
 }
 let aplicare: Aplicare | null = null
 
@@ -1361,11 +1358,14 @@ function aplicaDreptunghi(t: Tragere): void {
   if (plan.refuz !== null) { ui?.toast(plan.refuz, true); return }
   if (t.unealta === Unealta.STERGE_ZONA && plan.celuleInAfara > 20
     && !window.confirm(`Zonele atinse se șterg ÎNTREGI: ${plan.celuleInAfara} celule sunt în afara dreptunghiului. Continui?`)) return
-  aplicare = { unealta: t.unealta, plan, cursor: 0, aplicate: 0, refuzuri: new Map(), create: [], zonaId: null }
-  // Zonele: bucatile, legate de prima (o zona), dintr-o data — sunt putine comenzi.
-  for (const b of plan.zone) {
-    const out = applyCommand(world, { kind: 'picteazaZona', x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, z: b.z, fel: t.zonaFel, zonaId: aplicare.zonaId ?? undefined })
-    if (out.ok) { aplicare.zonaId = out.value; aplicare.aplicate++ } else noteazaRefuz(aplicare, out)
+  aplicare = { unealta: t.unealta, plan, cursor: 0, aplicate: 0, refuzuri: new Map(), create: [], zonaId: null, zonaFiltru: t.zonaFiltru }
+  // Zonele: bucatile, legate de prima (o zona), dintr-o data — sunt putine comenzi. O camara isi primeste filtrul in ACELASI
+  // pas (`aplicaZona`, t.3 §8): niciun tick intre pictura si filtru, deci niciun job spre o camara fara filtru.
+  if (plan.zone.length > 0) {
+    const r = aplicaZona((c) => applyCommand(world, c), plan.zone, t.zonaFel, t.zonaFiltru)
+    aplicare.zonaId = r.zonaId
+    aplicare.aplicate += r.aplicate
+    for (const out of r.refuzuri) if (!out.ok) noteazaRefuz(aplicare, out)
   }
 }
 
@@ -1394,6 +1394,7 @@ function pasAplicare(): void {
   dupaComenzi(cmds.length > 0 ? cmds : a.plan.zone.length > 0 ? [{ kind: 'picteazaZona', x0: 0, y0: 0, x1: 0, y1: 0, z: 0 }] : [])
   const refuz = [...a.refuzuri].map(([t, n]) => `${n} refuzate: ${t}`).join(' · ')
   let text = textPlan(a.plan, a.unealta)
+  if (a.zonaFiltru !== 0 && a.zonaId !== null) text += ' · cămară: doar hrană'
   if (refuz) text += ` · ${refuz}`
   if (a.unealta === Unealta.CONSTRUIESTE && a.create.length > 0 && ui !== null) {
     // Ce n-ar sta in picioare nici dupa restul planului, numarat DOAR pe piesele noi (panoul, CS-3).
@@ -1457,7 +1458,7 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
   const t = tintaLa(ev.clientX, ev.clientY, m)
   // Apasarea pe cer nu porneste nimic.
   if (!t.ok) return
-  tragere = { unealta: u, zonaFel: optiuniDreptunghi(u).zonaFel, start: { wx: t.wx, wy: t.wy, z: t.z }, m, colt: { wx: t.wx, wy: t.wy }, activ: false, plan: null }
+  tragere = { unealta: u, zonaFel: optiuniDreptunghi(u).zonaFel, zonaFiltru: u === Unealta.ZONA && !tastaZ ? ui?.zonaFiltru ?? 0 : 0, start: { wx: t.wx, wy: t.wy, z: t.z }, m, colt: { wx: t.wx, wy: t.wy }, activ: false, plan: null }
   apasareCuUnealta = true
 })
 // Butoanele camerei se aleg INAINTE ca OrbitControls sa vada apasarea (el asculta pe canvas, fara
@@ -1592,7 +1593,9 @@ renderer.domElement.addEventListener('click', (ev) => {
       ? applyCommand(world, { kind: 'stergeZona', id: -1 })
       : applyCommand(world, { kind: 'stergeZona', id: world.zone.celule.zonaId[cs]! })
   } else if (mod === 'zona') {
-    out = applyCommand(world, { kind: 'picteazaZona', x0: wx, y0: wy, x1: wx, y1: wy, z: z + 1, fel: ui?.zonaFel ?? 0 })
+    // Cămara: pictura si filtrul in acelasi pas (`aplicaZona`); refuzul picturii ramane `out`, ca inainte.
+    const r = aplicaZona((c) => applyCommand(world, c), [{ x0: wx, y0: wy, x1: wx, y1: wy, z: z + 1 }], ui?.zonaFel ?? 0, ui?.zonaFiltru ?? 0)
+    out = r.zonaId !== null ? { ok: true as const, value: r.zonaId } : r.refuzuri[0] ?? applyCommand(world, { kind: 'picteazaZona', x0: wx, y0: wy, x1: wx, y1: wy, z: z + 1, fel: ui?.zonaFel ?? 0 })
   } else if (m.shift) {
     out = applyCommand(world, { kind: 'fill', wx, wy, z, material: Material.PIATRA_CONSTRUITA })
     dinTeren = true
@@ -2366,6 +2369,11 @@ function stepFrame(ts: number): void {
       el('termic').textContent = r.text
       el('termic').className = r.avertizare ? 'warn' : ''
     }
+    if (!hud.hidden) {
+      // Hrana (t.3 §8): stricat (salvat), mormanele in pericol (≥ 0,1%/zi), pierderea medie — aceeasi trecere ca ecranul.
+      const hh = hranaEcran(world, DEFAULT_RULES)
+      el('hrana').textContent = textHranaF3(world.hranaStricata, hh.pericol, hh.pierdereMedie)
+    }
     if (probe.invalid) {
       el('spot').textContent = `INVALID · ${probe.invalid}`
       el('spot').className = 'warn'
@@ -2496,6 +2504,13 @@ if (!MOD.faraUI && MOD_JOC !== 'gate') {
       if (refuzuri.length > 0) ui?.toast(refuzuri[0]!, true)
       return { aplicate, refuzuri }
     },
+    picteazaZona: (bucati, fel, filtru) => {
+      const r = aplicaZona((c) => applyCommand(world, c), bucati, fel, filtru)
+      const refuzuri = r.refuzuri.map((out) => (out.ok ? '' : textMotiv('comanda', out.reason, 0, out.params, cifre).titlu)).filter((t) => t !== '')
+      dupaComenzi(bucati.length > 0 ? [{ kind: 'picteazaZona', x0: 0, y0: 0, x1: 0, y1: 0, z: 0 }] : [])
+      if (refuzuri.length > 0) ui?.toast(refuzuri[0]!, true)
+      return { zonaId: r.zonaId, refuzuri }
+    },
     nivel: () => {
       const { lo, hi } = plajaSlice()
       const g = groundLevelM(world.terrain, Math.floor(controls.target.x), Math.floor(controls.target.z))
@@ -2562,5 +2577,38 @@ if (!MOD.faraUI && MOD_JOC !== 'gate') {
 
 requestAnimationFrame(tick)
 
+/**
+ * Hrana (t.3 §8), pentru proba de pe ecran (bench/ui-fum.mjs): ACELEASI functii ca ecranul, pe lumea paginii — ce text
+ * ASTEAPTA bara, inspectorul, alerta si F3 din starea de acum, plus suma S (alterarea, PERSISTED) pe care se fac comparatiile
+ * (UI-7: unitatile nu se misca in ferestrele probelor, S da). Nimic de aici nu scrie in lume.
+ */
+const hranaProba = {
+  ecran: () => hranaEcran(world, DEFAULT_RULES),
+  stare: () => stareaHranei(world, DEFAULT_RULES),
+  /** Textul barei acum, si cel FARA alterare (proba negativa „bara-prognoza"). */
+  bara: () => textPrognozaBara(hranaEcran(world, DEFAULT_RULES).prognoza),
+  baraFaraAlterare: () => {
+    const s = stareaHranei(world, DEFAULT_RULES)
+    const f = prognozaFaraAlterare(s, DEFAULT_RULES)
+    return textPrognozaBara({ puncte: s.valoare, consumPeZi: 0, zile: f.zile, plafonat: f.plafonat, zileFaraAlterare: f.zile, plafonatFaraAlterare: f.plafonat })
+  },
+  /** Ce scrie inspectorul pe mormanul de deasupra celulei (wx, wy, z): cantitatea si alterarea. */
+  morman: (wx: number, wy: number, z: number) => mormanPeLoc(world, DEFAULT_RULES, wx, wy, z),
+  /** Alterarea mormanului cu id-ul dat (slotul se cauta), sau null. */
+  alterareId: (id: number) => { const s = world.iteme.laId.get(id); return s === undefined ? null : alterareaMormanului(world, DEFAULT_RULES, s) },
+  /** Clasa mormanului cu id-ul dat (0 se pastreaza, 1 aproape, 2 se strica; null neperisabil / fara T). */
+  clasaId: (id: number) => { const s = world.iteme.laId.get(id); const m = s === undefined ? null : mormanulDeHrana(world, DEFAULT_RULES, s); return m === null ? null : clasaMormanului(DEFAULT_RULES, m) },
+  /** Clasa unui T (Q16 °C): harta U. */
+  clasaLaT: (tQ16: number) => clasaLaT(DEFAULT_RULES, tQ16),
+  /** Semnalul alertei „hrana-se-strica" acum. */
+  alerta: () => semnaleAlerte(world, DEFAULT_RULES, null).get('hrana-se-strica') ?? null,
+  /** Σ S pe mormane si maini (1/ONE): PERSISTED, creste la fiecare pas de 1 Hz peste prag. */
+  sumaS: () => { let s = 0; for (let i = 0; i < world.iteme.count; i++) if (world.iteme.alive[i] === 1) s += world.iteme.alterare[i]!; for (let i = 0; i < world.agents.count; i++) if (world.agents.alive[i] === 1) s += world.agents.caraAlterare[i]!; return s },
+  /** Randul F3. */
+  f3: () => { const hh = hranaEcran(world, DEFAULT_RULES); return textHranaF3(world.hranaStricata, hh.pericol, hh.pierdereMedie) },
+  /** Dialogul „Joc nou" pentru (seed, oameni, hrana). */
+  jocNou: (seed: number, oameni: number, hrana: number) => prognozaJocNou(DEFAULT_RULES, seed, oameni, hrana).text,
+}
+
 // Expus pentru masuratori din consola, nu pentru joc.
-Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport, fantoma, jobOverlay, stabOverlay, tempOverlay, etichete: () => stratEtichete, ui, mod: MOD_JOC, agentLayer, tintaLa, suprafata, stratResurse, stare: () => ({ viteza, pauza: simPauza }), filtruOameni, tickObservat, monitorTermic, avanseaza, rules: DEFAULT_RULES } })
+Object.assign(globalThis, { __kinstead: { world, renderer, scene, camera, controls, frames, probe, bisector, ballast, stepFrame, meshes, densePanel, densePanelReport, fantoma, jobOverlay, stabOverlay, tempOverlay, etichete: () => stratEtichete, ui, mod: MOD_JOC, agentLayer, tintaLa, suprafata, stratResurse, stare: () => ({ viteza, pauza: simPauza }), filtruOameni, tickObservat, monitorTermic, avanseaza, rules: DEFAULT_RULES, hrana: hranaProba } })

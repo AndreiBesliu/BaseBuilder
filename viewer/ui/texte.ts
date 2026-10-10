@@ -708,3 +708,162 @@ export function textIntervalTemperatura(n: number, min: number, max: number, tAf
   const interval = textZecimi(min) === textZecimi(max) ? `~${textZecimi(min)} °C` : `${textZecimi(min)} … ${textZecimi(max)} °C`
   return `${interval} · afară ${textGradeIntregi(tAfaraQ16)} °C`
 }
+
+// ---- hrana: prognoza in zile, alterarea pe morman, camara, F3 (S24-27 t.3 §8) --------------------------------------
+
+/**
+ * Prognoza hranei in ZILE DE CALENDAR (UI-14; ca „Iarna în 3 zile" din calendar): „~3,6 zile" sub 10 zile, cu o zecimala;
+ * peste, in zile intregi („~12 zile", „~20 de zile"); sub o zi, in ore („~23 de ore", „~1 oră", „< 1 oră"); peste plafon,
+ * „peste un an". Inainte, „~2 h 0 min" erau minute REALE la 1× — 3,57 zile de calendar, langa ceasul de joc (H5).
+ */
+export function textZile(zile: number, plafonat: boolean): string {
+  if (plafonat) return 'peste un an'
+  if (!Number.isFinite(zile)) return '—'
+  const ore = Math.round(zile * 24)
+  if (ore < 1) return '< 1 oră'
+  if (ore < 24) return ore === 1 ? '~1 oră' : `~${cant(ore, 'ore')}`
+  const z = Math.round(zile * 10)
+  if (z < 100) return `~${Math.floor(z / 10)},${z % 10} zile`
+  return `~${cant(Math.round(zile), 'zile')}`
+}
+
+/** O fractie pe zi ca procent cu o zecimala: „3,1%", „0,0%". */
+export function textProcent1(f: number): string {
+  const z = Math.round(Math.max(0, f) * 1000)
+  return `${Math.floor(z / 10)},${z % 10}%`
+}
+
+/** Etichetele celor trei clase ale alterarii (UI-2), pe `Clasa` din model.ts: PASTREAZA, APROAPE, STRICA. */
+export const ETICHETA_ALTERARE: readonly string[] = ['Se păstrează', 'Se păstrează aproape', 'Se strică']
+
+/**
+ * Cat pierde un morman, in UNITATI: „~13 azi" / „~7 pe zi"; sub 0,5 unitati pe zi, la cat timp una: „~1 la 56 de zile",
+ * de la 100 de zile in ani de joc („~1 în 12 ani"; `zileAn` = zilele unui an de calendar); la 0 (banda moarta de deasupra
+ * pragului), „nimic azi" / „fără pierdere". Lânga prag, „~0 pe zi" pe toata banda pivnitelor nu spunea nimic (UI-6: la
+ * 5,2 °C, 0,005 pe zi dintr-un morman de 75).
+ */
+export function textPierdere(n: number, cand: 'azi' | 'pe zi', zileAn: number): string {
+  if (n >= 0.5) return `~${textNumar(Math.round(n))} ${cand}`
+  if (!(n > 0)) return cand === 'azi' ? 'nimic azi' : 'fără pierdere'
+  const zile = Math.round(1 / n)
+  if (zile < 100) return `~1 la ${cant(zile, 'zile')}`
+  const ani = Math.round(1 / n / zileAn)
+  return ani <= 1 ? '~1 într-un an' : `~1 în ${cant(ani, 'ani')}`
+}
+
+/**
+ * Randul de alterare al inspectorului pe un morman perisabil (§8, UI-5, UI-6), din rata CUANTIZATA a simularii:
+ *   „Se păstrează | 4,7 °C · cu 0,3 sub prag"             in incapere, T ≤ prag („· la prag" cand diferenta se scrie 0,0)
+ *   „Se păstrează aproape | ~1 la 56 de zile · la 5,3 °C"  peste prag, sub 0,1% pe zi
+ *   „Se strică | ~7 pe zi · la 12,3 °C"                    in incapere: rata de ACUM
+ *   „Se strică | ~13 azi · acum 2,1 °C"                    sub cer: pierderea URMATOARELOR 24 h, T-ul de acum separat
+ * `clasa` indexeaza `ETICHETA_ALTERARE`; `n` = unitatile pierdute (sub cer in urmatoarele 24 h, in incapere pe zi);
+ * `subPrag` = T-ul locului e la prag sau sub el.
+ */
+export function textAlterare(o: { readonly clasa: number; readonly cer: boolean; readonly subPrag: boolean; readonly tQ16: number; readonly pragQ16: number; readonly n: number; readonly zileAn: number }): { eticheta: string; valoare: string } {
+  const eticheta = ETICHETA_ALTERARE[o.clasa] ?? 'Alterare'
+  const t = `${textZecimi(o.tQ16)} °C`
+  if (o.cer) return { eticheta, valoare: `${textPierdere(o.n, 'azi', o.zileAn)} · acum ${t}` }
+  if (o.subPrag) {
+    const d = textZecimi(o.pragQ16 - o.tQ16)
+    return { eticheta, valoare: d === '0,0' ? `${t} · la prag` : `${t} · cu ${d} sub prag` }
+  }
+  return { eticheta, valoare: `${textPierdere(o.n, 'pe zi', o.zileAn)} · la ${t}` }
+}
+
+/** Randul de alterare cand locul n-are T (un invariant incalcat: pasul sare mormanul, STARE-12). */
+export const TEXT_ALTERARE_NECUNOSCUTA: { readonly eticheta: string; readonly valoare: string } = { eticheta: 'Alterare', valoare: 'nu se știe (eroare internă)' }
+
+/** Alerta „hrana se strica" (§8, UI-4): N = mormanele care pierd cel putin 0,1% pe zi. Textul se scrie PE LOC (cheia listei e pe id-uri). */
+export function textAlertaAlterare(n: number): string {
+  return `Hrana se strică: ${cant(n, 'mormane', 'un morman')}.`
+}
+
+/** Alerta „hrana-scade" (UI-9): aceeasi prognoza, in aceeasi unitate, ca bara. */
+export function textHranaScade(zile: string): string {
+  return `Hrana ajunge ${zile} și nu se poate produce încă. După aceea oamenii pleacă.`
+}
+
+/** Randul „hrana" din Diagnostic (F3, §8): „stricat 1.164 · în pericol 12 · 3,1%/zi". */
+export function textHranaF3(stricat: number, pericol: number, pierdereZi: number): string {
+  return `stricat ${textNumar(stricat)} · în pericol ${textNumar(pericol)} · ${textProcent1(pierdereZi)}/zi`
+}
+
+/** Felurile dintr-o masca (bitul k = felul k), in propozitie: „piatră", „piatră și pământ", „piatră, pământ și lemn". */
+export function textFeluri(masca: number): string {
+  const n: string[] = []
+  for (let k = 0; k < 31; k++) if (((masca >> k) & 1) === 1) n.push(NUME_ITEM_MIC[k] ?? 'marfă')
+  if (n.length <= 1) return n[0] ?? 'nimic'
+  return `${n.slice(0, -1).join(', ')} și ${n[n.length - 1]}`
+}
+
+/** Ce primeste un depozit, dupa masca INVERSA a filtrului (`refuzate`): „tot", „doar hrană", „piatră și pământ". */
+export function textPrimeste(refuzate: number, feluri: number): string {
+  const toate = (1 << feluri) - 1
+  const primite = toate & ~refuzate
+  if (primite === toate) return 'tot'
+  if (primite === 0) return 'nimic'
+  const nume = textFeluri(primite)
+  return (primite & (primite - 1)) === 0 ? `doar ${nume}` : nume
+}
+
+/** Capacitatea unei camare in oameni (J-11): „Ține hrana a 12 oameni" — `celule × itemStackMax / hranaPeOm`. */
+export function textCapacitateCamara(oameni: number): string {
+  return oameni <= 0 ? 'Prea mică: nu ține hrana nici unui om.' : `Ține hrana a ${cant(oameni, 'oameni', 'un om')} (cât au la început).`
+}
+
+/**
+ * Avertismentul gropii de moloz, in inspectorul camarii (§5, verif-J-2), cu cifrele lui `groapaDeMoloz`: ce sta pe camara,
+ * cat mai incape in celelalte depozite, cat lipseste.
+ */
+export function textGroapa(g: { readonly feluri: number; readonly unitati: number; readonly celuleOcupate: number; readonly loc: number; readonly lipsa: number; readonly lipsaCelule: number }): string {
+  return `Molozul săpat n-are unde pleca: ${cant(g.unitati, textFeluri(g.feluri))} pe ${cant(g.celuleOcupate, 'celule', 'o celulă')}; în alte depozite mai încap ${textNumar(g.loc)}, lipsesc ${textNumar(g.lipsa)} (${cant(g.lipsaCelule, 'celule', 'o celulă')}).`
+}
+
+/** Cauza de pe un morman de moloz din camara (§5): aceleasi cifre ca avertismentul camarii. */
+export function textMolozInCamara(fel: number, g: { readonly lipsa: number; readonly lipsaCelule: number }): TextMotiv {
+  return {
+    titlu: `Cămara nu primește ${NUME_ITEM_MIC[fel] ?? 'marfa asta'}, iar în depozite nu mai e loc: lipsesc ${textNumar(g.lipsa)} (${cant(g.lipsaCelule, 'celule', 'o celulă')}).`,
+    actiune: 'Pictează groapa de moloz din inspectorul cămării, sau mărește un depozit.',
+  }
+}
+
+/** Hrana care se strica intr-un depozit, cand o camara are loc dar caraușii n-o duc acolo (rangul ei nu e mai mare; UI-3). */
+export function textStricaCamaraAreLoc(prioCamara: number, prioAici: number): TextMotiv {
+  return { titlu: 'Se strică aici; cămara are loc.', actiune: `Ridică prioritatea cămării peste a depozitului ăstuia (cămara ${prioCamara}, aici ${prioAici}).` }
+}
+
+/** Randurile de prag din legenda lui U (UI-2, UI-11: elemente SEPARATE de cifre). `procent` = pragul „aproape", ca text. */
+export function randuriPragU(pragQ16: number, procent: string): readonly { readonly punct: 'plin' | 'slab'; readonly t: string }[] {
+  const p = textGradeIntregi(pragQ16)
+  return [
+    { punct: 'plin', t: `Puncte: ${p} °C sau mai puțin — hrana se păstrează` },
+    { punct: 'slab', t: `Puncte slabe: peste ${p} °C, dar sub ${procent} pe zi — se strică foarte încet` },
+  ]
+}
+
+/**
+ * Pasul camarii din „Primii pasi" (§5, J-11), INAINTEA depozitului general: unde, cum, de ce, si cat de mare — ~3 celule pe
+ * om (`celule` = ⌈oameni × hrana pe om / itemStackMax⌉).
+ */
+export function textPasCamara(pragQ16: number, oameni: number, celule: number): string {
+  return `Cămara: sapă o pivniță, apoi Zone (K) ▸ Cămară — sub ${textGradeIntregi(pragQ16)} °C hrana nu se strică (~${cant(celule, 'celule', 'o celulă')} pentru ${cant(oameni, 'oameni', 'un om')})`
+}
+
+/** Randul hranei din „Primii pasi": prognoza cu alterarea si, cand difera, cea fara (aceeasi functie, `proiecteaza`). */
+export function textHranaPasi(cu: string, fara: string): string {
+  return cu === fara ? `Hrana ajunge ${cu}; nu se poate produce încă.` : `Hrana ajunge ${cu} (se strică); fără să se strice, ${fara}. Nu se poate produce încă.`
+}
+
+/** Dialogul „Joc nou" (UI-9): hrana de start sta sub cer; aceeasi proiectie, si cea dintr-o camara. */
+export function textJocNouHrana(subCer: string, inCamara: string): string {
+  return `Hrana ajunge ${subCer} de joc dacă stă sub cer, ${inCamara} într-o cămară. Hrana nu se poate produce încă: după aceea oamenii pleacă.`
+}
+
+/**
+ * Coada tooltip-ului randului Hrană din bara de sus: cum se impaca UNITATILE din bara (ce se vede in mormane) cu VALOAREA pe
+ * care merge prognoza — „hrănește cât 1.212 proaspete" —, cat se strica pe zi si cat ajunge.
+ */
+export function textTooltipHrana(proaspete: number, pierdereZi: number, ajunge: string): string {
+  return ` — hrănește cât ${cant(proaspete, 'proaspete', 'una proaspătă')} · se strică ~${textProcent1(pierdereZi)} pe zi${ajunge ? ` · ajunge ${ajunge}` : ''}`
+}

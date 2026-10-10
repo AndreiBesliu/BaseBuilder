@@ -133,7 +133,10 @@ export function usilePropuse(w: World, inc: IncapereLa | null): UsilePropuse {
  * între mousedown și mouseup s-ar pierde (panoul, L5-2: 0 din 10 clicuri cu `replaceChildren`, 10 din 10 pe loc).
  */
 export function cheieInspectorCelula(c: InspectieCelula, versiune: number, usi: UsilePropuse): string {
-  return `${JSON.stringify(c)}|${versiune}|${usi.lipsa.length}|${usi.desemnata}`
+  // Masca zonei (filtrul camarii, t.3 §8) se scrie PE LOC, in comutatorul „Primește: tot · doar hrană": nu intra in cheie.
+  // Cantitatea mormanului nici nu mai e in inspectie (UI-10: scade singura, cand se strica).
+  const c2 = c.zona === null ? c : { ...c, zona: { ...c.zona, refuzate: 0 } }
+  return `${JSON.stringify(c2)}|${versiune}|${usi.lipsa.length}|${usi.desemnata}`
 }
 
 function aceeasiNormala(a: NormalaFetei | null, b: NormalaFetei | null): boolean {

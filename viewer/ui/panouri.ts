@@ -15,17 +15,19 @@ import './ui.css'
 import type { Command } from '../../src/sim/commands.ts'
 import type { Rules } from '../../src/sim/content.ts'
 import type { World } from '../../src/sim/state.ts'
-import { CATEGORII, Faction, Item, Piesa } from '../../src/sim/state.ts'
-import { Zona } from '../../src/sim/zone.ts'
+import { CATEGORII, Faction, Item, ITEME, Piesa } from '../../src/sim/state.ts'
+import { slotZona, Zona } from '../../src/sim/zone.ts'
+import { groapaDeMoloz } from '../../src/sim/camara.ts'
+import { pragAlterare } from '../../src/sim/prognoza.ts'
 import { ascuns, attr, clasa, h, text } from './dom.ts'
 import { ICON } from './iconite.ts'
-import { cauzaGolirii, creeazaMemorieTermica, creeazaPrevizualizare, golita, insigneBara, inspecteazaCelula, refacePrevizualizarea, inspecteazaPion, prognozaHrana, randuriOameni, rezumatColonie, semnaleAlerte } from './model.ts'
+import { capacitateCamara, cauzaGolirii, clasaPrognozei, creeazaMemorieHrana, creeazaMemorieTermica, creeazaPrevizualizare, esteCamara, golita, insigneBara, inspecteazaCelula, locGroapa, MASCA_DOAR_HRANA, mormanPeLoc, PRAG_APROAPE_ZI, prognozaJocNou, refacePrevizualizarea, inspecteazaPion, randuriOameni, rezumatColonie, semnaleAlerte, textPasiHrana, textPasulCamarii, textPrognozaBara, tooltipHrana } from './model.ts'
 import { cheieInspectorCelula, creeazaMemorieIncapere, usilePropuse } from './memorie-incapere.ts'
 import type { UsilePropuse } from './memorie-incapere.ts'
 import type { Bara, FiltruOameni, IncapereLa, InspectieCelula, NormalaFetei, Previz, RandOm } from './model.ts'
-import { actualizeaza, creeazaAlerte, eveniment, REGULI_ALERTE, Severitate } from './alerte.ts'
+import { actualizeaza, cheieListei, creeazaAlerte, eveniment, REGULI_ALERTE, Severitate } from './alerte.ts'
 import type { StareAlerta, Tinta } from './alerte.ts'
-import { baraDeSus, cant, NUME_ITEM, NUME_MATERIAL, NUME_PIESA, NUME_ZONA, textIncapere, textIndiciuUsa, textMinute, textNumar, textPrioritatePersonala, textTimp } from './texte.ts'
+import { baraDeSus, cant, NUME_ITEM, NUME_MATERIAL, NUME_PIESA, NUME_ZONA, randuriPragU, textCapacitateCamara, textFeluri, textGroapa, textIncapere, textIndiciuUsa, textNumar, textPrimeste, textPrioritatePersonala, textProcent1, textTimp } from './texte.ts'
 import { conturImplicit, Unealta } from './dreptunghi.ts'
 import type { UnealtaId } from './dreptunghi.ts'
 import { eTimpulSalvariiAutomate, idAutomata, salvareAutomataPermisa } from './salvari-plic.ts'
@@ -57,6 +59,11 @@ export interface ContextUI {
   vitezaEfectiva(): number
   /** Aplica, cu refuzurile traduse; o singura redesenare a overlay-urilor la final. */
   aplica(cmds: readonly Command[]): { readonly aplicate: number; readonly refuzuri: readonly string[] }
+  /**
+   * O zona NOUA din bucati (legate de prima) si, cu `filtru` ≠ 0, filtrul ei — in ACELASI pas, fara tick intre ele (`aplicaZona`,
+   * model.ts): camara si groapa de moloz. Intoarce id-ul zonei (null = nimic pictat) si refuzurile traduse.
+   */
+  picteazaZona(bucati: readonly { readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number; readonly z: number }[], fel: number, filtru: number): { readonly zonaId: number | null; readonly refuzuri: readonly string[] }
   nivel(): { readonly cota: number | null; readonly lo: number; readonly hi: number; readonly sol: number | null }
   seteazaNivel(cota: number | null): void
   overlayPornit(o: Overlay): boolean
@@ -87,6 +94,8 @@ export interface UI {
   unealta: UnealtaId
   piesa: number
   zonaFel: number
+  /** Filtrul zonei pictate (masca REFUZATA): 0 = depozit general, `MASCA_DOAR_HRANA` = Cămară (t.3 §8, presetul). */
+  zonaFiltru: number
   contur: boolean
   unStrat: boolean
   prioritate: number
@@ -126,7 +135,9 @@ const CULOARE_ITEM: Readonly<Record<number, string>> = {
 const NUME_CATEGORIE: readonly string[] = ['Sapă', 'Cară', 'Construiește']
 
 /** Legendele overlay-urilor: culoarea + FORMA, niciodata doar culoarea (DESIGN §9 regula 9). */
-const LEGENDE: Readonly<Record<Overlay, { titlu: string; randuri: readonly { c: string; diag?: boolean; t: string }[]; fara?: string }>> = {
+/** Un rand de legenda: culoarea, si optional hasura (I) sau punctul de pastrare (U, t.3: plin / slab). */
+interface RandLegenda { readonly c: string; readonly diag?: boolean; readonly punct?: 'plin' | 'slab'; readonly t: string }
+const LEGENDE: Readonly<Record<Overlay, { titlu: string; randuri: readonly RandLegenda[]; fara?: string }>> = {
   J: {
     titlu: 'Planul (J)',
     randuri: [
@@ -165,8 +176,8 @@ const LEGENDE: Readonly<Record<Overlay, { titlu: string; randuri: readonly { c: 
     fara: 'Încăperile se văd pe un nivel.',
   },
   // Temperatura (design temperatura v2, §6; t.2b §8): valoarea pe LUMINOZITATE (DESIGN §9 regula 9), cifra pe fiecare
-  // piesă a încăperii — temperatura de ACUM, din stare. Fără hașură, fără prag de 5 °C (pragul vine cu efectul, t.3)
-  // și fără săgeată (t.2b §8).
+  // piesă a încăperii — temperatura de ACUM, din stare. Fără hașură și fără săgeată (t.2b §8). Pragul a venit cu efectul
+  // (t.3 §8, UI-2): punctele de păstrare sunt în rândurile adăugate la montare (`randuriPragU`, pragul din content).
   U: {
     titlu: 'Temperatură (U)',
     randuri: [
@@ -301,9 +312,20 @@ export function monteazaUI(ctx: ContextUI): UI {
     }
     return previzCache
   }
-  const pasi = { depozit: false, sapa: false, piesa: false, pion: false }
-  if (ctx.primiPasi) [pasi.depozit, pasi.sapa, pasi.piesa, pasi.pion] = [!!ctx.primiPasi[0], !!ctx.primiPasi[1], !!ctx.primiPasi[2], !!ctx.primiPasi[3]]
-  const primiPasi = (): boolean[] => [pasi.depozit, pasi.sapa, pasi.piesa, pasi.pion]
+  /**
+   * „Primii pasi": camara INAINTEA depozitului general (t.3 §5, J-11); bifa ei se tine minte, ca a depozitului. In salvare,
+   * ordinea veche ramane (depozit, sapa, piesa, pion) si camara vine a cincea: o salvare veche n-o are, deci incepe nebifata.
+   */
+  const pasi = { camara: false, depozit: false, sapa: false, piesa: false, pion: false }
+  if (ctx.primiPasi) [pasi.depozit, pasi.sapa, pasi.piesa, pasi.pion, pasi.camara] = [!!ctx.primiPasi[0], !!ctx.primiPasi[1], !!ctx.primiPasi[2], !!ctx.primiPasi[3], !!ctx.primiPasi[4]]
+  const primiPasi = (): boolean[] => [pasi.depozit, pasi.sapa, pasi.piesa, pasi.pion, pasi.camara]
+  /** Hrana a ecranului (bara, Primii pasi, alertele): o trecere O(mormane) pe secunda de joc (`creeazaMemorieHrana`). */
+  const memHrana = creeazaMemorieHrana()
+  /** Legendele, cu randurile de prag ale lui U (UI-2, UI-11): pragul din content, procentul „aproape" din model. */
+  const legende: Readonly<Record<Overlay, { titlu: string; randuri: readonly RandLegenda[]; fara?: string }>> = {
+    ...LEGENDE,
+    U: { ...LEGENDE.U, randuri: [...LEGENDE.U.randuri, ...randuriPragU(pragAlterare(rules), textProcent1(PRAG_APROAPE_ZI)).map((r) => ({ c: '#5a6478', punct: r.punct, t: r.t }))] },
+  }
   let selectie: { fel: 'celula'; wx: number; wy: number; z: number; n: NormalaFetei | null } | { fel: 'pion'; id: number } | null = null
   let dreptunghi: { text: string; rosu: boolean } | null = null
   let sertar: 'inspector' | 'oameni' = 'inspector'
@@ -312,6 +334,7 @@ export function monteazaUI(ctx: ContextUI): UI {
     unealta: ctx.mod === 'verificare' ? Unealta.SAPA : Unealta.SELECTEAZA,
     piesa: Piesa.PERETE,
     zonaFel: Zona.DEPOZIT,
+    zonaFiltru: 0,
     contur: true,
     unStrat: false,
     prioritate: rules.designationPriorityDefault,
@@ -459,8 +482,11 @@ export function monteazaUI(ctx: ContextUI): UI {
   })
   const grupPrio = h('span', { style: 'display:inline-flex;align-items:center;gap:1px' }, h('span', { class: 'eticheta' }, 'Prioritate'), ...btnPrio)
   const subConstr = h('div', { class: 'ui-sub', hidden: true })
+  /** Cheia butonului Cămară in `btnZona` (nu e un fel de zona: e un DEPOZIT cu filtrul „doar hrană"). */
+  const CAMARA = -2
   const btnZona = new Map<number, HTMLButtonElement>([
     [Zona.DEPOZIT, iconBtn(ICON.depozit, 'Depozit', '', 'Depozit: aici se duc mormanele')],
+    [CAMARA, iconBtn(ICON.depozit, 'Cămară', '', 'Cămară: un depozit doar pentru hrană. Pictată într-o pivniță rece (sub 5 °C), hrana nu se strică; la prioritate egală, cărăușii aduc hrana și din depozitul general')],
     [Zona.DORMIT, iconBtn(ICON.dormit, 'Loc de dormit', '', 'Loc de dormit: cine doarme aici nu doarme pe jos')],
     [-1, iconBtn(ICON.stergeZona, 'Șterge zona', '', 'Șterge zonele atinse — ÎNTREGI (nu se poate șterge o singură celulă)')],
   ])
@@ -473,7 +499,16 @@ export function monteazaUI(ctx: ContextUI): UI {
   radacina.append(h('div', { class: 'ui-jos' }, toasturi, subConstr, subZona, unelte, indiciu))
   for (const [u, b] of btnU) b.addEventListener('click', () => alegeUnealta(u))
   for (const [p, b] of btnPiesa) b.addEventListener('click', () => { ui.piesa = p; ui.contur = conturImplicit(p); alegeUnealta(Unealta.CONSTRUIESTE) })
-  for (const [z, b] of btnZona) b.addEventListener('click', () => { if (z === -1) alegeUnealta(Unealta.STERGE_ZONA); else { ui.zonaFel = z; alegeUnealta(Unealta.ZONA) } })
+  for (const [z, b] of btnZona) {
+    b.dataset.zona = z === CAMARA ? 'camara' : z === -1 ? 'sterge' : String(z)
+    b.addEventListener('click', () => {
+      if (z === -1) { alegeUnealta(Unealta.STERGE_ZONA); return }
+      // Presetul Cămară: un DEPOZIT, iar filtrul „doar hrană" pleacă în ACELAȘI pas cu pictura (`ctx.picteazaZona`).
+      ui.zonaFel = z === CAMARA ? Zona.DEPOZIT : z
+      ui.zonaFiltru = z === CAMARA ? MASCA_DOAR_HRANA : 0
+      alegeUnealta(Unealta.ZONA)
+    })
+  }
 
   function alegeUnealta(u: UnealtaId): void {
     ui.unealta = u
@@ -502,13 +537,21 @@ export function monteazaUI(ctx: ContextUI): UI {
     subConstr.replaceChildren(...(constr ? [...btnPiesa.values(), ...(cuContur ? [h('span', { class: 'ui-sep' }), btnContur] : [])] : [btnStrat]), h('span', { class: 'ui-sep' }), grupPrio)
     ascuns(subZona, ui.unealta !== Unealta.ZONA && ui.unealta !== Unealta.STERGE_ZONA)
     for (const [p, b] of btnPiesa) attr(b, 'aria-pressed', constr && ui.piesa === p ? 'true' : 'false')
-    for (const [z, b] of btnZona) attr(b, 'aria-pressed', (z === -1 ? ui.unealta === Unealta.STERGE_ZONA : ui.unealta === Unealta.ZONA && ui.zonaFel === z) ? 'true' : 'false')
+    for (const [z, b] of btnZona) {
+      const ales = z === -1 ? ui.unealta === Unealta.STERGE_ZONA
+        : ui.unealta === Unealta.ZONA && (z === CAMARA ? ui.zonaFel === Zona.DEPOZIT && ui.zonaFiltru !== 0 : ui.zonaFel === z && ui.zonaFiltru === 0)
+      attr(b, 'aria-pressed', ales ? 'true' : 'false')
+    }
     attr(btnContur, 'aria-pressed', ui.contur ? 'true' : 'false')
     text(btnContur, ui.contur ? 'Contur' : 'Plin')
     attr(btnStrat, 'aria-pressed', ui.unStrat ? 'false' : 'true')
     text(btnStrat, ui.unStrat ? 'Un strat' : 'Înălțime de om')
     btnPrio.forEach((b, k) => attr(b, 'aria-pressed', ui.prioritate === k + 1 ? 'true' : 'false'))
     scrieIndiciu()
+  }
+
+  function textGradeIntregiPrag(): string {
+    return String(Math.round(pragAlterare(rules) / 65536))
   }
 
   function scrieIndiciu(): void {
@@ -521,7 +564,9 @@ export function monteazaUI(ctx: ContextUI): UI {
       [Unealta.SAPA]: `<b>Sapă</b> ${unde} · clic = o celulă · trage = dreptunghi · Esc = Selectează`,
       [Unealta.CONSTRUIESTE]: ui.piesa === Piesa.USA ? textIndiciuUsa(n.cota) : `<b>${NUME_PIESA[ui.piesa]}</b> ${unde} · trage = dreptunghi (${ui.contur ? 'contur' : 'plin'}) · P = altă piesă · Esc`,
       [Unealta.ANULEAZA]: '<b>Anulează</b> · clic pe o lucrare sau trage peste ele (doar ce se vede) · Esc',
-      [Unealta.ZONA]: `<b>${NUME_ZONA[ui.zonaFel]}</b> ${unde} · clic = o celulă · trage = dreptunghi · Esc`,
+      [Unealta.ZONA]: ui.zonaFiltru !== 0
+        ? `<b>Cămară</b> ${unde} · doar hrană: într-o pivniță sub ${textGradeIntregiPrag()} °C nu se strică · clic = o celulă · trage = dreptunghi · Esc`
+        : `<b>${NUME_ZONA[ui.zonaFel]}</b> ${unde} · clic = o celulă · trage = dreptunghi · Esc`,
       [Unealta.STERGE_ZONA]: '<b>Șterge zona</b> · clic sau dreptunghi: zonele atinse se șterg ÎNTREGI · Esc',
     }
     indiciu.innerHTML = s[ui.unealta] ?? ''
@@ -569,17 +614,37 @@ export function monteazaUI(ctx: ContextUI): UI {
     }
   }
 
+  /**
+   * Butonul fiecarei alerte, facut O DATA pe id si refolosit (t.3 §8, UI-4): cheia listei e doar pe ID-URI, textul se scrie PE
+   * LOC, iar tinta se citeste la CLIC din starea alertei (`alerte.stari`, reimprospatata la 2 Hz), nu din inchiderea de la
+   * creare. Cu `id|text` in cheie, „Hrana se strică: N mormane" refacea toata lista la fiecare morman carat in camara
+   * (18,6 redesenari pe minut la 1×, 55,7 la 3× in ora de varf), iar un clic cazut intre mousedown si mouseup se pierdea.
+   */
+  const butoaneAlerte = new Map<string, { readonly b: HTMLButtonElement; readonly t: HTMLElement; readonly s: HTMLElement }>()
+  function butonAlerta(id: string, critic: boolean): { readonly b: HTMLButtonElement; readonly t: HTMLElement; readonly s: HTMLElement } {
+    const vechi = butoaneAlerte.get(id)
+    if (vechi !== undefined) return vechi
+    const t = h('span', {}, '')
+    const s = h('span', {}, '')
+    const b = h('button', { class: `ui-alerta ${critic ? 'critic' : 'atentie'}`, type: 'button', 'data-alerta': id },
+      h('span', { html: critic ? ICON.critic : ICON.atentie }), t, s)
+    b.addEventListener('click', () => duLaTinta(alerte.stari.get(id)?.semnal.tinta ?? null))
+    const x = { b, t, s }
+    butoaneAlerte.set(id, x)
+    return x
+  }
   function scrieAlerte(): void {
-    const cheie = alerteAfisate.map((a) => `${a.id}|${a.semnal.text}`).join('\n')
-    if (listaAlerte.dataset.cheie === cheie) return
-    listaAlerte.dataset.cheie = cheie
-    listaAlerte.replaceChildren(...alerteAfisate.map((a) => {
-      const sev = a.severitate === Severitate.CRITIC ? 'critic' : 'atentie'
-      const b = h('button', { class: `ui-alerta ${sev}`, type: 'button', title: a.semnal.tinta ? 'Clic: du-mă acolo' : '' },
-        h('span', { html: a.severitate === Severitate.CRITIC ? ICON.critic : ICON.atentie }), h('span', {}, a.semnal.text), h('span', {}, a.semnal.tinta ? '›' : ''))
-      b.addEventListener('click', () => duLaTinta(a.semnal.tinta))
-      return b
-    }))
+    const cheie = cheieListei(alerteAfisate)
+    if (listaAlerte.dataset.cheie !== cheie) {
+      listaAlerte.dataset.cheie = cheie
+      listaAlerte.replaceChildren(...alerteAfisate.map((a) => butonAlerta(a.id, a.severitate === Severitate.CRITIC).b))
+    }
+    for (const a of alerteAfisate) {
+      const x = butonAlerta(a.id, a.severitate === Severitate.CRITIC)
+      text(x.t, a.semnal.text)
+      text(x.s, a.semnal.tinta ? '›' : '')
+      attr(x.b, 'title', a.semnal.tinta ? 'Clic: du-mă acolo' : '')
+    }
   }
 
   // ---- inspectorul ---------------------------------------------------------------------------
@@ -617,6 +682,84 @@ export function monteazaUI(ctx: ContextUI): UI {
     text(termicOameni, t.oameniText)
     text(termicCanale, t.canale)
   }
+  /**
+   * Mormanul din inspector (t.3 §8, UI-10): cantitatea si randul de alterare — elemente facute O DATA si scrise PE LOC, la
+   * fiecare reimprospatare, inaintea comparatiei cheii (ca temperatura). Cantitatea scade acum singura (se strica), iar in
+   * cheie refacea corpul — cu butoanele — de fiecare data.
+   */
+  const mormanCantitate = h('span', { class: 'num', 'data-morman-cantitate': '' })
+  const alterareEticheta = h('span', {})
+  const alterareValoare = h('span', { class: 'num' })
+  const mormanAlterare = h('div', { class: 'ui-kv ui-alterare', 'data-alterare': '', hidden: true }, alterareEticheta, alterareValoare)
+  function scrieMorman(): void {
+    const s = selectie
+    const m = s !== null && s.fel === 'celula' ? mormanPeLoc(w, rules, s.wx, s.wy, s.z) : null
+    text(mormanCantitate, m?.cantitate ?? '')
+    const a = m?.alterare ?? null
+    ascuns(mormanAlterare, a === null)
+    if (a === null) return
+    text(alterareEticheta, a.eticheta)
+    text(alterareValoare, a.valoare)
+    attr(mormanAlterare, 'data-clasa', a.clasa === null ? 'necunoscuta' : String(a.clasa))
+  }
+
+  /**
+   * Zona din inspector (t.3 §8): numele (Depozit / Cămară), ce primește, comutatorul „Primește: tot · doar hrană", capacitatea
+   * cămării și avertismentul gropii de moloz — scrise PE LOC (masca, celulele și molozul nu sunt în cheie). Id-ul zonei se
+   * citește la clic din `zonaInspectata`.
+   */
+  let zonaInspectata = -1
+  const zonaNume = h('span', {})
+  const zonaPrimeste = h('span', { 'data-primeste': '' })
+  const btnPrimesteTot = butonText('Tot', () => seteazaFiltru(0), 'Depozitul primește orice fel de marfă')
+  const btnDoarHrana = butonText('Doar hrană', () => seteazaFiltru(MASCA_DOAR_HRANA), 'Cămară: doar hrană; la prioritate egală, cărăușii aduc hrana și din depozitul general')
+  btnPrimesteTot.dataset.filtru = 'tot'
+  btnDoarHrana.dataset.filtru = 'hrana'
+  const comutatorFiltru = h('div', { class: 'ui-actiuni ui-comutator', 'data-comutator-filtru': '' }, h('span', { class: 'sub' }, 'Primește:'), btnPrimesteTot, btnDoarHrana)
+  const zonaCapacitate = h('div', { class: 'sub', 'data-capacitate': '' })
+  const groapaText = h('div', {})
+  const btnGroapa = butonText('Pictează groapa de moloz', () => picteazaGroapa(), 'Un depozit lângă cămară, doar pentru molozul de pe ea')
+  btnGroapa.dataset.groapa = ''
+  const groapaEl = h('div', { class: 'ui-motiv', 'data-groapa': '', hidden: true }, groapaText, h('div', { class: 'ui-actiuni' }, btnGroapa))
+  function seteazaFiltru(masca: number): void {
+    if (zonaInspectata < 0) return
+    ctx.aplica([{ kind: 'setFiltruZona', id: zonaInspectata, refuzate: masca }])
+    scrieInspector(true)
+  }
+  function picteazaGroapa(): void {
+    if (zonaInspectata < 0) return
+    const g = groapaDeMoloz(w, rules, zonaInspectata)
+    if (g === null || g.propusa <= 0) { scrieInspector(true); return }
+    const loc = locGroapa(w, rules, zonaInspectata, g.latura)
+    if (loc === null) {
+      toast(`Nu găsesc ${g.latura} × ${g.latura} celule libere lângă cămară: pictează un depozit pentru ${textFeluri(g.feluri)} (Zone ▸ Depozit).`, true)
+      return
+    }
+    const r = ctx.picteazaZona([{ x0: loc.x0, y0: loc.y0, x1: loc.x0 + g.latura - 1, y1: loc.y0 + g.latura - 1, z: loc.z }], Zona.DEPOZIT, g.refuzate)
+    if (r.zonaId !== null) toast(`Groapa de moloz: ${g.latura} × ${g.latura}, primește ${textFeluri(g.feluri)}.`, false, { eticheta: 'Arată', f: () => ctx.duLa(loc.x0, loc.y0, loc.z - 1, loc.z) })
+    scrieInspector(true)
+  }
+  function scrieZona(c: InspectieCelula): void {
+    const z = c.zona
+    zonaInspectata = z !== null && z.fel === Zona.DEPOZIT ? z.id : -1
+    if (z === null || z.fel !== Zona.DEPOZIT) return
+    const zs = slotZona(w.zone, z.id)
+    const cam = zs !== -1 && esteCamara(w, zs)
+    text(zonaNume, cam ? 'Cămară' : NUME_ZONA[z.fel] ?? 'Zonă')
+    text(zonaPrimeste, textPrimeste(z.refuzate, ITEME))
+    attr(btnPrimesteTot, 'aria-pressed', z.refuzate === 0 ? 'true' : 'false')
+    attr(btnDoarHrana, 'aria-pressed', z.refuzate === MASCA_DOAR_HRANA ? 'true' : 'false')
+    ascuns(zonaCapacitate, !cam)
+    if (cam) text(zonaCapacitate, textCapacitateCamara(capacitateCamara(w, rules, zs, HRANA_PE_OM)))
+    const g = z.refuzate !== 0 ? groapaDeMoloz(w, rules, z.id) : null
+    const propune = g !== null && g.propusa > 0
+    ascuns(groapaEl, !propune)
+    if (g !== null && propune) {
+      text(groapaText, textGroapa(g))
+      text(btnGroapa, `Pictează groapa de moloz (${g.latura} × ${g.latura})`)
+    }
+  }
+
   function scrieInspector(fortat = false): void {
     if (panouSertar.hidden || sertar !== 'inspector') return
     if (!selectie) {
@@ -663,8 +806,10 @@ export function monteazaUI(ctx: ContextUI): UI {
     // din timp cât minerii lucrează chiar acolo (recenzia încăperilor, EXP-4 / ECR-3). Un clic o sare.
     const inc = memorieIncapere.ia(w, selectie.wx, selectie.wy, selectie.z, fortat, selectie.n)
     const usi = usilePropuse(w, inc)
-    // Pe loc, înainte de comparație: se schimbă fără editări (vezi `scrieTermic`).
+    // Pe loc, înainte de comparație: se schimbă fără editări (vezi `scrieTermic`, `scrieMorman`, `scrieZona`).
     scrieTermic(inc)
+    scrieMorman()
+    scrieZona(c)
     const cheie = cheieInspectorCelula(c, memorieIncapere.versiune(), usi)
     if (!fortat && cheie === inspectorCheie) return
     inspectorCheie = cheie
@@ -740,17 +885,20 @@ export function monteazaUI(ctx: ContextUI): UI {
     }
     if (c.morman) {
       const m = c.morman
-      const s = h('section', {}, h('div', { class: 'ui-kv' }, h('span', {}, 'Morman'), h('span', { class: 'num' }, cant(m.cantitate, NUME_ITEM[m.fel]?.toLowerCase() ?? ''))))
+      // Cantitatea și alterarea: elementele scrise pe loc (`scrieMorman`), mutate în corpul nou.
+      const s = h('section', {}, h('div', { class: 'ui-kv' }, h('span', {}, 'Morman'), mormanCantitate), mormanAlterare)
       if (m.rezervat > 0) s.append(h('div', { class: 'ui-kv' }, h('span', {}, 'Promis cuiva'), h('span', { class: 'num' }, String(m.rezervat))))
       s.append(motivEl(m.stare, m.stare.actiune ? 'atentie' : 'bine'))
       out.push(s)
     }
     if (c.zona) {
       const z = c.zona
-      const s = h('section', {}, h('div', { class: 'ui-kv' }, h('span', {}, 'Zonă'), h('span', {}, NUME_ZONA[z.fel] ?? 'Zonă')))
+      const s = h('section', {}, h('div', { class: 'ui-kv' }, h('span', {}, 'Zonă'), z.fel === Zona.DEPOZIT ? zonaNume : h('span', {}, NUME_ZONA[z.fel] ?? 'Zonă')))
       const act = h('div', { class: 'ui-actiuni' })
       if (z.fel === Zona.DEPOZIT) {
         s.append(h('div', { class: 'ui-kv' }, h('span', {}, 'Prioritate'), h('span', { class: 'num' }, `${z.prioritate} din ${rules.zonePriorityLevels}`)))
+        // Filtrul, capacitatea cămării, groapa de moloz: scrise pe loc (`scrieZona`), mutate în corpul nou.
+        s.append(h('div', { class: 'ui-kv' }, h('span', {}, 'Primește'), zonaPrimeste), comutatorFiltru, zonaCapacitate, groapaEl)
         const minus = butonText('− prioritate', () => { ctx.aplica([{ kind: 'setPrioritateZona', id: z.id, prioritate: z.prioritate - 1 }]); scrieInspector(true) }, 'Mai puțin preferat')
         const plus = butonText('+ prioritate', () => { ctx.aplica([{ kind: 'setPrioritateZona', id: z.id, prioritate: z.prioritate + 1 }]); scrieInspector(true) }, 'Cărăușii îl umplu întâi')
         minus.disabled = z.prioritate <= 1
@@ -858,10 +1006,17 @@ export function monteazaUI(ctx: ContextUI): UI {
     ascuns(cardPasi, pasiInchise || (!panouSertar.hidden && sertar === 'oameni'))
   }
   function scriePasi(): void {
-    for (let i = 0; i < w.zone.count; i++) if (w.zone.alive[i] === 1 && w.zone.kind[i] === Zona.DEPOZIT) pasi.depozit = true
+    // O cămară bifează pasul cămării, nu pe al depozitului general (unde merg piatra și pământul); bifele se țin minte.
+    for (let i = 0; i < w.zone.count; i++) {
+      if (w.zone.alive[i] !== 1 || w.zone.kind[i] !== Zona.DEPOZIT) continue
+      if (esteCamara(w, i)) pasi.camara = true
+      else pasi.depozit = true
+    }
     if (pasiInchise) return
+    const hrana = memHrana.ia(w, rules)
     const items: [boolean, string][] = [
-      [pasi.depozit, 'Pictează un depozit: Zone (K) ▸ Depozit, trage pe sol'],
+      [pasi.camara, textPasulCamarii(rules, hrana.stare.colonisti, HRANA_PE_OM)],
+      [pasi.depozit, 'Pictează un depozit pentru piatră și pământ: Zone (K) ▸ Depozit, trage pe sol'],
       [pasi.sapa, 'Sapă: unealta Sapă (D), trage peste câteva celule — piatra e în rocă, sub pământ'],
       [pasi.piesa, 'Construiește un perete: C, trage un dreptunghi'],
       [pasi.pion, 'Selectează un om (V, clic pe el): vezi ce face și de ce'],
@@ -871,8 +1026,8 @@ export function monteazaUI(ctx: ContextUI): UI {
       listaPasi.dataset.cheie = cheie
       listaPasi.replaceChildren(...items.map(([gata, t]) => h('li', { class: gata ? 'facut' : '' }, t)))
     }
-    const hr = prognozaHrana(w, rules)
-    text(hranaPasi, hr.puncte <= 0 ? 'Nu mai ai hrană: în versiunea asta nu se poate produce.' : Number.isFinite(hr.minute) ? `Hrana e finită în versiunea asta: ajunge ${textMinute(hr.minute)}.` : '')
+    // Aceeași prognoză ca bara (UI-9), și cea fără alterare când diferă.
+    text(hranaPasi, textPasiHrana(hrana.prognoza))
     if (items.every(([a]) => a)) { pasiInchise = true; scrieVizibilitatePasi() }
   }
 
@@ -1015,10 +1170,10 @@ export function monteazaUI(ctx: ContextUI): UI {
     const hrana = camp('hrana', HRANA_PE_OM * 12, 0, 100000)
     let hranaAtinsa = false
     const cat = h('div', { class: 'sub' })
+    // Aceeași proiecție ca bara (UI-9): lumea nu există încă, deci hrana de start stă sub cer, la tickul 0 al jocului nou.
     const prog = () => {
       const o = Number(oameni.value), hr = Number(hrana.value)
-      const consum = o * rules.nevoi[0]!.scurgere * rules.ticksPerSecond * 60 / rules.nevoiTicks
-      cat.textContent = o > 0 && hr >= 0 ? `Hrana ajunge ${textMinute((hr * (rules.nutritie[Item.HRANA] ?? 0)) / consum)} de joc. Hrana nu se poate produce încă: după aceea oamenii pleacă.` : ''
+      cat.textContent = o > 0 && hr >= 0 ? prognozaJocNou(rules, Number(seed.value) || 0, o, hr).text : ''
     }
     oameni.addEventListener('input', () => { if (!hranaAtinsa) hrana.value = String(HRANA_PE_OM * Math.max(0, Number(oameni.value) || 0)); prog() })
     hrana.addEventListener('input', () => { hranaAtinsa = true; prog() })
@@ -1123,7 +1278,7 @@ export function monteazaUI(ctx: ContextUI): UI {
       } else {
         golitaArataa = false
         const previz = w.desemnari.viiConstruieste > 0 ? previzRar(false) : null
-        alerteAfisate = actualizeaza(alerte, REGULI_ALERTE, semnaleAlerte(w, rules, previz), w.tick, rules.ticksPerSecond)
+        alerteAfisate = actualizeaza(alerte, REGULI_ALERTE, semnaleAlerte(w, rules, previz, memHrana.ia(w, rules)), w.tick, rules.ticksPerSecond)
       }
       scrieAlerte()
       text(btnJurnal, alerte.jurnal.length > 0 ? `Jurnal (${alerte.jurnal.length})` : 'Jurnal')
@@ -1131,19 +1286,19 @@ export function monteazaUI(ctx: ContextUI): UI {
     }
     if (acc < 250) return
     acc = 0
-    const r = rezumatColonie(w, rules)
+    const r = rezumatColonie(w, rules, memHrana.ia(w, rules))
     scrieCalendar()
     for (const [fel, x] of resurse) {
       const m = r.marfa[fel]!
       text(x.val, textNumar(m.total))
-      attr(x.rad, 'title', `${NUME_ITEM[fel]}: ${textNumar(m.inDepozit)} în depozit · ${textNumar(m.peJos)} pe jos · ${textNumar(m.inMaini)} în mâini${fel === Item.PAMANT ? ' — nu se folosește încă la nimic; ocupă loc în depozit' : ''}${fel === Item.HRANA ? ' — nu se poate produce încă' : ''}`)
+      attr(x.rad, 'title', `${NUME_ITEM[fel]}: ${textNumar(m.inDepozit)} în depozit · ${textNumar(m.peJos)} pe jos · ${textNumar(m.inMaini)} în mâini${fel === Item.PAMANT ? ' — nu se folosește încă la nimic; ocupă loc în depozit' : ''}${fel === Item.HRANA ? `${tooltipHrana(rules, r.hranaEcran)} · nu se poate produce încă` : ''}`)
       ascuns(x.rad, fel === Item.LEMN && m.total === 0)
     }
-    const min = r.hrana.minute
-    // Fara hrana deloc, alerta critica spune tot; „~0 min" langa un 0 nu spune nimic.
-    text(prognoza, Number.isFinite(min) && r.hrana.puncte > 0 ? textMinute(min) : '')
-    clasa(prognoza, 'atentie', min < 30 && min >= 10)
-    clasa(prognoza, 'critic', min < 10)
+    // Zile de calendar, cu alterarea (UI-1, UI-14); fara hrana deloc, alerta critica spune tot.
+    text(prognoza, textPrognozaBara(r.hrana))
+    const cp = clasaPrognozei(r.hrana)
+    clasa(prognoza, 'atentie', cp === 'atentie')
+    clasa(prognoza, 'critic', cp === 'critic')
     text(oameniVal, String(r.colonisti))
     // Peste cate incap (insigneDespliate: una la 1.100 px, trei de la 1.280), insignele se pliaza in „N alerte", cu
     // lista in tooltip: cinci insigne scoteau butoanele de viteza din fereastra (recenzia t.2a, L4-6).
@@ -1184,7 +1339,7 @@ export function monteazaUI(ctx: ContextUI): UI {
     const pornit = (['S', 'U', 'I', 'J', 'G'] as const).find((o) => ctx.overlayPornit(o)) ?? null
     if (!pornit) { ascuns(legenda, true); legendaScrisa = ''; return }
     ascuns(legenda, false)
-    const L = LEGENDE[pornit]
+    const L = legende[pornit]
     const cifre = ctx.cifreOverlay(pornit)
     const vechi = pornit === 'S' && ctx.stabilitateInvechita()
     text(cifreLegenda, cifre)
@@ -1207,7 +1362,7 @@ export function monteazaUI(ctx: ContextUI): UI {
       const b = butonText('Alege nivelul de sub cameră', () => { const n = ctx.nivel(); ctx.seteazaNivel(n.sol === null ? n.hi : n.sol + 2) })
       copii.push(h('div', { class: 'sub' }, L.fara), h('div', { class: 'ui-actiuni' }, b))
     } else {
-      copii.push(h('ul', {}, ...L.randuri.map((r) => h('li', {}, h('span', { class: `mostra${r.diag ? ' diag' : ''}`, style: `background-color:${r.c}` }), h('span', {}, r.t)))))
+      copii.push(h('ul', {}, ...L.randuri.map((r) => h('li', { 'data-prag': r.punct ?? null }, h('span', { class: `mostra${r.diag ? ' diag' : ''}${r.punct ? ` punct ${r.punct}` : ''}`, style: `background-color:${r.c}` }), h('span', {}, r.t)))))
     }
     copii.push(cifreLegenda)
     if (vechi) copii.push(h('div', { class: 'ui-actiuni' }, h('span', { class: 'sub' }, 'Previzualizarea e de mai devreme (e scumpă pe planuri mari).'), butonText('Refă', () => ctx.refaStabilitatea())))
