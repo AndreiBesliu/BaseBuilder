@@ -229,12 +229,17 @@ test('PAS modelul memorat (PAS-2): un lot care nu atinge graful (o sapatura depa
   // Recenzia PAS-2: modelul era cheiat pe ștampila grafului, care se schimbă la ORICE lot cu editări — refăcut la 148/150 de
   // pași pe lărgire20, iar pe M10 cu un lot departe între pași pasul costa 346–367 µs p50 în loc de ~85. Cheia e acum
   // numărul de delte ale grafului (`GrafIncremental.delte`).
+  // A: cu loturile departe; B: geamăna fără ele; C: geamăna pășită cu referința independentă (fără model), ca un model
+  // rămas vechi după lotul din casă să se vadă pe VALORI, nu doar pe contor.
   const sa = casaTermica({ k: 1, etaj: true })
   const sb = casaTermica({ k: 1, etaj: true })
+  const sc = casaTermica({ k: 1, etaj: true })
   pionInCasa(sa)
   pionInCasa(sb)
+  pionInCasa(sc)
   const a = laEchilibru(sa.w, 300000)
   const b = laEchilibru(sb.w, 300000)
+  const c = laEchilibru(sc.w, 300000)
   const [cx, cy, cz] = sa.rep.casa!
   const departe = (k: number): [number, number, number] => {
     const x = cx + 60 + (k % 10)
@@ -243,18 +248,27 @@ test('PAS modelul memorat (PAS-2): un lot care nu atinge graful (o sapatura depa
   }
   const delte0 = grafLumii(a).delte
   for (let k = 0; k < 120; k++) {
-    a.tick = b.tick = 300000 + k * TPS
+    a.tick = b.tick = c.tick = 300000 + k * TPS
     if (k % 2 === 1) {
       const [x, y, z] = departe(k)
       const e0 = a.terrain.editari
       assert.ok(applyCommand(a, { kind: 'dig', wx: x, wy: y, z }, R).ok, `sapatura departe ${k}`)
       assert.ok(a.terrain.editari > e0, 'fixtura: lotul departe e un lot cu editari')
     }
-    // La 100, un lot care ATINGE graful, în ambele lumi: groapa în podeaua casei.
-    if (k === 100) for (const w of [a, b]) assert.ok(applyCommand(w, { kind: 'dig', wx: cx + 1, wy: cy + 1, z: cz - 1 }, R).ok, 'groapa in casa')
+    // La 100, un lot care ATINGE graful, în ambele lumi, fără să schimbe numărul de componente (altfel îl prinde și garda
+    // `n == comp.size`, iar proba „delta nenumărată" ieșea RATATĂ cu groapa din podea, care unește casa cu pivnița): o
+    // piatră pusă în casă — C' și fețele casei se schimbă, componentele rămân.
+    if (k === 100) for (const w of [a, b, c]) {
+      const n0 = w.camere.comp.size
+      assert.ok(applyCommand(w, { kind: 'fill', wx: cx + 1, wy: cy + 1, z: cz, material: Material.PIATRA_CONSTRUITA }, R).ok, 'piatra in casa')
+      assert.equal(w.camere.comp.size, n0, 'fixtura: aceleasi componente')
+      assert.ok(grafLumii(w).delte > delte0, 'fixtura: lotul a atins graful (o delta)')
+    }
     pasTermic(a, R)
     pasTermic(b, R)
+    pasReferinta(c)
     assert.deepEqual(tPeAncora(a), tPeAncora(b), `pasul ${k}`)
+    assert.deepEqual(tPeAncora(a), tPeAncora(c), `pasul ${k}: == referinta independenta`)
     if (k === 99) {
       assert.equal(grafLumii(a).delte, delte0, 'fixtura: cele 50 de loturi departe n-au atins graful')
       assert.deepEqual([statTermic(a).modeleRefacute, statTermic(b).modeleRefacute], [1, 1], 'modelul: construit o data, nerefacut de loturile departe')
