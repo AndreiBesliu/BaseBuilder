@@ -27,6 +27,7 @@ import { cellKey } from '../../src/sim/path.ts'
 import { materialAt } from '../../src/sim/terrain/terrain.ts'
 import { Material } from '../../src/sim/terrain/chunk.ts'
 import { cititorCamere, componentaLa, esteAer, esteAerAcoperit } from '../../src/sim/camere.ts'
+import type { Componenta } from '../../src/sim/camere.ts'
 import { geometriaCanalelor } from '../../src/sim/termic.ts'
 import type { GeometrieCanale } from '../../src/sim/termic.ts'
 import { canaleAcum, oameniPeComponente, temperaturaAcum, tragerea, tragereCuOameni } from '../../src/sim/temperatura.ts'
@@ -782,7 +783,11 @@ export function pasFiltru(s: StareFiltru | undefined, n: number): StareFiltru {
  * `dupaTick` se cheamă după FIECARE tick (main.ts împachetează `tick`): când pasul a rulat (`stat.pasi` a crescut),
  * eșantionează oamenii pe componente cu regula pasului (`oameniPeComponente`), din pozițiile pe care le-a folosit pasul
  * (pionii nu se mai mișcă după pas, în același tick). Ținut pe ANCORA componentei: id-urile se rotesc la orice epocă nouă
- * (o săpătură în mină), ancora nu. O componentă fără eșantion încă (închisă în pauză) arată oamenii de acum.
+ * (o săpătură în mină), ancora nu. Istoria e valabilă doar pentru ACEEAȘI componentă — aceeași ancoră ȘI același volum
+ * (recenzia t.2b, E1): unită cu pivnița de dedesubt, casa primește ancora pivniței, iar un zid nou lasă ancora casei uneia
+ * dintre jumătăți; ținută doar pe ancoră, istoria celeilalte componente se arăta în pauză oricât („oameni: niciunul" cu 2
+ * oameni înăuntru), și încă 2 pași jucând. O componentă fără istorie (nouă, unită, despărțită, închisă în pauză) arată
+ * oamenii de acum.
  */
 export interface FiltruOameni {
   dupaTick(w: World): void
@@ -791,8 +796,15 @@ export interface FiltruOameni {
   esantioane(): number
 }
 
+/** Cheia istoriei filtrului: ANCORA componentei — id-urile se rotesc la orice epocă nouă, ancora nu. */
+const cheieIstorie = (c: Componenta): number => c.ancora
+
 export function creeazaFiltruOameni(): FiltruOameni {
   let stari = new Map<number, StareFiltru>()
+  /** Volumul componentei de pe cheie, la eșantionul din `stari`: alt volum = altă componentă, fără istorie. */
+  let volume = new Map<number, number>()
+  /** Istoria lui `c`, doar dacă e a ACEEAȘI componente: aceeași ancoră și același volum. */
+  const istoria = (c: Componenta): StareFiltru | undefined => (volume.get(cheieIstorie(c)) === c.volum ? stari.get(cheieIstorie(c)) : undefined)
   let stat: World['temperatura']['stat'] | null = null
   let pasi = 0
   let esantioane = 0
@@ -804,20 +816,26 @@ export function creeazaFiltruOameni(): FiltruOameni {
         stat = st
         pasi = st.pasi
         stari = new Map()
+        volume = new Map()
         return
       }
       if (st.pasi === pasi) return
       pasi = st.pasi
       const cate = oameniPeComponente(w)
       const noi = new Map<number, StareFiltru>()
-      for (const c of w.camere.comp.values()) noi.set(c.ancora, pasFiltru(stari.get(c.ancora), cate.get(c.id) ?? 0))
+      const vol = new Map<number, number>()
+      for (const c of w.camere.comp.values()) {
+        noi.set(cheieIstorie(c), pasFiltru(istoria(c), cate.get(c.id) ?? 0))
+        vol.set(cheieIstorie(c), c.volum)
+      }
       stari = noi
+      volume = vol
       esantioane++
     },
     oameni(w, compId) {
       const c = w.camere.comp.get(compId)
       if (c === undefined) return 0
-      const s = stari.get(c.ancora)
+      const s = istoria(c)
       return s !== undefined ? s.afisat : (oameniPeComponente(w).get(compId) ?? 0)
     },
     esantioane: () => esantioane,

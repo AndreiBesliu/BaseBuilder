@@ -393,6 +393,143 @@ test('TERMIC ECRAN filtrul oamenilor pe hartie: ce se arata se schimba doar dupa
   assert.deepEqual(pasFiltru({ ultime: [1, 1, 1], afisat: 1 }, 2), { ultime: [1, 1, 2], afisat: 1 })
 })
 
+/** Spawn al unui colonist in mijlocul celulei (x, y, z). */
+function pune(w: World, x: number, y: number, z: number): void {
+  const o = applyCommand(w, { kind: 'spawnAgent', x: x * 1000 + 500, y: y * 1000 + 500, z, faction: Faction.ASEZARE }, R)
+  assert.ok(o.ok, JSON.stringify(o))
+}
+
+test('TERMIC ECRAN filtrul oamenilor la unire si despartire: istoria e a ACELEIASI componente (ancora si volumul) — chepengul scos in pauza nu da casei unite istoria pivnitei goale, zidul nou nu da jumatatii cu ancora veche istoria casei intregi', () => {
+  // Recenzia t.2b, E1. Ancora unei componente e celula ei minima (z întâi): unită cu pivnița de dedesubt, casa primește
+  // ancora PIVNIȚEI. Ținut doar pe ancoră, filtrul dădea componentei unite istoria pivniței goale: în pauză „oameni:
+  // niciunul" cu 2 oameni înăuntru, oricât (niciun eșantion), și încă 2 pași jucând.
+  const unire = (sus: number, jos: number): void => {
+    const { w, wx, wy, g } = sitPlat(12345, 12)
+    casa(w, wx, wy, g, false)
+    // Pivnița 3×3×2 sub interior, cu chepengul (o celulă de UȘĂ) în podea, la (1, 1, g).
+    for (const z of [g - 2, g - 1]) for (let dx = 1; dx <= 3; dx++) for (let dy = 1; dy <= 3; dy++) assert.ok(dig(w.terrain, wx + dx, wy + dy, z).ok)
+    assert.ok(dig(w.terrain, wx + 1, wy + 1, g).ok)
+    assert.ok(fill(w.terrain, wx + 1, wy + 1, g, Material.USA).ok)
+    bun(sincronizeazaLumea(w, R), 'sincronizeazaLumea')
+    for (let i = 0; i < sus; i++) pune(w, wx + 2 + (i % 2), wy + 3, g + 1)
+    for (let i = 0; i < jos; i++) pune(w, wx + 2 + (i % 2), wy + 2, g - 2)
+    const sus0 = { x: wx + 3, y: wy + 2, z: g + 1 }
+    const jos0 = { x: wx + 2, y: wy + 2, z: g - 2 }
+    const f = creeazaFiltruOameni()
+    avanseaza(w, 81, f)
+    const cs = componentaLa(w.camere, sus0.x, sus0.y, sus0.z)!
+    const cp = componentaLa(w.camere, jos0.x, jos0.y, jos0.z)!
+    assert.notEqual(cs.id, cp.id, 'fixtura: casa si pivnita sunt doua componente (chepengul e o usa)')
+    assert.deepEqual([f.esantioane(), f.oameni(w, cs.id), f.oameni(w, cp.id)], [4, sus, jos], 'fixtura: filtrul are 4 esantioane pe fiecare (pasii 20…80)')
+    // PAUZĂ: chepengul scos (o comandă), nimic nu mai avansează.
+    const o = applyCommand(w, { kind: 'dig', wx: wx + 1, wy: wy + 1, z: g }, R)
+    assert.ok(o.ok, JSON.stringify(o))
+    const u = componentaLa(w.camere, sus0.x, sus0.y, sus0.z)!
+    assert.equal(u.ancora, cp.ancora, 'fixtura: componenta unita are ancora pivnitei')
+    assert.equal(u.id, componentaLa(w.camere, jos0.x, jos0.y, jos0.z)!.id)
+    const adev = (): number => oameniPeComponente(w).get(componentaLa(w.camere, sus0.x, sus0.y, sus0.z)!.id) ?? 0
+    assert.equal(adev(), sus + jos)
+    const t = termicLa(w, R, sus0, f)!
+    const tr = tragerea(w, R, u.id)
+    assert.ok(tr.ok)
+    assert.deepEqual([t.oameni, t.oameniText], [sus + jos, textOameni(sus + jos)], `in pauza, dupa unire (${sus} sus, ${jos} jos)`)
+    assert.equal(t.xTotQ16, tragereCuOameni(tr.value, (sus + jos) * R.termic.omW), 'X_tot cu oamenii componentei unite')
+    for (let k = 1; k <= 3; k++) {
+      avanseaza(w, 20, f)
+      assert.equal(termicLa(w, R, sus0, f)!.oameni, adev(), `dupa ${k} pasi (${sus} sus, ${jos} jos)`)
+    }
+  }
+  unire(2, 0)
+  unire(0, 2)
+
+  // Despărțirea: un zid nou prin casă, în pauză. Partea cu ancora veche (x = 1) e goală; cea nouă (x = 3) are oamenii.
+  const { w, wx, wy, g } = sitPlat(12345, 12)
+  casa(w, wx, wy, g, false)
+  bun(sincronizeazaLumea(w, R), 'sincronizeazaLumea')
+  pune(w, wx + 3, wy + 1, g + 1)
+  pune(w, wx + 3, wy + 3, g + 1)
+  const f = creeazaFiltruOameni()
+  avanseaza(w, 81, f)
+  const c0 = componentaLa(w.camere, wx + 1, wy + 1, g + 1)!
+  assert.deepEqual([c0.volum, f.oameni(w, c0.id)], [18, 2], 'fixtura: casa intreaga, 2 oameni aratati')
+  const a = w.agents
+  for (let i = 0; i < a.count; i++) if (a.alive[i]) assert.equal(Math.floor(a.x[i]! / 1000), wx + 3, 'fixtura: pionii stau pe x = 3 (zidul vine pe x = 2)')
+  for (let z = g + 1; z <= g + 2; z++) for (let dy = 1; dy <= 3; dy++) assert.ok(fill(w.terrain, wx + 2, wy + dy, z, P).ok)
+  bun(sincronizeazaLumea(w, R), 'sincronizeazaLumea')
+  const veche = { x: wx + 1, y: wy + 2, z: g + 1 }
+  const noua = { x: wx + 3, y: wy + 2, z: g + 1 }
+  const cv = componentaLa(w.camere, veche.x, veche.y, veche.z)!
+  assert.deepEqual([cv.ancora, cv.volum], [c0.ancora, 6], 'fixtura: jumatatea x = 1 pastreaza ancora casei')
+  for (let k = 0; k <= 3; k++) {
+    if (k > 0) avanseaza(w, 20, f)
+    const adev = oameniPeComponente(w)
+    const tv = termicLa(w, R, veche, f)!
+    const tn = termicLa(w, R, noua, f)!
+    assert.deepEqual([tv.oameni, tn.oameni], [adev.get(tv.comp) ?? 0, adev.get(tn.comp) ?? 0], `${k === 0 ? 'in pauza, dupa zid' : `dupa ${k} pasi`}`)
+    assert.deepEqual([tv.oameni, tn.oameni], [0, 2])
+  }
+})
+
+test('TERMIC ECRAN filtrul oamenilor tinut pe ANCORA, nu pe id: in pauza, comenzile rotesc si refolosesc id-urile a doua case — fiecare isi pastreaza oamenii aratati', () => {
+  // Recenzia t.2b, E2 (1): mutantul „filtrul pe id" trecea toate testele. Două case sigilate în aceeași felie, 2 oameni în
+  // A, B goală; o piatră pusă și scoasă în fiecare casă (4 comenzi, în pauză) rotește id-urile: A primește id-ul lui B.
+  const { w, wx, wy, g } = sitPlat(12345, 16)
+  casa(w, wx, wy, g, false)
+  casa(w, wx + 6, wy, g, false)
+  bun(sincronizeazaLumea(w, R), 'sincronizeazaLumea')
+  pune(w, wx + 1, wy + 1, g + 1)
+  pune(w, wx + 1, wy + 3, g + 1)
+  const f = creeazaFiltruOameni()
+  avanseaza(w, 81, f)
+  const A = { x: wx + 2, y: wy + 2, z: g + 1 }
+  const B = { x: wx + 9, y: wy + 2, z: g + 1 }
+  const id = (c: typeof A): number => componentaLa(w.camere, c.x, c.y, c.z)!.id
+  const ids0 = [id(A), id(B)]
+  for (const c of [
+    { kind: 'fill', wx: wx + 3, wy: wy + 2, z: g + 1, material: P }, { kind: 'fill', wx: wx + 8, wy: wy + 2, z: g + 1, material: P },
+    { kind: 'dig', wx: wx + 3, wy: wy + 2, z: g + 1 }, { kind: 'dig', wx: wx + 8, wy: wy + 2, z: g + 1 },
+  ] as const) {
+    const o = applyCommand(w, c, R)
+    assert.ok(o.ok, JSON.stringify(o))
+  }
+  assert.equal(id(A), ids0[1], `fixtura: A a primit id-ul de dinainte al lui B (${ids0} → ${[id(A), id(B)]})`)
+  for (let k = 0; k <= 1; k++) {
+    if (k > 0) avanseaza(w, 20, f)
+    const adev = oameniPeComponente(w)
+    const tA = termicLa(w, R, A, f)!
+    const tB = termicLa(w, R, B, f)!
+    assert.deepEqual([tA.oameniText, tB.oameniText], ['oameni: 2 înăuntru', 'oameni: niciunul'], k === 0 ? 'in pauza' : 'dupa un pas')
+    assert.deepEqual([tA.oameni, tB.oameni], [adev.get(tA.comp) ?? 0, adev.get(tB.comp) ?? 0])
+    const trB = tragerea(w, R, tB.comp)
+    assert.ok(trB.ok)
+    assert.equal(tB.xTotQ16, tragereCuOameni(trB.value, 0), 'X_tot al casei goale fara caldura altcuiva')
+  }
+})
+
+test('TERMIC ECRAN filtrul oamenilor: o componenta fara esantion (inchisa in pauza, cu un om inauntru) arata oamenii de ACUM, nu 0', () => {
+  // Recenzia t.2b, E2 (2). Cămara 3×3×2 de piatră cu acoperișul fără celula din mijloc (casa B din ui-fum): coloana ei de
+  // aer e cer, deci nicio componentă; filtrul vede 4 pași fără ea. În pauză, un om intră (spawn) și acoperișul se închide:
+  // componenta nouă n-are istorie, deci se arată eșantionul de acum. Casa de alături ține pasul viu (fără nicio componentă,
+  // pasul nu rulează).
+  const { w, wx, wy, g } = sitPlat(12345, 16)
+  for (let z = g + 1; z <= g + 3; z++) for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) if (dx !== 1 || dy !== 1) assert.ok(fill(w.terrain, wx + dx, wy + dy, z, P).ok)
+  casa(w, wx + 6, wy, g, false)
+  bun(sincronizeazaLumea(w, R), 'sincronizeazaLumea')
+  const celula = { x: wx + 1, y: wy + 1, z: g + 1 }
+  assert.equal(componentaLa(w.camere, celula.x, celula.y, celula.z), null, 'fixtura: camara deschisa spre cer nu e o componenta')
+  const f = creeazaFiltruOameni()
+  avanseaza(w, 81, f)
+  assert.equal(f.esantioane(), 4)
+  pune(w, wx + 1, wy + 1, g + 1)
+  assert.ok(fill(w.terrain, wx + 1, wy + 1, g + 3, P).ok)
+  bun(sincronizeazaLumea(w, R), 'sincronizeazaLumea')
+  const c = componentaLa(w.camere, celula.x, celula.y, celula.z)
+  assert.ok(c !== null)
+  assert.equal(oameniPeComponente(w).get(c.id), 1, 'fixtura: omul e in componenta noua')
+  assert.equal(f.oameni(w, c.id), 1)
+  assert.equal(termicLa(w, R, celula, f)!.oameniText, 'oameni: 1 înăuntru')
+})
+
 test('TERMIC ECRAN oamenii ecranului == caldura pasului: oameniPeComponente pe pozitiile pasului da exact ΣP al lui (pionul inauntru, cel afara, cel mort)', () => {
   const { w, wx, wy, g } = sitPlat(12345, 16)
   casa(w, wx, wy, g, false)
@@ -966,6 +1103,25 @@ test('TERMIC ECRAN legenda lui U: aerul de afara de la tickul lumii (acelasi gra
   // Fara nivel, nimic.
   actualizeazaTemperaturaOverlay(o, w, R, null)
   assert.equal(cifreLegenda(o, w, R), '')
+})
+
+test('TERMIC ECRAN legenda lui U cu o componenta fara T: „Temperatura nu se știe (eroare internă)", nu intervalul celorlalte', () => {
+  // Recenzia t.2b, E2 (3): UI-6 cere eroarea și în legendă; testul „componenta fara T" verifică `o.eroare`, nu legenda.
+  // Două case la nivel: una pierde T-ul, cealaltă îl are — fără eroare, legenda ar scrie intervalul ei, cu aerul de afară.
+  const { w, wx, wy, g } = sitPlat(12345, 16)
+  casa(w, wx, wy, g)
+  casa(w, wx + 8, wy, g)
+  bun(sincronizeazaLumea(w, R), 'sincronizeazaLumea')
+  const o = createTemperaturaOverlay()
+  o.visible = true
+  actualizeazaTemperaturaOverlay(o, w, R, g + 1)
+  assert.equal(o.valori.size, 2, 'fixtura: doua componente desenate')
+  assert.equal(cifreLegenda(o, w, R), textIntervalTemperatura(2, o.min, o.max, tAfara(w.seed, w.tick, R)), 'fara eroare: intervalul')
+  const id = componentaLa(w.camere, wx + 2, wy + 2, g + 1)!.id
+  w.temperatura.slot.are[id] = 0
+  actualizeazaTemperaturaOverlay(o, w, R, g + 1)
+  assert.deepEqual([o.faraT, o.valori.size], [1, 1], 'fixtura: una fara T, cealalta desenata')
+  assert.equal(cifreLegenda(o, w, R), TEXT_TEMPERATURA_NECUNOSCUTA)
 })
 
 test('TERMIC ECRAN tasta U: overlay-ul Temperatura, doar cu UI; nu dintr-un camp de text', () => {

@@ -34,6 +34,9 @@ const E5 = 'TERMIC ECRAN textele: descompunerea contopeste'
 const EG = 'TERMIC ECRAN inspectorul pe hartie: casa 5x5x2 cu golul usii'
 const EX = 'TERMIC ECRAN X_tot cu oameni'
 const EF = 'TERMIC ECRAN filtrul oamenilor pe hartie'
+const EFU = 'TERMIC ECRAN filtrul oamenilor la unire si despartire'
+const EFR = 'TERMIC ECRAN filtrul oamenilor tinut pe ANCORA'
+const EFI = 'TERMIC ECRAN filtrul oamenilor: o componenta fara esantion'
 const EP = 'TERMIC ECRAN oamenii ecranului == caldura pasului'
 const EO = 'TERMIC ECRAN oracolul X'
 const EN = 'TERMIC ECRAN viewer-ul nu cere graful t.2a'
@@ -42,6 +45,7 @@ const ET = 'TERMIC ECRAN componenta fara T'
 const ES = 'TERMIC ECRAN stepSimSigur'
 const EA = 'TERMIC ECRAN avanseazaSigur'
 const EL = 'TERMIC ECRAN legenda lui U: aerul de afara'
+const ELT = 'TERMIC ECRAN legenda lui U cu o componenta fara T'
 const E7 = 'TERMIC ECRAN ancorele pe hartie'
 const E8 = 'TERMIC ECRAN ancorele pe M10'
 const E10 = 'TERMIC ECRAN densitatea'
@@ -139,6 +143,28 @@ export const MUTATII = [
     a: '  const egale = ultime.length === 3 && ultime[0] === n && ultime[1] === n',
     b: '  const egale = ultime[ultime.length - 2] === n',
     t: T, e: EF,
+  },
+  // --- recenzia t.2b, E1/E2: istoria filtrului e a ACELEIASI componente (ancora si volumul); fara istorie, oamenii de acum
+  {
+    n: 'E2: filtrul tinut pe ID, nu pe ancora (id-urile rotite in pauza dau unei case oamenii celeilalte)',
+    f: M,
+    a: 'const cheieIstorie = (c: Componenta): number => c.ancora',
+    b: 'const cheieIstorie = (c: Componenta): number => c.id',
+    t: T, e: EFR,
+  },
+  {
+    n: 'E1: istoria fara volum (unita cu pivnita, casa ia istoria pivnitei goale; zidul nou lasa unei jumatati istoria casei intregi)',
+    f: M,
+    a: '(volume.get(cheieIstorie(c)) === c.volum ? stari.get(cheieIstorie(c)) : undefined)',
+    b: 'stari.get(cheieIstorie(c))',
+    t: T, e: EFU,
+  },
+  {
+    n: 'E2: o componenta fara istorie (inchisa in pauza) arata 0, nu oamenii de acum',
+    f: M,
+    a: '      return s !== undefined ? s.afisat : (oameniPeComponente(w).get(compId) ?? 0)\n',
+    b: '      return s !== undefined ? s.afisat : 0\n',
+    t: T, e: EFI,
   },
   {
     n: 'F4: esantionul la fiecare tick, nu la pasul termic',
@@ -499,6 +525,13 @@ export const MUTATII = [
     a: '  return textIntervalTemperatura(o.valori.size, o.min, o.max, tAfara(w.seed, w.tick, rules))',
     b: '  return textIntervalTemperatura(o.valori.size, o.min, o.max, o.tAfara)',
     t: T, e: EL,
+  },
+  {
+    n: 'E2: legenda lui U fara eroare (cu o componenta fara T, intervalul celorlalte)',
+    f: O,
+    a: "  if (o.eroare !== '') return o.eroare\n",
+    b: '',
+    t: T, e: ELT,
   },
   {
     n: 'legenda lui U scrie cifre si fara nivel',
