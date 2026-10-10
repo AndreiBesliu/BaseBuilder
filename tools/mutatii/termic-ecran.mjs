@@ -64,7 +64,7 @@ const ET = 'TERMIC ECRAN componenta fara T'
 const ES = 'TERMIC ECRAN stepSimSigur'
 const EA = 'TERMIC ECRAN avanseazaSigur'
 const EGS = 'TERMIC ECRAN garda simularii'
-const EM = 'TERMIC ECRAN monitorul citit dupa FIECARE tick'
+const EM = 'TERMIC ECRAN monitorul: fiecare tip nou o data'
 const EF3 = 'TERMIC ECRAN randul F3 al temperaturii'
 const EL = 'TERMIC ECRAN legenda lui U: aerul de afara'
 const ELT = 'TERMIC ECRAN legenda lui U cu o componenta fara T'
@@ -291,18 +291,11 @@ export const MUTATII = [
     b: '',
     t: T, e: EGS,
   },
-  // --- recenzia t.2b, E5: monitorul dupa fiecare tick, cu multimea tipurilor
-  {
-    n: 'E5: tickul observat fara monitor (citit doar pe cadru: doi pasi ai cadrului pierd primul tip)',
-    f: M,
-    a: '    const m = monitor.verifica(w)\n    for (const tip of m.tipuriNoi) tipNou(tip, m.total)\n',
-    b: '',
-    t: T, e: EM,
-  },
+  // --- recenzia t.2b, E5: monitorul pe multimea tipurilor tinuta de simulare (citirea pe tick a iesit: echivalenta)
   {
     n: 'E5: doar ultimul tip, nu multimea tipurilor tinuta de simulare (doua tipuri in acelasi pas)',
     f: M,
-    a: '  return (st as StatTermic & { readonly tipuriInvarianti?: Iterable<string> }).tipuriInvarianti ?? [st.ultimulInvariant]',
+    a: '  return st.tipuriInvarianti',
     b: '  return [st.ultimulInvariant]',
     t: T, e: EM,
   },

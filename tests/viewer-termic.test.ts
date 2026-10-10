@@ -696,9 +696,9 @@ test('TERMIC ECRAN componenta fara T: randul 1 „Temperatura nu se știe (eroar
   assert.deepEqual(mon.verifica(w).tipuriNoi, ['indexul s-a sincronizat pe langa temperatura (punctul unic ocolit)'])
 })
 
-test('TERMIC ECRAN monitorul citit dupa FIECARE tick (tickul observat): doua tipuri noi in doi pasi ai aceluiasi cadru dau doua alerte; cu multimea tipurilor tinuta de simulare, si doua tipuri in acelasi pas', () => {
-  // Recenzia t.2b, E5. Citit doar o data pe cadru, monitorul vedea doar `ultimulInvariant`: doi pasi intr-un cadru (un
-  // cadru lung la 3×, avansul de proba) cu tipuri diferite pierdeau primul tip — niciun console.error, nicio alerta.
+test('TERMIC ECRAN monitorul: fiecare tip nou o data, din multimea tinuta de simulare — doua tipuri in doi pasi ai aceluiasi cadru (o singura citire, de cadru) dau doua alerte; si doua in acelasi pas', () => {
+  // Recenzia t.2b, E5. Cu doar `ultimulInvariant`, doi pasi intr-un cadru (un cadru lung la 3×, avansul de proba) cu tipuri
+  // diferite pierdeau primul tip — niciun console.error, nicio alerta. Simularea tine acum multimea (`tipuriInvarianti`).
   const { w, wx, wy, g } = sitPlat(12345, 12)
   casa(w, wx, wy, g)
   bun(sincronizeazaLumea(w, R), 'sincronizeazaLumea')
@@ -715,7 +715,7 @@ test('TERMIC ECRAN monitorul citit dupa FIECARE tick (tickul observat): doua tip
     }
     tick(x, r)
   }
-  const tickObservat = creeazaTickObservat(simTick, f, mon, (tip) => alerte.push(tip))
+  const tickObservat = creeazaTickObservat(simTick, f)
   // Primul invariant: componenta fara T, numarata de pasul de la tickul 0.
   w.temperatura.slot.are[id] = 0
   // UN cadru: 40 de tickuri (doi pasi) prin avansul de proba, apoi citirea de cadru a lui main.ts (`verificaTemperatura`).
@@ -724,8 +724,8 @@ test('TERMIC ECRAN monitorul citit dupa FIECARE tick (tickul observat): doua tip
   assert.equal(statTermic(w).invarianti, 2, 'fixtura: doi invarianti, cate unul pe pas')
   assert.deepEqual(alerte, ['componenta fara T', 'indexul s-a sincronizat pe langa temperatura (punctul unic ocolit)'])
   assert.equal(f.esantioane(), 1, 'tickul observat hraneste si filtrul')
-  // Doua tipuri in ACELASI pas: din contoare se vede doar ultimul motiv. Cand simularea tine si multimea tipurilor
-  // (`tipuriInvarianti`, TRANSIENT — ceruta ramurii simularii), monitorul le raporteaza pe toate cele noi, o data.
+  assert.deepEqual(statTermic(w).tipuriInvarianti, alerte, 'multimea simularii, in ordinea primei aparitii')
+  // Doua tipuri in ACELASI pas: din contoare s-ar vedea doar ultimul motiv; din multime, toate cele noi, o data.
   const st = { ...statTermic(w), invarianti: 5, ultimulInvariant: 'b', tipuriInvarianti: ['componenta fara T', 'a', 'b'] }
   const lume = { temperatura: { stat: st } } as unknown as World
   assert.deepEqual(mon.verifica(lume).tipuriNoi, ['a', 'b'])

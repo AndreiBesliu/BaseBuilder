@@ -830,9 +830,9 @@ scene.add(tempOverlay.group)
  */
 const filtruOameni = creeazaFiltruOameni()
 /**
- * Erorile temperaturii (§5.3, UI-6): invariantii numarati de simulare, cititi dupa FIECARE tick (tickul observat; recenzia
- * t.2b, E5: doi pasi ai aceluiasi cadru cu tipuri diferite pierdeau primul tip) si la fiecare cadru (ce se numara in afara
- * tickului: incarcarea, salvarea).
+ * Erorile temperaturii (§5.3, UI-6): invariantii numarati de simulare, cititi la fiecare cadru (`verificaTemperatura`).
+ * Simularea tine multimea tipurilor (`tipuriInvarianti`; recenzia t.2b, E5), deci doi pasi ai aceluiasi cadru cu tipuri
+ * diferite dau amandoua alertele.
  */
 const monitorTermic = creeazaMonitorTermic()
 /** Un tip NOU de invariant al temperaturii: o alerta si UN `console.error` (monitorul, model.ts). */
@@ -840,8 +840,8 @@ function tipNouTermic(tip: string, total: number): void {
   console.error(`[temperatura] invariant incalcat (${total} in total): ${tip}`)
   ui?.eroare(textEroareTemperatura())
 }
-/** Tickul simularii, urmat de esantionul oamenilor (daca a rulat pasul) si de monitor. Orice avans al lumii din viewer trece pe aici. */
-const tickObservat = creeazaTickObservat(simTick, filtruOameni, monitorTermic, tipNouTermic)
+/** Tickul simularii, urmat de esantionul oamenilor (daca a rulat pasul). Orice avans al lumii din viewer trece pe aici. */
+const tickObservat = creeazaTickObservat(simTick, filtruOameni)
 /**
  * Garda simularii pe pagina (recenzia t.2b, E4; agenti.ts): o exceptie din `tick()` o inchide, iar lumea ramasa pe
  * jumatate de tick nu mai avanseaza (nici cadrele, nici `__kinstead.avanseaza`), nu mai porneste (`seteazaPauza`) si nu se
@@ -881,7 +881,7 @@ function avanseaza(n: number): { tick: number; rulate: number; simMs: number; re
   remeshDinJurnal()
   return { tick: world.tick, rulate, simMs: t1 - t0, remeshMs: performance.now() - t1 }
 }
-/** La fiecare cadru: ce s-a numarat in afara tickului (incarcarea, salvarea) — un tip NOU da alerta si `console.error`. */
+/** La fiecare cadru: fiecare tip NOU de invariant (din pasii cadrului, din incarcare, din salvare) da alerta si `console.error`. */
 function verificaTemperatura(): void {
   const m = monitorTermic.verifica(world)
   for (const tip of m.tipuriNoi) tipNouTermic(tip, m.total)

@@ -864,11 +864,11 @@ export interface MonitorTermic {
 }
 
 /**
- * Tipurile (motivele) invarianților văzute de simulare: mulțimea lor, dacă simularea o ține (`tipuriInvarianti`,
- * TRANSIENT — cerută ramurii simulării, recenzia t.2b E5: două tipuri în ACELAȘI pas), altfel doar ultimul.
+ * Tipurile (motivele) distincte ale invarianților, ținute de simulare (`StatTermic.tipuriInvarianti`, TRANSIENT; recenzia
+ * t.2b, E5): două tipuri în același pas, sau în doi pași ai aceluiași cadru, se raportează amândouă la citirea de cadru.
  */
 function tipuriInvarianti(st: StatTermic): Iterable<string> {
-  return (st as StatTermic & { readonly tipuriInvarianti?: Iterable<string> }).tipuriInvarianti ?? [st.ultimulInvariant]
+  return st.tipuriInvarianti
 }
 
 export function creeazaMonitorTermic(): MonitorTermic {
@@ -899,22 +899,18 @@ export function creeazaMonitorTermic(): MonitorTermic {
 }
 
 /**
- * Tickul observat al viewer-ului (main.ts; recenzia t.2b, E5): tickul simulării, apoi eșantionul filtrului oamenilor și
- * citirea monitorului, cu fiecare tip nou dat lui `tipNou`. Orice avans al lumii din viewer trece pe aici (`stepSim`,
- * `__kinstead.avanseaza`). Citit doar o dată pe cadru, monitorul vedea doar `ultimulInvariant`: doi pași ai aceluiași
- * cadru (un cadru lung la 3×, avansul de probă) cu tipuri diferite pierdeau primul tip.
+ * Tickul observat al viewer-ului (main.ts): tickul simulării, apoi eșantionul filtrului oamenilor (recenzia t.2b, E3).
+ * Orice avans al lumii din viewer trece pe aici (`stepSim`, `__kinstead.avanseaza`). Monitorul termic se citește o dată pe
+ * cadru: simularea ține mulțimea tipurilor (E5), deci doi pași ai aceluiași cadru cu tipuri diferite nu pierd niciunul —
+ * o citire și după fiecare tick ar fi fost o a doua cale pentru același lucru (mutantul ei ieșea echivalent).
  */
 export function creeazaTickObservat(
   simTick: (w: World, r: Rules) => void,
   filtru: FiltruOameni,
-  monitor: MonitorTermic,
-  tipNou: (tip: string, total: number) => void,
 ): (w: World, r: Rules) => void {
   return (w, r) => {
     simTick(w, r)
     filtru.dupaTick(w)
-    const m = monitor.verifica(w)
-    for (const tip of m.tipuriNoi) tipNou(tip, m.total)
   }
 }
 
