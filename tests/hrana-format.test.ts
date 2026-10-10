@@ -19,6 +19,8 @@ import { FelJob, Item, NEVOI, Nevoie, PasCara, Piesa, SCHEMA_VERSION } from '../
 import type { World } from '../src/sim/state.ts'
 import { asazaItem, creeazaItem, itemLaCelula, nutritieEfectiva, ONE_ALTERARE, parteDinAlterare, scadeStricate, slotItem, stergeItem, unitatiPentruNutritie } from '../src/sim/iteme.ts'
 import { lastJobReport } from '../src/sim/joburi.ts'
+import { cellOf } from '../src/sim/drumuri.ts'
+import { celulaDeZonaLa } from '../src/sim/zone.ts'
 import { parseRules } from '../src/sim/content.ts'
 import type { Rules } from '../src/sim/content.ts'
 import { Reason } from '../src/sim/result.ts'
@@ -244,16 +246,20 @@ test('G1S + G1 la FIECARE tick: Σ S scris + acumulat == Σ S + ONE·stricat + m
         const c = solidLaDistanta(w, sit.wx + 1 + (ev.injectii % 5), sit.wy + 1, sit.g, 5, 9)
         if (pune(H, 1, c.wx, c.wy, 0.999 + r() * 0.001) !== -1) ev.injectii++
       }
-      // Ucidere cu marfa: primul pion cu HRANA si S > 0 in mana, dupa tickul 150.
+      // Ucidere cu marfa: primul pion cu HRANA si S > 0 in mana care sta INCA pe mormanul din care a ridicat (cu S, in afara
+      // oricarei zone — o celula de depozit poate fi rezervata ca destinatie, si atunci `asazaItem` o sare), dupa tickul 150:
+      // marfa lasata la picioare se UNESTE cu restul mormanului — `asazaItem` pe calea de unire, cu S pe ambele parti.
       if (off && !ucis && w.tick > 150) {
         const a = w.agents
         for (let s = 0; s < a.count; s++) {
-          if (a.alive[s] === 1 && a.caraKind[s] === H && a.caraCantitate[s]! > 0 && a.caraAlterare[s]! > 0) {
-            assert.ok(applyCommand(w, { kind: 'killAgent', id: a.id[s]! }, R).ok)
-            ucis = true
-            ev.ucisi++
-            break
-          }
+          if (a.alive[s] !== 1 || a.caraKind[s] !== H || a.caraCantitate[s]! === 0 || a.caraAlterare[s]! === 0) continue
+          const sub = itemLaCelula(w.iteme, cellOf(a.x[s]!), cellOf(a.y[s]!), a.z[s]!)
+          if (sub === -1 || w.iteme.kind[sub] !== H || w.iteme.alterare[sub] === 0) continue
+          if (celulaDeZonaLa(w.zone, cellOf(a.x[s]!), cellOf(a.y[s]!), a.z[s]!) !== -1) continue
+          assert.ok(applyCommand(w, { kind: 'killAgent', id: a.id[s]! }, R).ok)
+          ucis = true
+          ev.ucisi++
+          break
         }
       }
       // Un nou-nascut in slotul mortului (golesteMana la nastere).
