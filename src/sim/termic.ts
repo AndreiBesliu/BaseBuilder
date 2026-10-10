@@ -822,10 +822,17 @@ export interface GrafIncremental {
   readonly nodComp: ReadonlyMap<number, number>
   /** M, marginea temperaturilor (Q16): un nod cu Σg · M ≥ 2^52 cere BigInt (antetul, „Exactitatea"). */
   readonly margineT: number
+  /**
+   * Delte aplicate pe ACEST obiect: conținutul grafului (noduri, sume, muchii) se schimbă doar prin ele — o construcție sau o
+   * refacere integrală e alt obiect. Cheia modelului memorat al pasului (temperatura.ts, PAS-2): un lot care nu atinge graful
+   * (o săpătură departe de orice încăpere) schimbă ștampila, dar nu și graful, deci nici modelul.
+   */
+  readonly delte: number
 }
 
 interface StareGraf extends GrafIncremental {
   stampila: StampilaIndex
+  delte: number
   readonly noduri: Map<number, NodLucru>
   readonly nodComp: Map<number, number>
   /** Nodul fiecărei bucăți, pe slot (−1: niciunul). */
@@ -853,6 +860,7 @@ function grafGol(idx: IndexCamere, rules: Rules): StareGraf {
     noduri: new Map(),
     nodComp: new Map(),
     margineT: margineTemperaturi(rules),
+    delte: 0,
     nodB: new Int32Array(Math.max(64, idx.bUrmator)).fill(-1),
     adunari: [],
     contrib: [],
@@ -1233,6 +1241,7 @@ export function actualizeazaGraful(idx: IndexCamere, sch: SchimbareCamere, rules
   if (s.vazute !== a.vazute || s.epoca !== a.epoca || s.epocaFete !== a.epocaFete) return refaIntegral(idx, rules, e, true)
   if (sch.bucatiMoarte.length > 0 || sch.bucatiNascute.length > 0 || sch.bucatiRescrise.length > 0 || sch.noi.length > 0) {
     e.stat.loturi++
+    g.delte++
     if (aplicaDelta(g, idx, sch, e.stat) !== null) return refaIntegral(idx, rules, e, true)
   }
   g.stampila = stampilaIndexului(idx)

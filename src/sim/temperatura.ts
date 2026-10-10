@@ -406,6 +406,11 @@ export interface StatTermic {
   adunariOameni: number
   /** Citiri ale rezervoarelor (`temperaturiRezervoare`) la pas. */
   rezervoareCitite: number
+  /**
+   * Modele ale pasului construite (PAS-2): unul pe graf nou și pe deltă a grafului; un lot care nu atinge graful nu-l reface
+   * (cheia e `GrafIncremental.delte`, nu ștampila).
+   */
+  modeleRefacute: number
   /** Invarianți încălcați (§2, §5.3): ștampila, T în ambele direcții, graful, evidența. */
   invarianti: number
   /** Motivul ultimului invariant încălcat (jurnalul; F3). */
@@ -441,7 +446,7 @@ export interface StatTermic {
 
 function statGol(): StatTermic {
   return {
-    pasi: 0, pasiBigInt: 0, noduriBigInt: 0, oameniCautati: 0, adunariOameni: 0, rezervoareCitite: 0, invarianti: 0, ultimulInvariant: '',
+    pasi: 0, pasiBigInt: 0, noduriBigInt: 0, oameniCautati: 0, adunariOameni: 0, rezervoareCitite: 0, modeleRefacute: 0, invarianti: 0, ultimulInvariant: '',
     loturi: 0, loturiDoarFete: 0, rezerva: 0, provenienteBigInt: 0, surseVechi: 0, surseSol: 0, surseCer: 0, surseNec: 0, echilibre: 0, echilibreNeconvergente: 0,
     grafDiferitLaSalvare: 0, ultimaDiferentaGraf: '', restNormalizat: 0, taieri: 0,
   }
@@ -973,14 +978,15 @@ export interface OptiuniPas {
 
 /**
  * Modelul pasului (DERIVED din graful incremental și reguli, TRANSIENT): nodurile dense, C', muchiile o dată pe pereche
- * cu g pe pas, rezervoarele pe bin cu g pe pas și S. Memorat pe OBIECTUL grafului, valabil cât ștampila lui (vazute,
- * epoca, epocaFete) și regulile: orice deltă a grafului vine cu un lot, deci cu altă ștampilă (S2). Validările de citire
- * ale grafului (simetria muchiilor, nodurile == componentele indexului, C' > 0) se fac aici, la construire.
+ * cu g pe pas, rezervoarele pe bin cu g pe pas și S. Memorat pe OBIECTUL grafului, valabil cât conținutul lui — numărul de
+ * delte aplicate pe obiect (`GrafIncremental.delte`; o refacere integrală e alt obiect) — și regulile. Nu pe ștampila
+ * grafului: ea se schimbă la ORICE lot cu editări, și unul care nu atinge nicio încăpere refăcea modelul degeaba (recenzia
+ * PAS-2: refăcut la 148/150 de pași pe lărgire20; pe M10 cu un lot departe între pași, 346–367 µs p50 în loc de ~85).
+ * Validările de citire ale grafului (simetria muchiilor, nodurile == componentele indexului, C' > 0) se fac aici, la
+ * construire; la refolosire, garda ieftină `n == comp.size`.
  */
 interface ModelPas {
-  readonly vazute: number
-  readonly epoca: number
-  readonly epocaFete: number
+  readonly delte: number
   readonly reguli: Rules
   readonly n: number
   /** Slotul componentei fiecărui nod dens. */
@@ -1004,10 +1010,9 @@ interface ModelPas {
 const MODELE = new WeakMap<GrafIncremental, ModelPas>()
 
 function modelul(w: World, g: GrafIncremental, rules: Rules): ModelPas | Refusal {
-  const s = g.stampila
-  const m = MODELE.get(g)
-  if (m !== undefined && m.reguli === rules && m.vazute === s.vazute && m.epoca === s.epoca && m.epocaFete === s.epocaFete) return m
   const idx = w.camere
+  const m = MODELE.get(g)
+  if (m !== undefined && m.reguli === rules && m.delte === g.delte && m.n === idx.comp.size) return m
   const n = g.noduri.size
   if (n !== idx.comp.size) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'nodurile grafului nu sunt componentele indexului', noduri: n, componente: idx.comp.size })
   const conv = conversia(rules)
@@ -1070,11 +1075,12 @@ function modelul(w: World, g: GrafIncremental, rules: Rules): ModelPas | Refusal
   }
   rStart[n] = rBin.length
   const nou: ModelPas = {
-    vazute: s.vazute, epoca: s.epoca, epocaFete: s.epocaFete, reguli: rules, n, comp, C, densDupaComp,
+    delte: g.delte, reguli: rules, n, comp, C, densDupaComp,
     mA: Int32Array.from(mA), mB: Int32Array.from(mB), mEa: Int32Array.from(mEa), mEb: Int32Array.from(mEb), mG: Float64Array.from(mG),
     rStart, rBin: Int32Array.from(rBin), rG: Float64Array.from(rG), S,
   }
   MODELE.set(g, nou)
+  w.temperatura.stat.modeleRefacute++
   return nou
 }
 

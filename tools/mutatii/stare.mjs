@@ -16,6 +16,7 @@ const TP = 'tests/pas-termic.test.ts'
 const TS = 'tests/stare-temperatura.test.ts'
 const TSV = 'tests/salvare-temperatura.test.ts'
 const F = 'src/sim/temperatura.ts'
+const TERMIC = 'src/sim/termic.ts'
 const TPL = 'tests/sincronizare-plasa.test.ts'
 const NEG = 'PLASA punctului unic, proba negativa'
 
@@ -231,11 +232,26 @@ export const MUTATII = [
     t: TS, e: 'STARE pasul nu arunca din tick',
   },
   {
-    n: 't.2b §5: modelul pasului memorat fara stampila (dupa un lot, pasul integreaza pe graful vechi)',
+    n: 't.2b §5: modelul pasului memorat fara cheie (dupa o delta a grafului, pasul integreaza pe graful vechi)',
     f: F,
-    a: '  if (m !== undefined && m.reguli === rules && m.vazute === s.vazute && m.epoca === s.epoca && m.epocaFete === s.epocaFete) return m',
+    a: '  if (m !== undefined && m.reguli === rules && m.delte === g.delte && m.n === idx.comp.size) return m',
     b: '  if (m !== undefined) return m',
     t: TP, e: 'PAS T*',
+  },
+  // --- modelul pasului cheiat pe deltele grafului, nu pe stampila (recenzia PAS-2)
+  {
+    n: 't.2b §5, PAS-2: orice lot cu editari reface modelul pasului (cheia inapoi pe stampila: un lot departe de orice incapere il reface degeaba)',
+    f: TERMIC,
+    a: '  g.stampila = stampilaIndexului(idx)\n  return accept(g)\n}',
+    b: '  g.delte++\n  g.stampila = stampilaIndexului(idx)\n  return accept(g)\n}',
+    t: TP, e: 'PAS modelul memorat',
+  },
+  {
+    n: 't.2b §5, PAS-2: o delta a grafului nu se numara (modelul vechi ramane dupa un lot care atinge graful)',
+    f: TERMIC,
+    a: '    e.stat.loturi++\n    g.delte++\n',
+    b: '    e.stat.loturi++\n',
+    t: TP, e: 'PAS modelul memorat',
   },
   {
     n: 't.2b §5.1, B4: oamenii nu se citesc (W 0)',
