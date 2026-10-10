@@ -261,6 +261,20 @@ export const MUTATII = [
     t: TP, e: 'PROVENIENTA depasirea',
   },
   {
+    n: 't.2b §3, PROV-5: regula NEC inversata (sub solul natural T_afara, deasupra T_sol)',
+    f: F,
+    a: '    necunoscute.set(kc, sub ? PROV_NEC_SOL0 - adancimeIn(col, z) : PROV_NEC_CER)',
+    b: '    necunoscute.set(kc, sub ? PROV_NEC_CER : PROV_NEC_SOL0 - adancimeIn(col, z))',
+    t: TP, e: 'PROVENIENTA recalculul NEC',
+  },
+  {
+    n: 't.2b §3, PROV-6: descompunerea pe Number pentru H negativ cu floor(h/d)·d (restul ±1 langa −2^53)',
+    f: 'src/sim/temperatura.ts',
+    a: '    return r === 0 ? { t: -q + 0, rest: 0 } : { t: -q - 1, rest: d - r }',
+    b: '    return { t: Math.floor(h / d), rest: h - Math.floor(h / d) * d }',
+    t: TP, e: 'PROVENIENTA aritmetica: descompunerea pe Number',
+  },
+  {
     n: 't.2b §3: recalculul nu citeste partea valida a inelului (tunelul din ultimele editari iese NEC)',
     f: 'src/sim/camere.ts',
     a: '    for (let i = Math.max(idx.vazute, t.editari - JURNAL_CAP); i < t.editari; i++) {',

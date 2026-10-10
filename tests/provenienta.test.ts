@@ -611,6 +611,40 @@ test('PROVENIENTA depasirea: un lot de peste JURNAL_CAP editari care uneste doua
   assert.deepEqual([u.origine.cer, u.origine.nec, u.origine.sol.map((o) => o.celule)], [0, 0, [1]])
 })
 
+test('PROVENIENTA recalculul NEC (§3, PROV-5): o camera de piatra cu podea de piatra (deasupra solului) si o groapa captusita cu piatra (sub sol), zidite la INCEPUTUL unui lot de peste JURNAL_CAP editari — ies din inel, deci NEC: camera de la T_afara, groapa de la T_sol(d); T == oracolul pe forta bruta (materialul vechi real)', () => {
+  // Măsurat (recenzia PROV, f4): pe HEAD 0 erori; cu NEC_SOL ↔ NEC_CER inversate, T-urile ies 11,70 în loc de 25,48 °C
+  // (camera) și 25,48 în loc de 3,20 °C (groapa) — mutantul trecea toată suita: singurul test al ramurii („depășirea") are
+  // editările relevante în partea validă a inelului.
+  const { w, wx, wy, g } = sitPlat(12345, 14)
+  const t = w.terrain
+  const x0 = wx + 1, y0 = wy + 1
+  const b = new Banca(w, cutie(x0, y0, g - 4, x0 + 12, y0 + 6, g + 6))
+  const departe = wx > 8000 ? wx - 300 : wx + 300
+  const gd = groundLevelM(t, departe, wy)
+  assert.ok(gd.ok)
+  const bx = x0 + 7
+  const sch = b.lot(() => {
+    // Camera: placa, pereții și acoperișul de piatră, toate peste solul natural (aerul ei era cer).
+    for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) ok(fill(t, x0 + dx, y0 + dy, g + 1, P), 'placa')
+    for (let z = g + 2; z <= g + 3; z++) for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) if (dx === 0 || dy === 0 || dx === 4 || dy === 4) ok(fill(t, x0 + dx, y0 + dy, z, P), 'perete')
+    for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) ok(fill(t, x0 + dx, y0 + dy, g + 4, P), 'acoperis')
+    // Groapa 3×3×2 sub sol, căptușită cu piatră pe toate fețele (aerul ei era pământ, la d 1 și 2).
+    for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) for (let z = g - 3; z <= g; z++) ok(dig(t, bx + dx, y0 + dy, z), 'groapa')
+    for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) for (let z = g - 3; z <= g; z++) if (dx === 0 || dy === 0 || dx === 4 || dy === 4 || z === g - 3 || z === g) ok(fill(t, bx + dx, y0 + dy, z, P), 'captuseala')
+    // Umplutura: editări departe, cât să le împingă pe cele de mai sus afară din inel.
+    for (let i = 0; i < JURNAL_CAP / 2 + 8; i++) {
+      dig(t, departe, wy, gd.value)
+      fill(t, departe, wy, gd.value, P)
+    }
+  }, 'NEC')
+  assert.ok(sch.recalcul, 'fixtura: lotul trece de JURNAL_CAP')
+  const cam = componentaLa(w.camere, x0 + 2, y0 + 2, g + 2)!
+  const gr = componentaLa(w.camere, bx + 2, y0 + 2, g - 1)!
+  const o = (id: number) => sch.mase.noi.find((y) => y.id === id)!.origine
+  assert.deepEqual(o(cam.id), { cer: 18, sol: [], nec: 18 }, 'camera: NEC deasupra solului natural, la T_afara')
+  assert.deepEqual(o(gr.id), { cer: 0, sol: [{ d: 1, celule: 9 }, { d: 2, celule: 9 }], nec: 18 }, 'groapa: NEC sub solul natural, la T_sol(d)')
+})
+
 test('PROVENIENTA prin COMENZI (SAV-7): usa dintre doua pivnite deschisa si zidita la loc de 10 ori prin applyCommand dig / fill — T-ul CONSUMATORULUI (w.temperatura) == oracolul pe forta bruta dupa fiecare comanda, energia la rotunjire', () => {
   const { w, wx, wy, g } = sitPlat(20261001, 12)
   for (const z of [g - 2, g - 3]) for (let dy = 2; dy <= 4; dy++) {
@@ -733,4 +767,39 @@ test('PROVENIENTA aritmetica: Number == BigInt (comutatorul), si o casa la 30.00
   const [px, py] = s.rep.pivnita!
   b.lot(() => ok(dig(w.terrain, px - 1, py - 1, z1 - 1), 'chepeng'), 'unirea casei fierbinti')
   assert.ok(b.ev.bigInt > 0, 'fixtura: un produs a trecut de 2^53')
+})
+
+test('PROVENIENTA aritmetica: descompunerea pe Number == BigInt == exactul pentru H negativ la mai putin de C\' de −2^53 (PROV-6) — unirea a doua componente cu H ≈ −2^52, toate produsele intregi sigure', () => {
+  // Recenzia PROV (a3): pe Number, floor(h/d)·d pentru h < 0 are |q·d| = |h| + r, peste 2^53 când |h| > 2^53 − d — restul
+  // ieșea cu ±1 (energie ±1 μ·Q16) pe 5 din 8 C' încercate. Descompunerea se face acum pe |h|, ca rsN.
+  const sol = (n: number): ContoareMasa => ({ nAer: 1, nConstr: 0, nSolMasiv: n, nApa: 0 })
+  const exact = (H: bigint, C: number): [number, number] => {
+    let q = H / BigInt(C)
+    if (H - q * BigInt(C) < 0n) q -= 1n
+    return [Number(q), Number(H - q * BigInt(C))]
+  }
+  let gresite = 0
+  for (const [n1, n2, dh] of [[529, 530, 0], [529, 530, 1], [529, 530, 7], [1000, 1001, 3], [600, 777, 11], [2000, 2047, 5], [529, 1, 9], [3000, 3001, 2]] as const) {
+    const c1 = sol(n1), c2 = sol(n2), cy = { nAer: 2, nConstr: 0, nSolMasiv: n1 + n2, nApa: 0 }
+    const C1 = capacitateMu(c1, MASE), C2 = capacitateMu(c2, MASE), Cy = capacitateMu(cy, MASE)
+    const H1 = -(2n ** 52n - 500n), H2 = H1 + BigInt(dh)
+    const st = temperaturiGoale(3)
+    const [t1, r1] = exact(H1, C1)
+    const [t2, r2] = exact(H2, C2)
+    st.t[0] = t1; st.rest[0] = r1; st.are[0] = 1
+    st.t[1] = t2; st.rest[1] = r2; st.are[1] = 1
+    const gol = { nAer: 0, nConstr: 0, nSolMasiv: 0, nApa: 0 }
+    const vechi = (id: number, c: ContoareMasa) => ({ id, ancora: id + 1, capacitate: c, persista: c, solIese: [], altaIese: gol })
+    const sch = {
+      moarte: [0, 1],
+      mase: { noi: [{ id: 2, ancora: 1, capacitate: cy, surse: [{ id: 0, ancora: 1, masa: c1 }, { id: 1, ancora: 2, masa: c2 }], solIntra: [], aparuta: gol, origine: { cer: 0, sol: [], nec: 0 } }], vechi: [vechi(0, c1), vechi(1, c2)], abateri: 0 },
+    } as unknown as SchimbareCamere
+    const n = provenientaTemperaturii(st, sch, 0, 1, R)
+    const b = provenientaTemperaturii(st, sch, 0, 1, R, true)
+    assert.equal(n.bigInt, 0, 'fixtura: toate produsele sunt intregi siguri (Number)')
+    const ex = exact(H1 + H2, Cy)
+    assert.deepEqual([b.stare.t[2], b.stare.rest[2]], ex, `BigInt, C' ${Cy}`)
+    if (n.stare.t[2] !== ex[0] || n.stare.rest[2] !== ex[1]) gresite++
+  }
+  assert.equal(gresite, 0, 'Number == exactul pe toate C\'')
 })

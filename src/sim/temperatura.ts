@@ -183,11 +183,16 @@ function rs(n: Ent, d: Ent, c: Calcul): Ent {
   return rsB(bg(n), bg(d))
 }
 
-/** floor(n / d) și restul, d > 0; amândouă întregi siguri (T pe Q16, 0 ≤ rest < d). */
+/**
+ * floor(n / d) și restul, d > 0; amândouă întregi siguri (T pe Q16, 0 ≤ rest < d). Pe Number se împarte |h|, ca în `rsN`:
+ * pentru h < 0, `floor(h/d)·d` are modulul |h| + r, care trece de 2^53 când |h| > 2^53 − d — produsul ieșea rotunjit, iar
+ * restul cu ±1 (PROV-6: 109.888 din 2.000.000 de eșantioane lângă −2^53; 0 pe |h|).
+ */
 function descompune(h: Ent, d: number): { t: number; rest: number } {
   if (typeof h === 'number') {
-    let q = Math.floor(h / d)
-    let r = h - q * d
+    const a = h < 0 ? -h : h
+    let q = Math.floor(a / d)
+    let r = a - q * d
     if (r < 0) {
       q--
       r += d
@@ -195,7 +200,9 @@ function descompune(h: Ent, d: number): { t: number; rest: number } {
       q++
       r -= d
     }
-    return { t: q + 0, rest: r + 0 }
+    if (h >= 0) return { t: q + 0, rest: r + 0 }
+    // floor(−a/d) = −q − 1 și restul d − r; pe un multiplu exact, −q și 0.
+    return r === 0 ? { t: -q + 0, rest: 0 } : { t: -q - 1, rest: d - r }
   }
   const db = BigInt(d)
   let q = h / db
