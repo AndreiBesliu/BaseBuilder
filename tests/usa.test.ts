@@ -448,11 +448,14 @@ function cameraCuToc(seed: number, gol: boolean): { w: World; wx: number; wy: nu
 test('USA toc (USA-1): usa de sus se zideste peste un morman din toc (usa de jos zidita), fara asteptare', () => {
   for (const seed of [12345, 777]) {
     const { w, wx, wy, g, x0, y0, pioni } = cameraCuToc(seed, true)
-    // Pamant: nu e materialul niciunei piese, deci nimeni nu-l ia din toc ca sursa. Lasat in gol INAINTE de usa de jos
-    // (t.3: `asazaItem` pune pe USA doar ca a treia trecere — calea vie e usa zidita peste morman, STARE-2).
-    assert.ok(applyCommand(w, { kind: 'lasaItem', fel: Item.PAMANT, cantitate: 20, wx: x0 + 2, wy: y0, z: g + 1 }, R).ok)
     assert.ok(applyCommand(w, { kind: 'fill', wx: x0 + 2, wy: y0, z: g + 1, material: Material.USA }, R).ok)
     assert.ok(applyCommand(w, { kind: 'desemneaza', wx: x0 + 2, wy: y0, z: g + 2, piesa: Piesa.USA }, R).ok)
+    // Pamant: nu e materialul niciunei piese, deci nimeni nu-l ia din toc ca sursa. Lasat pe usa DUPA ce usa de sus e
+    // desenata: t.3 pune marfa in toc doar ca a TREIA trecere, deci vecinii calcabili ai usii (inauntru si afara) sunt
+    // plini de pamant — tocul ramane singurul loc. Asa `asazaItem` intreaba si aici „santier deasupra?": un santier de USA
+    // nu alunga mormanul (proba usa „USA-1 + USA-5").
+    for (const dy of [1, -1]) assert.ok(applyCommand(w, { kind: 'lasaItem', fel: Item.PAMANT, cantitate: R.itemStackMax, wx: x0 + 2, wy: y0 + dy, z: g + 1 }, R).ok)
+    assert.ok(applyCommand(w, { kind: 'lasaItem', fel: Item.PAMANT, cantitate: 20, wx: x0 + 2, wy: y0, z: g + 1 }, R).ok)
     assert.notEqual(itemLaCelula(w.iteme, x0 + 2, y0, g + 1), -1, 'premisa: mormanul e in toc')
     lasaItem(w, Item.PIATRA, 20, wx + 1, wy + 1)
     pioni()
