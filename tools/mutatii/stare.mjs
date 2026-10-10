@@ -183,6 +183,56 @@ export const MUTATII = [
     b: '    if (false) return refuse(',
     t: TP, e: 'PAS T in afara intregilor siguri',
   },
+  // --- verdictul lotului si plasele de la rulare (GRAF-1, PAS-4)
+  {
+    n: 't.2b GRAF-1: refacerea de urgenta a grafului la lot nu se vede (delta stricata reparata tacut)',
+    f: F,
+    a: '  const deUrgenta = numarRefaceriDeUrgenta(w.camere) !== urgente',
+    b: '  const deUrgenta = false',
+    t: TS, e: 'STARE refacerea de urgenta a grafului la lot',
+  },
+  {
+    n: 't.2b GRAF-1, SAV-R2: diferenta grafului la salvare nu se numara ca invariant (monitorul ecranului n-o vede)',
+    f: F,
+    a: '    invariant(st, refuse(Reason.INVARIANT_INCALCAT, { motiv: MOTIV_GRAF_LA_SALVARE, linie: cmp.params.linie }))',
+    b: '    void 0',
+    t: TSV, e: 'SALVARE compararea cu graful integral la encode',
+  },
+  {
+    n: 't.2b PAS-4: verdictul lotului ignora abaterile evidentei maselor',
+    f: F,
+    a: '  if (l.abateri > 0) return refuse(',
+    b: '  if (false) return refuse(',
+    t: TS, e: 'STARE verdictul lotului',
+  },
+  {
+    n: 't.2b PAS-4, GRAF-1: verdictul lotului ignora refacerea de urgenta',
+    f: F,
+    a: '  if (l.deUrgenta) return refuse(',
+    b: '  if (false) return refuse(',
+    t: TS, e: 'STARE verdictul lotului',
+  },
+  {
+    n: 't.2b PAS-4: sursele provenientei fara T nu ajung la verdict',
+    f: F,
+    a: '    surseFaraT = p.surseFaraT',
+    b: '    surseFaraT = 0',
+    t: TS, e: 'STARE sursa fara T',
+  },
+  {
+    n: 't.2b PAS-4: pasul nu verifica indexul fata de teren (pasul pe un index ramas in urma)',
+    f: F,
+    a: '  if (!stamp.ok || idx.teren !== w.terrain || idx.vazute !== w.terrain.editari) {',
+    b: '  if (!stamp.ok) {',
+    t: TS, e: 'STARE pas: indexul nu e la zi',
+  },
+  {
+    n: 't.2b PAS-4: rezervoarele citite la pas nu se numara (scenariul standard le cere 0 — vid)',
+    f: F,
+    a: '  st.stat.rezervoareCitite++',
+    b: '  void 0',
+    t: TS, e: 'STARE rezervoareCitite',
+  },
   // --- plasa de siguranta ±1000 °C (PROV-1 b)
   {
     n: 't.2b PROV-1 b: plasa nu taie dupa provenienta (pompa C3 duce T peste 1000 °C intre doi pasi, apoi peste marginea salvabila)',

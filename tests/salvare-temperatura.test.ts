@@ -26,7 +26,7 @@ import type { World } from '../src/sim/state.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
 import { dig, fill, materialAt } from '../src/sim/terrain/terrain.ts'
 import { grafulIncremental } from '../src/sim/termic.ts'
-import { amprentaCapacitatii, sincronizeazaLumea, statTermic } from '../src/sim/temperatura.ts'
+import { amprentaCapacitatii, MOTIV_GRAF_LA_SALVARE, sincronizeazaLumea, statTermic } from '../src/sim/temperatura.ts'
 import { advance, createWorld, tick } from '../src/sim/world.ts'
 import { casaTermica } from './fixturi-temperatura.ts'
 import { bun, faraInvarianti, grafLumii, laEchilibru, mina192, tPeAncora } from './fixturi-pas.ts'
@@ -304,6 +304,8 @@ test('SALVARE compararea cu graful integral la encode (§6, IDX-4): o delta stri
   const text = encode(w)
   assert.equal(statTermic(w).grafDiferitLaSalvare, 1)
   assert.ok(statTermic(w).ultimaDiferentaGraf.startsWith('N '), statTermic(w).ultimaDiferentaGraf)
+  // Numărat și ca invariant (GRAF-1, SAV-R2): singurul contor pe care îl citește viewer-ul (alerta din Jurnal, F3).
+  assert.deepEqual([statTermic(w).invarianti, statTermic(w).ultimulInvariant], [1, MOTIV_GRAF_LA_SALVARE])
   const c = incarca(text)
   advance(w, 2016 * TPS, R)
   advance(c, 2016 * TPS, R)

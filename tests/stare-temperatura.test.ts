@@ -15,11 +15,12 @@ import { Material } from '../src/sim/terrain/chunk.ts'
 import { dig, fill } from '../src/sim/terrain/terrain.ts'
 import { construiesteGrafIncremental, formaCanonicaGrafIncremental, grafulIncremental, regimPermanent, statGraf } from '../src/sim/termic.ts'
 import type { GrafIncremental } from '../src/sim/termic.ts'
-import { MOTIV_TAIERE, pasTermic, PLAFON_ECHILIBRU, sincronizeazaLumea, statTermic, T_SIGURANTA, temperaturaLaEchilibru, verificaStampila } from '../src/sim/temperatura.ts'
+import { MOTIV_GRAF_URGENTA, MOTIV_TAIERE, pasTermic, PLAFON_ECHILIBRU, sincronizeazaLumea, statTermic, T_SIGURANTA, temperaturaLaEchilibru, verdictulLotului, verificaStampila } from '../src/sim/temperatura.ts'
+import { accept, Reason, refuse } from '../src/sim/result.ts'
 import { createWorld, tick } from '../src/sim/world.ts'
 import { casaPompei, casaTermica, cicluIncrucisat, comanda, oraDeVara } from './fixturi-temperatura.ts'
 import { bun, faraInvarianti, hotel, laEchilibru, tPeAncora } from './fixturi-pas.ts'
-import { R } from './fixturi.ts'
+import { R, sitPlat } from './fixturi.ts'
 
 const P = Material.PIATRA_CONSTRUITA
 
@@ -156,6 +157,83 @@ test('STARE pasul nu arunca din tick (§5.3): o muchie stricata in graf fara nic
   assert.equal(statGraf(a.camere).refaceriDeUrgenta, urgente + 1)
   assert.deepEqual(tPeAncora(a), tPeAncora(b), 'pasul a continuat pe graful bun')
   faraInvarianti(b, 'geaman')
+})
+
+test('STARE refacerea de urgenta a grafului la lot (GRAF-1): o delta care loveste un invariant (sursa unirii fara nod) se reface integral si se NUMARA ca invariant, cu motivul — nu tacut; graful == integralul, T pe toate', () => {
+  // Recenzia GRAF (r2): delta stricată → `actualizeazaGraful` reface de urgență și întoarce accept, iar `sincronizeazaLumea`
+  // nu număra nimic (invarianti 0) — viewer-ul alertează doar pe `invarianti`, deci un defect real al deltei dispărea fără urmă.
+  const { w, wx, wy, g } = sitPlat(12345, 12)
+  for (let z = g - 3; z <= g - 2; z++) for (let y = wy + 2; y <= wy + 4; y++) {
+    for (let x = wx + 2; x <= wx + 4; x++) assert.ok(dig(w.terrain, x, y, z).ok)
+    for (let x = wx + 6; x <= wx + 8; x++) assert.ok(dig(w.terrain, x, y, z).ok)
+  }
+  bun(sincronizeazaLumea(w, R), 'pivnitele')
+  laEchilibru(w, 300000)
+  const A = componentaLa(w.camere, wx + 2, wy + 2, g - 3)!
+  // Defectul: componenta A pierde intrarea din nodComp (orice defect care lasă o sursă fără nod); unirea o cere.
+  ;(bun(grafulIncremental(w.camere, R), 'graf').nodComp as Map<number, number>).delete(A.id)
+  const urgente = statGraf(w.camere).refaceriDeUrgenta
+  assert.ok(applyCommand(w, { kind: 'dig', wx: wx + 5, wy: wy + 3, z: g - 3 }, R).ok, 'usa dintre pivnite')
+  assert.equal(statGraf(w.camere).refaceriDeUrgenta, urgente + 1, 'fixtura: delta a lovit invariantul')
+  const st = statTermic(w)
+  assert.equal(st.invarianti, 1)
+  assert.equal(st.ultimulInvariant, MOTIV_GRAF_URGENTA)
+  assert.deepEqual(canonic(w, bun(grafulIncremental(w.camere, R), 'graf')), canonic(w, bun(construiesteGrafIncremental(w.camere, R), 'integral')))
+  for (const c of w.camere.comp.values()) assert.equal(w.temperatura.slot.are[c.id], 1)
+  assert.doesNotThrow(() => encode(w))
+})
+
+test('STARE verdictul lotului (PAS-4, GRAF-1): functie pura — curat → accept; sursa fara T, abaterile evidentei, graful refuzat, refacerea de urgenta → INVARIANT_INCALCAT cu motivul lor, in ordinea asta', () => {
+  const gBun = accept(null)
+  const gRau = refuse(Reason.INVARIANT_INCALCAT, { motiv: 'muchie asimetrica' })
+  const motiv = (o: ReturnType<typeof verdictulLotului>): string => (o.ok ? 'ok' : String(o.params.motiv))
+  assert.equal(motiv(verdictulLotului({ surseFaraT: 0, abateri: 0, graf: gBun, deUrgenta: false })), 'ok')
+  assert.equal(motiv(verdictulLotului({ surseFaraT: 2, abateri: 0, graf: gBun, deUrgenta: false })), 'o sursa a provenientei n-avea T (stare nesincronizata)')
+  assert.equal(motiv(verdictulLotului({ surseFaraT: 0, abateri: 1, graf: gBun, deUrgenta: false })), 'evidenta maselor nu se inchide')
+  assert.equal(motiv(verdictulLotului({ surseFaraT: 0, abateri: 0, graf: gRau, deUrgenta: false })), 'muchie asimetrica')
+  assert.equal(motiv(verdictulLotului({ surseFaraT: 0, abateri: 0, graf: gBun, deUrgenta: true })), MOTIV_GRAF_URGENTA)
+  // Ordinea: primul invariant încălcat.
+  assert.equal(motiv(verdictulLotului({ surseFaraT: 1, abateri: 1, graf: gRau, deUrgenta: true })), 'o sursa a provenientei n-avea T (stare nesincronizata)')
+  assert.equal(motiv(verdictulLotului({ surseFaraT: 0, abateri: 1, graf: gRau, deUrgenta: true })), 'evidenta maselor nu se inchide')
+  assert.equal(motiv(verdictulLotului({ surseFaraT: 0, abateri: 0, graf: gRau, deUrgenta: true })), 'muchie asimetrica')
+  const r = verdictulLotului({ surseFaraT: 0, abateri: 3, graf: gBun, deUrgenta: false })
+  assert.ok(!r.ok && r.reason === Reason.INVARIANT_INCALCAT && r.params.abateri === 3)
+})
+
+test('STARE sursa fara T intr-un lot de comanda (PAS-4): pivnita fara T, apoi o celula sapata in ea — INVARIANT numarat, cu motivul', () => {
+  const s = casaTermica({ k: 1 })
+  const w = laEchilibru(s.w, 300000)
+  const piv = componentaLa(w.camere, ...s.rep.pivnita!)!.id
+  w.temperatura.slot.are[piv] = 0
+  const [px, py, pz] = s.rep.pivnita!
+  assert.ok(applyCommand(w, { kind: 'dig', wx: px + 1, wy: py, z: pz - 1 }, R).ok, 'groapa in podeaua pivnitei')
+  assert.equal(statTermic(w).invarianti, 1, JSON.stringify(statTermic(w)))
+  assert.equal(statTermic(w).ultimulInvariant, 'o sursa a provenientei n-avea T (stare nesincronizata)')
+})
+
+test('STARE pas: indexul nu e la zi cu terenul (PAS-4): o sapatura direct in teren, fara sincronizare (stampila e a indexului) — pasul numara invariantul, sincronizeaza indexul si graful, reia T de la echilibru pe toate', () => {
+  const s = casaTermica({ k: 1 })
+  const w = laEchilibru(s.w, 300000)
+  const [cx, cy, cz] = s.rep.casa!
+  assert.ok(dig(w.terrain, cx + 1, cy, cz - 1).ok)
+  assert.ok(verificaStampila(w).ok, 'fixtura: stampila e a indexului (indexul doar ramas in urma)')
+  pasTermic(w, R)
+  assert.equal(statTermic(w).invarianti, 1)
+  assert.equal(statTermic(w).ultimulInvariant, 'pas: indexul nu e la zi cu terenul')
+  assert.equal(w.camere.vazute, w.terrain.editari, 'indexul sincronizat de pas')
+  assert.ok(componentaLa(w.camere, cx + 1, cy, cz - 1) !== null, 'groapa e in index')
+  for (const c of w.camere.comp.values()) assert.equal(w.temperatura.slot.are[c.id], 1)
+  assert.deepEqual(canonic(w, bun(grafulIncremental(w.camere, R), 'graf')), canonic(w, bun(construiesteGrafIncremental(w.camere, R), 'integral')))
+})
+
+test('STARE rezervoareCitite numara fiecare pas cu componente (PAS-4: controlul pozitiv al scenariului standard, care il cere 0)', () => {
+  const s = casaTermica()
+  const w = laEchilibru(s.w, 0)
+  for (let k = 0; k < 7; k++) {
+    w.tick = k * R.ticksPerSecond
+    pasTermic(w, R)
+  }
+  assert.deepEqual([statTermic(w).pasi, statTermic(w).rezervoareCitite], [7, 7])
 })
 
 test('STARE comenzile trec prin punctul unic: dig si fill pe o casa — fara invarianti, stampila la zi dupa fiecare comanda, salvarea merge intre comanda si tick', () => {

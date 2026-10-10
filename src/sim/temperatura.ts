@@ -92,7 +92,7 @@ import type { ContoareMasa, MaseComponentaNoua, MaseComponentaVeche, MasaPeAdanc
 import { capacitateMu, PROV_CER, PROV_NEC_CER, PROV_NEC_SOL0, PROV_SOL0 } from './fete.ts'
 import { tAfara, tSol } from './clima.ts'
 import type { CanaleTermice, GeometrieCanale, GrafIncremental, NodTermic } from './termic.ts'
-import { actualizeazaGraful, BIN_AFARA, canaleDinGeometrie, comparaGrafulCuIntegral, grafTermic, grafulIncremental, refaGrafulDeUrgenta, rezolvaRegim, temperaturiRezervoare } from './termic.ts'
+import { actualizeazaGraful, BIN_AFARA, canaleDinGeometrie, comparaGrafulCuIntegral, grafTermic, grafulIncremental, numarRefaceriDeUrgenta, refaGrafulDeUrgenta, rezolvaRegim, temperaturiRezervoare } from './termic.ts'
 import { Hasher } from './hash.ts'
 import { cellOf } from './drumuri.ts'
 import type { World } from './state.ts'
@@ -530,6 +530,37 @@ export interface SincronizareLume {
   readonly noi: number
 }
 
+/** Ce a văzut punctul unic pe un lot, pentru verdict (`verdictulLotului`). */
+export interface StareaLotului {
+  /** Surse ale provenienței fără T (o stare nesincronizată): masa lor a fost tratată ca apărută. */
+  readonly surseFaraT: number
+  /** Componentele pe care identitățile evidenței maselor nu țin (`EvidentaMase.abateri`). */
+  readonly abateri: number
+  /** Graful incremental de după lot, sau refuzul construcției lui. */
+  readonly graf: Outcome<unknown>
+  /** Delta a lovit un invariant și graful s-a refăcut integral, de urgență (cu ștampila de intrare bună). */
+  readonly deUrgenta: boolean
+}
+
+/** Motivul invariantului „refacere de urgență a grafului la lot" (GRAF-1; jurnalul, F3). */
+export const MOTIV_GRAF_URGENTA = 'graful incremental refacut de urgenta la lot'
+
+/** Motivul invariantului „graful incremental ≠ integralul la salvare" (GRAF-1, SAV-R2, IDX-4; jurnalul, F3). */
+export const MOTIV_GRAF_LA_SALVARE = 'graful incremental difera de cel integral (la salvare)'
+
+/**
+ * Verdictul unui lot (§2, §5.3) — funcție PURĂ (PAS-4: o abatere a evidenței nu se poate provoca din afară fără să strici
+ * fete.ts, deci verdictul se probează direct): primul invariant încălcat, în ordinea sursă fără T → abaterile evidenței →
+ * graful refuzat → graful refăcut de urgență (GRAF-1); altfel accept.
+ */
+export function verdictulLotului(l: StareaLotului): Outcome<void> {
+  if (l.surseFaraT > 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'o sursa a provenientei n-avea T (stare nesincronizata)', surse: l.surseFaraT })
+  if (l.abateri > 0) return refuse(Reason.INVARIANT_INCALCAT, { motiv: 'evidenta maselor nu se inchide', abateri: l.abateri })
+  if (!l.graf.ok) return l.graf
+  if (l.deUrgenta) return refuse(Reason.INVARIANT_INCALCAT, { motiv: MOTIV_GRAF_URGENTA })
+  return accept()
+}
+
 /** Perechile (componentă nouă, sursă) ale lotului, pe fel (contoarele de viață ale porților, SAV-5). */
 function numaraSursele(stat: StatTermic, sch: SchimbareCamere): void {
   // determinism-ok: numărători (sume întregi), ordinea nu contează.
@@ -551,18 +582,24 @@ function numaraSursele(stat: StatTermic, sch: SchimbareCamere): void {
  *
  * Invarianții nu aruncă: o ștampilă care nu e a indexului la intrare (un lot sincronizat pe lângă) își pierde
  * proveniența — graful se reface integral, T se reia de la echilibru pe toate componentele, se numără și se întoarce
- * `INVARIANT_INCALCAT`. La fel se numără o sursă fără T (o stare nesincronizată), abaterile evidenței și un graf refuzat.
+ * `INVARIANT_INCALCAT`. Altfel verdictul lotului (`verdictulLotului`) numără o sursă fără T (o stare nesincronizată),
+ * abaterile evidenței, un graf refuzat și o refacere de URGENȚĂ a grafului în deltă (GRAF-1: un invariant al deltei se
+ * repară, dar nu tăcut — viewer-ul alertează doar pe `invarianti`).
  */
 export function sincronizeazaLumea(w: World, rules: Rules): Outcome<SincronizareLume> {
   const st = w.temperatura
   const intrare = verificaStampila(w)
+  const urgente = numarRefaceriDeUrgenta(w.camere)
   const sch = sincronizeazaCamere(w.camere, w.terrain)
   const graf = actualizeazaGraful(w.camere, sch, rules)
+  // După ramura ștampilei de intrare: o ocolire a punctului unic face și ea o refacere de urgență (ștampila grafului nu e
+  // `sch.inainte`), dar e numărată acolo — de două ori ar fi un invariant fals în plus.
   if (!intrare.ok) {
     invariant(st, intrare)
     reiaDeLaEchilibru(w, rules)
     return intrare
   }
+  const deUrgenta = numarRefaceriDeUrgenta(w.camere) !== urgente
   let noi = 0
   let surseFaraT = 0
   let taiate = 0
@@ -581,11 +618,9 @@ export function sincronizeazaLumea(w: World, rules: Rules): Outcome<Sincronizare
   }
   st.stampila = stampilaDe(w.camere)
   st.reguli = rules
-  let o: Outcome<SincronizareLume> = accept({ sch, graf, noi })
-  if (surseFaraT > 0) o = refuse(Reason.INVARIANT_INCALCAT, { motiv: 'o sursa a provenientei n-avea T (stare nesincronizata)', surse: surseFaraT })
-  else if (sch.mase.abateri > 0) o = refuse(Reason.INVARIANT_INCALCAT, { motiv: 'evidenta maselor nu se inchide', abateri: sch.mase.abateri })
-  else if (!graf.ok) o = graf
-  if (!o.ok) invariant(st, o)
+  const v = verdictulLotului({ surseFaraT, abateri: sch.mase.abateri, graf, deUrgenta })
+  let o: Outcome<SincronizareLume> = v.ok ? accept({ sch, graf, noi }) : v
+  if (!v.ok) invariant(st, v)
   if (taiate > 0) {
     const t = refuse(Reason.INVARIANT_INCALCAT, { motiv: MOTIV_TAIERE, componente: taiate })
     st.stat.taieri += taiate
@@ -734,6 +769,9 @@ export function blocTemperaturi(w: World): Outcome<BlocTemperaturi> {
     if (cmp.params.motiv !== 'graful incremental difera de cel integral') return cmp
     st.stat.grafDiferitLaSalvare++
     st.stat.ultimaDiferentaGraf = String(cmp.params.linie)
+    // Numărat și ca invariant (GRAF-1, SAV-R2): viewer-ul alertează doar pe `invarianti` — altfel delta greșită prinsă aici
+    // s-ar repara tăcut la fiecare salvare automată.
+    invariant(st, refuse(Reason.INVARIANT_INCALCAT, { motiv: MOTIV_GRAF_LA_SALVARE, linie: cmp.params.linie }))
   }
   const go = grafulIncremental(w.camere, rules)
   if (!go.ok) return go

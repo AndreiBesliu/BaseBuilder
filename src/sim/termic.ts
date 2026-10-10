@@ -404,6 +404,14 @@ export function statGraf(idx: IndexCamere): StatGraf {
   return e === undefined ? statGol() : { ...e.stat }
 }
 
+/**
+ * Câte refaceri integrale de urgență a avut graful incremental al indexului (`StatGraf.refaceriDeUrgenta`), fără copia lui
+ * `statGraf`: punctul unic îl citește la fiecare lot, înainte și după delta (GRAF-1).
+ */
+export function numarRefaceriDeUrgenta(idx: IndexCamere): number {
+  return GRAFURI.get(idx)?.stat.refaceriDeUrgenta ?? 0
+}
+
 /** Contoarele memoriilor grafului unui index (o copie). */
 export function statMemorieTermica(idx: IndexCamere): StatMemorieTermica {
   const e = GRAFURI.get(idx)
