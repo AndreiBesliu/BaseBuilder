@@ -153,7 +153,8 @@ test('PAS pragul Number / BigInt (§5.3, PAS-6): 2^53 − 2^17 — un nod cu S·
   // marginea grafului; casa singură, fără oameni și fără muchii, deci T* = T (restul < C'). |T| = ⌊(prag − 1)/S⌋ − M pune
   // S·(M + |T|) ≤ prag − 1, iar |T| + 1 îl duce la ≥ prag. Pragul se ia de pe HÂRTIE (2^53 − 2^17), nu din PRAG_NUMBER: testul
   // fixează VALOAREA pragului prin rutare (un prag mai mic trece nodul de jos pe BigInt, unul mai mare îl lasă pe cel de sus pe
-  // Number), nu doar faptul că rutarea urmează constanta.
+  // Number), nu doar faptul că rutarea urmează constanta — într-o fereastră de ±S în jurul lui (S ≈ 2^22 pe casă; cel mai mic S
+  // al unui nod real e ~2^19,5, deci 2^53 însuși, aproape echivalent — exact până la colțul S = 0 —, nu se distinge).
   const PRAG = 9_007_199_254_609_920n
   const A = BigInt(R.ticksPerSecond * 86400 * R.termic.mase.aer)
   const B = BigInt(R.calendar.ziTicks * R.termic.cAerJPeK)

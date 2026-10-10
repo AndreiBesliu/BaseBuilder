@@ -281,10 +281,13 @@ export const MUTATII = [
     t: TP, e: 'PAS pragul Number / BigInt',
   },
   {
-    n: 't.2b §5.3, PAS-6: pragul Number/BigInt la 2^53 (rs(X, 2^16)·ψ poate trece de 2^53: produsul nu mai e exact)',
+    // 2^53 insusi e aproape echivalent (rs(X, 2^16)·ψ atinge 2^53 doar cu rs = 2^37 si ψ = 2^16, adica S = 0) si nu se poate
+    // distinge prin rutare: cel mai mic S al unui nod real e ~2^19,5 (o gaura de o celula), mai mult decat marja de 2^17.
+    // Proba e deci 2^54, unde X insusi nu mai e exact in Number (F1, 10.10: proba cu 2^53 iesea RATATA).
+    n: 't.2b §5.3, PAS-6: pragul Number/BigInt la 2^54 (X trece de 2^53: sumele lui nu mai sunt exacte in Number)',
     f: F,
     a: 'export const PRAG_NUMBER = 9_007_199_254_609_920',
-    b: 'export const PRAG_NUMBER = 9_007_199_254_740_992',
+    b: 'export const PRAG_NUMBER = 18_014_398_509_481_984',
     t: TP, e: 'PAS pragul Number / BigInt',
   },
   {
