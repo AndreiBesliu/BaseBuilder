@@ -64,8 +64,9 @@ export const MUTATII = [
   {
     n: '„nicio zona" numara zone de orice fel',
     f: 'src/sim/zone.ts',
-    a: '      it.ultimulMotivDetaliu[i] = ix.depoziteOrdonate.length === 0 ? DetaliuItem.NICIO_ZONA : DetaliuItem.DEPOZITE_PLINE',
-    b: '      it.ultimulMotivDetaliu[i] = s.vii === 0 ? DetaliuItem.NICIO_ZONA : DetaliuItem.DEPOZITE_PLINE',
+    // Re-ancorata la camara (t.3): cauza are acum trei ramuri (NICIO_ZONA / DEPOZITE_PLINE / FEL_REFUZAT), pe randuri.
+    a: '      it.ultimulMotivDetaliu[i] = ix.depoziteOrdonate.length === 0\n',
+    b: '      it.ultimulMotivDetaliu[i] = s.vii === 0\n',
     t: 'tests/drivere.test.ts', e: '„nicio zona" inseamna niciun DEPOZIT',
   },
   {

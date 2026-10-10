@@ -14,7 +14,8 @@ export const MUTATII = [
   {
     n: 'MOD-1: cu indexul murdar, o celula de depozit goala nu mai conteaza (alerta ramane cat se cara)',
     f: 'src/sim/zone.ts',
-    a: '      return !celulaGoala && it.ultimulMotiv[i] === codMotiv(Reason.FARA_DEPOZIT)',
+    // Re-ancorata la camara (t.3): regula celulei goale e acum PE FEL (`goalaPeFel`); mutantul o scoate de tot, ca inainte.
+    a: '      return ((goalaPeFel >> it.kind[i]!) & 1) === 0 && it.ultimulMotiv[i] === codMotiv(Reason.FARA_DEPOZIT)',
     b: '      return it.ultimulMotiv[i] === codMotiv(Reason.FARA_DEPOZIT)',
     t: REC, e: 'MOD-1: depozit cu loc',
   },
@@ -35,15 +36,16 @@ export const MUTATII = [
   {
     n: 'MOD-1: alerta spune „niciun depozit" cand depozitele sunt doar pline',
     f: 'viewer/ui/model.ts',
-    a: '    ? { activ: true, text: vedere.depozite === 0 ? `',
-    b: '    ? { activ: true, text: vedere.depozite !== 0 ? `',
+    // Re-ancorata la camara (t.3): textul alertei are acum si ramura felului refuzat, scos intr-o constanta.
+    a: '  const textFaraDepozit = vedere.depozite === 0\n',
+    b: '  const textFaraDepozit = vedere.depozite !== 0\n',
     t: REC, e: 'MOD-1: depozitul plin',
   },
   // --- MOD-5: un loc de dormit nu e depozit ---
   {
     n: 'MOD-5: bara de sus numara orice zona drept depozit (si locul de dormit)',
     f: 'viewer/ui/model.ts',
-    a: '    if (prioritateaLocului(w.zone, it.wx[i]!, it.wy[i]!, it.z[i]!) > 0) m.inDepozit += it.cantitate[i]!',
+    a: '    if (prioritateaLocului(w.zone, it.wx[i]!, it.wy[i]!, it.z[i]!, it.kind[i]!) > 0) m.inDepozit += it.cantitate[i]!',
     b: '    if (celulaDeZonaLa(w.zone, it.wx[i]!, it.wy[i]!, it.z[i]!) !== -1) m.inDepozit += it.cantitate[i]!',
     t: REC, e: 'MOD-5: un loc de dormit nu e depozit',
   },

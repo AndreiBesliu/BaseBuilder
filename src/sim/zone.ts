@@ -111,10 +111,17 @@ export interface IndexZone {
    * evaluare scumpa candidati care picau mereu, furand plafonul de la sapat.
    */
   maxLocLiber: Int32Array
-  /** Per fel: prioritatea maxima a unei zone cu cel putin o celula acceptanta; 0 = niciuna. */
+  /** Per fel: prioritatea maxima a unei zone cu cel putin o celula acceptanta; 0 = niciuna. Castigul jobului de carat. */
   readonly maxPrioLibera: Int32Array
   /**
-   * Sloturile zonelor de DEPOZIT vii, in ordinea (prioritate desc, id asc).
+   * Per fel: RANGUL maxim (`rangZona`) al unei zone cu cel putin o celula acceptanta; 0 = niciuna (t.3, camara). Poarta
+   * ieftina a lui `deMutat` („exista o zona STRICT mai buna decat locul?"), in aceeasi unitate ca `prioritateaLocului(…, fel)`.
+   * Castigul jobului ramane pe `maxPrioLibera`: rangul departajeaza doar ordinea, nu cat valoreaza caratul.
+   */
+  readonly maxRangLibera: Int32Array
+  /**
+   * Sloturile zonelor de DEPOZIT vii, in ordinea (rang desc, id asc) — rangul e `rangZona`, adica prioritatea, iar la
+   * prioritate egala depozitul cu filtru (camara) inaintea celui care primeste tot.
    *
    * Numai DEPOZIT: lista asta e ordinea in care se cauta o destinatie de carat,
    * si un dormitor n-are ce cauta in ea. Vezi `Zona`.
@@ -174,8 +181,9 @@ export interface ZoneStore {
    * celor primite: 0 = primeste tot, deci zero-initializarea e implicitul corect, un fel adaugat mai tarziu intra
    * implicit in fiecare depozit vechi si migrarea 8 -> 9 e un zero (o masca „primite: toate" scrisa ca biti ar fi
    * refuzat orice fel nou — „stocheaza EXCEPTIA", STARE-9/P12). Resetata in `creeazaZona`: un slot refolosit nu
-   * mosteneste filtrul zonei sterse. Biti in afara felurilor: `encode` arunca, `decode` refuza. Pana la camara
-   * (commit-ul C) n-o citeste nimeni din simulare. Uint8Array: ajunge cat `ITEME <= 8`.
+   * mosteneste filtrul zonei sterse. Biti in afara felurilor: `encode` arunca, `decode` refuza. O scrie doar comanda
+   * `setFiltruZona`; o citesc `indexZone` (celulele care primesc felul), `prioritateaLocului(…, fel)` si `rangZona`
+   * (camara, commit-ul C). Uint8Array: ajunge cat `ITEME <= 8`.
    */
   readonly refuzate: Uint8Array
   /** DERIVED — id → slot */ readonly laId: Map<number, number>
@@ -215,6 +223,7 @@ export function makeZoneStore(capacity: number, cellCapacity: number): ZoneStore
       acceptante: new Int32Array(capacity * ITEME),
       maxLocLiber: new Int32Array(capacity * ITEME),
       maxPrioLibera: new Int32Array(ITEME),
+      maxRangLibera: new Int32Array(ITEME),
       depoziteOrdonate: [],
       paturiLibere: [],
       deMutat: [],
@@ -242,20 +251,44 @@ export function celulaDeZonaLa(s: ZoneStore, wx: number, wy: number, z: number):
   return i === undefined ? -1 : i
 }
 
+/** Zona `zs` primeste felul `fel`? Masca e INVERSA (`refuzate`, 0 = primeste tot). Un adevar pentru index, loc si vedere. */
+export function primesteFel(s: ZoneStore, zs: number, fel: number): boolean {
+  return ((s.refuzate[zs]! >> fel) & 1) === 0
+}
+
 /**
- * Prioritatea DEPOZITULUI in care sta celula (wx, wy, z), sau 0.
+ * RANGUL depozitului `zs` (S24-27 t.3 §5, verif-J-1, verif-UI-3): `prioritate·2 + (1 daca filtrul e ingust)`. La prioritate
+ * EGALA castiga depozitul specializat — camara pictata DUPA depozitul general, la prioritatea implicita, ia hrana si din el
+ * (fara rang: 0 u in camara, „strict mai bun" + id-ul mai mic). Prioritatea jucatorului ramane prima regula: un depozit
+ * general la 4 (rang 8) bate camara la 3 (rang 7). Fara niciun filtru, rangul e prioritatea dublata — aceeasi ordine, deci
+ * aceeasi lume (hash-ul standard neschimbat). „Ingust" = refuza macar un fel; nu e o rutare dupa temperatura: filtrul e
+ * alegerea explicita a jucatorului.
+ */
+export function rangZona(s: ZoneStore, zs: number): number {
+  return s.prioritate[zs]! * 2 + (s.refuzate[zs]! !== 0 ? 1 : 0)
+}
+
+/**
+ * RANGUL (`rangZona`) DEPOZITULUI in care sta celula (wx, wy, z), PENTRU felul `fel`, sau 0.
  *
  * 0 si pentru o celula dintr-o zona de alt fel: „cat de bine e asezata marfa
  * aici" are sens doar intr-un depozit. Fara clauza asta, un morman cazut intr-un
  * dormitor ar mosteni prioritatea dormitorului, si cum scannerul cere o zona
  * STRICT mai buna decat locul, n-ar mai fi luat de acolo niciodata.
+ *
+ * 0 si intr-un depozit care REFUZA felul (t.3, camara): piatra din camara e „pe jos" — se cara afara daca are unde, iar
+ * ecranul n-o mai numara „in depozit". `fel` e OBLIGATORIU, fara valoare implicita (verif-P4): un implicit „orice fel"
+ * ascundea de tsc cei patru cititori din viewer (rezumatul, inspectorul, „nimeni-cara", vederea), care spuneau „În
+ * depozit." pe molozul refuzat. Unitatea e rangul, comparat cu `rangZona` in `incapeUndeva`, `cautaDestinatie` si
+ * `maxRangLibera`; ecranul citeste doar `> 0`.
  */
-export function prioritateaLocului(s: ZoneStore, wx: number, wy: number, z: number): number {
+export function prioritateaLocului(s: ZoneStore, wx: number, wy: number, z: number, fel: number): number {
   const cs = celulaDeZonaLa(s, wx, wy, z)
   if (cs === -1) return 0
   const zs = slotZona(s, s.celule.zonaId[cs]!)
   if (zs === -1 || s.kind[zs] !== Zona.DEPOZIT) return 0
-  return s.prioritate[zs]!
+  if (!primesteFel(s, zs, fel)) return 0
+  return rangZona(s, zs)
 }
 
 /**
@@ -272,12 +305,23 @@ export function prioritateaLocului(s: ZoneStore, wx: number, wy: number, z: numb
  * pe morman la ultima reconstructie. O celula de sub un santier viu (`subSantier`) nu se numara:
  * nici indexul nu o ofera.
  *
+ * Cu filtrul (t.3, verif-P4), regula celulei goale e PE FEL: o celula goala a camarii „doar hrana" nu primeste piatra.
+ * `goalaPeFel` e masca felurilor primite de macar o celula goala; trecerea se opreste cand le-a gasit pe toate cele
+ * PRIMITE de vreun depozit (`primeste`) — un fel pe care nu-l primeste nimeni nu se poate gasi, deci cautarea lui ar fi o
+ * trecere completa degeaba (verif-P4 V2b: 24–44 µs → 0,1–0,2 µs pe o camara de 4.095 de celule).
+ *
  * `rules` da headroom-ul pentru `subSantier`. Implicit `DEFAULT_RULES`, fiindca apelantii din
  * viewer (model.ts, overlay-joburi.ts) nu-l trec inca; au `rules` la indemana si ar trebui sa-l dea.
  */
 export interface VedereFaraDepozit {
   /** Cate zone de DEPOZIT vii exista (0 ⇒ „niciun depozit", altfel „nu incap"). Dormitoarele nu conteaza. */
   readonly depozite: number
+  /**
+   * Bitul k = vreun depozit viu primeste felul k (filtrul, t.3). UN adevar pentru cauza de pe morman (`FEL_REFUZAT`, in
+   * inspector) si pentru alerta („n-au niciun depozit care sa le primeasca felul"): fara el, inspectorul si alerta cereau
+   * „Mărește" pentru un fel pe care niciun depozit nu-l primeste (verif-P4, al cincilea cititor).
+   */
+  readonly primeste: number
   esteFaraDepozit(item: number): boolean
 }
 
@@ -285,32 +329,42 @@ export function vedereFaraDepozit(w: World, rules: Rules = DEFAULT_RULES): Veder
   const s = w.zone
   const ix = s.index
   const it = w.iteme
+  const TOATE = (1 << ITEME) - 1
   let depozite = 0
-  for (let i = 0; i < s.count; i++) if (s.alive[i] === 1 && s.kind[i] === Zona.DEPOZIT) depozite++
+  let primeste = 0
+  for (let i = 0; i < s.count; i++) {
+    if (s.alive[i] === 1 && s.kind[i] === Zona.DEPOZIT) {
+      depozite++
+      primeste |= TOATE & ~s.refuzate[i]!
+    }
+  }
   const deMutat = ix.murdar ? null : new Set(ix.deMutat)
-  let celulaGoala = false
+  let goalaPeFel = 0
   if (ix.murdar) {
     const c = s.celule
-    for (let cs = 0; cs < c.count && !celulaGoala; cs++) {
+    for (let cs = 0; cs < c.count && goalaPeFel !== primeste; cs++) {
       if (c.alive[cs] === 0) continue
       const zs = slotZona(s, c.zonaId[cs]!)
       if (zs === -1 || s.kind[zs] !== Zona.DEPOZIT) continue
+      const aici = TOATE & ~s.refuzate[zs]!
+      if ((goalaPeFel | aici) === goalaPeFel) continue // nu aduce niciun fel nou
       if (it.laCelula.has(cellKey(c.wx[cs]!, c.wy[cs]!, c.z[cs]!))) continue
       if (rezervariPentru(w.rezervari, c.id[cs]!, Strat.LUCRU).length > 0) continue
       // Aceeasi regula ca indexul: o celula de sub un santier viu nu primeste nimic (USA-5). Fara ea,
       // cu indexul murdar, vederea spunea „are depozit" exact cand simularea spunea FARA_DEPOZIT.
       if (subSantier(w, rules, c.wx[cs]!, c.wy[cs]!, c.z[cs]!)) continue
-      celulaGoala = true
+      goalaPeFel |= aici
     }
   }
   return {
     depozite,
+    primeste,
     esteFaraDepozit(i) {
       if (it.alive[i] !== 1) return false
-      if (prioritateaLocului(s, it.wx[i]!, it.wy[i]!, it.z[i]!) !== 0) return false
+      if (prioritateaLocului(s, it.wx[i]!, it.wy[i]!, it.z[i]!, it.kind[i]!) !== 0) return false
       if (rezervariPentru(w.rezervari, it.id[i]!, Strat.CARAT).length > 0) return false
       if (deMutat !== null) return !deMutat.has(i)
-      return !celulaGoala && it.ultimulMotiv[i] === codMotiv(Reason.FARA_DEPOZIT)
+      return ((goalaPeFel >> it.kind[i]!) & 1) === 0 && it.ultimulMotiv[i] === codMotiv(Reason.FARA_DEPOZIT)
     },
   }
 }
@@ -441,14 +495,17 @@ export function reindexeazaZone(s: ZoneStore, rules: Rules): Outcome<void> {
  * evaluari scumpe, pe viata, fiindca depozitul bun avea loc doar in mormane de
  * pamant.
  *
+ * Cu filtrul (t.3): o celula ACCEPTA doar felurile pe care zona ei le primeste — cea goala pe toate cele primite, cea
+ * partiala doar daca zona ii primeste felul (altfel nu e libera deloc: piatra ramasa in camara nu e un loc de piatra).
+ *
  * `deMutat` sunt itemele pe care scannerul are voie sa le vada: cele cu o zona
- * strict mai buna decat locul lor. Un item rezervat ca sursa ramane in lista;
+ * strict mai buna decat locul lor (pe RANG, `rangZona`). Un item rezervat ca sursa ramane in lista;
  * scannerul il respinge ieftin cu `poateRezerva`.
  */
-/** Exista o zona strict mai buna decat `prioLoc` cu loc pentru `cant` din felul `kind`? */
+/** Exista o zona strict mai buna (pe rang) decat `prioLoc` cu loc pentru `cant` din felul `kind`? */
 function incapeUndeva(s: ZoneStore, ix: IndexZone, kind: number, cant: number, prioLoc: number): boolean {
   for (const zs of ix.depoziteOrdonate) {
-    if (s.prioritate[zs]! <= prioLoc) return false
+    if (rangZona(s, zs) <= prioLoc) return false
     if (ix.maxLocLiber[zs * ITEME + kind]! >= cant) return true
   }
   return false
@@ -467,6 +524,11 @@ function incapeUndeva(s: ZoneStore, ix: IndexZone, kind: number, cant: number, p
  * Restul indexului (`comestibile`, `peFel`, depozitele, paturile) se schimba doar la moarte, care murdareste ca azi. Un
  * index deja murdar: nimic de facut. Probele negative (cate o clauza scoasa) lasa indexul invechit: fara (a) 36–138 de pasi
  * invechiti din 600, fara (b) 459–555, fara (c) 91–125; „doar la moarte" 567–600 (verif-P3).
+ *
+ * Cu filtrul (t.3, camara) predicatul copiaza `indexZone` si aici: (a) si (b) privesc doar o zona care PRIMESTE felul — o
+ * celula cu un fel refuzat nu intra in `libere`/`acceptante`/`maxLocLiber` oricat ar scadea, deci nu schimba nimic (altfel:
+ * o refacere degeaba la fiecare unitate stricata in depozitul care refuza hrana); (c) se judeca pe RANG, ca `deMutat`
+ * (altfel hrana din depozitul general, la aceeasi prioritate cu o camara, isi schimba apartenenta nevazuta).
  */
 export function scadereaSchimbaIndexul(w: World, rules: Rules, slot: number, q0: number, q1: number): boolean {
   const s = w.zone
@@ -476,16 +538,16 @@ export function scadereaSchimbaIndexul(w: World, rules: Rules, slot: number, q0:
   const k = it.kind[slot]!
   const cs = celulaDeZonaLa(s, it.wx[slot]!, it.wy[slot]!, it.z[slot]!)
   const zs = cs === -1 ? -1 : slotZona(s, s.celule.zonaId[cs]!)
-  if (zs !== -1 && s.kind[zs] === Zona.DEPOZIT) {
+  if (zs !== -1 && s.kind[zs] === Zona.DEPOZIT && primesteFel(s, zs, k)) {
     if (q0 >= rules.itemStackMax) return true
     if (rules.itemStackMax - q1 > ix.maxLocLiber[zs * ITEME + k]!) return true
   }
   const c0 = Math.min(q0, rules.haulCarryMax)
   const c1 = Math.min(q1, rules.haulCarryMax)
   if (c0 === c1) return false
-  const p = prioritateaLocului(s, it.wx[slot]!, it.wy[slot]!, it.z[slot]!)
-  const inainte = ix.maxPrioLibera[k]! > p && incapeUndeva(s, ix, k, c0, p)
-  const dupa = ix.maxPrioLibera[k]! > p && incapeUndeva(s, ix, k, c1, p)
+  const p = prioritateaLocului(s, it.wx[slot]!, it.wy[slot]!, it.z[slot]!, k)
+  const inainte = ix.maxRangLibera[k]! > p && incapeUndeva(s, ix, k, c0, p)
+  const dupa = ix.maxRangLibera[k]! > p && incapeUndeva(s, ix, k, c1, p)
   return inainte !== dupa
 }
 
@@ -499,16 +561,17 @@ export function indexZone(w: World, rules: Rules): IndexZone {
   ix.murdar = false
   ix.reconstructii++
 
-  // Depozitele vii, ordonate. Ordine TOTALA pe date persistate (prioritate, id).
+  // Depozitele vii, ordonate. Ordine TOTALA pe date persistate (rang = prioritate·2 + filtru, id).
   ix.depoziteOrdonate.length = 0
   for (let i = 0; i < s.count; i++) if (s.alive[i] === 1 && s.kind[i] === Zona.DEPOZIT) ix.depoziteOrdonate.push(i)
-  ix.depoziteOrdonate.sort((a, b) => s.prioritate[b]! - s.prioritate[a]! || s.id[a]! - s.id[b]!)
+  ix.depoziteOrdonate.sort((a, b) => rangZona(s, b) - rangZona(s, a) || s.id[a]! - s.id[b]!)
 
   if (ix.acceptante.length < s.count * ITEME) ix.acceptante = new Int32Array(s.capacity * ITEME)
   if (ix.maxLocLiber.length < s.count * ITEME) ix.maxLocLiber = new Int32Array(s.capacity * ITEME)
   ix.acceptante.fill(0)
   ix.maxLocLiber.fill(0)
   ix.maxPrioLibera.fill(0)
+  ix.maxRangLibera.fill(0)
   for (let i = 0; i < s.count; i++) {
     if (!ix.libere[i]) ix.libere[i] = []
     else ix.libere[i]!.length = 0
@@ -550,10 +613,12 @@ export function indexZone(w: World, rules: Rules): IndexZone {
     if (item === undefined) {
       ix.libere[zs]!.push(cs)
       for (let k = 0; k < ITEME; k++) {
+        // Filtrul (t.3): celula goala a camarii „doar hrana" nu e loc de piatra.
+        if (!primesteFel(s, zs, k)) continue
         ix.acceptante[zs * ITEME + k]!++
         if (rules.itemStackMax > ix.maxLocLiber[zs * ITEME + k]!) ix.maxLocLiber[zs * ITEME + k] = rules.itemStackMax
       }
-    } else if (it.cantitate[item]! < rules.itemStackMax) {
+    } else if (it.cantitate[item]! < rules.itemStackMax && primesteFel(s, zs, it.kind[item]!)) {
       const k = it.kind[item]!
       const loc = rules.itemStackMax - it.cantitate[item]!
       ix.libere[zs]!.push(cs)
@@ -562,8 +627,10 @@ export function indexZone(w: World, rules: Rules): IndexZone {
     }
   }
   for (const zs of ix.depoziteOrdonate) {
+    const rang = rangZona(s, zs)
     for (let k = 0; k < ITEME; k++) {
       if (ix.acceptante[zs * ITEME + k]! > 0 && s.prioritate[zs]! > ix.maxPrioLibera[k]!) ix.maxPrioLibera[k] = s.prioritate[zs]!
+      if (ix.acceptante[zs * ITEME + k]! > 0 && rang > ix.maxRangLibera[k]!) ix.maxRangLibera[k] = rang
     }
   }
 
@@ -578,19 +645,28 @@ export function indexZone(w: World, rules: Rules): IndexZone {
     // Comestibilele, in aceeasi trecere: lista mosteneste exact garantia lui
     // `deMutat`, fara sa ceara un al doilea loc de tinut minte.
     if (rules.nutritie[it.kind[i]!]! > 0) ix.comestibile.push(i)
-    const prioLoc = prioritateaLocului(s, it.wx[i]!, it.wy[i]!, it.z[i]!)
+    const prioLoc = prioritateaLocului(s, it.wx[i]!, it.wy[i]!, it.z[i]!, it.kind[i]!)
     const cant = Math.min(it.cantitate[i]!, rules.haulCarryMax)
-    if (ix.maxPrioLibera[it.kind[i]!]! > prioLoc && incapeUndeva(s, ix, it.kind[i]!, cant, prioLoc)) {
+    if (ix.maxRangLibera[it.kind[i]!]! > prioLoc && incapeUndeva(s, ix, it.kind[i]!, cant, prioLoc)) {
       ix.deMutat.push(i)
     } else if (prioLoc === 0) {
-      // Pe jos si n-are unde. Cauza e TRANSIENT si se scrie aici, ca sa fie
+      // Pe jos (sau intr-un depozit care ii refuza felul) si n-are unde. Cauza e TRANSIENT si se scrie aici, ca sa fie
       // vizibila fara ca vreun pion sa plateasca o evaluare pentru ea.
       ix.peJosFaraDepozit++
       it.ultimulMotiv[i] = codMotiv(Reason.FARA_DEPOZIT)
       // „Nicio zona" inseamna niciun DEPOZIT: cu un dormitor pictat si zero
       // depozite, cauza corecta ramane „n-ai unde pune", nu „depozitele sunt pline".
-      it.ultimulMotivDetaliu[i] = ix.depoziteOrdonate.length === 0 ? DetaliuItem.NICIO_ZONA : DetaliuItem.DEPOZITE_PLINE
+      // Iar „pline" doar daca vreun depozit ii PRIMESTE felul (t.3): altfel „Mareste" ar fi un sfat mincinos.
+      it.ultimulMotivDetaliu[i] = ix.depoziteOrdonate.length === 0
+        ? DetaliuItem.NICIO_ZONA
+        : primitDeVreunDepozit(s, ix, it.kind[i]!) ? DetaliuItem.DEPOZITE_PLINE : DetaliuItem.FEL_REFUZAT
     }
   }
   return ix
+}
+
+/** Vreun depozit viu (din `depoziteOrdonate`) primeste felul? Pentru cauza `FEL_REFUZAT` scrisa de index. */
+function primitDeVreunDepozit(s: ZoneStore, ix: IndexZone, fel: number): boolean {
+  for (const zs of ix.depoziteOrdonate) if (primesteFel(s, zs, fel)) return true
+  return false
 }

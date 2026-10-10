@@ -102,6 +102,16 @@ export const DetaliuItem = {
   DEPOZITE_PLINE: 2,
   /** Exista loc, dar nu in componenta pionului care a intrebat. Actionabil: leaga zonele. */
   COMPONENTE_DIFERITE: 3,
+  /**
+   * Exista depozite, dar niciunul nu PRIMESTE felul asta (filtrul, t.3 — camara „doar hrana"). Actionabil: schimba filtrul
+   * unui depozit sau picteaza unul nou. Scris de `indexZone`; ecranul il citeste din `VedereFaraDepozit.primeste`.
+   */
+  FEL_REFUZAT: 4,
+  /**
+   * Exista loc pentru felul asta, dar numai dincolo de raza destinatiei (`haulDestRadiusCells`, masurata de la morman).
+   * Actionabil: picteaza un depozit mai aproape. Inainte de t.3 se scria „pline" (H4 E10: pivnita avea 7 celule libere).
+   */
+  PREA_DEPARTE: 5,
 } as const
 
 export interface ItemStore {

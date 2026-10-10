@@ -54,6 +54,12 @@ export type Command =
   /** Sterge o zona cu toate celulele ei. Cine ducea ceva acolo e intrerupt (marfa la picioare). */
   | { readonly kind: 'stergeZona'; readonly id: number }
   | { readonly kind: 'setPrioritateZona'; readonly id: number; readonly prioritate: number }
+  /**
+   * Filtrul unui DEPOZIT (t.3, camara): `refuzate` = masca felurilor pe care NU le primeste (bitul k = felul `Item` k; 0 =
+   * primeste tot). Camara „doar hrana" = toate felurile in afara de HRANA. Ce sta deja acolo dintr-un fel refuzat ramane pe
+   * loc, dar nu mai e „in depozit": se cara afara daca are unde.
+   */
+  | { readonly kind: 'setFiltruZona'; readonly id: number; readonly refuzate: number }
   /** Pune un morman pe jos. Pentru harness si depanare: un item apare altfel doar din sapat. */
   | { readonly kind: 'lasaItem'; readonly fel: number; readonly cantitate: number; readonly wx: number; readonly wy: number; readonly z: number }
 
@@ -472,6 +478,27 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
         return refuse(Reason.VALOARE_INVALIDA, { camp: 'prioritate', valoare: String(cmd.prioritate), min: 1, max: rules.zonePriorityLevels })
       }
       w.zone.prioritate[zs] = cmd.prioritate
+      marcheazaZoneMurdare(w)
+      uitaRacirileDeMarfa(w)
+      return accept(cmd.id)
+    }
+
+    case 'setFiltruZona': {
+      const zs = slotZona(w.zone, cmd.id)
+      if (zs === -1) return refuse(Reason.ENTITATE_INEXISTENTA, { id: cmd.id })
+      // Filtrul e al unui loc de DEPOZITARE: un dormitor nu primeste marfa deloc, deci o masca pe el ar fi o stare fara
+      // inteles — si rangul (`rangZona`) l-ar citi ca „specializat".
+      if (w.zone.kind[zs] !== Zona.DEPOZIT) {
+        return refuse(Reason.VALOARE_INVALIDA, { camp: 'id', valoare: cmd.id, motiv: 'doar un depozit are filtru', fel: w.zone.kind[zs]! })
+      }
+      // Aceleasi conditii ca decode (save.ts): un intreg, biti doar pe felurile cunoscute. Un bit in afara ar trece prin
+      // Uint8Array trunchiat (256 → 0 = „primeste tot") sau ar face encode sa arunce la urmatoarea salvare.
+      const feluri = (1 << ITEME) - 1
+      if (!Number.isInteger(cmd.refuzate) || cmd.refuzate < 0 || (cmd.refuzate & ~feluri) !== 0) {
+        return refuse(Reason.VALOARE_INVALIDA, { camp: 'refuzate', valoare: String(cmd.refuzate), min: 0, max: feluri, motiv: 'biti in afara felurilor' })
+      }
+      w.zone.refuzate[zs] = cmd.refuzate
+      // Premisa indexului (ce primeste zona, rangul ei) si a oricarui „n-are unde" tocmai s-a schimbat.
       marcheazaZoneMurdare(w)
       uitaRacirileDeMarfa(w)
       return accept(cmd.id)

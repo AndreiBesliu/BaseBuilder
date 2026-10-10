@@ -481,7 +481,7 @@ test('asazaItem: tocul usii e a TREIA trecere — marfa lasata pe usa ajunge la 
 // ---------------------------------------------------------------------------
 
 interface Instantaneu {
-  murdar: boolean; libere: number[][]; acceptante: Int32Array; maxLocLiber: Int32Array; maxPrioLibera: Int32Array
+  murdar: boolean; libere: number[][]; acceptante: Int32Array; maxLocLiber: Int32Array; maxPrioLibera: Int32Array; maxRangLibera: Int32Array
   depoziteOrdonate: number[]; paturiLibere: number[]; deMutat: number[]; comestibile: number[]; peFel: number[][]; peJosFaraDepozit: number
   ultimulMotiv: Uint8Array; ultimulMotivDetaliu: Uint8Array
 }
@@ -489,7 +489,7 @@ function instantaneu(w: World): Instantaneu {
   const ix = w.zone.index
   return {
     murdar: ix.murdar, libere: ix.libere.map((l) => (l ? l.slice() : [])), acceptante: ix.acceptante.slice(), maxLocLiber: ix.maxLocLiber.slice(),
-    maxPrioLibera: ix.maxPrioLibera.slice(), depoziteOrdonate: ix.depoziteOrdonate.slice(), paturiLibere: ix.paturiLibere.slice(), deMutat: ix.deMutat.slice(),
+    maxPrioLibera: ix.maxPrioLibera.slice(), maxRangLibera: ix.maxRangLibera.slice(), depoziteOrdonate: ix.depoziteOrdonate.slice(), paturiLibere: ix.paturiLibere.slice(), deMutat: ix.deMutat.slice(),
     comestibile: ix.comestibile.slice(), peFel: ix.peFel.map((l) => l.slice()), peJosFaraDepozit: ix.peJosFaraDepozit,
     ultimulMotiv: w.iteme.ultimulMotiv.slice(), ultimulMotivDetaliu: w.iteme.ultimulMotivDetaliu.slice(),
   }
@@ -501,6 +501,7 @@ function puneLaLoc(w: World, a: Instantaneu): void {
   ix.acceptante.set(a.acceptante)
   ix.maxLocLiber.set(a.maxLocLiber)
   ix.maxPrioLibera.set(a.maxPrioLibera)
+  ix.maxRangLibera.set(a.maxRangLibera)
   for (const [l, v] of [[ix.depoziteOrdonate, a.depoziteOrdonate], [ix.paturiLibere, a.paturiLibere], [ix.deMutat, a.deMutat], [ix.comestibile, a.comestibile]] as const) { l.length = 0; l.push(...v) }
   for (let k = 0; k < a.peFel.length; k++) { ix.peFel[k]!.length = 0; ix.peFel[k]!.push(...a.peFel[k]!) }
   ix.peJosFaraDepozit = a.peJosFaraDepozit
@@ -514,6 +515,7 @@ function diferente(a: Instantaneu, b: Instantaneu, zone: number, iteme: number):
   if (!egale(a.acceptante.subarray(0, zone * 4), b.acceptante.subarray(0, zone * 4))) d.push('acceptante')
   if (!egale(a.maxLocLiber.subarray(0, zone * 4), b.maxLocLiber.subarray(0, zone * 4))) d.push('maxLocLiber')
   if (!egale(a.maxPrioLibera, b.maxPrioLibera)) d.push('maxPrioLibera')
+  if (!egale(a.maxRangLibera, b.maxRangLibera)) d.push('maxRangLibera')
   if (!egale(a.depoziteOrdonate, b.depoziteOrdonate)) d.push('depoziteOrdonate')
   if (!egale(a.deMutat, b.deMutat)) d.push('deMutat')
   if (!egale(a.comestibile, b.comestibile)) d.push('comestibile')

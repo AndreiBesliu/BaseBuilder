@@ -56,9 +56,11 @@ export interface Cifre {
   readonly razaLucru: number
   /** Cat de departe cauta un pion mancare sau pat. */
   readonly razaNevoi: number
+  /** Cat de departe de morman cauta un caraus locul din depozit (`haulDestRadiusCells`). */
+  readonly razaDepozit: number
 }
 
-export const CIFRE_IMPLICITE: Cifre = { suportMax: 4, suportRazaGrinda: 10, agentHeadroomM: 2, maxStepM: 1, cantitatePiesa: 20, pragRidicare: 10, atingereSusM: 2, razaLucru: 96, razaNevoi: 96 }
+export const CIFRE_IMPLICITE: Cifre = { suportMax: 4, suportRazaGrinda: 10, agentHeadroomM: 2, maxStepM: 1, cantitatePiesa: 20, pragRidicare: 10, atingereSusM: 2, razaLucru: 96, razaNevoi: 96, razaDepozit: 96 }
 
 /**
  * Un numar urmat de substantiv, cu „de" unde il cere romana: dupa 20 si peste, cu exceptia celor
@@ -274,6 +276,8 @@ export function textMotiv(
   if (sursa === 'morman') {
     if (motiv === Reason.FARA_DEPOZIT) {
       if (detaliu === DetaliuItem.DEPOZITE_PLINE) return { titlu: 'Toate locurile libere din depozite sunt pline sau deja promise unui cărăuș.', actiune: 'Mărește un depozit sau pictează altul.' }
+      if (detaliu === DetaliuItem.FEL_REFUZAT) return { titlu: `Niciun depozit nu primește ${NUME_ITEM_MIC[material] ?? 'marfa asta'}.`, actiune: 'Schimbă filtrul unui depozit sau pictează unul nou.' }
+      if (detaliu === DetaliuItem.PREA_DEPARTE) return { titlu: `Depozitul cu loc e prea departe: cărăușii caută loc doar pe ${cant(cifre.razaDepozit, 'celule')} în jurul mormanului.`, actiune: 'Pictează un depozit mai aproape.' }
       return { titlu: `Niciun depozit pentru ${NUME_ITEM_MIC[material] ?? 'marfă'}.`, actiune: 'Pictează un depozit (Zone ▸ Depozit).' }
     }
     if (motiv === Reason.INACCESIBIL || detaliu === DetaliuItem.COMPONENTE_DIFERITE) {

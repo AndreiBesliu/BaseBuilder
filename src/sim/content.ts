@@ -381,6 +381,12 @@ export interface Rules {
   /** Prioritatea unei zone cand jucatorul nu spune. */
   readonly zonePriorityDefault: number
   /**
+   * Groapa de moloz a camarii (t.3 §5, verif-J-2; `groapaDeMoloz`, camara.ts): cate celule se adauga peste
+   * `⌈moloz / itemStackMax⌉` in marimea propusa. Mormanele nu se umplu la 75: `haulCarryMax` 50 < 75 lasa mormane partiale.
+   * Masurat: 4×4 = 16 celule pentru 800–870 u (12 pline) → 1,2–2,7% pierdere; 3×3 (sub moloz) → 5,4–8,6%.
+   */
+  readonly groapaMargineCelule: number
+  /**
    * Ce lasa fiecare material la sapat, indexat cu `MaterialId`. In fisier e un
    * obiect cu numele materialelor solide drept chei; loader-ul REFUZA daca
    * lipseste vreunul — un material fara yield ar produce iteme de zero bucati pe
@@ -598,6 +604,7 @@ const RULES_SPEC: Record<Exclude<keyof Rules, (typeof SECTIUNI)[number]>, FieldS
   zoneCellCapacity: { min: 1, max: 1000000 },
   zonePriorityLevels: { min: 1, max: 9 },
   zonePriorityDefault: { min: 1, max: 9 },
+  groapaMargineCelule: { min: 0, max: 4096 },
   nevoieMax: { min: 1, max: 1000000 },
   nevoiTicks: { min: 1, max: 1000000 },
   nevoieFazaPas: { min: 1, max: 1000000 },
@@ -1671,6 +1678,8 @@ export const DEFAULT_RULES: Rules = {
   zoneCellCapacity: 4096,
   zonePriorityLevels: 5,
   zonePriorityDefault: 3,
+  // Groapa de moloz: 4 celule peste ⌈moloz/75⌉ (verif-J-2: 4×4 pentru 800–870 u).
+  groapaMargineCelule: 4,
   // Indexat cu MaterialId: AER, ROCA, PAMANT, IARBA, APA, LEMN_CONSTRUIT, PIATRA_CONSTRUITA, MOLOZ, GRINDA, USA.
   digYield: [
     { fel: 0, cantitate: 0 },

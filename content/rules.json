@@ -44,6 +44,7 @@
   "zoneCellCapacity": 4096,
   "zonePriorityLevels": 5,
   "zonePriorityDefault": 3,
+  "groapaMargineCelule": 4,
   "suportMax": 4,
   "suportRazaGrinda": 10,
   "atingereSusM": 2,

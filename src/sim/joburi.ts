@@ -108,7 +108,7 @@ import type { DesignationStore } from './desemnari.ts'
 import type { Cerere } from './rezervari.ts'
 import { elibereaza, elibereazaTinta, elibereazaUna, poateRezerva, rezervaToate, rezervatPe, Strat, sumaRezervata } from './rezervari.ts'
 import { asazaItem, creeazaItem, DetaliuItem, iaDinItem, itemLaCelula, locPeCelula, numaraPierdute, nutritieEfectiva, parteDinAlterare, slotItem, stergeItem, unitatiPentruNutritie } from './iteme.ts'
-import { celulaDeZonaLa, indexZone, marcheazaZoneMurdare, prioritateaLocului, slotCelulaDeZona, slotZona, stergeCelulaDeZona, subSantier } from './zone.ts'
+import { celulaDeZonaLa, indexZone, marcheazaZoneMurdare, prioritateaLocului, rangZona, slotCelulaDeZona, slotZona, stergeCelulaDeZona, subSantier } from './zone.ts'
 import type { StatAlterare } from './alterare.ts'
 
 // ---------------------------------------------------------------------------
@@ -1061,8 +1061,12 @@ type CandFel = typeof CAND_SAPA | typeof CAND_CARA | typeof CAND_CONSTRUIESTE
  *
  * Refuzul spune DE CE, ca apelantul sa-l memoreze unde ii e locul:
  *   FARA_DEPOZIT / `pline`      — nicio celula cu loc pentru cantitatea asta (pe item)
+ *   FARA_DEPOZIT / `departe`    — celule cu loc exista, dar toate cele vazute sunt dincolo de raza (pe item; t.3, H4 E10)
  *   FARA_DEPOZIT / `evitate`    — toate zonele cu loc sunt evitate de pionul asta (pe pereche)
  *   INACCESIBIL  / `componenta` — exista, dar nu in componenta pionului (pe item)
+ *
+ * `prioLoc` si ordinea zonelor sunt pe RANG (`rangZona`, t.3): la prioritate egala, camara cu filtru e strict mai buna
+ * decat depozitul general, deci hrana pleaca din el spre ea, nu si invers.
  */
 export function cautaDestinatie(
   w: World,
@@ -1086,8 +1090,9 @@ export function cautaDestinatie(
   let zoneCuLoc = 0
   let evitate = 0
   let inAltaComponenta = false
+  let departeCuLoc = false
   for (const zs of ix.depoziteOrdonate) {
-    const prio = s.prioritate[zs]!
+    const prio = rangZona(s, zs)
     if (prio <= prioLoc) break
     // Poarta ieftina intreaba „incape CAT car?", nu „e vreun loc?": altfel un
     // depozit cu toate celulele la 74/75 trimitea fiecare candidat la o parcurgere
@@ -1112,7 +1117,11 @@ export function cautaDestinatie(
       const cy = c.wy[cs]!
       const cz = c.z[cs]!
       const dist = Math.abs(cx - fx) + Math.abs(cy - fy) + Math.abs(cz - fz)
-      if (dist > rules.haulDestRadiusCells) continue
+      if (dist > rules.haulDestRadiusCells) {
+        // Doar pentru cauza (H4 E10): „pline" mintea cand singurul loc era dincolo de raza.
+        if (!departeCuLoc && locPeCelula(w, rules, kind, cx, cy, cz) >= cant) departeCuLoc = true
+        continue
+      }
       if (locPeCelula(w, rules, kind, cx, cy, cz) < cant) continue
       // Aici NU se intinde niciun coridor de acoperire.
       //
@@ -1148,6 +1157,9 @@ export function cautaDestinatie(
   // cauza care tinea de un singur pion — si o ascundea de toata colonia.
   if (evitate > 0) return refuse(Reason.FARA_DEPOZIT, { detaliu: 'evitate', zone: zoneCuLoc, evitate })
   if (inAltaComponenta) return refuse(Reason.INACCESIBIL, { detaliu: 'componenta' })
+  // „Departe": nicio celula din raza n-a dat ceva, dar macar una de dincolo avea loc. O celula cu loc PROMISA altui caraus
+  // nu ajunge aici: rezervarea murdareste indexul (`pornesteCara`), iar celula rezervata nu mai e in `libere`.
+  if (departeCuLoc) return refuse(Reason.FARA_DEPOZIT, { detaliu: 'departe', zone: zoneCuLoc, raza: rules.haulDestRadiusCells })
   return refuse(Reason.FARA_DEPOZIT, { detaliu: 'pline', zone: zoneCuLoc })
 }
 
@@ -1716,7 +1728,7 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
     // (b) destinatia. Aceeasi cantitate ca in trecerea ieftina: intre ele nu s-a
     // schimbat nimic pe un singur fir.
     const cant = Math.min(liberPeItem(w, s), rules.haulCarryMax)
-    const prioLoc = prioritateaLocului(w.zone, ixx, iy, iz)
+    const prioLoc = prioritateaLocului(w.zone, ixx, iy, iz, it.kind[s]!)
     const dest = cautaDestinatie(w, rules, slot, it.kind[s]!, cant, ixx, iy, iz, prioLoc, ax, ay, az)
     if (!dest.ok) {
       if (dest.reason === Reason.INACCESIBIL) {
@@ -1730,7 +1742,7 @@ export function cautaJob(w: World, rules: Rules, slot: number): boolean {
         noteaza(Reason.FARA_DEPOZIT)
       } else {
         raport.faraDepozit++
-        memoreazaPeItem(w, rules, s, Reason.FARA_DEPOZIT, DetaliuItem.DEPOZITE_PLINE)
+        memoreazaPeItem(w, rules, s, Reason.FARA_DEPOZIT, dest.params.detaliu === 'departe' ? DetaliuItem.PREA_DEPARTE : DetaliuItem.DEPOZITE_PLINE)
         noteaza(Reason.FARA_DEPOZIT)
       }
       compAgent = find(w.regions, regionAt(w.regions, ax, ay, az))

@@ -52,6 +52,7 @@ export function cifreDinReguli(rules: Rules): Cifre {
     atingereSusM: rules.atingereSusM,
     razaLucru: rules.jobScanRadiusCells,
     razaNevoi: rules.nevoieScanRadiusCells,
+    razaDepozit: rules.haulDestRadiusCells,
   }
 }
 
@@ -130,7 +131,7 @@ export function rezumatColonie(w: World, rules: Rules): RezumatColonie {
     if (it.alive[i] !== 1) continue
     const m = acc[it.kind[i]!]
     if (!m) continue
-    if (prioritateaLocului(w.zone, it.wx[i]!, it.wy[i]!, it.z[i]!) > 0) m.inDepozit += it.cantitate[i]!
+    if (prioritateaLocului(w.zone, it.wx[i]!, it.wy[i]!, it.z[i]!, it.kind[i]!) > 0) m.inDepozit += it.cantitate[i]!
     else m.peJos += it.cantitate[i]!
   }
   const a = w.agents
@@ -549,7 +550,7 @@ function stareMorman(w: World, rules: Rules, is: number, vedere: VedereFaraDepoz
     const constructor = rez.find((r) => { const s = slotOf(w.agents, r.claimant); return s !== -1 && w.agents.jobKind[s] === FelJob.CONSTRUIESTE })
     return { titlu: constructor ? `Luat pentru construit — ${numePion(constructor.claimant)}.` : 'În drum spre depozit.', actiune: '' }
   }
-  if (prioritateaLocului(w.zone, it.wx[is]!, it.wy[is]!, it.z[is]!) > 0) return { titlu: 'În depozit.', actiune: '' }
+  if (prioritateaLocului(w.zone, it.wx[is]!, it.wy[is]!, it.z[is]!, it.kind[is]!) > 0) return { titlu: 'În depozit.', actiune: '' }
   const cod = motivDinCod(it.ultimulMotiv[is]!)
   const s = Math.ceil((it.reincercaLaTick[is]! - w.tick) / rules.ticksPerSecond)
   if (cod !== null && s > 0) {
@@ -557,7 +558,9 @@ function stareMorman(w: World, rules: Rules, is: number, vedere: VedereFaraDepoz
     return { titlu: `${t.titlu} Reîncearcă în ${s} s.`, actiune: t.actiune }
   }
   if (vedere.esteFaraDepozit(is)) {
-    return textMotiv('morman', Reason.FARA_DEPOZIT, vedere.depozite === 0 ? DetaliuItem.NICIO_ZONA : DetaliuItem.DEPOZITE_PLINE, undefined, cifre, it.kind[is]!)
+    // Trei cauze, din `vedere` (un adevar cu alerta): niciun depozit; niciunul nu-i primeste felul (filtrul, t.3); pline.
+    const detaliu = vedere.depozite === 0 ? DetaliuItem.NICIO_ZONA : ((vedere.primeste >> it.kind[is]!) & 1) === 0 ? DetaliuItem.FEL_REFUZAT : DetaliuItem.DEPOZITE_PLINE
+    return textMotiv('morman', Reason.FARA_DEPOZIT, detaliu, undefined, cifre, it.kind[is]!)
   }
   return { titlu: 'Pe jos: așteaptă un cărăuș.', actiune: '' }
 }
@@ -995,7 +998,7 @@ export function semnaleAlerte(w: World, rules: Rules, previz: Previz | null): Ma
   const vedere = vedereFaraDepozit(w, rules)
   const it = w.iteme
   let peJosIteme = 0
-  for (let i = 0; i < it.count; i++) if (it.alive[i] === 1 && prioritateaLocului(w.zone, it.wx[i]!, it.wy[i]!, it.z[i]!) === 0) peJosIteme++
+  for (let i = 0; i < it.count; i++) if (it.alive[i] === 1 && prioritateaLocului(w.zone, it.wx[i]!, it.wy[i]!, it.z[i]!, it.kind[i]!) === 0) peJosIteme++
   m.set('nimeni-cara', peJosIteme > 0 && vedere.depozite > 0 && !pe.cara ? { activ: true, text: 'Nimeni n-are voie să care (prioritate 0 sau Exclusiv pe altceva).', tinta: null } : inactiv)
 
   // Blocate: nerezervate, cu motiv de blocaj, fara nicio lucrare IN CURS la cel mult 8 celule.
@@ -1037,14 +1040,24 @@ export function semnaleAlerte(w: World, rules: Rules, previz: Previz | null): Ma
 
   // Mormane fara depozit: din `vedereFaraDepozit`, aceeasi functie ca inspectorul si Planul (MOD-1:
   // cerea o racire pe care sim-ul nu o scrie, deci alerta nu aparea niciodata).
-  let faraDepozit = 0, primulMorman = -1
+  // Cu filtrul (t.3, verif-P4 V2): mormanele unui fel pe care NICIUN depozit nu-l primeste se numara separat, din
+  // `vedere.primeste` (acelasi adevar ca inspectorul) — „Mărește-le" era un sfat gresit pentru ele.
+  let faraDepozit = 0, primulMorman = -1, refuzate = 0
   for (let i = 0; i < it.count; i++) {
     if (!vedere.esteFaraDepozit(i)) continue
     faraDepozit++
+    if (((vedere.primeste >> it.kind[i]!) & 1) === 0) refuzate++
     if (primulMorman < 0) primulMorman = i
   }
+  const textFaraDepozit = vedere.depozite === 0
+    ? `${faraDepozit === 1 ? 'Un morman n-are unde fi dus' : `${cant(faraDepozit, 'mormane')} n-au unde fi duse`}: niciun depozit. Pictează unul (Zone ▸ Depozit).`
+    : refuzate === faraDepozit
+      ? `${faraDepozit === 1 ? 'Un morman n-are' : `${cant(faraDepozit, 'mormane')} n-au`} niciun depozit care să le primească felul. Schimbă filtrul unui depozit sau pictează unul nou.`
+      : refuzate > 0
+        ? `${cant(faraDepozit, 'mormane')} n-au unde fi duse: ${cant(refuzate, 'mormane', 'unul')} de un fel pe care nu-l primește niciun depozit, restul nu încap. Schimbă filtrul sau mărește depozitele.`
+        : `${faraDepozit === 1 ? 'Un morman nu încape' : `${cant(faraDepozit, 'mormane')} nu încap`} în depozite. Mărește-le.`
   m.set('fara-depozit', faraDepozit > 0
-    ? { activ: true, text: vedere.depozite === 0 ? `${faraDepozit === 1 ? 'Un morman n-are unde fi dus' : `${cant(faraDepozit, 'mormane')} n-au unde fi duse`}: niciun depozit. Pictează unul (Zone ▸ Depozit).` : `${faraDepozit === 1 ? 'Un morman nu încape' : `${cant(faraDepozit, 'mormane')} nu încap`} în depozite. Mărește-le.`, tinta: { fel: 'celula', wx: it.wx[primulMorman]!, wy: it.wy[primulMorman]!, z: it.z[primulMorman]! - 1 } }
+    ? { activ: true, text: textFaraDepozit, tinta: { fel: 'celula', wx: it.wx[primulMorman]!, wy: it.wy[primulMorman]!, z: it.z[primulMorman]! - 1 } }
     : inactiv)
   return m
 }

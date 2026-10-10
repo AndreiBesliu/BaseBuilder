@@ -129,7 +129,7 @@ test('un morman CAZUT intr-un dormitor e dus la depozit, nu lasat acolo', () => 
   const g = solid(w, dorm.x0, dorm.y0)!
   assert.notEqual(celulaDeZonaLa(w.zone, dorm.x0, dorm.y0, g + 1), -1, 'fixtura: mormanul nu e pe o celula de zona')
 
-  assert.equal(prioritateaLocului(w.zone, dorm.x0, dorm.y0, g + 1), 0, 'o celula de dormit nu are prioritate de depozitare')
+  assert.equal(prioritateaLocului(w.zone, dorm.x0, dorm.y0, g + 1, Item.PIATRA), 0, 'o celula de dormit nu are prioritate de depozitare')
   assert.equal(indexZone(w, R).deMutat.length, 1, 'deci mormanul ARE unde sa fie mutat')
 
   const t = panaCand(w, 3000, (ww) => itemeInZona(ww, zDep).iteme === 1)
