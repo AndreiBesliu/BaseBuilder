@@ -314,6 +314,81 @@ test('SALVARE compararea cu graful integral la encode (§6, IDX-4): o delta stri
   assert.equal(statTermic(w).grafDiferitLaSalvare, 1, 'la salvarea urmatoare graful e bun')
 })
 
+/** Casa cu pivniță la echilibru, cu C' al nodului casei din graful incremental stricat (+k fețe de construcție), pășită până când restul trece de C'-ul integral. */
+function casaCuCStricat(k: number): { w: World; id: number; cBun: number; cStricat: number } {
+  const s = casaTermica({ k: 1 })
+  const w = laEchilibru(s.w, 300000)
+  const g = grafLumii(w)
+  const id = componentaLa(w.camere, ...s.rep.casa!)!.id
+  const nod = g.noduri.get(g.nodComp.get(id)!)! as unknown as { nConstr: number }
+  const cBun = capacitateMu(nod as never, R.termic.mase)
+  nod.nConstr += k
+  const cStricat = capacitateMu(nod as never, R.termic.mase)
+  for (let p = 0; p < 20000 && w.temperatura.slot.rest[id]! < cBun; p++) advance(w, TPS, R)
+  assert.ok(w.temperatura.slot.rest[id]! >= cBun, 'fixtura: restul a trecut de C\' integral')
+  return { w, id, cBun, cStricat }
+}
+
+test('SALVARE plasa IDX-4 pe o deriva de C\' (GRAF-2, SAV-R1): C\' incremental cu +k fete de constructie (k 1 si 50), pasit pana cand restul trece de C\' integral — salvarea nu arunca (nici a doua oara, in pauza), restul se normalizeaza exact pe C\'-ul nou in lumea continua, iar ea si lumea incarcata merg identic o zi', () => {
+  // Recenzia GRAF-2 / SAV-R1: encode compara, înlocuia graful, apoi cerea rest < C' pe graful NOU — restul pasului trăise pe
+  // C'-ul derivat, deci encode ARUNCA („temperaturi.rest") la fiecare salvare până la pasul următor; în pauză, la nesfârșit
+  // (k 1…500: aruncă; 20 din 40 de salvări după o derivă proaspătă). Testul vechi al plasei deriva doar un BIN.
+  for (const k of [1, 50]) {
+    const { w, id, cBun, cStricat } = casaCuCStricat(k)
+    assert.equal(cStricat, cBun + k * R.termic.mase.constr, `k=${k}: fixtura, C' derivat`)
+    const H = BigInt(cBun) * BigInt(w.temperatura.slot.t[id]!) + BigInt(w.temperatura.slot.rest[id]!)
+    let text = ''
+    assert.doesNotThrow(() => { text = encode(w) }, `k=${k}: prima salvare`)
+    assert.equal(statTermic(w).grafDiferitLaSalvare, 1)
+    // Normalizarea exactă pe C'-ul integral: aceeași energie H = C'·T + rest, cu 0 ≤ rest < C'.
+    const sl = w.temperatura.slot
+    assert.ok(sl.rest[id]! >= 0 && sl.rest[id]! < cBun, `k=${k}: restul ${sl.rest[id]} in [0, ${cBun})`)
+    assert.equal(BigInt(cBun) * BigInt(sl.t[id]!) + BigInt(sl.rest[id]!), H, `k=${k}: energia pe C'-ul nou, exact`)
+    assert.doesNotThrow(() => encode(w), `k=${k}: a doua salvare, in pauza`)
+    const c = incarca(text)
+    assert.deepEqual(tPeAncora(c), tPeAncora(w), `k=${k}: la incarcare`)
+    advance(w, 2016 * TPS, R)
+    advance(c, 2016 * TPS, R)
+    assert.deepEqual(tPeAncora(c), tPeAncora(w), `k=${k}: dupa o zi`)
+    assert.equal(hashWorld(c), hashWorld(w), `k=${k}`)
+  }
+})
+
+test('SALVARE marginile refuzurilor (SAV-R3): rest == C\' refuzat la decode (aceeasi amprenta) si aruncat la encode, rest = C\' − 1 acceptat; T = −2^31 scris la encode si citit la decode; amprenta 2^32 si −1 refuzate la decode', () => {
+  // Testele vechi foloseau rest 1e12 / 1e9: mutanții „>= → >" la decode și la encode, „t < T_MIN → <=" la encode și amprenta
+  // în afara [0, 2^32) acceptată treceau toată suita (recenzia SAV, m6).
+  const s = scenaSPlus()
+  const text = encode(s.w)
+  const b = JSON.parse(text) as Salvare
+  const g = grafLumii(s.w)
+  const c0 = listaComponente(s.w.camere)[0]!
+  const C = capacitateMu(g.noduri.get(g.nodComp.get(c0.id)!)!, R.termic.mase)
+  assert.equal(b.data.temperaturi!.ancora[0], c0.ancora)
+  const cu = (f: (x: Salvare) => void): string => {
+    const x = JSON.parse(text) as Salvare
+    f(x)
+    return JSON.stringify(x)
+  }
+  const o = decode(cu((x) => { x.data.temperaturi!.rest[0] = C }), R)
+  assert.ok(!o.ok && o.reason === 'VALOARE_INVALIDA', o.ok ? 'rest == C\' acceptat' : o.reason)
+  assert.ok(decode(cu((x) => { x.data.temperaturi!.rest[0] = C - 1 }), R).ok, 'rest = C\' − 1 e in domeniu')
+  for (const a of [4294967296, -1]) {
+    const d = decode(cu((x) => { x.data.temperaturi!.amprenta = a }), R)
+    assert.ok(!d.ok && d.reason === 'VALOARE_INVALIDA', `amprenta ${a}: ${d.ok ? 'acceptata' : d.reason}`)
+  }
+  const sl = s.w.temperatura.slot
+  const [t0, r0] = [sl.t[c0.id]!, sl.rest[c0.id]!]
+  sl.rest[c0.id] = C
+  assert.throws(() => encode(s.w), /temperatura nu se poate salva/, 'rest == C\' la encode')
+  sl.rest[c0.id] = r0
+  sl.t[c0.id] = -2147483648
+  let jos = ''
+  assert.doesNotThrow(() => { jos = encode(s.w) }, 'T = −2^31 e in domeniu la encode')
+  const dj = incarca(jos)
+  assert.equal(dj.temperatura.slot.t[listaComponente(dj.camere)[0]!.id], -2147483648)
+  sl.t[c0.id] = t0
+})
+
 test('SALVARE amprenta C\' (§7, verif-SAV-2): FNV peste n si C\' hi/lo, in ordinea ancorelor — alt vector, alta amprenta; nu intra in hash', () => {
   assert.notEqual(amprentaCapacitatii([1, 2, 3]), amprentaCapacitatii([1, 2, 4]))
   assert.notEqual(amprentaCapacitatii([1, 2]), amprentaCapacitatii([2, 1]))

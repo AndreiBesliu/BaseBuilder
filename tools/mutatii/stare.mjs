@@ -233,6 +233,49 @@ export const MUTATII = [
     b: '  void 0',
     t: TS, e: 'STARE rezervoareCitite',
   },
+  // --- plasa IDX-4 pe o deriva de C' si marginile refuzurilor (GRAF-2, SAV-R1, SAV-R3)
+  {
+    n: 't.2b GRAF-2, SAV-R1: dupa inlocuirea grafului la salvare, restul nu se normalizeaza pe C\'-ul nou (encode arunca)',
+    f: F,
+    a: '      if (!(r >= C) || !Number.isSafeInteger(r)) continue',
+    b: '      if (true) continue',
+    t: TSV, e: 'SALVARE plasa IDX-4 pe o deriva de C\'',
+  },
+  {
+    n: 't.2b GRAF-2: normalizarea la salvare pune restul la 0 (energia pierduta, lumea incarcata ia alt T)',
+    f: F,
+    a: '      sl.t[id] = sl.t[id]! + q\n      sl.rest[id] = rr',
+    b: '      sl.rest[id] = 0',
+    t: TSV, e: 'SALVARE plasa IDX-4 pe o deriva de C\'',
+  },
+  {
+    n: 't.2b SAV-R3: decode accepta rest == C\' cu aceeasi amprenta',
+    f: F,
+    a: '    if (strict && r >= cap[i]!) return refuse(',
+    b: '    if (strict && r > cap[i]!) return refuse(',
+    t: TSV, e: 'SALVARE marginile refuzurilor',
+  },
+  {
+    n: 't.2b SAV-R3: encode scrie rest == C\'',
+    f: F,
+    a: '    if (!Number.isSafeInteger(r) || r < 0 || r >= cap[i]!) return refuse(',
+    b: '    if (!Number.isSafeInteger(r) || r < 0 || r > cap[i]!) return refuse(',
+    t: TSV, e: 'SALVARE marginile refuzurilor',
+  },
+  {
+    n: 't.2b SAV-R3: encode refuza T = −2^31 (pe care decode il accepta)',
+    f: F,
+    a: '    if (!Number.isSafeInteger(t) || t < T_MIN || t >= T_LIMITA) return refuse(',
+    b: '    if (!Number.isSafeInteger(t) || t <= T_MIN || t >= T_LIMITA) return refuse(',
+    t: TSV, e: 'SALVARE marginile refuzurilor',
+  },
+  {
+    n: 't.2b SAV-R3: amprenta in afara [0, 2^32) acceptata la decode (normalizare in loc de refuz)',
+    f: F,
+    a: ' || b.amprenta < 0 || b.amprenta >= DOI_LA_32) return refuse(',
+    b: ') return refuse(',
+    t: TSV, e: 'SALVARE marginile refuzurilor',
+  },
   // --- plasa de siguranta ±1000 °C (PROV-1 b)
   {
     n: 't.2b PROV-1 b: plasa nu taie dupa provenienta (pompa C3 duce T peste 1000 °C intre doi pasi, apoi peste marginea salvabila)',

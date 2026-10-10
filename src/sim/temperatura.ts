@@ -755,8 +755,10 @@ function capacitatiPeAncora(g: GrafIncremental, lista: readonly Componenta[], ru
 /**
  * Blocul de scris la salvare (§7). Întâi: temperatura e la zi (ștampila, T în ambele direcții), iar graful incremental se
  * compară cu cel INTEGRAL (IDX-4: o deltă greșită fără asimetrie — un bin, un C' — ar lăsa lumea continuă pe alt graf decât
- * cea încărcată); la diferență, integralul îl înlocuiește, se numără (`grafDiferitLaSalvare`) și prima linie diferită intră
- * în jurnal (`ultimaDiferentaGraf`), iar salvarea continuă pe graful bun. Apoi, pe fiecare componentă, în ordinea
+ * cea încărcată); la diferență, integralul îl înlocuiește, se numără (`grafDiferitLaSalvare` și ca invariant) și prima linie
+ * diferită intră în jurnal (`ultimaDiferentaGraf`), iar salvarea continuă pe graful bun: restul fiecărei componente se
+ * normalizează EXACT pe C'-ul nou (GRAF-2, SAV-R1 — o deltă greșită de C' lăsa restul în [C'_bun, C'_greșit), iar `encode`
+ * arunca la fiecare salvare până la pasul următor; în pauză, la nesfârșit). Apoi, pe fiecare componentă, în ordinea
  * ancorelor: T întreg sigur în [−2^31, 2^31), rest întreg sigur în [0, C') — altfel refuz (`encode` aruncă).
  */
 export function blocTemperaturi(w: World): Outcome<BlocTemperaturi> {
@@ -779,6 +781,28 @@ export function blocTemperaturi(w: World): Outcome<BlocTemperaturi> {
   const cap = capacitatiPeAncora(go.value, lista, rules)
   if ('reason' in cap) return cap
   const sl = st.slot
+  // Graful tocmai înlocuit poate avea alt C': restul lumii continue a trăit pe C'-ul vechi. Normalizarea exactă pe C'-ul nou
+  // (T += floor(rest / C'), rest −= q·C') e chiar cea pe care o face pasul următor (`pasPeGraf`), adusă înainte de scriere și
+  // scrisă ÎN lumea continuă — ca ea și lumea încărcată să rămână una (GRAF-2, SAV-R1). Un rest valid rămâne neatins.
+  if (!cmp.ok) {
+    for (let i = 0; i < lista.length; i++) {
+      const id = lista[i]!.id
+      const C = cap[i]!
+      const r = sl.rest[id]!
+      if (!(r >= C) || !Number.isSafeInteger(r)) continue
+      let q = Math.floor(r / C)
+      let rr = r - q * C
+      if (rr < 0) {
+        q--
+        rr += C
+      } else if (rr >= C) {
+        q++
+        rr -= C
+      }
+      sl.t[id] = sl.t[id]! + q
+      sl.rest[id] = rr
+    }
+  }
   const b: BlocTemperaturi = { ancora: [], t: [], rest: [], amprenta: amprentaCapacitatii(cap) }
   for (let i = 0; i < lista.length; i++) {
     const c = lista[i]!
