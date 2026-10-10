@@ -4979,3 +4979,15 @@ propriu), nu într-un worktree (CLAUDE.md).
 cu limita ei), pivnița (2 m fără casă), oamenii, salvarea automată pe o așezare mare, oprirea după o eroare.
 
 **Ce urmează:** t.3 — hrana sub 5 °C (efectul temperaturii).
+
+## Task Started — 10.10.2026 — S24-27, tăietura 3: hrana sub 5 °C
+
+**Prompt:** „Continua" (după livrarea t.2b)
+**Model:** Claude Opus 5.5 (claude-opus-5-5), Claude Code, Ultracode.
+
+t.2b a făcut temperatura stare, dar simularea încă n-o citește. Tăietura asta îi dă primul efect: hrana se strică
+peste 5 °C, cu o rată care crește cu temperatura (DESIGN §5.1: „un singur prag: sub 5 °C nu putrezește; peste, rata
+crește neliniar"), iar sub prag se păstrează — de aici pivnița, săpatul și foamea sezonieră. Registrul t.2b a lăsat
+contractul: pivnița bună stă vara cu doar 0,2–0,3 °C sub prag, vatra de deasupra o duce peste, mormanul din tocul ușii
+n-are componentă, iar acceptanța relativă a pivniței e garanția pe care t.3 se sprijină. Metoda, ca la t.1–t.2b: hartă
+și măsurători pe HEAD → design → panou adversarial → cod → probe → recenzie a codului.
