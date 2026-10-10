@@ -627,14 +627,14 @@ export const MUTATII = [
   {
     n: 'componenta fara T: mormanul sare, dar nu se numara',
     f: 'src/sim/alterare.ts',
-    a: '      if (l < 0) { st.faraT++; continue }',
-    b: '      if (l < 0) continue',
+    a: '      if (l === null) { st.faraT++; continue }',
+    b: '      if (l === null) continue',
     t: TP, e: 'componenta fara T',
   },
   {
     n: 'componenta fara T: se ghiceste T_afara',
     f: 'src/sim/alterare.ts',
-    a: '        l = t === null ? -1 : lambdaPeCurba(curba, t)',
+    a: '        l = t === null ? null : lambdaPeCurba(curba, t)',
     b: '        l = lambdaPeCurba(curba, t ?? tAfara(w.seed, w.tick, rules))',
     t: TP, e: 'componenta fara T',
   },

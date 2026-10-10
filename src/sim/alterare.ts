@@ -97,8 +97,11 @@ export function pasAlterare(w: World, rules: Rules): void {
   let tA = 0
   let areTA = false
   let lambdaCer = -1
-  /** Rata pe componenta, in trecerea asta; −1 = componenta fara T. */
-  const peComponenta = new Map<number, number>()
+  /**
+   * Rata pe componenta, in trecerea asta; null = componenta fara T. Null, nu un λ negativ ca santinela: o curba stricata
+   * care ar da λ < 0 sub prag s-ar fi citit „fara T" si ar fi sarit tacut (proba „pragul mutat cu −0,1 °C" iesea RATATA).
+   */
+  const peComponenta = new Map<number, number | null>()
   const ids: number[] = []
   const kuri: number[] = []
   const faraRata: boolean[] = []
@@ -133,12 +136,12 @@ export function pasAlterare(w: World, rules: Rules): void {
       let l = peComponenta.get(loc)
       if (l === undefined) {
         const t = stampilaOk ? tDinStare(w, loc) : null
-        l = t === null ? -1 : lambdaPeCurba(curba, t)
+        l = t === null ? null : lambdaPeCurba(curba, t)
         peComponenta.set(loc, l)
         st.evaluariRata++
         st.evaluariUltimulPas++
       }
-      if (l < 0) { st.faraT++; continue }
+      if (l === null) { st.faraT++; continue }
       lambda = l
     }
     const q = it.cantitate[i]!

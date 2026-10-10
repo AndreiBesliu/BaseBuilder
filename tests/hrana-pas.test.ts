@@ -289,12 +289,14 @@ test('pragul: un morman la EXACT 5,000 °C si unul la 5 °C + 1 Q16 nu strang ni
   assert.ok(o.ok)
   const s = slotItem(w.iteme, o.ok ? o.value : -1)
   const S = () => w.iteme.alterare[s]!
+  const faraT0 = statAlterare(w).faraT
   for (const [T, dS] of [[5 * Q, 0], [5 * Q + 1, 0], [5 * Q + ALTERARE_BANDA_Q16, 150], [5 * Q - 1, 0]] as const) {
     w.temperatura.slot.t[ic] = T
     const inainte = S()
     pasAlterare(w, R)
     assert.equal(S() - inainte, dS, `T = ${T} Q16`)
   }
+  assert.equal(statAlterare(w).faraT, faraT0, 'componenta are T: niciun morman sarit')
 })
 
 test('pivnita sub casa, un anotimp intreg (toamna, regimul periodic): cantitatea si S raman EXACT 0; un morman cu S = 1,5·ONE dus acolo pierde o unitate la primul pas (λ = 0 realizeaza, P14) si apoi nimic', () => {
