@@ -238,6 +238,23 @@ export const MUTATII = [
     b: '  if (m !== undefined) return m',
     t: TP, e: 'PAS T*',
   },
+  // --- M5 dupa incarcare (recenzia SAV-R4): pe S+ indexul de la decode iese in ordinea ancorelor, iar copiile n-aveau loturi
+  {
+    n: 't.2b §7, SAV-R4: amprenta C\' calculata la decode pe ordinea SLOTURILOR indexului nou (pe M10 normalizeaza tacut toate resturile)',
+    f: F,
+    a: '  const cap = capacitatiPeAncora(go.value, ordonate, rules)',
+    b: '  const cap = capacitatiPeAncora(go.value, [...camere.comp.values()], rules)',
+    t: TSV, e: 'SALVARE M5 pe M10 (SAV-R4)',
+  },
+  {
+    // Lumea continua ia C'-ul lotului doar-fete din memoria de pe componenta (PROV-3), copiile de dupa decode pe calea plina:
+    // o memorie gresita le desparte (o vede si oracolul provenientei, pe testul lui).
+    n: 't.2b §7, SAV-R4: memoria lui C\' fara diferenta constructiei (lotul doar-fete de dupa incarcare: copiile pe calea plina, lumea continua pe memorie)',
+    f: 'src/sim/fete.ts',
+    a: '          tot.nConstr += en.nConstr - ev.nConstr',
+    b: '          tot.nConstr += 0',
+    t: TSV, e: 'SALVARE M5-faze cu LOTURI dupa incarcare',
+  },
   // --- compararea grafului la encode doar dupa o schimbare (recenzia SAV-R6). Clauza `delte` din comparatiaLaZi nu are
   // proba: in joc orice delta vine cu (epoca, epocaFete) noi, deci scoasa singura e echivalenta (ramane ca aparare).
   {

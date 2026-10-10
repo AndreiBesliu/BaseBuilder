@@ -28,6 +28,7 @@ import { dig, fill, groundLevelM, materialAt } from '../src/sim/terrain/terrain.
 import { actualizeazaGraful, grafulIncremental } from '../src/sim/termic.ts'
 import { amprentaCapacitatii, MOTIV_GRAF_LA_SALVARE, sincronizeazaLumea, statTermic } from '../src/sim/temperatura.ts'
 import { advance, createWorld, tick } from '../src/sim/world.ts'
+import { buildM10PeLume } from '../src/harness/fixture-m10.ts'
 import { casaTermica } from './fixturi-temperatura.ts'
 import { bun, faraInvarianti, grafLumii, laEchilibru, mina192, tPeAncora } from './fixturi-pas.ts'
 import { panaLa, scenaSPlus } from './fixturi-salvare.ts'
@@ -88,7 +89,9 @@ test('SALVARE scena S+ (literalul dedicat, §7, SAV-5): hash-ul la tickul 1.600 
   const s = scenaSPlus()
   const w = s.w
   const st = statTermic(w)
-  assert.ok(st.surseSol >= 1 && st.surseCer >= 1, `sursele: ${JSON.stringify(st)}`)
+  // SAV-R5: pragurile păzesc pivnița săpată prin comenzi (20 de surse SOL; fără ea: 3, din ușă și scobitură) și șopronul
+  // (3 surse CER; fără el: 2, din case) — cu ≥ 1, scena trecea și fără ele (măsurat: 23 și 3 pe scena întreagă).
+  assert.ok(st.surseSol >= 20 && st.surseCer >= 3, `sursele: ${JSON.stringify(st)}`)
   assert.ok(st.loturiDoarFete >= 1, 'un lot doar-fete')
   assert.ok(st.adunariOameni > 0, 'caldura umana')
   assert.equal(st.invarianti, 0)
@@ -111,6 +114,69 @@ test('SALVARE M5-faze pe S+ (§9 a): 20 de salvari consecutive (toate fazele pas
   assert.equal(r.cuIdDiferit, 20, 'id-uri diferite dupa fiecare decode (cheia pe slot ar fi vizibila)')
   assert.ok(r.oameni > 0, 'caldura umana in copiile incarcate')
   assert.equal(statTermic(s.w).grafDiferitLaSalvare, 0, 'graful incremental == integralul la fiecare salvare')
+})
+
+test('SALVARE M5-faze cu LOTURI dupa incarcare pe S+ (SAV-R4): salvari la cele 20 de faze 1.600–1.619, apoi in TOATE lumile usa A|B sapata (1.625) si zidita (1.638) prin comenzi si un lot DOAR-FETE sub pivnita (1.650) — la 1.700 hash si (T, rest) identice, fara invarianti', () => {
+  // Recenzia SAV-R4: în toate porțile M5 editările erau ÎNAINTEA salvării, iar copiile mergeau fără niciun lot — proveniența,
+  // delta grafului și evidența maselor pe indexul și graful construite INTEGRAL la decode nu erau comparate niciodată cu
+  // lumea continuă. Lotul doar-fețe de la 1.650 trece în lumea continuă prin C'-ul memorat pe componentă (PROV-3), iar în
+  // copii prin calea plină (obiectele de după decode n-au memorie): cele două căi ale evidenței, comparate pe M5.
+  const s = scenaSPlus()
+  const w = s.w
+  const usa = { wx: s.ax + 5, wy: s.ay + 2, z: s.g + 1 }
+  const sub = [s.ax + 1, s.ay + 1, s.g - 4] as const
+  const m0 = materialAt(w.terrain, ...sub)
+  assert.ok(m0.ok && (m0.value === Material.PAMANT || m0.value === Material.ROCA), 'fixtura: sol natural sub pivnita')
+  const aplica = (x: World): void => {
+    if (x.tick === 1625) assert.ok(applyCommand(x, { kind: 'dig', ...usa }, R).ok, 'usa sapata')
+    if (x.tick === 1638) assert.ok(applyCommand(x, { kind: 'fill', ...usa, material: P }, R).ok, 'usa zidita')
+    if (x.tick === 1650) {
+      assert.ok(dig(x.terrain, ...sub).ok)
+      assert.ok(fill(x.terrain, ...sub, P).ok)
+    }
+  }
+  const copii: World[] = []
+  let epoca1650 = -1
+  while (w.tick < 1700) {
+    if (w.tick < 1620) copii.push(incarca(encode(w)))
+    if (w.tick === 1650) epoca1650 = w.camere.epoca
+    aplica(w)
+    for (const c of copii) aplica(c)
+    tick(w, R)
+    for (const c of copii) tick(c, R)
+    if (w.tick === 1651) assert.equal(w.camere.epoca, epoca1650, 'fixtura: lotul de la 1.650 e doar-fete')
+  }
+  assert.equal(copii.length, 20)
+  for (const c of copii) {
+    assert.deepEqual(tPeAncora(c), tPeAncora(w))
+    assert.equal(hashWorld(c), hashWorld(w))
+    faraInvarianti(c, 'copia')
+    // Contorul de viață: fiecare copie a trecut prin loturi DUPĂ încărcare, între ele unul doar-fețe.
+    const st = statTermic(c)
+    assert.ok(st.loturi >= 3 && st.loturiDoarFete >= 1, `loturi dupa incarcare: ${st.loturi}, doar-fete ${st.loturiDoarFete}`)
+  }
+  faraInvarianti(w, 'lumea continua')
+})
+
+test('SALVARE M5 pe M10 (SAV-R4): indexul CONSTRUIT LA DECODE nu e in ordinea ancorelor (contor de viata — pe S+ e), rest nenul la salvare, nicio normalizare, hash si (T, rest) identice dupa 400 de tickuri', () => {
+  // Recenzia SAV-R4: pe S+ indexul construit la decode iese exact în ordinea ancorelor, deci o confuzie slot/ancoră pe partea
+  // DECODE (amprenta C' calculată pe ordinea sloturilor indexului nou) trecea toate testele salvării; pe M10 normaliza tăcut
+  // 677/677 de resturi la fiecare încărcare.
+  const w = createWorld(12345)
+  assert.ok(applyCommand(w, { kind: 'setFocus', cx: 244, cy: 244 }, R).ok)
+  buildM10PeLume(w, R, 244, 244)
+  advance(w, 200, R)
+  assert.ok([...w.camere.comp.values()].some((c) => w.temperatura.slot.rest[c.id] !== 0), 'fixtura: rest nenul la salvare')
+  const c = incarca(encode(w))
+  const ordine = [...c.camere.comp.values()].map((x) => x.ancora)
+  assert.notDeepEqual(ordine, [...ordine].sort((a, b) => a - b), 'fixtura: indexul incarcat e in alta ordine decat ancorele')
+  assert.equal(statTermic(c).restNormalizat, 0, 'aceeasi amprenta C\': nicio normalizare')
+  assert.deepEqual(tPeAncora(c), tPeAncora(w), 'la incarcare')
+  advance(w, 400, R)
+  advance(c, 400, R)
+  assert.equal(hashWorld(c), hashWorld(w))
+  assert.deepEqual(tPeAncora(c), tPeAncora(w))
+  faraInvarianti(c, 'M10 incarcat')
 })
 
 // --- M5 după comenzi (c) ------------------------------------------------------------------------
