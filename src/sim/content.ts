@@ -456,6 +456,12 @@ export interface Rules {
    * un numar pe care jucatorul nu-l poate traduce in mese.
    */
   readonly nutritie: readonly number[]
+  /**
+   * Care feluri de item se STRICA (S24-27 t.3), indexat cu `Item`. Declaratie EXPLICITA, nu dedusa din nutritie:
+   * azi doar HRANA. Doar un fel perisabil poarta alterare; o salvare cu S ≠ 0 pe un fel pe care content-ul de acum
+   * nu-l declara perisabil se incarca cu S = 0, numarat (`alterareNormalizata`) — nu refuzata.
+   */
+  readonly perisabil: readonly boolean[]
 
   // --- temperatura (S24-27, taietura 2a) ---
   //
@@ -469,9 +475,9 @@ export interface Rules {
 type FieldSpec = { min: number; max: number }
 
 /** Sectiunile-obiect, validate fiecare de parserul ei. */
-const SECTIUNI = ['digYield', 'piese', 'nevoi', 'nutritie', 'ganduri', 'calendar', 'clima', 'termic'] as const
+const SECTIUNI = ['digYield', 'piese', 'nevoi', 'nutritie', 'perisabil', 'ganduri', 'calendar', 'clima', 'termic'] as const
 
-/** Campurile NUMERICE. `digYield`, `nevoi` si `nutritie` sunt tabele si se valideaza separat. */
+/** Campurile NUMERICE. `digYield`, `nevoi`, `nutritie` si `perisabil` sunt tabele si se valideaza separat. */
 const RULES_SPEC: Record<Exclude<keyof Rules, (typeof SECTIUNI)[number]>, FieldSpec> = {
   agentCapacity: { min: 1, max: 100000 },
   agentStepMm: { min: 1, max: 100000 },
@@ -841,6 +847,36 @@ function parseNutritie(raw: unknown): Outcome<number[]> {
 }
 
 /**
+ * Tabelul `perisabil` din fisier → tablou indexat cu `Item` (t.3). Fiecare fel trebuie sa aiba o intrare, si e
+ * `true` sau `false` — nu 0/1, nu lipsa: un fel uitat ar fi tacut „neperisabil", si hrana lui nu s-ar strica niciodata.
+ */
+function parsePerisabil(raw: unknown): Outcome<boolean[]> {
+  if (Array.isArray(raw)) {
+    if (raw.length !== NUME_ITEME.length) return refuse(Reason.VALOARE_INVALIDA, { camp: 'perisabil', lungime: raw.length, asteptat: NUME_ITEME.length })
+    const obj: Record<string, unknown> = {}
+    for (const [nume, id] of NUME_ITEME) obj[nume] = raw[id]
+    raw = obj
+  }
+  if (typeof raw !== 'object' || raw === null) {
+    return refuse(Reason.LIPSA_MATERIAL, { camp: 'perisabil', asteptat: 'obiect', primit: typeof raw })
+  }
+  const obj = raw as Record<string, unknown>
+  const cunoscute = NUME_ITEME.map(([n]) => n)
+  for (const key of Object.keys(obj).sort()) {
+    if (!cunoscute.includes(key)) return refuse(Reason.COMANDA_NECUNOSCUTA, { camp: `perisabil.${key}`, cunoscute: cunoscute.join(', ') })
+  }
+  const out: boolean[] = []
+  for (const [nume] of NUME_ITEME) {
+    const v = obj[nume]
+    if (typeof v !== 'boolean') {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `perisabil.${nume}`, asteptat: 'true sau false', primit: String(v) })
+    }
+    out.push(v)
+  }
+  return accept(out)
+}
+
+/**
  * Tabelul `digYield` din fisier → tablou indexat cu `MaterialId`. Fiecare
  * material SOLID trebuie sa aiba o intrare; AER si APA nu au voie sa aiba.
  */
@@ -1137,6 +1173,10 @@ export function parseRules(raw: unknown): Outcome<Rules> {
   const nutritieOut = parseNutritie(obj.nutritie)
   if (!nutritieOut.ok) return nutritieOut
   out.nutritie = nutritieOut.value
+  if (obj.perisabil === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'perisabil' })
+  const perisabilOut = parsePerisabil(obj.perisabil)
+  if (!perisabilOut.ok) return perisabilOut
+  out.perisabil = perisabilOut.value
   if (obj.ganduri === undefined) return refuse(Reason.LIPSA_MATERIAL, { camp: 'ganduri' })
   const ganduriOut = parseGanduri(obj.ganduri)
   if (!ganduriOut.ok) return ganduriOut
@@ -1552,6 +1592,8 @@ export const DEFAULT_RULES: Rules = {
   // deci o portie de 20 da 300 si un morman plin (75) da 1125 — un pion si un
   // sfert, de la zero la satul.
   nutritie: [0, 0, 0, 15],
+  // Indexat cu `Item`. Doar hrana se strica (t.3).
+  perisabil: [false, false, false, true],
   // Dispozitia, pe ACEEASI scara ca nevoile: 0..1000.
   //
   // Bara se misca la 500 de tickuri (25 s), cu 120 in sus si 80 in jos, deci de

@@ -484,7 +484,8 @@ export const MUTATII = [
   {
     n: "zidirea nu consuma mormanul sursa (materia se tipareste)",
     f: "src/sim/joburi.ts",
-    a: "  if (a.caraCantitate[slot] === 0) a.caraKind[slot] = 0",
+    // Re-ancorata la t.3 (commit-ul A): mana goala se goleste prin `golesteMana` (cu alterarea ei).
+    a: "  if (a.caraCantitate[slot] === 0) golesteMana(a, slot)",
     b: "  a.caraCantitate[slot] = a.caraCantitate[slot]! + spec.cantitate",
     t: 'tests/constructie.test.ts', e: "ACCEPTANTA: pionul cara materialul si RIDICA peretele",
   },

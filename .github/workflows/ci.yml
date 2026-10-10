@@ -96,13 +96,17 @@ jobs:
       # 52b16ed2 -> b38229fd (S24-27 t.2b, schema 8): schema 8 plus blocul temperaturii, GOL — scenariul n-are nicio
       # componenta in niciun tick (tests/pas-termic.test.ts). Hash-ul asta e deci ORB la temperatura; literalul ei e
       # al scenei S+ (tests/salvare-temperatura.test.ts), care ruleaza in `npm test`.
+      #
+      # b38229fd -> fd188574 (S24-27 t.3, commit-ul A, schema 9): DOAR formatul — schema 9 si campurile alterarii in hash
+      # (toate zero: rata e 0). Comportamentul e identic: functia de hash de dinainte, pe lumea noua cu schema proiectata
+      # pe 8, da b38229fd la FIECARE din cele 100.000 de tickuri; mancate 4.397, plecati 8, hrana ramasa 628, ca inainte.
       - name: hash de referinta
         if: ${{ !cancelled() }}
         run: |
           OUT=$(node src/harness/cli.ts --seed 12345 --ticks 100000 --agents 40)
           echo "$OUT"
           HASH=$(echo "$OUT" | awk '/^hash/ {print $2}')
-          EXPECTED=b38229fd
+          EXPECTED=fd188574
           if [ "$HASH" != "$EXPECTED" ]; then
             echo "::error::hash-ul de referinta s-a schimbat: $HASH (asteptat $EXPECTED)"
             echo "Daca schimbarea e intentionata, actualizeaza EXPECTED in acest workflow"

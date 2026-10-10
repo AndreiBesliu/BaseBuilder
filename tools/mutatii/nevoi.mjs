@@ -65,8 +65,9 @@ export const MUTATII = [
   {
     n: 'nutritia e pe MORMAN, nu pe unitate',
     f: 'src/sim/joburi.ts',
-    a: '  a.nevoi[baza] = Math.min(rules.nevoieMax, a.nevoi[baza]! + luat * rules.nutritie[fel]!)',
-    b: '  a.nevoi[baza] = Math.min(rules.nevoieMax, a.nevoi[baza]! + rules.nutritie[fel]!)',
+    // Re-ancorata la t.3 (commit-ul A): nutritia e acum EFECTIVA (`nutritieEfectiva`); mutantul ia o singura unitate.
+    a: '  a.nevoi[baza] = Math.min(rules.nevoieMax, a.nevoi[baza]! + nutritieEfectiva(luat, parte, rules.nutritie[fel]!))',
+    b: '  a.nevoi[baza] = Math.min(rules.nevoieMax, a.nevoi[baza]! + nutritieEfectiva(1, parte, rules.nutritie[fel]!))',
     t: 'tests/nevoi.test.ts', e: 'un pion flamand cauta mancare',
   },
   {

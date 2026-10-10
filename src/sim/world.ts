@@ -73,6 +73,7 @@ export function createWorld(seed: number, rules: Rules = DEFAULT_RULES): World {
     // Nicio componentă, deci nicio temperatură: starea goală, aliniată la index.
     temperatura: temperaturaGoala(camere, rules),
     plecatiTotal: 0,
+    hranaStricata: 0,
   }
 }
 

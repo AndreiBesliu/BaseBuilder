@@ -45,8 +45,11 @@ import type { StareTemperatura } from './temperatura.ts'
  *   8 — S24-27 t.2b: temperatura incaperilor — blocul `temperaturi` {ancora, t, rest,
  *       amprenta}, pe ANCORA componentei (id-urile nu supravietuiesc unei incarcari);
  *       o salvare de schema 7 porneste de la echilibru (temperatura.ts)
+ *   9 — S24-27 t.3: hrana se strica — alterarea mormanelor (`iteme.alterare`) si a mainilor (`agents.caraAlterare`),
+ *       in 1/ONE dintr-o unitate, masca felurilor REFUZATE a zonelor (`zone.refuzate`, 0 = primeste tot) si totalul
+ *       stricat (`hranaStricata`); o salvare de schema 8 porneste cu hrana PROASPATA si fiecare zona primind tot
  */
-export const SCHEMA_VERSION = 8
+export const SCHEMA_VERSION = 9
 
 /**
  * Categoriile de munca. Lista de STRUCTURA (ce feluri de munca exista), nu numar
@@ -347,6 +350,12 @@ export interface AgentStore {
   caraKind: Uint8Array
   caraCantitate: Int32Array
   /**
+   * PERSISTED (S24-27 t.3) — alterarea a ce e in mana, in 1/`ONE_ALTERARE` (iteme.ts): mana NU se strica, dar isi
+   * POARTA starea de la RIDICA la LASA (si la picioare, si la zidire). Intregi exacti in Float64. Mana goala ⇒ 0;
+   * o golesc toate locurile printr-o singura functie, `golesteMana`.
+   */
+  caraAlterare: Float64Array
+  /**
    * MANANCA: cat a consumat deja din rezervare. E un camp PROPRIU, si nu o
    * scadere din `jobCantitate`, tocmai fiindca `jobCantitate` e ce se REZERVA:
    * daca ar scadea, lumea continua ar tine rezervarea initiala iar cea incarcata
@@ -535,6 +544,22 @@ export interface World {
    * cand salvezi nu e un numar. Intra si in hash.
    */
   plecatiTotal: number
+  /**
+   * PERSISTED (S24-27 t.3) — cate unitati de hrana s-au stricat, de la inceputul lumii. Pe `World`, ca `plecatiTotal`:
+   * jucatorul il vede ca total (F3), deci nu se reseteaza la incarcare. Intra in hash (hi/lo).
+   */
+  hranaStricata: number
+}
+
+/**
+ * Goleste mana unui pion: felul, cantitatea si alterarea, IMPREUNA (t.3). Toate locurile care golesc o mana —
+ * nasterea pe un slot refolosit, lasatul la picioare, LASA, zidirea care consuma tot, mortul de la incarcare — trec
+ * pe aici: o mana goala cu S ≠ 0 e o salvare pe care `decode` o refuza (si `encode` n-o scrie).
+ */
+export function golesteMana(a: AgentStore, slot: number): void {
+  a.caraKind[slot] = 0
+  a.caraCantitate[slot] = 0
+  a.caraAlterare[slot] = 0
 }
 
 export function makeAgentStore(capacity: number, prioPersonalaImplicita = 1, evitaSloturi = 4, nevoieMax = 1000, ganduriSloturi = 4, dispozitieBaza = 500): AgentStore {
@@ -566,6 +591,7 @@ export function makeAgentStore(capacity: number, prioPersonalaImplicita = 1, evi
     jobEfect: new Uint8Array(capacity),
     caraKind: new Uint8Array(capacity),
     caraCantitate: new Int32Array(capacity),
+    caraAlterare: new Float64Array(capacity),
     jobConsumat: new Int32Array(capacity),
     evitaSloturi,
     evitaTinta: new Int32Array(capacity * evitaSloturi),

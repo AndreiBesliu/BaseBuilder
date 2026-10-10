@@ -90,7 +90,7 @@ import type { Rules } from './content.ts'
 import type { Outcome, ReasonCode } from './result.ts'
 import { accept, codMotiv, refuse, Reason } from './result.ts'
 import type { FelJobId, World } from './state.ts'
-import { Categorie, CATEGORII, Faction, FelJob, Gand, GAND_PENTRU_NEVOIE, ITEME, Nevoie, NEVOI, PasCara, PasConstruieste, PasJob, pasDeMers, PasNevoie, puneGand } from './state.ts'
+import { Categorie, CATEGORII, Faction, FelJob, Gand, GAND_PENTRU_NEVOIE, golesteMana, ITEME, Nevoie, NEVOI, PasCara, PasConstruieste, PasJob, pasDeMers, PasNevoie, puneGand } from './state.ts'
 import { cellOf, centerMm, clearPath } from './drumuri.ts'
 import { blockOfCell, ensureArea, find, isWalkable, markDirty, materialFast, NO_REGION, regionAt, REGION_SIZE } from './regions.ts'
 import type { RegionStore } from './regions.ts'
@@ -107,7 +107,7 @@ import { Desemnare, desemnareLaCelula, DetaliuMotiv, seSapaLa, slotDesemnare, st
 import type { DesignationStore } from './desemnari.ts'
 import type { Cerere } from './rezervari.ts'
 import { elibereaza, elibereazaTinta, elibereazaUna, poateRezerva, rezervaToate, rezervatPe, Strat, sumaRezervata } from './rezervari.ts'
-import { asazaItem, creeazaItem, DetaliuItem, iaDinItem, itemLaCelula, locPeCelula, slotItem, stergeItem } from './iteme.ts'
+import { asazaItem, creeazaItem, DetaliuItem, iaDinItem, itemLaCelula, locPeCelula, numaraPierdute, nutritieEfectiva, parteDinAlterare, slotItem, stergeItem, unitatiPentruNutritie } from './iteme.ts'
 import { celulaDeZonaLa, indexZone, marcheazaZoneMurdare, prioritateaLocului, slotCelulaDeZona, slotZona, stergeCelulaDeZona, subSantier } from './zone.ts'
 
 // ---------------------------------------------------------------------------
@@ -201,6 +201,25 @@ export interface RatiuneStore {
   ridicariAbandonate: number
   /** ZAVOR, per lume: de cate ori o nevoie sub prag N-A putut fi rezolvata si a primit racire. */
   nevoiNerezolvate: number
+
+  // --- alterarea (S24-27 t.3, research/hrana-t3.md §1, §4) ---
+  //
+  // Contoarele oracolelor de conservare: G1S pe S (Σ acumulat == Σ S in mormane si maini + ONE·stricat + mancat +
+  // pierdut + disparut) si G1 pe unitati, pe fel. Conservarea pe UNITATI e oarba la orice defect de S (0 roșii pe 8
+  // mutanti, STARE-1/P1), de-aia exista contoarele astea. TRANSIENT: nu intra in hash, nu se salveaza; un oracol ia o
+  // BAZA la pornire si dupa fiecare `decode`.
+  /** Σ q·λ adaugat de pasul de alterare. 0 cat rata e 0 peste tot (commit-ul A). */
+  alterareAcumulata: number
+  /** S dus de unitatile mancate (din el se scade nutritia: `nutritieEfectiva`). */
+  alterareMancata: number
+  /** S al unitatilor pierdute: n-au incaput nicaieri, sau erau in mana unui mort la incarcare. */
+  alterarePierduta: number
+  /** S iesit din lume altfel decat mancat sau pierdut: restul unui morman mort din stricaciune, S-ul materialului zidit. */
+  alterareDisparuta: number
+  /** Unitati pierdute, pe FEL (`Item`) — termenul „pierdut" al lui G1 pe hrana; `itemePierdute` le numara pe toate. */
+  readonly pierdutePeFel: Float64Array
+  /** Sloturi (mormane si maini) cu S ≠ 0 pe un fel pe care content-ul de ACUM nu-l declara perisabil, puse pe 0 la incarcare. */
+  alterareNormalizata: number
 }
 
 export function makeRatiuneStore(capacity: number): RatiuneStore {
@@ -210,6 +229,12 @@ export function makeRatiuneStore(capacity: number): RatiuneStore {
     candidati: new Int32Array(capacity),
     taiati: new Int32Array(capacity),
     motivFinal: new Uint8Array(capacity),
+    alterareAcumulata: 0,
+    alterareMancata: 0,
+    alterarePierduta: 0,
+    alterareDisparuta: 0,
+    pierdutePeFel: new Float64Array(ITEME),
+    alterareNormalizata: 0,
     joburiFaraProgres: 0,
     itemePierdute: 0,
     unitatiZidite: 0,
@@ -1955,14 +1980,14 @@ export type RacireId = (typeof Racire)[keyof typeof Racire]
 
 /**
  * Lasa la picioare ce are pionul in mana, prin `asazaItem`, si goleste mana.
- * Intoarce slotul mormanului rezultat (nou sau contopit), sau -1.
+ * Intoarce slotul mormanului rezultat (nou sau contopit), sau -1. Starea de
+ * alterare a mainii pleaca odata cu marfa (t.3), impartita pe portiuni.
  */
 export function lasaLaPicioare(w: World, rules: Rules, slot: number): number {
   const a = w.agents
   if (a.caraCantitate[slot] === 0) return -1
-  const r = asazaItem(w, rules, a.caraKind[slot]!, a.caraCantitate[slot]!, cellOf(a.x[slot]!), cellOf(a.y[slot]!), a.z[slot]!)
-  a.caraKind[slot] = 0
-  a.caraCantitate[slot] = 0
+  const r = asazaItem(w, rules, a.caraKind[slot]!, a.caraCantitate[slot]!, cellOf(a.x[slot]!), cellOf(a.y[slot]!), a.z[slot]!, 0, a.caraAlterare[slot]!)
+  golesteMana(a, slot)
   raport.lasateLaPicioare++
   return r.ultimulSlot
 }
@@ -2504,9 +2529,14 @@ function zideste(w: World, rules: Rules, slot: number): void {
   }
 
   // Materialul s-a CONSUMAT. Al treilea termen al conservarii: fara el, prima
-  // zidire ar inrosi fiecare asertiune de `itemePierdute === 0`.
+  // zidire ar inrosi fiecare asertiune de `itemePierdute === 0`. Si partea lui de
+  // alterare (t.3): iese din lume odata cu el, numarata — un material perisabil zidit
+  // nu-si lasa S-ul in mana goala (azi niciun fel perisabil nu se zideste).
+  const parteZidita = parteDinAlterare(a.caraAlterare[slot]!, a.caraCantitate[slot]!, spec.cantitate)
+  a.caraAlterare[slot] = a.caraAlterare[slot]! - parteZidita
+  w.ratiune.alterareDisparuta += parteZidita
   a.caraCantitate[slot] = a.caraCantitate[slot]! - spec.cantitate
-  if (a.caraCantitate[slot] === 0) a.caraKind[slot] = 0
+  if (a.caraCantitate[slot] === 0) golesteMana(a, slot)
   w.ratiune.unitatiZidite += spec.cantitate
   a.jobEfect[slot] = 1
   raport.pieseZidite++
@@ -2553,6 +2583,8 @@ function ridica(w: World, rules: Rules, slot: number): void {
   const luat = iaDinItem(w, rules, is, cant)
   // Se ADUNA, nu se scrie: la construit mana poate avea deja prima parte a piesei.
   a.caraCantitate[slot] = a.caraCantitate[slot]! + luat
+  // Si alterarea (t.3): partea dusa de unitatile luate intra in mana, tot adunata.
+  a.caraAlterare[slot] = a.caraAlterare[slot]! + it.ultimaParte
   // Mormanul s-a golit: cine il mai tinea isi incheie jobul ACUM. Varianta veche
   // chema `elibereazaTinta` si ii ARUNCA valoarea de retur — adica stergea rezervarile
   // celorlalti fara sa le incheie joburile, lasand un job viu FARA rezervare.
@@ -2669,19 +2701,20 @@ function lasa(w: World, rules: Rules, slot: number): void {
     terminaJob(w, rules, slot, Sfarsit.INTRERUPT)
     return
   }
+  // A doua cale de UNIRE, pe langa `asazaItem` (t.3): toata mana intra pe morman, deci si toata alterarea ei.
   const it = itemLaCelula(w.iteme, cx, cy, cz)
   if (it !== -1) {
     w.iteme.cantitate[it] = w.iteme.cantitate[it]! + cant
+    w.iteme.alterare[it] = w.iteme.alterare[it]! + a.caraAlterare[slot]!
   } else {
-    const out = creeazaItem(w.iteme, w.nextId, kind, cx, cy, cz, cant)
+    const out = creeazaItem(w.iteme, w.nextId, kind, cx, cy, cz, cant, a.caraAlterare[slot]!)
     if (!out.ok) {
       terminaJob(w, rules, slot, Sfarsit.INCOMPLET, Reason.CAPACITATE_DEPASITA, Racire.TINTA)
       return
     }
     w.nextId++
   }
-  a.caraKind[slot] = 0
-  a.caraCantitate[slot] = 0
+  golesteMana(a, slot)
   marcheazaZoneMurdare(w)
   raport.itemeMutate++
   terminaJob(w, rules, slot, Sfarsit.TERMINAT)
@@ -2705,8 +2738,11 @@ function mutaItem(w: World, rules: Rules, is: number, wx: number, wy: number, z:
   const id = it.id[is]!
   const kind = it.kind[is]!
   const cant = it.cantitate[is]!
+  // Alterarea se citeste INAINTE de `stergeItem`, care o pune pe 0 (t.3, STARE-10): mutat „proaspat", mormanul
+  // cazut ar intineri — invizibil pe scenariul standard, unde nimic nu cade.
+  const S = it.alterare[is]!
   stergeItem(it, is)
-  const r = asazaItem(w, rules, kind, cant, wx, wy, z, id)
+  const r = asazaItem(w, rules, kind, cant, wx, wy, z, id, S)
   marcheazaZoneMurdare(w)
   // Post-conditia: id VIU ⇒ cantitate NESCHIMBATA. `asazaItem` cu id contopeste
   // intai in vecinii cu loc si abia RESTUL primeste id-ul vechi — deci un morman
@@ -2983,7 +3019,7 @@ export function sapaVoxel(w: World, wx: number, wy: number, z: number, rules: Ru
     // creasta zidului de langa — la 2 m peste sol, izolata (recenzia incaperilor, USA-3: poarta
     // dintr-un gard). Piatra cade prin usa, ca pionul si mormanul la prabusire.
     const cota = mat.value === Material.USA ? cotaDeRefugiu(w.terrain, wx, wy, z) : z
-    asazaItem(w, rules, y.fel, y.cantitate, wx, wy, cota)
+    asazaItem(w, rules, y.fel, y.cantitate, wx, wy, cota, 0, 0)
     raport.itemeProduse++
     raport.unitatiProduse += y.cantitate
   }
@@ -3441,8 +3477,9 @@ export function reconstruiesteRezervari(w: World, rules: Rules): number {
       // dintr-un slot mort dispare fara sa apara in niciun contor — exact ce
       // interzice regula „marfa nu dispare niciodata tacut".
       w.ratiune.itemePierdute += a.caraCantitate[i]!
-      a.caraKind[i] = 0
-      a.caraCantitate[i] = 0
+      // Pe fel si cu alterarea ei (t.3): S-ul din mana mortului e pierdut, numarat.
+      numaraPierdute(w, a.caraKind[i]!, a.caraCantitate[i]!, a.caraAlterare[i]!)
+      golesteMana(a, i)
     }
   }
   w.rezervari.anulateLaIncarcare = anulate
@@ -3569,8 +3606,9 @@ function cautaMancare(w: World, rules: Rules, slot: number): { is: number; cant:
     if (best !== -1 && d >= bestD) continue
     if (esteEvitata(w, slot, it.id[i]!)) continue
     const nut = rules.nutritie[it.kind[i]!]!
-    // Cat ii trebuie, nu cat e acolo: restul mormanului ramane celorlalti.
-    const cant = Math.min(it.cantitate[i]!, Math.ceil(lipsa / nut))
+    // Cat ii trebuie, nu cat e acolo: restul mormanului ramane celorlalti. Pe VALOARE (t.3): o hrana pe jumatate
+    // stricata hraneste pe jumatate, deci acopera lipsa cu mai multe unitati; pe hrana proaspata, `ceil(lipsa/nut)`.
+    const cant = unitatiPentruNutritie(it.alterare[i]!, it.cantitate[i]!, nut, lipsa)
     if (cant <= 0) continue
     const r = regionAt(w.regions, it.wx[i]!, it.wy[i]!, it.z[i]!)
     if (r === NO_REGION || find(w.regions, r) !== compAgent) continue
@@ -3738,10 +3776,13 @@ function mananca(w: World, rules: Rules, slot: number): void {
   const fel = it.kind[is]!
   const idMorman = it.id[is]!
   const luat = iaDinItem(w, rules, is, portie)
+  const parte = it.ultimaParte
+  w.ratiune.alterareMancata += parte
   const baza = slot * NEVOI + Nevoie.FOAME
   // Nutritia e PE UNITATE: cu ea pe morman, restul de 15 dintr-o stiva de 75 ar
-  // hrani cat o portie intreaga — hrana din nimic.
-  a.nevoi[baza] = Math.min(rules.nevoieMax, a.nevoi[baza]! + luat * rules.nutritie[fel]!)
+  // hrani cat o portie intreaga — hrana din nimic. Si e EFECTIVA (t.3, decizia 3):
+  // partea de alterare mancata scade din ea, cu `ceil` — tot hrana din nimic, altfel.
+  a.nevoi[baza] = Math.min(rules.nevoieMax, a.nevoi[baza]! + nutritieEfectiva(luat, parte, rules.nutritie[fel]!))
   a.jobConsumat[slot] = a.jobConsumat[slot]! + luat
   a.jobEfect[slot] = 1
   raport.unitatiMancate += luat

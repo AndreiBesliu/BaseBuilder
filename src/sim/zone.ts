@@ -169,6 +169,15 @@ export interface ZoneStore {
   /** PERSISTED — `Zona` */ readonly kind: Uint8Array
   /** PERSISTED — 1..zonePriorityLevels */ readonly prioritate: Uint8Array
   /** PERSISTED — 0 = slot liber */ readonly alive: Uint8Array
+  /**
+   * PERSISTED (S24-27 t.3) — masca felurilor pe care zona le REFUZA (bitul k = felul `Item` k). INVERSA, nu masca
+   * celor primite: 0 = primeste tot, deci zero-initializarea e implicitul corect, un fel adaugat mai tarziu intra
+   * implicit in fiecare depozit vechi si migrarea 8 -> 9 e un zero (o masca „primite: toate" scrisa ca biti ar fi
+   * refuzat orice fel nou — „stocheaza EXCEPTIA", STARE-9/P12). Resetata in `creeazaZona`: un slot refolosit nu
+   * mosteneste filtrul zonei sterse. Biti in afara felurilor: `encode` arunca, `decode` refuza. Pana la camara
+   * (commit-ul C) n-o citeste nimeni din simulare. Uint8Array: ajunge cat `ITEME <= 8`.
+   */
+  readonly refuzate: Uint8Array
   /** DERIVED — id → slot */ readonly laId: Map<number, number>
   /** DERIVED */ vii: number
   /** PERSISTED — celulele tuturor zonelor */ readonly celule: ZoneCellStore
@@ -183,6 +192,7 @@ export function makeZoneStore(capacity: number, cellCapacity: number): ZoneStore
     kind: new Uint8Array(capacity),
     prioritate: new Uint8Array(capacity),
     alive: new Uint8Array(capacity),
+    refuzate: new Uint8Array(capacity),
     laId: new Map(),
     vii: 0,
     celule: {
@@ -323,6 +333,8 @@ export function creeazaZona(s: ZoneStore, id: number, kind: ZonaKind, prioritate
   s.id[slot] = id
   s.kind[slot] = kind
   s.prioritate[slot] = prioritate
+  // Slotul se REFOLOSESTE: o zona noua primeste tot, oricare ar fi fost filtrul celei sterse de aici (t.3).
+  s.refuzate[slot] = 0
   s.alive[slot] = 1
   s.laId.set(id, slot)
   s.vii++

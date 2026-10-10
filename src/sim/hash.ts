@@ -48,6 +48,20 @@ export class Hasher {
     return this
   }
 
+  /**
+   * Un intreg exact NENEGATIV sub 2^53, pe doua cuvinte (hi, lo). `u32` singur l-ar taia la 32 de biti: doua stari care
+   * difera cu 2^32 ar avea acelasi hash (t.3: alterarea trece de 2^32 la 8 unitati).
+   */
+  hiLo(v: number): this {
+    return this.u32(Math.floor(v / 4294967296)).u32(v % 4294967296)
+  }
+
+  /** `hiLo` pe primele `length` valori ale unui Float64Array de intregi exacti. */
+  intregi(view: Float64Array, length: number): this {
+    for (let i = 0; i < length; i++) this.hiLo(view[i]!)
+    return this
+  }
+
   text(s: string): this {
     for (let i = 0; i < s.length; i++) {
       this.h ^= s.charCodeAt(i) & 0xff
@@ -117,6 +131,8 @@ export function hashWorld(w: World): string {
   h.bytes(a.jobEfect, a.count)
   h.bytes(a.caraKind, a.count)
   h.ints(a.caraCantitate, a.count)
+  // Alterarea din mana (t.3): PERSISTED, pe hi/lo.
+  h.intregi(a.caraAlterare, a.count)
   h.ints(a.jobConsumat, a.count)
   // Nevoile si racirea lor: PERSISTED, deci in hash. Fara ele, o divergenta de
   // foame ar sta ascunsa pana schimba ce job ia cineva — adica tickuri mai
@@ -128,6 +144,8 @@ export function hashWorld(w: World): string {
   h.bytes(a.gandFel, a.count * a.ganduriSloturi)
   h.ints(a.gandPanaLa, a.count * a.ganduriSloturi)
   h.u32(w.plecatiTotal)
+  // Totalul stricat (t.3): PERSISTED, pe hi/lo — nimic nu-l margineste sub 2^32.
+  h.hiLo(w.hranaStricata)
   h.ints(a.evitaTinta, a.count * a.evitaSloturi)
   h.ints(a.evitaPanaLa, a.count * a.evitaSloturi)
   h.ints(a.scanLaTick, a.count)
@@ -165,6 +183,8 @@ export function hashWorld(w: World): string {
   h.ints(it.cantitate, it.count)
   h.bytes(it.alive, it.count)
   h.ints(it.reincercaLaTick, it.count)
+  // Alterarea in curs (t.3): PERSISTED, pe hi/lo (trece de 2^32 la 8 unitati).
+  h.intregi(it.alterare, it.count)
 
   // Zonele si celulele lor.
   const z = w.zone
@@ -173,6 +193,8 @@ export function hashWorld(w: World): string {
   h.bytes(z.kind, z.count)
   h.bytes(z.prioritate, z.count)
   h.bytes(z.alive, z.count)
+  // Masca felurilor refuzate (t.3): PERSISTED.
+  h.bytes(z.refuzate, z.count)
   const zc = z.celule
   h.u32(zc.count)
   h.ints(zc.id, zc.count)

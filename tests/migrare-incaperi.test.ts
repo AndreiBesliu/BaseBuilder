@@ -27,9 +27,11 @@ import { advance } from '../src/sim/world.ts'
 const FIX = readFileSync(new URL('./fixtures/save-schema7-incaperi.json', import.meta.url), 'utf8')
 /**
  * Hash-ul lumii DUPA migrarea 7 -> 8 (S24-27 t.2b): schema 8 si T-ul celor trei componente la echilibru, rest 0. In clipa
- * capturii (schema 7, iesirea scriptului) era 0e0666c5.
+ * capturii (schema 7, iesirea scriptului) era 0e0666c5. 65883f04 -> f83bc5fb (S24-27 t.3, commit-ul A): lantul trece acum si
+ * prin migrarea 8 -> 9 (schema 9, alterarea pe zero); functia de hash de dinainte, pe lumea migrata cu schema proiectata
+ * pe 8, da tot 65883f04.
  */
-const HASH_DUPA_MIGRARE = '65883f04'
+const HASH_DUPA_MIGRARE = 'f83bc5fb'
 /** Situl capturii: coltul (wx, wy) si cota solului g. Casele si pivnita sunt pe el, ca in script. */
 const SIT = { wx: 12489, wy: 4643, g: 30 }
 const A = { x: SIT.wx + 2, y: SIT.wy + 2 }

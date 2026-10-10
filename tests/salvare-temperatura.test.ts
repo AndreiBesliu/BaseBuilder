@@ -103,7 +103,9 @@ test('SALVARE scena S+ (literalul dedicat, §7, SAV-5): hash-ul la tickul 1.600 
   assert.ok(listaComponente(w.camere).some((x) => idc.get(x.ancora) !== x.id), 'cel putin un id diferit dupa decode')
   // Pionul a rămas în B (căldura lui e în literal).
   assert.equal(componentaLa(w.camere, Math.floor(w.agents.x[0]! / 1000), Math.floor(w.agents.y[0]! / 1000), w.agents.z[0]!)?.id, componentaLa(w.camere, ...s.rep.B)!.id)
-  assert.equal(hashWorld(w), '84d14adc')
+  // 84d14adc -> 82d32e8f (S24-27 t.3, commit-ul A, schema 9): doar formatul — functia de hash de dinainte, pe lumea noua
+  // cu schema proiectata pe 8, da tot 84d14adc.
+  assert.equal(hashWorld(w), '82d32e8f')
   assert.equal(hashWorld(d), hashWorld(w))
 })
 

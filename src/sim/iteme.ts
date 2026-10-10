@@ -40,6 +40,61 @@ import { isWalkable } from './regions.ts'
 import { rezervariPentru, Strat } from './rezervari.ts'
 import { celulaDeZonaLa, marcheazaZoneMurdare, subSantier } from './zone.ts'
 
+// ---------------------------------------------------------------------------
+// alterarea (S24-27 t.3, research/hrana-t3.md §1) — aritmetica, o functie pe fapt
+// ---------------------------------------------------------------------------
+
+/**
+ * O unitate intreaga de alterare: S-ul unui morman e in 1/ONE dintr-o unitate. 2^29: rata cuantizata e nenula de
+ * la ~5,02 °C (t.3 §3), iar la `itemStackMax` maxim (10^6) q·ONE ≈ 5,4e14 ramane sub 2^53 — intregi exacti in
+ * Float64, fara BigInt. Intra in FORMAT: o schimbare de ONE cere o migrare a salvarilor.
+ */
+export const ONE_ALTERARE = 536870912
+
+/**
+ * Partea de alterare care pleaca cu `k` din `q` unitati ale unui morman (sau ale unei maini) cu alterarea `S`:
+ * `floor(S·k/q)`, calculat ca `floor(S/q)·k + floor((S mod q)·k/q)` — fiecare produs ramane sub 2^53 (S < q·ONE ≤
+ * 10^6·2^29), deci exact fara BigInt. Toata la `k ≥ q`, nimic la `k ≤ 0`. Sursa pastreaza `S − parte`: suma e
+ * exacta, deci nicio despartire nu creeaza si nu sterge prospetime (proba de proprietate: `|parte·q − S·k| < q`,
+ * `parte·q ≤ S·k`). O SINGURA functie, pentru toate caile: depunerea, luatul, mutarea, mana, zidirea.
+ */
+export function parteDinAlterare(S: number, q: number, k: number): number {
+  if (k >= q) return S
+  if (k <= 0) return 0
+  return Math.floor(S / q) * k + Math.floor(((S % q) * k) / q)
+}
+
+/**
+ * Nutritia EFECTIVA a `luat` unitati care au dus cu ele `parte` din alterare (decizia 3: hrana pe jumatate
+ * stricata hraneste pe jumatate): `luat·nut − ceil(parte·nut/ONE)`. Cu `ceil`, mancatorul nu castiga niciodata
+ * restul (STARE-11), iar fragmentarea in mormane de 1 u nu mai scapa de pierdere. Fara depasire: `ceil(parte·nut/ONE)
+ * = floor(parte/ONE)·nut + ceil((parte mod ONE)·nut/ONE)`. Niciodata negativa: `parte ≤ luat·(ONE − 1)`.
+ */
+export function nutritieEfectiva(luat: number, parte: number, nut: number): number {
+  const intregi = Math.floor(parte / ONE_ALTERARE)
+  const rest = parte - intregi * ONE_ALTERARE
+  return luat * nut - (intregi * nut + Math.ceil((rest * nut) / ONE_ALTERARE))
+}
+
+/**
+ * Cate unitati dintr-un morman (q, S) acopera o lipsa de nutritie, pe VALOARE (t.3 §1): cel mai mic `k ≤ q` cu
+ * `nutritieEfectiva(k, parteDinAlterare(S, q, k), nut) ≥ lipsa`, altfel `q`. Cu S = 0 e exact formula de dinainte,
+ * `min(q, ceil(lipsa/nut))` (si aceeasi valoare ≤ 0 cand nu lipseste nimic). Nutritia efectiva creste cu `k` (pasul
+ * ei e `nut − Δceil ≥ 0`, fiindca `S ≤ q·(ONE − 1)`), deci cautarea e binara, pornind de la `ceil(lipsa/nut)`.
+ */
+export function unitatiPentruNutritie(S: number, q: number, nut: number, lipsa: number): number {
+  let lo = Math.ceil(lipsa / nut)
+  if (lo >= q) return q
+  if (lo <= 0 || S === 0) return lo
+  let hi = q
+  while (lo < hi) {
+    const k = Math.floor((lo + hi) / 2)
+    if (nutritieEfectiva(k, parteDinAlterare(S, q, k), nut) >= lipsa) hi = k
+    else lo = k + 1
+  }
+  return lo
+}
+
 /** Detaliul unui refuz memorat pe item. Pentru „De ce nu?". */
 export const DetaliuItem = {
   NICIUNUL: 0,
@@ -68,6 +123,19 @@ export interface ItemStore {
    * stare — panoul a aratat ca nepersistat rupe `1000 + save + load + 1000`.
    */
   readonly reincercaLaTick: Int32Array
+  /**
+   * PERSISTED (S24-27 t.3) — alterarea IN CURS a mormanului, in 1/`ONE_ALTERARE` dintr-o unitate: un intreg exact
+   * intr-un Float64Array (trece de 2^31 la `itemStackMax` mare, ramane sub 2^53). EXTENSIVA: unirea aduna, despartirea
+   * da portiunii `parteDinAlterare`, sursa pastreaza restul — nicio cale nu creeaza si nu sterge prospetime.
+   * Invariantul: `0 ≤ S ≤ cantitate·(ONE − 1)` pe un morman viu, 0 pe un slot mort (`stergeItem` il pune pe 0),
+   * 0 pe un fel neperisabil. `encode` arunca si `decode` refuza in afara lui (`valideazaAlterarea`).
+   */
+  readonly alterare: Float64Array
+  /**
+   * TRANSIENT — partea de alterare dusa de ultimul `iaDinItem`. Citita IMEDIAT dupa apel (RIDICA o pune in mana,
+   * MANANCA o scade din nutritie); n-are alt sens si nu se salveaza.
+   */
+  ultimaParte: number
   /** TRANSIENT — `codMotiv` al ultimului refuz si detaliul lui (`DetaliuItem`). */
   readonly ultimulMotiv: Uint8Array
   readonly ultimulMotivDetaliu: Uint8Array
@@ -91,6 +159,8 @@ export function makeItemStore(capacity: number): ItemStore {
     cantitate: new Int32Array(capacity),
     alive: new Uint8Array(capacity),
     reincercaLaTick: new Int32Array(capacity),
+    alterare: new Float64Array(capacity),
+    ultimaParte: 0,
     ultimulMotiv: new Uint8Array(capacity),
     ultimulMotivDetaliu: new Uint8Array(capacity),
     laCelula: new Map(),
@@ -115,8 +185,11 @@ export function itemLaCelula(s: ItemStore, wx: number, wy: number, z: number): n
  * Creeaza un morman NOU pe o celula GOALA. Nu contopeste, nu cauta: e primitiva
  * de store. Validarile de teren sunt ale apelantului (`asazaItem`). `id` vine
  * din `w.nextId` si e consumat de apelant DOAR daca intra.
+ *
+ * `alterare` e starea pe care o aduce marfa (t.3): argument OBLIGATORIU, nu implicit — un apelant care uita sa
+ * spuna de unde vine marfa ar crea prospetime din nimic, iar `tsc` il opreste. 0 doar pentru marfa noua.
  */
-export function creeazaItem(s: ItemStore, id: number, kind: number, wx: number, wy: number, z: number, cantitate: number): Outcome<number> {
+export function creeazaItem(s: ItemStore, id: number, kind: number, wx: number, wy: number, z: number, cantitate: number, alterare: number): Outcome<number> {
   const key = cellKey(wx, wy, z)
   const existent = s.laCelula.get(key)
   if (existent !== undefined) return refuse(Reason.CELULA_OCUPATA, { id: s.id[existent]!, wx, wy, z })
@@ -140,6 +213,8 @@ export function creeazaItem(s: ItemStore, id: number, kind: number, wx: number, 
   // Slotul se REUTILIZEAZA: nimic din itemul mort nu ramane (racirea mostenita
   // ar ascunde itemul nou pana la un tick pe care nu l-a trait).
   s.reincercaLaTick[slot] = 0
+  // SCRISA, nu adunata: slotul mort are 0 (`stergeItem`), dar starea vine de la apelant, nu din slot.
+  s.alterare[slot] = alterare
   s.ultimulMotiv[slot] = 0
   s.ultimulMotivDetaliu[slot] = 0
   s.laCelula.set(key, slot)
@@ -148,10 +223,16 @@ export function creeazaItem(s: ItemStore, id: number, kind: number, wx: number, 
   return accept(slot)
 }
 
-/** Omoara un item viu, la nivel de store. Rezervarile de pe el sunt treaba apelantului. */
+/**
+ * Omoara un item viu, la nivel de store. Rezervarile de pe el sunt treaba apelantului.
+ *
+ * Alterarea slotului se pune pe 0 (t.3): un slot mort nu tine stare, iar `decode` refuza unul cu S ≠ 0. Cine
+ * muta mormanul (`mutaItem`) citeste S INAINTE de apel.
+ */
 export function stergeItem(s: ItemStore, slot: number): void {
   if (s.alive[slot] === 0) return
   s.alive[slot] = 0
+  s.alterare[slot] = 0
   s.laCelula.delete(cellKey(s.wx[slot]!, s.wy[slot]!, s.z[slot]!))
   s.laId.delete(s.id[slot]!)
   s.vii--
@@ -238,9 +319,16 @@ export interface Depunere {
  *
  * `id` nenul: primul morman NOU creat il primeste (un morman mutat de cârlig
  * isi pastreaza identitatea daca nu se contopeste); celelalte iau din `nextId`.
+ *
+ * `alterare` (t.3) e starea SURSEI — mana lasata la picioare, mormanul mutat, 0 pentru marfa noua —, argument
+ * obligatoriu. Fiecare portiune isi ia `parteDinAlterare(S ramas, q ramas, pune)`, scazuta din sursa abia DUPA ce
+ * portiunea a intrat (`creeazaItem` poate refuza pe capacitate); S-ul unitatilor care nu incap nicaieri se numara
+ * pierdut (`alterarePierduta`), alaturi de unitatile lor (`itemePierdute`, si pe fel in `pierdutePeFel`).
  */
-export function asazaItem(w: World, rules: Rules, kind: number, cantitate: number, wx: number, wy: number, z: number, id = 0): Depunere {
+export function asazaItem(w: World, rules: Rules, kind: number, cantitate: number, wx: number, wy: number, z: number, id: number, alterare: number): Depunere {
   let ramas = cantitate
+  // Starea sursei, ramasa: `ramas` unitati cu `sursaS` alterare. Se scade portiune cu portiune, exact.
+  let sursaS = alterare
   let ultimulSlot = -1
   const pas = Math.max(0, Math.min(4, rules.maxStepM))
   for (let trecere = 0; trecere < 2 && ramas > 0; trecere++) {
@@ -269,36 +357,90 @@ export function asazaItem(w: World, rules: Rules, kind: number, cantitate: numbe
           if (!isWalkable(w.terrain, nx, ny, zs, rules)) continue
           if (rezervataCaDestinatie(w, nx, ny, zs)) continue
           const pune = Math.min(loc, ramas)
+          const parte = parteDinAlterare(sursaS, ramas, pune)
           const it = itemLaCelula(w.iteme, nx, ny, zs)
           if (it !== -1) {
             w.iteme.cantitate[it] = w.iteme.cantitate[it]! + pune
+            w.iteme.alterare[it] = w.iteme.alterare[it]! + parte
             ultimulSlot = it
           } else {
             const idNou = id !== 0 ? id : w.nextId
-            const out = creeazaItem(w.iteme, idNou, kind, nx, ny, zs, pune)
+            const out = creeazaItem(w.iteme, idNou, kind, nx, ny, zs, pune, parte)
             if (!out.ok) continue // capacitate: se incearca contopirea in alta parte
             if (id !== 0) id = 0
             else w.nextId++
             ultimulSlot = out.value
           }
           ramas -= pune
+          sursaS -= parte
           marcheazaZoneMurdare(w)
         }
       }
     }
   }
   if (ramas > 0) w.ratiune.itemePierdute += ramas
+  if (ramas > 0) numaraPierdute(w, kind, ramas, sursaS)
   return { pus: cantitate - ramas, ultimulSlot }
+}
+
+/**
+ * Unitati care n-au incaput nicaieri (sau mana unui mort la incarcare): pe fel, si S-ul lor. Contoarele sunt ale
+ * oracolelor G1 (unitati pe fel) si G1S (S); `itemePierdute`, zavorul tuturor felurilor, il trage apelantul.
+ */
+export function numaraPierdute(w: World, kind: number, cantitate: number, alterare: number): void {
+  w.ratiune.pierdutePeFel[kind] = w.ratiune.pierdutePeFel[kind]! + cantitate
+  w.ratiune.alterarePierduta += alterare
 }
 
 /**
  * Ia `cantitate` din mormanul `slot`. Daca ramane gol, moare. Intoarce cat s-a
  * luat. Rezervarile de pe un morman mort sunt treaba apelantului.
+ *
+ * Alterarea (t.3): unitatile luate duc cu ele `parteDinAlterare(S, q, luat)` (toata, la `luat = q`), lasata in
+ * `ultimaParte` pentru apelant; mormanul pastreaza restul.
  */
 export function iaDinItem(w: World, rules: Rules, slot: number, cantitate: number): number {
   const s = w.iteme
+  const luat = Math.min(cantitate, s.cantitate[slot]!)
+  const parte = parteDinAlterare(s.alterare[slot]!, s.cantitate[slot]!, luat)
+  s.alterare[slot] = s.alterare[slot]! - parte
+  s.ultimaParte = parte
+  scadeDinMorman(w, rules, slot, luat)
+  return luat
+}
+
+/**
+ * Realizarea alterarii (t.3 §1): `k` unitati intregi stricate pleaca din morman cu EXACT `k·ONE` din S — nu cu
+ * regula de despartire a lui `iaDinItem`, care, luata literal, lasa S ≥ ONE si strica o unitate la aproape fiecare
+ * pas (de 26 de ori mai repede: STARE-4). `k = min(q, floor(S/ONE))`; un `k` mai mare se taie acolo, deci S nu
+ * ajunge niciodata negativ. Unitatile se numara in `w.hranaStricata`; daca mormanul moare, restul lui de S iese
+ * numarat (`alterareDisparuta`). Imparte cu `iaDinItem` DOAR contabilitatea de store (zonele, moartea);
+ * `reconciliazaTintaMoarta` e a apelantului, ca la `iaDinItem`. Intoarce cantitatea ramasa (0 = mort).
+ *
+ * La commit-ul A al t.3 nu o cheama niciun pas (rata e 0 peste tot): o cheama testele, pe S scris de ele.
+ */
+export function scadeStricate(w: World, rules: Rules, slot: number, k: number): number {
+  const s = w.iteme
+  const q = s.cantitate[slot]!
+  const n = Math.min(k, q, Math.floor(s.alterare[slot]! / ONE_ALTERARE))
+  if (n <= 0) return q
+  s.alterare[slot] = s.alterare[slot]! - n * ONE_ALTERARE
+  w.hranaStricata += n
+  if (n === q) {
+    w.ratiune.alterareDisparuta += s.alterare[slot]!
+    s.alterare[slot] = 0
+  }
+  scadeDinMorman(w, rules, slot, n)
+  return s.cantitate[slot]!
+}
+
+/**
+ * Contabilitatea de STORE a unei scaderi din morman, comuna lui `iaDinItem` si `scadeStricate`: cantitatea,
+ * moartea (`stergeItem`) si murdarirea indexului de zone. Alterarea e a apelantului.
+ */
+function scadeDinMorman(w: World, rules: Rules, slot: number, luat: number): void {
+  const s = w.iteme
   const inainte = s.cantitate[slot]!
-  const luat = Math.min(cantitate, inainte)
   const dupa = inainte - luat
   s.cantitate[slot] = dupa
 
@@ -321,5 +463,4 @@ export function iaDinItem(w: World, rules: Rules, slot: number, cantitate: numbe
   } else if (peZona || caraSchimbat) {
     marcheazaZoneMurdare(w)
   }
-  return luat
 }

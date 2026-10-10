@@ -108,7 +108,7 @@ test('asazaItem: cand NICIO celula din ordine nu primeste felul, pierderea se NU
   // Celula si cei patru vecini: pline cu LEMN (plafon). Sus e aer fara podea, jos e piatra.
   for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]] as const) lasaItem(w, Item.LEMN, R.itemStackMax, cx + dx, cy + dy)
   assert.equal(w.ratiune.itemePierdute, 0)
-  const r = asazaItem(w, R, Item.PIATRA, 7, cx, cy, p.g + 1)
+  const r = asazaItem(w, R, Item.PIATRA, 7, cx, cy, p.g + 1, 0, 0)
   assert.equal(r.pus, 0)
   assert.equal(r.ultimulSlot, -1)
   assert.equal(w.ratiune.itemePierdute, 7, 'pierderea nu s-a numarat')
@@ -126,7 +126,7 @@ test('un save cu doua iteme vii pe aceeasi celula, sau cu cantitate 0, e refuzat
   const raw = JSON.parse(encode(w)) as { data: { nextId: number; iteme: Record<string, number | number[]> } }
   const it = raw.data.iteme
   it.count = 2
-  for (const camp of ['id', 'kind', 'wx', 'wy', 'z', 'cantitate', 'alive', 'reincercaLaTick'] as const) (it[camp] as number[]).push((it[camp] as number[])[0]!)
+  for (const camp of ['id', 'kind', 'wx', 'wy', 'z', 'cantitate', 'alive', 'reincercaLaTick', 'alterare'] as const) (it[camp] as number[]).push((it[camp] as number[])[0]!)
   ;(it.id as number[])[1] = raw.data.nextId
   raw.data.nextId++
   const dublu = decode(JSON.stringify(raw))

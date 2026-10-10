@@ -608,7 +608,7 @@ test('marfa nu se lasa PE un santier', () => {
   assert.ok(santier.ok, `fixtura: ${JSON.stringify(santier)}`)
 
   // Se incearca depunerea EXACT pe santier.
-  const pus = asazaItem(w, R, 0, 10, wx, wy, g + 1)
+  const pus = asazaItem(w, R, 0, 10, wx, wy, g + 1, 0, 0)
   assert.equal(itemLaCelula(w.iteme, wx, wy, g + 1), -1, 'nimic n-are voie sa stea pe santier')
   assert.equal(pus.pus, 10, `marfa trebuia sa ajunga alaturi, nu sa se piarda: ${JSON.stringify(pus)}`)
 

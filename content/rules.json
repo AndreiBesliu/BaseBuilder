@@ -66,6 +66,7 @@
     "ODIHNA": { "scurgere": 4, "prag": 400, "pragCritic": 150 }
   },
   "nutritie": { "PIATRA": 0, "PAMANT": 0, "LEMN": 0, "HRANA": 15 },
+  "perisabil": { "PIATRA": false, "PAMANT": false, "LEMN": false, "HRANA": true },
   "dispozitieMax": 1000,
   "dispozitieBaza": 500,
   "dispozitieTicks": 500,

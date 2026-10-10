@@ -173,7 +173,7 @@ test('DEPOZIT PESTE SANTIER (USA-5): un morman deja sub santier (buiandrug) e re
   const o = applyCommand(w, { kind: 'desemneaza', wx: x, wy: y, z: g + 2, piesa: Piesa.PERETE }, R)
   assert.ok(o.ok, JSON.stringify(o))
   const id = o.ok ? o.value : -1
-  assert.ok(creeazaItem(w.iteme, w.nextId++, Item.PAMANT, x, y, g + 1, 20).ok)
+  assert.ok(creeazaItem(w.iteme, w.nextId++, Item.PAMANT, x, y, g + 1, 20, 0).ok)
   marcheazaZoneMurdare(w)
   assert.notEqual(itemLaCelula(w.iteme, x, y, g + 1), -1, 'premisa: mormanul e sub buiandrug')
   lasaItem(w, Item.PIATRA, 40, wx + 2, wy + 2)

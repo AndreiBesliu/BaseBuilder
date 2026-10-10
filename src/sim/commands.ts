@@ -15,7 +15,7 @@
 import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import type { World, FactionId } from './state.ts'
-import { CATEGORII, Gand, ITEME, NEVOI, nevoiaInitiala, Piesa, puneGand, slotOf } from './state.ts'
+import { CATEGORII, Gand, golesteMana, ITEME, NEVOI, nevoiaInitiala, Piesa, puneGand, slotOf } from './state.ts'
 import type { PiesaId } from './state.ts'
 import { cellOf, clearPath } from './drumuri.ts'
 import type { Rules } from './content.ts'
@@ -137,8 +137,8 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
       a.jobDest[slot] = 0
       a.jobCantitate[slot] = 0
       a.jobEfect[slot] = 0
-      a.caraKind[slot] = 0
-      a.caraCantitate[slot] = 0
+      // Mana, cu alterarea ei (t.3): nou-nascutul nu mosteneste nimic din mana mortului.
+      golesteMana(a, slot)
       a.jobConsumat[slot] = 0
       a.scanLaTick[slot] = 0
       // Nevoile, DEFAZAT pe id — si asta e singurul loc unde id-ul exista.
@@ -491,10 +491,13 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
         return refuse(Reason.LOC_NECALCABIL, { wx: cmd.wx, wy: cmd.wy, z: cmd.z })
       }
       const pierduteInainte = w.ratiune.itemePierdute
-      const r = asazaItem(w, rules, cmd.fel, cmd.cantitate, cmd.wx, cmd.wy, cmd.z)
+      const pierduteFelInainte = w.ratiune.pierdutePeFel[cmd.fel]!
+      // Marfa NOUA: alterarea 0 (t.3).
+      const r = asazaItem(w, rules, cmd.fel, cmd.cantitate, cmd.wx, cmd.wy, cmd.z, 0, 0)
       if (r.pus === 0) {
-        // Comanda a refuzat: zavorul nu se trage pentru un ordin respins.
+        // Comanda a refuzat: zavorul nu se trage pentru un ordin respins (nici cel pe fel).
         w.ratiune.itemePierdute = pierduteInainte
+        w.ratiune.pierdutePeFel[cmd.fel] = pierduteFelInainte
         return refuse(Reason.CAPACITATE_DEPASITA, { camp: 'iteme', wx: cmd.wx, wy: cmd.wy, z: cmd.z })
       }
       acoperaDesemnarea(w, rules, cmd.wx, cmd.wy, cmd.z)

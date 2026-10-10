@@ -16,7 +16,7 @@ import type { Outcome } from './result.ts'
 import { accept, refuse, Reason } from './result.ts'
 import type { RngState } from './rng.ts'
 import type { AgentStore, RngStreamName, World } from './state.ts'
-import { CATEGORII, makeAgentStore, MM_PER_CELL, NEVOI, nevoiaInitiala, Piesa, RNG_STREAMS, SCHEMA_VERSION } from './state.ts'
+import { CATEGORII, ITEME, makeAgentStore, MM_PER_CELL, NEVOI, nevoiaInitiala, Piesa, RNG_STREAMS, SCHEMA_VERSION } from './state.ts'
 import { createRegions, restoreRegions } from './regions.ts'
 import { makePathStore } from './drumuri.ts'
 import type { PathStore } from './drumuri.ts'
@@ -30,7 +30,7 @@ import { createReservations } from './rezervari.ts'
 import { makeRatiuneStore, reconstruiesteRezervari } from './joburi.ts'
 import { FelJob, PasConstruieste } from './state.ts'
 import { slotDesemnare } from './desemnari.ts'
-import { makeItemStore, reindexeazaIteme } from './iteme.ts'
+import { makeItemStore, ONE_ALTERARE, reindexeazaIteme } from './iteme.ts'
 import type { ItemStore } from './iteme.ts'
 import { makeZoneStore, reindexeazaZone } from './zone.ts'
 import type { ZoneStore } from './zone.ts'
@@ -77,6 +77,9 @@ export function encode(w: World): string {
   // se arunca, nu se scrie.
   const temp = blocTemperaturi(w)
   if (!temp.ok) throw new Error(`encode: temperatura nu se poate salva (${String(temp.params.motiv ?? temp.params.camp ?? temp.reason)})`)
+  // Alterarea (t.3 §7): aceiasi invarianti ca la `decode` — o stare pe care incarcarea ar refuza-o nu se scrie.
+  const alt = valideazaAlterarea(w.iteme, w.agents, w.zone, w.hranaStricata)
+  if (!alt.ok) throw new Error(`encode: alterarea nu se poate salva (${String(alt.params.camp)}: ${String(alt.params.motiv)})`)
   const a = w.agents
   const rng: Record<string, RngState> = {}
   for (const name of RNG_STREAMS) rng[name] = w.rng[name]
@@ -95,6 +98,8 @@ export function encode(w: World): string {
       nextId: w.nextId,
       // PERSISTED: plecatii raman plecati. Vezi `World.plecatiTotal`.
       plecatiTotal: w.plecatiTotal,
+      // PERSISTED (t.3): hrana stricata ramane stricata, ca plecatii.
+      hranaStricata: w.hranaStricata,
       // Terenul: se salveaza DOAR chunk-urile promovate. Restul lumii — 268 km² —
       // se regenereaza din seed. Asta e trucul care face ca un save sa fie de
       // ordinul megabytelor si nu al gigabytelor.
@@ -176,6 +181,8 @@ export function encode(w: World): string {
         jobEfect: Array.from(a.jobEfect.subarray(0, a.count)),
         caraKind: Array.from(a.caraKind.subarray(0, a.count)),
         caraCantitate: Array.from(a.caraCantitate.subarray(0, a.count)),
+        // Alterarea din mana (t.3): mana nu se strica, dar isi poarta starea de la RIDICA la LASA.
+        caraAlterare: Array.from(a.caraAlterare.subarray(0, a.count)),
         // `jobConsumat` era HASHUIT si citit de `decode`, dar nu se scria niciodata:
         // `decode` il punea pe 0, deci `decode(encode(w))` dadea alt hash decat `w`
         // INAINTE de orice tick, ori de cate ori un pion era in mijlocul mesei.
@@ -232,6 +239,8 @@ export function encode(w: World): string {
         cantitate: Array.from(it.cantitate.subarray(0, it.count)),
         alive: Array.from(it.alive.subarray(0, it.count)),
         reincercaLaTick: Array.from(it.reincercaLaTick.subarray(0, it.count)),
+        // Alterarea in curs (t.3): intregi exacti sub 2^53, scrisi ca numere JSON (exacte pana la 2^53).
+        alterare: Array.from(it.alterare.subarray(0, it.count)),
       },
       // Zonele si celulele lor. Indexul (libere, acceptante, deMutat) e DERIVED
       // si porneste murdar la incarcare.
@@ -242,6 +251,8 @@ export function encode(w: World): string {
         kind: Array.from(z.kind.subarray(0, z.count)),
         prioritate: Array.from(z.prioritate.subarray(0, z.count)),
         alive: Array.from(z.alive.subarray(0, z.count)),
+        // Masca felurilor REFUZATE (t.3): 0 = primeste tot.
+        refuzate: Array.from(z.refuzate.subarray(0, z.count)),
         celule: {
           count: zc.count,
           capacity: zc.capacity,
@@ -267,6 +278,22 @@ const STORE_GOL = { count: 0, capacity: 0, id: [], kind: [], wx: [], wy: [], z: 
  * are o fixtura golden in `tests/fixtures/`, capturata INAINTE de schimbare.
  */
 const MIGRATIONS: Record<number, (data: Record<string, unknown>) => Record<string, unknown>> = {
+  // 8 -> 9 (S24-27 t.3): alterarea. O salvare de schema 8 n-are nicio alterare, deci totul e ZERO: hrana porneste
+  // PROASPATA (decizia 14 — o varsta n-are de unde fi estimata), mainile la 0, nimic stricat, iar fiecare zona primeste
+  // tot — masca e a felurilor REFUZATE, deci „primeste tot" e chiar zero-ul, nu un sir de biti care ar imbatrani.
+  // Idempotenta (`??`); un store lipsa ramane lipsa (refuzul lui e al citirii, ca inainte).
+  8: (d) => {
+    const it = d.iteme as Record<string, unknown> | undefined
+    const a = d.agents as Record<string, unknown> | undefined
+    const z = d.zone as Record<string, unknown> | undefined
+    return {
+      ...d,
+      hranaStricata: d.hranaStricata ?? 0,
+      ...(it ? { iteme: { ...it, alterare: it.alterare ?? zerouri(it.count) } } : {}),
+      ...(a ? { agents: { ...a, caraAlterare: a.caraAlterare ?? zerouri(a.count) } } : {}),
+      ...(z ? { zone: { ...z, refuzate: z.refuzate ?? zerouri(z.count) } } : {}),
+    }
+  },
   // 7 -> 8 (S24-27 t.2b): temperatura incaperilor. Identitate: T-ul unei lumi fara istorie termica se calculeaza in
   // `decode` (echilibrul, pe indexul si graful reconstruite acolo — JSON-ul n-are teren de citit). Fara treapta asta,
   // bucla de migrari refuza ORICE salvare veche (B1: 4/4 fixturi refuzate). Decizia „migreaza" vine din `env.schema < 8`,
@@ -447,6 +474,12 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
     if (v.length !== count) return refuse(Reason.VALOARE_INVALIDA, { camp: `agents.${camp}`, lungime: v.length, asteptat: count })
     agents[camp].set(v)
   }
+  // Alterarea din mana (t.3): obligatorie de la schema 9 (migrarea 8 -> 9 o scrie cu zero). Aici doar forma — numere,
+  // de lungime `count`; invariantii sunt ai lui `valideazaAlterarea`, mai jos, aceiasi ca la `encode`.
+  {
+    const c = citesteNumere(agentsRaw.caraAlterare, 'agents.caraAlterare', count, agents.caraAlterare)
+    if (!c.ok) return c
+  }
   if (agentsRaw.evitaTinta && agentsRaw.evitaPanaLa) {
     const k = agentsRaw.evitaSloturi as number
     const t = agentsRaw.evitaTinta as number[]
@@ -624,6 +657,15 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
   if (!iteme.ok) return iteme
   const zone = incarcaZone(data.zone, rules)
   if (!zone.ok) return zone
+  // Alterarea (t.3 §7): totalul stricat e obligatoriu de la schema 9; invariantii formatului, aceiasi ca la `encode`;
+  // apoi perisabilitatea, care e a content-ului de ACUM: un S ≠ 0 pe un fel pe care regulile nu-l strica se pune pe 0,
+  // numarat — nu refuz (o salvare nu devine stricata fiindca s-a schimbat content-ul). Inainte de `reconstruiesteRezervari`,
+  // care poate lasa mana unui job neincarcabil la picioare, cu starea ei.
+  const hranaStricata = data.hranaStricata
+  if (typeof hranaStricata !== 'number') return refuse(Reason.LIPSA_MATERIAL, { camp: 'hranaStricata' })
+  const alt = valideazaAlterarea(iteme.value, agents, zone.value, hranaStricata)
+  if (!alt.ok) return alt
+  const normalizate = normalizeazaAlterarea(iteme.value, agents, rules)
   // Indexul incaperilor e DERIVED: reconstruit ACUM, nu la primul tick (lumea incarcata trebuie sa aiba, inainte de
   // orice, exact indexul lumii continue, la zi in afara tickului), cu K-ul si dSolMasiv ai regulilor de ACUM; graful
   // incremental construit integral; starea temperaturii aliniata la el (temperatura.ts, `incarcaTemperaturi`).
@@ -657,7 +699,9 @@ export function decode(text: string, rules: Rules = DEFAULT_RULES): Outcome<Worl
     camere: lumeInc.value.camere,
     temperatura: lumeInc.value.temperatura,
     plecatiTotal: (data.plecatiTotal as number | undefined) ?? 0,
+    hranaStricata,
   }
+  w.ratiune.alterareNormalizata = normalizate
   // Migrarea temperaturii (t.2b §7): o salvare de dinainte de schema 8 n-are T, deci lumea porneste de la echilibru — la
   // neconvergenta, ultima iterata si contorul (temperatura.ts); un graf refuzat refuza incarcarea.
   if (env.schema < 8) {
@@ -791,6 +835,9 @@ function incarcaIteme(raw: unknown, rules: Rules): Outcome<ItemStore> {
   s.count = count.value
   const c = citesteCampuri(r, 'iteme', s.count, ['id', 'kind', 'wx', 'wy', 'z', 'cantitate', 'alive', 'reincercaLaTick'] as const, s)
   if (!c.ok) return c
+  // Alterarea (t.3): forma aici, invariantii in `valideazaAlterarea`.
+  const alt = citesteNumere(r.alterare, 'iteme.alterare', s.count, s.alterare)
+  if (!alt.ok) return alt
   const idx = reindexeazaIteme(s, rules)
   if (!idx.ok) return idx
   return accept(s)
@@ -805,6 +852,18 @@ function incarcaZone(raw: unknown, rules: Rules): Outcome<ZoneStore> {
   s.count = count.value
   const c = citesteCampuri(r, 'zone', s.count, ['id', 'kind', 'prioritate', 'alive'] as const, s)
   if (!c.ok) return c
+  // Masca refuzata (t.3): forma aici — intregi care incap EXACT intr-un octet, fara conversie tacuta (256 ar deveni 0,
+  // adica „primeste tot"); bitii in afara felurilor sunt refuzul lui `valideazaAlterarea`.
+  const ref = r.refuzate as unknown[] | undefined
+  if (!Array.isArray(ref)) return refuse(Reason.LIPSA_MATERIAL, { camp: 'zone.refuzate' })
+  if (ref.length !== s.count) return refuse(Reason.VALOARE_INVALIDA, { camp: 'zone.refuzate', lungime: ref.length, asteptat: s.count })
+  for (let i = 0; i < s.count; i++) {
+    const v = ref[i]
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 255) {
+      return refuse(Reason.VALOARE_INVALIDA, { camp: `zone.refuzate[${i}]`, valoare: String(v), min: 0, max: 255, motiv: 'masca nu incape intr-un octet' })
+    }
+  }
+  s.refuzate.set(ref as number[])
   const cr = r.celule as Record<string, unknown> | undefined
   if (!cr) return refuse(Reason.LIPSA_MATERIAL, { camp: 'zone.celule' })
   const ccount = citesteCount(cr, 'zone.celule', s.celule.capacity)
@@ -815,6 +874,82 @@ function incarcaZone(raw: unknown, rules: Rules): Outcome<ZoneStore> {
   const idx = reindexeazaZone(s, rules)
   if (!idx.ok) return idx
   return accept(s)
+}
+
+/** Un tablou de zerouri pentru migrare; un `count` stricat da un tablou gol, iar lungimea gresita o refuza citirea. */
+function zerouri(count: unknown): number[] {
+  const n = typeof count === 'number' && Number.isInteger(count) && count >= 0 && count <= 100_000_000 ? count : 0
+  return new Array<number>(n).fill(0)
+}
+
+/**
+ * Citeste un tablou de NUMERE intr-un Float64Array, fara conversie tacuta: un sir, un `null` sau un boolean s-ar face
+ * NaN, 0 sau 1. Obligatoriu, de lungime `count`. Valorile se judeca in `valideazaAlterarea`.
+ */
+function citesteNumere(raw: unknown, camp: string, count: number, tinta: Float64Array): Outcome<void> {
+  if (!Array.isArray(raw)) return refuse(Reason.LIPSA_MATERIAL, { camp })
+  if (raw.length !== count) return refuse(Reason.VALOARE_INVALIDA, { camp, lungime: raw.length, asteptat: count })
+  for (let i = 0; i < count; i++) {
+    if (typeof raw[i] !== 'number') return refuse(Reason.VALOARE_INVALIDA, { camp: `${camp}[${i}]`, valoare: String(raw[i]), motiv: 'nu e un numar' })
+  }
+  tinta.set(raw as number[])
+  return accept()
+}
+
+/**
+ * Invariantii FORMATULUI alterarii (S24-27 t.3 §1, §7): ACEIASI la `encode` (arunca) si la `decode` (refuza) — o
+ * functie, un adevar (STARE-8: un drum uitat scria o salvare care nu se mai incarca). Fiecare refuz cu cazul lui:
+ *   - mormane, pe sloturile [0, count): S intreg SIGUR si nenegativ; 0 pe un slot MORT (`stergeItem`); pe unul viu
+ *     cel mult `cantitate·(ONE − 1)` — invariantul pe care nicio cale legala nu-l incalca (d = q·ONE − S ≥ q, STARE-10);
+ *   - maini: la fel, cu `caraCantitate`; o mana GOALA are S = 0;
+ *   - zone: masca refuzata are doar biti de feluri (`ITEME`);
+ *   - totalul stricat: intreg sigur, nenegativ.
+ * Nu cere content: perisabilitatea e a regulilor, si `decode` o normalizeaza (`normalizeazaAlterarea`), nu o refuza.
+ */
+export function valideazaAlterarea(it: ItemStore, a: AgentStore, z: ZoneStore, hranaStricata: number): Outcome<void> {
+  for (let i = 0; i < it.count; i++) {
+    const S = it.alterare[i]!
+    if (!Number.isSafeInteger(S) || S < 0) return refuse(Reason.VALOARE_INVALIDA, { camp: `iteme.alterare[${i}]`, valoare: S, motiv: 'S nu e un intreg sigur nenegativ' })
+    if (it.alive[i] === 0) {
+      if (S !== 0) return refuse(Reason.VALOARE_INVALIDA, { camp: `iteme.alterare[${i}]`, valoare: S, motiv: 'S pe un slot mort' })
+      continue
+    }
+    const max = it.cantitate[i]! * (ONE_ALTERARE - 1)
+    if (S > max) return refuse(Reason.VALOARE_INVALIDA, { camp: `iteme.alterare[${i}]`, valoare: S, max, motiv: 'S peste cantitate·(ONE − 1)' })
+  }
+  for (let i = 0; i < a.count; i++) {
+    const S = a.caraAlterare[i]!
+    if (!Number.isSafeInteger(S) || S < 0) return refuse(Reason.VALOARE_INVALIDA, { camp: `agents.caraAlterare[${i}]`, valoare: S, motiv: 'S nu e un intreg sigur nenegativ' })
+    const q = a.caraCantitate[i]!
+    if (q === 0) {
+      if (S !== 0) return refuse(Reason.VALOARE_INVALIDA, { camp: `agents.caraAlterare[${i}]`, valoare: S, motiv: 'mana goala cu S ≠ 0' })
+      continue
+    }
+    const max = q * (ONE_ALTERARE - 1)
+    if (S > max) return refuse(Reason.VALOARE_INVALIDA, { camp: `agents.caraAlterare[${i}]`, valoare: S, max, motiv: 'S peste cantitate·(ONE − 1)' })
+  }
+  const feluri = (1 << ITEME) - 1
+  for (let i = 0; i < z.count; i++) {
+    if ((z.refuzate[i]! & ~feluri) !== 0) return refuse(Reason.VALOARE_INVALIDA, { camp: `zone.refuzate[${i}]`, valoare: z.refuzate[i]!, max: feluri, motiv: 'biti in afara felurilor' })
+  }
+  if (!Number.isSafeInteger(hranaStricata) || hranaStricata < 0) return refuse(Reason.VALOARE_INVALIDA, { camp: 'hranaStricata', valoare: hranaStricata, motiv: 'nu e un intreg sigur nenegativ' })
+  return accept()
+}
+
+/**
+ * Perisabilitatea e a CONTENT-ului (t.3, STARE-8): S ≠ 0 pe un morman sau intr-o mana al carei fel regulile de acum
+ * nu il declara perisabil se pune pe 0. Intoarce cate sloturi a atins (`ratiune.alterareNormalizata`). Nu refuza: o
+ * salvare nu devine stricata fiindca s-a schimbat content-ul.
+ */
+function normalizeazaAlterarea(it: ItemStore, a: AgentStore, rules: Rules): number {
+  let n = 0
+  for (let i = 0; i < it.count; i++) {
+    if (it.alterare[i] !== 0 && rules.perisabil[it.kind[i]!] !== true) { it.alterare[i] = 0; n++ }
+  }
+  for (let i = 0; i < a.count; i++) {
+    if (a.caraAlterare[i] !== 0 && rules.perisabil[a.caraKind[i]!] !== true) { a.caraAlterare[i] = 0; n++ }
+  }
+  return n
 }
 
 interface SavedTerrain {
