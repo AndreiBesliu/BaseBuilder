@@ -108,7 +108,6 @@ test('STARE T in ambele directii (IDX-6): o componenta fara T si un slot mort cu
   const w = laEchilibru(s.w, 0)
   const casa = componentaLa(w.camere, ...s.rep.casa!)!.id
   const sl = w.temperatura.slot
-  const tCasa = sl.t[casa]!
   sl.are[casa] = 0
   assert.throws(() => encode(w), /componenta fara T/)
   w.tick = 20
@@ -130,7 +129,55 @@ test('STARE T in ambele directii (IDX-6): o componenta fara T si un slot mort cu
   assert.equal(statTermic(w).invarianti, 2)
   assert.equal(w.temperatura.slot.are[mort] ?? 0, 0)
   assert.doesNotThrow(() => encode(w))
-  assert.ok(Number.isFinite(tCasa))
+  // Valorile reparației le probează testul de mai jos („completeaza pe VALORI"): aici stătea `Number.isFinite(tCasa)`, cu
+  // T-ul citit ÎNAINTE de ștergere — vid (PAS-1: șase implementări greșite ale lui `completeaza` treceau toată suita).
+})
+
+test('STARE completeaza pe VALORI (§5.3, IDX-6, PAS-1): componenta fara T o primeste de la echilibrul tickului pasului, celelalte isi pastreaza (T, rest) — == lumea geamana cu T-ul pus de mana', () => {
+  // Trei gemene cu aceeași istorie: 200 de pași la tickuri k·7919, deci T-urile departe de echilibru și restul nenul.
+  const istorie = (): ReturnType<typeof casaTermica> => {
+    const s = casaTermica({ k: 1 })
+    laEchilibru(s.w, 0)
+    for (let k = 1; k <= 200; k++) {
+      s.w.tick = k * 7919
+      pasTermic(s.w, R)
+    }
+    return s
+  }
+  const a = istorie()
+  const b = istorie()
+  const c = istorie()
+  assert.deepEqual(tPeAncora(a.w), tPeAncora(b.w))
+  const tk = 1_600_020
+  const casa = componentaLa(a.w.camere, ...a.rep.casa!)!
+  assert.equal(componentaLa(b.w.camere, ...b.rep.casa!)!.id, casa.id, 'fixtura: gemenele au aceleasi sloturi')
+  // Echilibrul jocului la tk, pe geamăna C (aceeași soluție pe care o cere `completeaza`, fără să-i indexăm nodurile).
+  const echilibruPeAncora = (tick: number): Map<number, number> => {
+    bun(temperaturaLaEchilibru(c.w, R, tick), `echilibrul la ${tick}`)
+    return new Map([...c.w.camere.comp.values()].map((x) => [x.ancora, c.w.temperatura.slot.t[x.id]!] as const))
+  }
+  const laZero = echilibruPeAncora(0)
+  const tEcPeAncora = echilibruPeAncora(tk)
+  const eq = (ancora: number): number => tEcPeAncora.get(ancora)!
+  const tEq = eq(casa.ancora)
+  const sl = a.w.temperatura.slot
+  const alte = [...a.w.camere.comp.values()].filter((x) => x.id !== casa.id)
+  // Precondițiile fac vizibilă fiecare implementare greșită, pe componentele PĂSTRATE: toate de la echilibru (istoria ≠
+  // echilibrul), restul pierdut (rest ≠ 0), 0 °C, T-ul vechi, echilibrul altui nod, echilibrul altui tick.
+  assert.ok(alte.length >= 1, 'fixtura: casa si pivnita')
+  assert.ok(alte.some((x) => sl.t[x.id] !== eq(x.ancora)), 'fixtura: istoria difera de echilibru pe o componenta pastrata')
+  assert.ok(alte.some((x) => sl.rest[x.id] !== 0), 'fixtura: rest nenul pe o componenta pastrata')
+  assert.ok(tEq !== 0 && tEq !== sl.t[casa.id] && alte.every((x) => eq(x.ancora) !== tEq), 'fixtura: echilibrul casei e distinct (de 0, de T-ul vechi, de al celorlalte)')
+  assert.notEqual(laZero.get(casa.ancora), tEq, 'fixtura: echilibrul casei la tickul pasului difera de cel de la tickul 0')
+  sl.are[casa.id] = 0
+  b.w.temperatura.slot.t[casa.id] = tEq
+  b.w.temperatura.slot.rest[casa.id] = 0
+  a.w.tick = b.w.tick = tk
+  pasTermic(a.w, R)
+  pasTermic(b.w, R)
+  assert.equal(statTermic(a.w).invarianti, 1)
+  faraInvarianti(b.w, 'geamana')
+  assert.deepEqual(tPeAncora(a.w), tPeAncora(b.w), 'casa de la echilibru, celelalte (T, rest) pastrate')
 })
 
 test('STARE pasul nu arunca din tick (§5.3): o muchie stricata in graf fara niciun lot (asimetrica) — pasul o vede, reface graful de urgenta, numara si continua cu graful bun (== pasul pe o lume geamana)', () => {

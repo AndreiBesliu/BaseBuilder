@@ -16,8 +16,67 @@ const TP = 'tests/pas-termic.test.ts'
 const TS = 'tests/stare-temperatura.test.ts'
 const TSV = 'tests/salvare-temperatura.test.ts'
 const F = 'src/sim/temperatura.ts'
+const TPL = 'tests/sincronizare-plasa.test.ts'
+const NEG = 'PLASA punctului unic, proba negativa'
 
 export const MUTATII = [
+  // --- plasa AST a punctului unic (§2, IDX-5; recenzia PAS-3): instrumentul e chiar testul, deci probele il strica pe EL.
+  {
+    n: 't.2b §2, PAS-3: plasa AST accepta un nume interzis importat CU alias intr-un modul permis (si reexportat)',
+    f: TPL,
+    a: '&& ts.isImportSpecifier(p) && p.propertyName === undefined',
+    b: '&& ts.isImportSpecifier(p)',
+    t: TPL, e: NEG,
+  },
+  {
+    n: 't.2b §2, PAS-3: plasa AST citeste doar .ts .mjs .js (.mts .cts .tsx .jsx .cjs nu se umbla)',
+    f: TPL,
+    a: 'const COD = /\\.(ts|mts|cts|tsx|js|mjs|cjs|jsx)$/',
+    b: 'const COD = /\\.(ts|mjs|js)$/',
+    t: TPL, e: NEG,
+  },
+  {
+    n: 't.2b §2, PAS-3: plasa AST sare orice dosar cu punct (src/.ascuns nu se umbla)',
+    f: TPL,
+    a: "      if (n === 'node_modules' || n === '.git' ||",
+    b: "      if (n === 'node_modules' || n.startsWith('.') ||",
+    t: TPL, e: NEG,
+  },
+  {
+    n: 't.2b §2, PAS-3: plasa AST nu vede spatiile de nume (import * / export * / import() / require ale modulelor sincronizarii)',
+    f: TPL,
+    a: '  const faraSpatii = /^(src|viewer)\\//.test(rel) && !IN_MODULELE_SINC.has(rel)',
+    b: '  const faraSpatii = false',
+    t: TPL, e: NEG,
+  },
+  {
+    n: 't.2b §2, PAS-3: plasa AST accepta import() / require cu calea calculata in src/ si viewer/',
+    f: TPL,
+    a: '        if (a === undefined || !ts.isStringLiteralLike(a)) r.incalcari.push(',
+    b: '        if (false) r.incalcari.push(',
+    t: TPL, e: NEG,
+  },
+  {
+    n: 't.2b §2, PAS-3: plasa AST accepta `export * as T from` un modul al sincronizarii',
+    f: TPL,
+    a: '(n.exportClause === undefined || ts.isNamespaceExport(n.exportClause))',
+    b: '(n.exportClause === undefined)',
+    t: TPL, e: NEG,
+  },
+  {
+    n: 't.2b §2, PAS-3: plasa AST accepta `import * as C` dintr-un modul al sincronizarii',
+    f: TPL,
+    a: '        if (b !== undefined && ts.isNamespaceImport(b)) r.incalcari.push(',
+    b: '        if (false) r.incalcari.push(',
+    t: TPL, e: NEG,
+  },
+  {
+    n: 't.2b §2, PAS-3: plasa AST accepta import() / require cu calea literala spre un modul al sincronizarii',
+    f: TPL,
+    a: '        else if (MODULE_SINC.test(a.text)) r.incalcari.push(',
+    b: '        else if (false) r.incalcari.push(',
+    t: TPL, e: NEG,
+  },
   // --- punctul unic si invariantii (§2)
   {
     n: 't.2b §2: sincronizeazaLumea nu verifica stampila la intrare (o ocolire a punctului unic trece neobservata)',
@@ -53,6 +112,50 @@ export const MUTATII = [
     a: '    if (!idx.comp.has(s)) return refuse(',
     b: '    if (false) return refuse(',
     t: TS, e: 'STARE T in ambele directii',
+  },
+  // --- valorile reparatiei (recenzia PAS-1): `completeaza` — cea lipsa de la echilibrul tickului pasului, restul pastrat.
+  // Probele de mai sus sunt pe DETECTIE; fara acestea, sase implementari gresite treceau toata suita (verif-PAS-1).
+  {
+    n: 't.2b §5.3, PAS-1: o componenta fara T sterge istoria TUTUROR (toate de la echilibru, rest 0)',
+    f: F,
+    a: '    if (c < vechi.are.length && vechi.are[c] === 1) {',
+    b: '    if (false) {',
+    t: TS, e: 'STARE completeaza pe VALORI',
+  },
+  {
+    n: 't.2b §5.3, PAS-1: componenta lipsa primeste 0 °C, nu echilibrul',
+    f: F,
+    a: '    } else sl.t[c] = r.value.t[i]!',
+    b: '    } else sl.t[c] = 0',
+    t: TS, e: 'STARE completeaza pe VALORI',
+  },
+  {
+    n: 't.2b §5.3, PAS-1: componentele pastrate isi pierd restul',
+    f: F,
+    a: '      sl.rest[c] = vechi.rest[c]!',
+    b: '      void 0',
+    t: TS, e: 'STARE completeaza pe VALORI',
+  },
+  {
+    n: 't.2b §5.3, PAS-1: echilibrul componentei lipsa la tickul 0, nu la tickul pasului',
+    f: F,
+    a: '  const r = solutiaEchilibrului(w, rules, w.tick)',
+    b: '  const r = solutiaEchilibrului(w, rules, 0)',
+    t: TS, e: 'STARE completeaza pe VALORI',
+  },
+  {
+    n: 't.2b §5.3, PAS-1: componenta lipsa primeste echilibrul ALTUI nod',
+    f: F,
+    a: '    } else sl.t[c] = r.value.t[i]!',
+    b: '    } else sl.t[c] = r.value.t[(i + 1) % r.value.t.length]!',
+    t: TS, e: 'STARE completeaza pe VALORI',
+  },
+  {
+    n: 't.2b §5.3, PAS-1: componenta lipsa isi pastreaza T-ul VECHI (din slot), nu echilibrul',
+    f: F,
+    a: '    if (c < vechi.are.length && vechi.are[c] === 1) {',
+    b: '    if (c < vechi.are.length) {',
+    t: TS, e: 'STARE completeaza pe VALORI',
   },
   {
     n: 't.2b §5.3: invariantii nu se numara',
