@@ -33,6 +33,7 @@ import { CauzaAcces } from '../../src/sim/acces.ts'
 import { sustinutAcum } from '../../src/sim/stabilitate.ts'
 import { motivDinCod, Reason } from '../../src/sim/result.ts'
 import { cellKey } from '../../src/sim/path.ts'
+import { find, NO_REGION, regionAt } from '../../src/sim/regions.ts'
 import { materialAt } from '../../src/sim/terrain/terrain.ts'
 import { Material } from '../../src/sim/terrain/chunk.ts'
 import { cititorCamere, componentaLa, esteAer, esteAerAcoperit } from '../../src/sim/camere.ts'
@@ -415,18 +416,27 @@ export const RAZA_GROAPA = 24
 /**
  * Unde se poate picta groapa de moloz (`latura` × `latura`), langa camara `zonaId`: primul patrat, pe inele tot mai largi in
  * jurul ei, in care fiecare celula e pe suprafata (aceeasi cota), poate tine o zona (`celulaDeZonaPosibila`, ca
- * `picteazaZona`), nu e deja intr-o zona si nu are o desemnare. null = niciunul in `RAZA_GROAPA` (inspectorul spune ce sa
- * faca). Citire pura; costul e al unui clic (cel mult ~(2R)² patrate).
+ * `picteazaZona`), nu e deja intr-o zona, nu are o desemnare si e IN ACEEASI COMPONENTA de mers ca o celula a camarii
+ * (`regionAt` + `find`, citiri de tablou): caraușii molozului trebuie sa ajunga din camara la ea. Fara asta, langa camara
+ * geometriei H4 (pivnita sub casa) primul patrat „pe suprafata" era ACOPERISUL casei (z = g + 4), unde nu ajunge nimeni:
+ * propunerea disparea (`loc` din `groapaDeMoloz` nu intreaba de acces), iar molozul ramanea in camara (JOC-1, JOC-2).
+ * null = niciunul in `RAZA_GROAPA` (inspectorul spune ce sa faca). Citire pura; costul e al unui clic (cel mult ~(2R)² patrate).
  */
 export function locGroapa(w: World, rules: Rules, zonaId: number, latura: number): { readonly x0: number; readonly y0: number; readonly z: number } | null {
   const s = w.zone
   const c = s.celule
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
+  // Componenta de mers a camarii: a primei celule ei care are o regiune (una pe care se poate sta).
+  let comp = NO_REGION
   for (let i = 0; i < c.count; i++) {
     if (c.alive[i] !== 1 || c.zonaId[i] !== zonaId) continue
     x0 = Math.min(x0, c.wx[i]!); x1 = Math.max(x1, c.wx[i]!); y0 = Math.min(y0, c.wy[i]!); y1 = Math.max(y1, c.wy[i]!)
+    if (comp === NO_REGION) {
+      const r = regionAt(w.regions, c.wx[i]!, c.wy[i]!, c.z[i]!)
+      if (r !== NO_REGION) comp = find(w.regions, r)
+    }
   }
-  if (!Number.isFinite(x0) || latura <= 0) return null
+  if (!Number.isFinite(x0) || latura <= 0 || comp === NO_REGION) return null
   const bun = (ax: number, ay: number): number | null => {
     const s0 = suprafataColoanei(w, ax, ay)
     if (s0 === null) return null
@@ -437,6 +447,8 @@ export function locGroapa(w: World, rules: Rules, zonaId: number, latura: number
         if (suprafataColoanei(w, x, y) !== s0) return null
         if (!celulaDeZonaPosibila(w.terrain, x, y, z, rules) || celulaDeZonaLa(s, x, y, z) !== -1) return null
         if (desemnareLaCelula(w.desemnari, x, y, z) !== -1 || desemnareLaCelula(w.desemnari, x, y, s0) !== -1) return null
+        const r = regionAt(w.regions, x, y, z)
+        if (r === NO_REGION || find(w.regions, r) !== comp) return null
       }
     }
     return z

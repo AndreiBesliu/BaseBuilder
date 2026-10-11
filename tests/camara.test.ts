@@ -27,7 +27,7 @@ import { Material } from '../src/sim/terrain/chunk.ts'
 import { fill, materialAt } from '../src/sim/terrain/terrain.ts'
 import { componentaLa } from '../src/sim/camere.ts'
 import { sincronizeazaLumea, temperaturaLaEchilibru } from '../src/sim/temperatura.ts'
-import { inspecteazaCelula, rezumatColonie, semnaleAlerte } from '../viewer/ui/model.ts'
+import { aplicaZona, inspecteazaCelula, locGroapa, rezumatColonie, semnaleAlerte } from '../viewer/ui/model.ts'
 import { textMotiv } from '../viewer/ui/texte.ts'
 import { itemeInZona, laSit, lasaItem, patratPlat, picteaza, R, ruleaza, sitPlat } from './fixturi.ts'
 import { tickLa } from './fixturi-pivnita.ts'
@@ -530,16 +530,21 @@ test('indexul de zone pe o camara filtrata (predicatul X): dupa fiecare pas de a
 interface Acceptanta {
   gataSapat: number; redesemnate: number; molozLaPictare: number; propusa: number; molozGata: number
   maxCamara: number; pusa: number; stricat: number; mancat: number; mancatCamara: number; plecati: number; plecatiCuHrana: number
+  /** Unde a pus-o butonul, fata de coltul casei si de sol (null = nicio groapa); si molozul (piatra + pamant) din ea la final. */
+  groapa: { dx: number; dy: number; dz: number } | null; molozInGroapa: number
 }
 
 /**
  * Casa de piatra 7×7 (interior 5×5×2, usa pe sud, acoperis la g+3), pe un sit plat; 4 pioni afara; 600 u de hrana pe jos;
  * depozitul general 3×3 pictat INTAI („Primii pasi"); pivnita 3×3×2 sub casa + putul chepengului DESEMNATE (pionii sapa;
  * molozul unei prabusiri se re-desemneaza la 100 de tickuri). Cand sapatul e gata: chepengul (doua usi in podea), paturile in
- * casa, camara la prioritatea IMPLICITA cu filtrul „doar hrana", si — daca `groapaDeMoloz` propune — groapa, de marimea si cu
- * filtrul propuse. Apoi colonia traieste 3,5 zile.
+ * casa, camara la prioritatea IMPLICITA cu filtrul „doar hrana", si — daca `groapaDeMoloz` propune si `groapa` e 'buton' —
+ * groapa PE CALEA BUTONULUI (`picteazaGroapa` din panouri.ts: `locGroapa`, apoi `aplicaZona` cu filtrul propus). Apoi colonia
+ * traieste 3,5 zile. `generalPlin`: depozitul general primeste 9 × 75 de piatra imediat dupa pictura — molozul n-are loc in
+ * el, deci doar groapa il poate scoate din camara (JOC-2: cu generalul gol, hrana plecata spre camara ii facea loc, iar
+ * groapa nu era necesara).
  */
-function camaraCuOameni(seed: number, anotimp: number, cuFiltru = true): Acceptanta {
+function camaraCuOameni(seed: number, anotimp: number, cuFiltru = true, groapa: 'buton' | 'fara' = 'buton', generalPlin = false): Acceptanta {
   const P = Material.PIATRA_CONSTRUITA
   const { w, wx, wy, g } = sitPlat(seed, 30)
   const tk0 = tickLa(0, anotimp, 1, 8)
@@ -556,12 +561,14 @@ function camaraCuOameni(seed: number, anotimp: number, cuFiltru = true): Accepta
   const pusa = 600
   for (let i = 0; i < 8; i++) bun(applyCommand(w, { kind: 'lasaItem', fel: H, cantitate: 75, wx: hx - 8 + (i % 4), wy: hy + (i >> 2), z: g + 1 }, R), 'hrana')
   bun(applyCommand(w, { kind: 'picteazaZona', x0: hx - 14, y0: hy, x1: hx - 12, y1: hy + 2, z: g + 1 }, R), 'depozitul general')
+  if (generalPlin) for (let k = 0; k < 9; k++) bun(applyCommand(w, { kind: 'lasaItem', fel: Item.PIATRA, cantitate: 75, wx: hx - 14 + (k % 3), wy: hy + Math.floor(k / 3), z: g + 1 }, R), 'piatra in general')
   const sapa: [number, number, number][] = [[hx + 5, hy + 2, g], [hx + 4, hy + 2, g], [hx + 4, hy + 2, g - 1]]
   for (const z of [g - 1, g - 2]) for (let dx = 2; dx <= 4; dx++) for (let dy = 3; dy <= 5; dy++) sapa.push([hx + dx, hy + dy, z])
   for (const [x, y, z] of sapa) bun(applyCommand(w, { kind: 'desemneaza', wx: x, wy: y, z }, R), 'desemnarea')
   const inCamara = (i: number): boolean => w.iteme.z[i] === g - 2 && w.iteme.wx[i]! >= hx + 2 && w.iteme.wx[i]! <= hx + 4 && w.iteme.wy[i]! >= hy + 3 && w.iteme.wy[i]! <= hy + 5
-  const o: Acceptanta = { gataSapat: -1, redesemnate: 0, molozLaPictare: 0, propusa: 0, molozGata: -1, maxCamara: 0, pusa, stricat: 0, mancat: 0, mancatCamara: 0, plecati: 0, plecatiCuHrana: 0 }
+  const o: Acceptanta = { gataSapat: -1, redesemnate: 0, molozLaPictare: 0, propusa: 0, molozGata: -1, maxCamara: 0, pusa, stricat: 0, mancat: 0, mancatCamara: 0, plecati: 0, plecatiCuHrana: 0, groapa: null, molozInGroapa: 0 }
   let camara = -1
+  let groapaId = -1
   const inainte = new Map<number, number>()
   const ZI = R.calendar.ziTicks
   while (w.tick < tk0 + 3.5 * ZI) {
@@ -593,9 +600,15 @@ function camaraCuOameni(seed: number, anotimp: number, cuFiltru = true): Accepta
         o.molozLaPictare = moloz
         const p = groapaDeMoloz(w, R, camara)!
         o.propusa = p.propusa
-        if (p.propusa > 0) {
-          const groapa = bun(applyCommand(w, { kind: 'picteazaZona', x0: hx + 9, y0: hy, x1: hx + 8 + p.latura, y1: hy - 1 + p.latura, z: g + 1 }, R), 'groapa')
-          filtru(w, groapa, p.refuzate)
+        if (p.propusa > 0 && groapa === 'buton') {
+          // Ce face butonul: locul din `locGroapa`, pictura si filtrul in acelasi pas (`aplicaZona`) — nu o coordonata aleasa
+          // de test (pe sol liber, langa casa), care ocolea tocmai alegerea locului (JOC-1: acoperisul casei).
+          const loc = locGroapa(w, R, camara, p.latura)
+          assert.ok(loc, `seed ${seed}: locGroapa n-a gasit loc`)
+          o.groapa = { dx: loc.x0 - hx, dy: loc.y0 - hy, dz: loc.z - g }
+          const r = aplicaZona((c) => applyCommand(w, c, R), [{ x0: loc.x0, y0: loc.y0, x1: loc.x0 + p.latura - 1, y1: loc.y0 + p.latura - 1, z: loc.z }], Zona.DEPOZIT, p.refuzate)
+          assert.ok(r.zonaId !== null && r.refuzuri.length === 0, `seed ${seed}: groapa refuzata ${JSON.stringify(r.refuzuri)}`)
+          groapaId = r.zonaId
         }
         const cp = componentaLa(w.camere, hx + 3, hy + 4, g - 2)
         const cc = componentaLa(w.camere, hx + 3, hy + 3, g + 1)
@@ -604,10 +617,13 @@ function camaraCuOameni(seed: number, anotimp: number, cuFiltru = true): Accepta
     }
   }
   o.stricat = w.hranaStricata
+  if (groapaId !== -1) o.molozInGroapa = felInZona(w, groapaId, Item.PIATRA) + felInZona(w, groapaId, Item.PAMANT)
   return o
 }
 
-test('acceptanta camarii cu oameni: 4 pioni locuiesc in casa, sapa pivnita, camara „doar hrana" la prioritatea implicita (dupa depozitul general) + groapa propusa; mananca din camara; „plecati cu hrana in camara" = 0 — toamna si vara, 3 seminte', () => {
+// Groapa de aici iese din buton, dar testul NU o probeaza: cu generalul gol, hrana plecata spre camara face loc molozului in
+// general (JOC-2: trecea identic si fara groapa). Groapa o probeaza „acceptanta gropii de moloz", cu generalul plin.
+test('acceptanta camarii cu oameni: 4 pioni locuiesc in casa, sapa pivnita, camara „doar hrana" la prioritatea implicita (dupa depozitul general); mananca din camara; „plecati cu hrana in camara" = 0 — toamna si vara, 3 seminte', () => {
   for (const seed of [1, 7, 12345]) {
     for (const [an, nume] of [[2, 'toamna'], [1, 'vara']] as const) {
       const o = camaraCuOameni(seed, an)
@@ -626,4 +642,20 @@ test('acceptanta camarii cu oameni: 4 pioni locuiesc in casa, sapa pivnita, cama
   // pictata dupa el, nu primeste hrana (rangul egal, id-ul mai mare).
   const m = camaraCuOameni(1, 2, false)
   assert.ok(m.maxCamara <= 150 && m.stricat >= 0.1 * m.pusa, `martorul fara filtru: ${JSON.stringify(m)}`)
+})
+
+// JOC-2: aceeasi colonie, cu depozitul general PLIN de piatra — singurul loc al molozului e groapa, pusa de buton.
+test('acceptanta gropii de moloz cu oameni: generalul plin de piatra, groapa pusa pe calea butonului (locGroapa + aplicaZona) — molozul camarii ajunge in ea in 3 h, camara se umple, stricat sub 3%; fara groapa, molozul ramane si hrana se strica — toamna, 3 seminte', () => {
+  for (const seed of [1, 7, 12345]) {
+    const o = camaraCuOameni(seed, 2, true, 'buton', true)
+    const cine = `seed ${seed}: ${JSON.stringify(o)}`
+    assert.ok(o.gataSapat > 0 && o.molozLaPictare > 0 && o.propusa > 0 && o.groapa !== null, `${cine} — molozul era pe camara, groapa propusa si pictata`)
+    assert.ok(o.molozInGroapa >= o.molozLaPictare, `${cine} — molozul camarii a ajuns in groapa`)
+    assert.ok(o.molozGata >= 0 && o.molozGata <= 3 * 1680, `${cine} — camara fara moloz in 3 h`)
+    assert.ok(o.maxCamara >= 450, `${cine} — hrana a intrat in camara`)
+    assert.ok(o.stricat <= 0.03 * o.pusa, `${cine} — stricat sub 3%`)
+  }
+  // Martorul: fara groapa, molozul n-are unde pleca (generalul e plin), camara ramane pe jumatate goala si hrana se strica.
+  const m = camaraCuOameni(1, 2, true, 'fara', true)
+  assert.ok(m.molozGata === -1 && m.stricat >= 0.05 * m.pusa, `martorul fara groapa: ${JSON.stringify(m)}`)
 })

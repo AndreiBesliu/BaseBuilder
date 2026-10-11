@@ -337,6 +337,14 @@ export const MUTATII = [
     b: '    refuzate: 0,',
     t: T, e: 'groapaDeMoloz pe hartie',
   },
+  {
+    // JOC-2: acceptanta cu oameni, pe calea butonului, cu generalul plin — groapa pe acoperisul casei nu primeste nimic.
+    n: 'JOC-1, cu oameni: locGroapa fara proba de acces — butonul pune groapa pe acoperis, molozul ramane in camara',
+    f: 'viewer/ui/model.ts',
+    a: '        if (r === NO_REGION || find(w.regions, r) !== comp) return null',
+    b: '',
+    t: T, e: 'acceptanta gropii de moloz',
+  },
 
   // --- predicatul X pe o camara filtrata (zone.ts) ---
   {

@@ -406,6 +406,13 @@ export const MUTATII = [
     t: T, e: 'HRANA ECRAN groapa de moloz',
   },
   {
+    n: 'JOC-1: locGroapa fara proba de acces — langa pivnita de sub casa, primul patrat „pe suprafata" e acoperisul (z = g + 4)',
+    f: M,
+    a: '        if (r === NO_REGION || find(w.regions, r) !== comp) return null',
+    b: '',
+    t: T, e: 'HRANA ECRAN groapa de moloz',
+  },
+  {
     n: 'groapa departe: cautarea incepe la 5 celule de camara',
     f: M,
     a: '  for (let d = 1; d <= RAZA_GROAPA; d++) {',

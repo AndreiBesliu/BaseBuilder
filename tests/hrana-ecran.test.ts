@@ -37,7 +37,10 @@ import type { StareAlerta } from '../viewer/ui/alerte.ts'
 import { cheieInspectorCelula } from '../viewer/ui/memorie-incapere.ts'
 import { textFeluri, textHranaF3, textPierdere, textPrimeste, textZecimi, textZile } from '../viewer/ui/texte.ts'
 import { actualizeazaTemperaturaOverlay, ALFA_PUNCT, createTemperaturaOverlay, culoarePunct, NUME_PUNCTE, PUNCT_DESCHIS, PUNCT_INCHIS } from '../viewer/overlay-temperatura.ts'
-import { gasesteSit, laSit, lasaItem, patratPlat, picteaza, R, solid } from './fixturi.ts'
+import { Material } from '../src/sim/terrain/chunk.ts'
+import { dig, fill } from '../src/sim/terrain/terrain.ts'
+import { sincronizeazaLumea } from '../src/sim/temperatura.ts'
+import { gasesteSit, laSit, lasaItem, patratPlat, picteaza, R, sitPlat, solid } from './fixturi.ts'
 import { casaTermica, compLa } from './fixturi-temperatura.ts'
 import { tickLa } from './fixturi-pivnita.ts'
 
@@ -588,7 +591,45 @@ test('HRANA ECRAN groapa de moloz dintr-un clic: locul langa camara, filtrul gro
   assert.deepEqual([dupa.lipsa, dupa.propusa], [0, 0])
   assert.notEqual(inspecteazaCelula(w, R, c.x0, c.y0, c.g, null).morman!.stare.titlu.slice(0, 6), 'Cămara')
   void pm
+  // Geometria CANONICA (H4), fara pioni: pivnita sub o casa. Primul patrat „pe suprafata" de langa camara e acoperisul casei
+  // (z = g + 4), unde nu ajunge niciun caraus — butonul il alegea, propunerea disparea, molozul ramanea (JOC-1, JOC-2). Locul
+  // trebuie sa fie pe sol (z = g + 1), in afara casei.
+  const h = casaCuPivnita(1)
+  const gh = groapaDeMoloz(h.w, R, h.camara)!
+  assert.deepEqual([gh.unitati, gh.loc, gh.latura], [170, 0, 3], 'fixtura: molozul pivnitei n-are loc in generalul plin')
+  const lh = locGroapa(h.w, R, h.camara, gh.latura)
+  assert.ok(lh !== null, 'un loc langa pivnita')
+  assert.equal(lh.z, h.g + 1, `groapa pe sol, nu pe acoperis: ${JSON.stringify({ dx: lh.x0 - h.hx, dy: lh.y0 - h.hy, dz: lh.z - h.g })}`)
+  const peste = lh.x0 + gh.latura > h.hx && lh.x0 < h.hx + 7 && lh.y0 + gh.latura > h.hy && lh.y0 < h.hy + 7
+  assert.equal(peste, false, 'in afara amprentei casei')
 })
+
+/**
+ * Geometria H4 fara pioni (copia fixturii `camaraCuOameni` din camara.test.ts, cu sapatul gata): casa de piatra 7×7 (usa pe
+ * sud, acoperis la g + 3), pivnita 3×3×2 sub ea cu chepengul (doua usi in podea), camara „doar hrana" pe fundul pivnitei cu
+ * molozul sapaturii (170 de pamant), depozitul general 3×3 plin de piatra.
+ */
+function casaCuPivnita(seed: number): { w: World; hx: number; hy: number; g: number; camara: number } {
+  const P = Material.PIATRA_CONSTRUITA
+  const { w, wx, wy, g } = sitPlat(seed, 30)
+  const hx = wx + 12, hy = wy + 12
+  for (let z = g + 1; z <= g + 2; z++) for (let dx = 0; dx < 7; dx++) for (let dy = 0; dy < 7; dy++) {
+    if (dx !== 0 && dx !== 6 && dy !== 0 && dy !== 6) continue
+    bun(fill(w.terrain, hx + dx, hy + dy, z, dx === 3 && dy === 0 ? Material.USA : P), 'perete')
+  }
+  for (let dx = 0; dx < 7; dx++) for (let dy = 0; dy < 7; dy++) bun(fill(w.terrain, hx + dx, hy + dy, g + 3, P), 'acoperis')
+  const sapa: [number, number, number][] = [[hx + 5, hy + 2, g], [hx + 4, hy + 2, g], [hx + 4, hy + 2, g - 1]]
+  for (const z of [g - 1, g - 2]) for (let dx = 2; dx <= 4; dx++) for (let dy = 3; dy <= 5; dy++) sapa.push([hx + dx, hy + dy, z])
+  for (const [x, y, z] of sapa) bun(dig(w.terrain, x, y, z), 'sapatul')
+  for (const [x, y] of [[hx + 5, hy + 2], [hx + 4, hy + 2]] as const) bun(fill(w.terrain, x, y, g, Material.USA), 'chepengul')
+  bun(sincronizeazaLumea(w, R), 'sincronizarea')
+  bun(applyCommand(w, { kind: 'picteazaZona', x0: hx - 14, y0: hy, x1: hx - 12, y1: hy + 2, z: g + 1 }, R), 'depozitul general')
+  for (let k = 0; k < 9; k++) bun(applyCommand(w, { kind: 'lasaItem', fel: Item.PIATRA, cantitate: 75, wx: hx - 14 + (k % 3), wy: hy + Math.floor(k / 3), z: g + 1 }, R), 'piatra in general')
+  const camara = bun(applyCommand(w, { kind: 'picteazaZona', x0: hx + 2, y0: hy + 3, x1: hx + 4, y1: hy + 5, z: g - 2 }, R), 'camara')
+  bun(applyCommand(w, { kind: 'setFiltruZona', id: camara, refuzate: MASCA_DOAR_HRANA }, R), 'filtrul')
+  for (const [k, q] of [[0, 75], [1, 75], [2, 20]] as const) bun(applyCommand(w, { kind: 'lasaItem', fel: Item.PAMANT, cantitate: q, wx: hx + 2 + k, wy: hy + 3, z: g - 2 }, R), 'molozul')
+  return { w, hx, hy, g, camara }
+}
 
 // --- 8. harta U, memoria, cheia --------------------------------------------------------------------------------------
 

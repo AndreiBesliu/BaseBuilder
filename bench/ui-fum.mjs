@@ -61,7 +61,8 @@ const NEGATIVA = NEG === undefined ? null : NEG.includes('=') ? NEG.slice(NEG.in
  * Hrana (t.3 §8; UI-7, UI-8): bara-prognoza — textul asteptat e cel FARA alterare; alterare-inspector — fiecare scriere a
  * randului de alterare, la 3×, se compara cu starea de acum 400 ms; alterare-timp — timpul sarit (`world.tick +=`) in locul
  * avansului; pastrare — hrana „din pivnita" pusa la suprafata; alerta-alterare — lista de alerte refacuta FORTAT intre
- * mousedown si mouseup; U-prag — gestul (Q/E, U) pe alt nivel decat al pivnitelor; camara — Zone fara clicul pe „Cămară".
+ * mousedown si mouseup; U-prag — gestul (Q/E, U) pe alt nivel decat al pivnitelor; camara — Zone fara clicul pe „Cămară";
+ * groapa — podeaua gropii sapata dupa clic (celulele ei nu mai sunt calcabile: nu ajunge niciun moloz, ca pe un acoperis).
  */
 const TINTE_NEGATIVE = {
   sapa: 'sapa', pauza: 'pauza', salvare: 'salvare', desen: 'casa-desenata', exceptie: 'joc-nou',
@@ -71,6 +72,7 @@ const TINTE_NEGATIVE = {
   'filtru-bucla': 'filtru-bucla', 'exceptie-tick': 'exceptie-tick', latime: 'latime-inspector',
   'bara-prognoza': 'bara-prognoza', 'alterare-inspector': 'alterare-inspector', 'alterare-timp': 'alterare-timp',
   pastrare: 'alterare-pastrata', 'alerta-alterare': 'alerta-alterare', 'U-prag': 'U-prag', camara: 'camara-unealta',
+  groapa: 'groapa-clic',
 }
 if (NEGATIVA !== null && !Object.hasOwn(TINTE_NEGATIVE, NEGATIVA)) { console.log(`proba negativa necunoscuta: ${NEGATIVA} (sunt: ${Object.keys(TINTE_NEGATIVE).join(', ')})`); process.exit(2) }
 const POZE = argv.find((a) => a.startsWith('--poze='))?.slice('--poze='.length) ?? null
@@ -2116,10 +2118,20 @@ async function paginaHranei() {
     })()`)
     const L = r0.g?.latura ?? 0
     const asteptate = r0.loc === null ? [] : Array.from({ length: L * L }, (_, k) => [r0.loc.x0 + (k % L), r0.loc.y0 + Math.floor(k / L), r0.loc.z].join()).sort()
+    // Molozul chiar AJUNGE in groapa (JOC-2): o groapa unde nu ajunge niciun caraus (acoperisul casei, JOC-1) dadea si ea
+    // „propusa 0" si panoul ascuns. Tickuri reale, cate 120, pana vine marfa noua pe celulele ei (cel mult 1.680 = o ora de
+    // joc): doar cat trebuie, ca pasii de dupa sa gaseasca lumea aproape neschimbata. Proba negativa „groapa": podeaua gropii
+    // sapata DUPA clic (comanda `dig`, sub fiecare celula) — celulele ei nu mai sunt calcabile, deci nu mai lasa nimeni nimic acolo.
+    const molozPe = (celule) => pH.js(`(() => { const it = __kinstead.world.iteme, P = __h.St.Item.PIATRA, PM = __h.St.Item.PAMANT; let m = 0; for (const [x, y, z] of ${JSON.stringify(celule)}) { const i = __h.It.itemLaCelula(it, x, y, z); if (i !== -1 && (it.kind[i] === P || it.kind[i] === PM)) m += it.cantitate[i] } return m })()`)
+    const m0 = await molozPe(r1.celule)
+    const sapate = NEGATIVA === 'groapa' ? await pH.js(`${JSON.stringify(r1.celule)}.filter(([x, y, z]) => __h.cmd({ kind: 'dig', wx: x, wy: y, z: z - 1 }).ok).length`) : 0
+    const av = { rulate: 0, m: m0, pasi: 0 }
+    for (; av.pasi < 14 && av.rulate < 1680 && av.m <= m0; av.pasi++) { av.rulate += (await pH.js('__kinstead.avanseaza(120)')).rulate; av.m = await molozPe(r1.celule) }
     bifa('groapa-clic', tinta !== null && r0.g !== null && r0.g.propusa > 0 && r0.vizibil && r0.text === r0.asteptat && r0.buton === `Pictează groapa de moloz (${L} × ${L})` && r0.loc !== null
-      && r1.noi === 1 && r1.fel === 0 && r1.refuzate === r0.g.refuzate && JSON.stringify(r1.celule.map((x) => x.join()).sort()) === JSON.stringify(asteptate) && r1.toast.startsWith(`Groapa de moloz: ${L} × ${L}, primește `) && r1.propusaDupa === 0 && !r1.vizibilDupa,
-      'inspectorul camarii cu molozul ei: propunerea gropii („Molozul săpat n-are unde pleca…" == textGroapa(groapaDeMoloz)) si butonul „Pictează groapa de moloz (L × L)"; clicul real picteaza L × L celule la locGroapa, cu filtrul gropii (doar felurile molozului), toast „Groapa de moloz: …"; apoi propunerea dispare',
-      JSON.stringify({ tinta, r0: { ...r0, x: undefined, zone: undefined }, r1 }))
+      && r1.noi === 1 && r1.fel === 0 && r1.refuzate === r0.g.refuzate && JSON.stringify(r1.celule.map((x) => x.join()).sort()) === JSON.stringify(asteptate) && r1.toast.startsWith(`Groapa de moloz: ${L} × ${L}, primește `) && r1.propusaDupa === 0 && !r1.vizibilDupa
+      && av.m > m0,
+      'inspectorul camarii cu molozul ei: propunerea gropii („Molozul săpat n-are unde pleca…" == textGroapa(groapaDeMoloz)) si butonul „Pictează groapa de moloz (L × L)"; clicul real picteaza L × L celule la locGroapa, cu filtrul gropii (doar felurile molozului), toast „Groapa de moloz: …"; apoi propunerea dispare; si, cu tickuri reale (≤ o ora), molozul AJUNGE pe celulele gropii',
+      JSON.stringify({ tinta, r0: { ...r0, x: undefined, zone: undefined }, r1, m0, av, sapate }))
   })
 
   // --- h9. „Se strică aici; cămara are loc." — hrana dintr-un depozit general cu prioritatea PESTE a camarii ---
