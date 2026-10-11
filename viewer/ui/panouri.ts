@@ -1021,11 +1021,15 @@ export function monteazaUI(ctx: ContextUI): UI {
       [pasi.piesa, 'Construiește un perete: C, trage un dreptunghi'],
       [pasi.pion, 'Selectează un om (V, clic pe el): vezi ce face și de ce'],
     ]
+    // Cheia e pe BIFE (lista se reface doar cand se bifeaza ceva); textele se scriu PE LOC, la fiecare reimprospatare: pasul
+    // camarii poarta prognoza hranei, care curge cu lumea. Cu textele scrise doar la refacere, ramanea cea de la prima
+    // desenare („~3,6 zile, nu ~2,9" langa o bara care spunea „~2,8 zile" dupa o ora; ui-fum, „primii-pasi-camara").
     const cheie = items.map(([a]) => (a ? 1 : 0)).join('')
     if (listaPasi.dataset.cheie !== cheie) {
       listaPasi.dataset.cheie = cheie
-      listaPasi.replaceChildren(...items.map(([gata, t]) => h('li', { class: gata ? 'facut' : '' }, t)))
+      listaPasi.replaceChildren(...items.map(([gata]) => h('li', { class: gata ? 'facut' : '' })))
     }
+    items.forEach(([, t], i) => { const li = listaPasi.children[i]; if (li !== undefined) text(li as HTMLElement, t) })
     // Prognoza stă în pasul cămării (aceeași ca bara, UI-9); dedesubt, doar „nu mai ai hrană".
     const fara = textPasiHrana(hrana.prognoza)
     text(hranaPasi, fara)

@@ -19,6 +19,11 @@
  * doar prin `__kinstead.avanseaza(n)` (tickuri reale) sau cu jocul pornit, niciodata prin `world.tick +=` — in afara de
  * ultimul pas („exceptie-tick"), care sare ceasul DUPA ce simularea s-a oprit, doar ca sa vina momentul salvarii automate.
  *
+ * Hrana (t.3 §8) ruleaza pe doua pagini ale ei, dupa cea termica: `paginaHranei` (jocul nou implicit: bara cu prognoza,
+ * alerta, F3, Primii pasi, unealta Camara, dialogul Joc nou) si `paginaAlterarii` (pivnite sapate prin comenzi: inspectorul
+ * in cele trei clase, S-ul in timp si in pivnita, harta U cu pragul). Comparatiile alterarii se fac pe S (PERSISTED), nu pe
+ * unitati (UI-7), iar timpul trece tot doar prin `__kinstead.avanseaza(n)`.
+ *
  * Fiecare pas ruleaza in `pas()`: o exceptie e o bifa ROSIE cu numele pasului, nu sfarsitul rularii
  * (recenzia incaperilor, ECR-10).
  *
@@ -53,6 +58,10 @@ const NEGATIVA = NEG === undefined ? null : NEG.includes('=') ? NEG.slice(NEG.in
  * E6): filtru-bucla — cat jocul merge, `dupaTick` al filtrului oamenilor e golit in pagina (exact bucla care ar da
  * `simTick` in locul tickului observat); exceptie-tick — exceptia din pas nu se provoaca; latime — CSS-ul randurilor fixe
  * ale inspectorului (`nowrap` pe cele trei randuri, cele 3 randuri minime ale descompunerii) e anulat printr-un stil.
+ * Hrana (t.3 §8; UI-7, UI-8): bara-prognoza — textul asteptat e cel FARA alterare; alterare-inspector — fiecare scriere a
+ * randului de alterare, la 3×, se compara cu starea de acum 400 ms; alterare-timp — timpul sarit (`world.tick +=`) in locul
+ * avansului; pastrare — hrana „din pivnita" pusa la suprafata; alerta-alterare — lista de alerte refacuta FORTAT intre
+ * mousedown si mouseup; U-prag — gestul (Q/E, U) pe alt nivel decat al pivnitelor; camara — Zone fara clicul pe „Cămară".
  */
 const TINTE_NEGATIVE = {
   sapa: 'sapa', pauza: 'pauza', salvare: 'salvare', desen: 'casa-desenata', exceptie: 'joc-nou',
@@ -60,6 +69,8 @@ const TINTE_NEGATIVE = {
   'incapere-noua': 'temperatura-incapere-noua', 'U-la-3x': 'temperatura-U-la-3x', alerta: 'alerta-termica',
   'incarca-m5': 'incarca-m5', sertar: 'sertar-oameni-lung',
   'filtru-bucla': 'filtru-bucla', 'exceptie-tick': 'exceptie-tick', latime: 'latime-inspector',
+  'bara-prognoza': 'bara-prognoza', 'alterare-inspector': 'alterare-inspector', 'alterare-timp': 'alterare-timp',
+  pastrare: 'alterare-pastrata', 'alerta-alterare': 'alerta-alterare', 'U-prag': 'U-prag', camara: 'camara-unealta',
 }
 if (NEGATIVA !== null && !Object.hasOwn(TINTE_NEGATIVE, NEGATIVA)) { console.log(`proba negativa necunoscuta: ${NEGATIVA} (sunt: ${Object.keys(TINTE_NEGATIVE).join(', ')})`); process.exit(2) }
 const POZE = argv.find((a) => a.startsWith('--poze='))?.slice('--poze='.length) ?? null
@@ -316,7 +327,10 @@ async function ruleaza() {
   // calendarul in fiecare anotimp (extremele climei, pe seed-ul lumii), nu doar cel de acum: tickul probei e mereu toamna.
   // Cazul cel mai RAU (recenzia t.2a, L4-6): bifa proba doar 2 insigne scurte, iar a treia scotea 3× din ecran. Acum,
   // fiecare submultime a celor 5 insigne (numere de doua cifre), pliata de `insigneBara` (model.ts) — aceeasi functie
-  // ca panouri.ts —, cu hrana „~12 h 59 min" si indicatorul „≈1,2×", cu fiecare calendar; la 1.100 si la 1.280 px.
+  // ca panouri.ts —, cu cel mai lat text al prognozei hranei si indicatorul „≈1,2×", cu fiecare calendar; la 1.100 si la 1.280 px.
+  // Prognoza (t.3 §8, UI-14) e in zile de calendar: cel mai lat text e al lui `textZile` (texte.ts), MASURAT pe toate textele pe
+  // care le poate scrie sub plafon (orele unei zile, zecimile pana la 10 zile, zilele intregi pana la un an, „peste un an"),
+  // nu literalul de dinainte („~12 h 59 min", minute reale).
   // Insignele, prognoza si indicatorul se pun in DOM si se scot la loc; lumea nu se atinge.
   await pas('bara-sus', async () => {
     const masoara = (latime) => p.js(`(async () => {
@@ -331,6 +345,7 @@ async function ruleaza() {
       let variante = 'niciuna'
       let asteptat = null
       let seturi = []
+      let progLat = null
       try {
         const T = await import('/@fs/${REPO}/viewer/ui/texte.ts')
         const Cl = await import('/@fs/${REPO}/src/sim/clima.ts')
@@ -347,6 +362,14 @@ async function ruleaza() {
           texte.push(T.textCalendar({ anotimp: a, zi: R.calendar.zilePeAnotimp, ora: 23, minut: 59 }, R.calendar.zilePeAnotimp, v, d))
         }
         variante = ext.map(([mn, mx]) => Math.round(mn / 65536) + '..' + Math.round(mx / 65536)).join(' | ')
+        // Textele prognozei: orele (sub o zi), zecimile si zilele pana la plafonul de un an, si „peste un an"; cel mai lat, masurat.
+        const zileAn = Ca.tickuriPeAn(R) / R.calendar.ziTicks
+        const cand = new Set([T.textZile(zileAn, true)])
+        for (let h = 0; h <= 24; h++) cand.add(T.textZile(h / 24, false))
+        for (let z = 10; z <= Math.ceil(zileAn * 10); z++) cand.add(T.textZile(z / 10, false))
+        for (const c of cand) { prog.textContent = c; const l = prog.getBoundingClientRect().width; if (progLat === null || l > progLat.lat) progLat = { text: c, lat: +l.toFixed(1), candidati: cand.size } }
+        prog.textContent = '~12 h 59 min'
+        progLat.vechi = +prog.getBoundingClientRect().width.toFixed(1)
         // Ce TREBUIE sa scrie bara acum: aceeasi compunere ca panouri.ts (baraDeSus), la tickul si seed-ul lumii.
         asteptat = { tick: __kinstead.world.tick, ...T.baraDeSus(__kinstead.world.tick, seed, R, __kinstead.stare().viteza) }
         // Toate cele 32 de submultimi ale insignelor, cu 12 pe fiecare, pliate ca in joc la latimea de acum.
@@ -357,7 +380,7 @@ async function ruleaza() {
         }
       } catch (e) { variante = 'fara calendar: ' + String(e?.message ?? e).slice(0, 80) }
       if (seturi.length === 0) seturi = [[{ clasa: 'atentie', text: '3 flămânzi', titlu: '' }, { clasa: 'atentie', text: '2 obosiți', titlu: '' }]]
-      prog.textContent = '~12 h 59 min'
+      prog.textContent = progLat?.text ?? '~12 h 59 min'
       ef.textContent = '≈1,2×'
       const masuri = []
       for (const set of seturi) {
@@ -379,7 +402,7 @@ async function ruleaza() {
       const stramt = masuri.reduce((a, m) => (m.rezerva < a.rezerva ? m : a), masuri[0])
       const rele = masuri.filter((m) => !(m.sw <= m.cw && m.dreapta <= m.cw && m.inalt <= 20))
       const despliate = Math.max(...seturi.map((s) => (s.length === 1 && / alerte$/.test(s[0].text) ? 0 : s.length)))
-      return { latime: innerWidth, ceruta: ${latime}, marca: !!sus.querySelector('.ui-marca'), cate: masuri.length, seturi: seturi.length, despliate, variante, acum: masuri[0], celMaiLat: lat, celMaiIngust: ingust, celMaiStramt: stramt, rele: rele.slice(0, 4), titlu: cal.title, text: vechi, asteptat }
+      return { latime: innerWidth, ceruta: ${latime}, marca: !!sus.querySelector('.ui-marca'), cate: masuri.length, seturi: seturi.length, despliate, variante, acum: masuri[0], celMaiLat: lat, celMaiIngust: ingust, celMaiStramt: stramt, rele: rele.slice(0, 4), titlu: cal.title, text: vechi, asteptat, progLat }
     })()`)
     p.win.setContentSize(1100, H)
     await astepta(700)
@@ -387,11 +410,11 @@ async function ruleaza() {
     p.win.setContentSize(W, H)
     await astepta(700)
     const r2 = await masoara(W)
-    const bine = (x, latime) => x.latime === latime && !x.marca && x.seturi === 32 && x.cate >= 32 * 25 && x.rele.length === 0 && x.celMaiLat.lat - x.celMaiIngust.lat <= 1
+    const bine = (x, latime) => x.latime === latime && !x.marca && x.seturi === 32 && x.cate >= 32 * 25 && x.rele.length === 0 && x.celMaiLat.lat - x.celMaiIngust.lat <= 1 && x.progLat !== null && x.progLat.candidati >= 100
     // Si bara nu se misca atunci cand se schimba textul: calendarul are aceeasi latime pentru oricare din ele.
     bifa('bara-sus', bine(r, 1100) && bine(r2, W) && r.despliate === 1 && r2.despliate === 3,
-      'bara de sus la 1.100 si la 1.280 px, in cazul cel mai rau (oricare din cele 5 insigne, cu 12 pe fiecare, pliate peste una / trei in „N alerte"; hrana „~12 h 59 min"; „≈1,2×"; cel mai lat calendar al fiecarui anotimp): nimic nu iese din bara, calendarul e pe un rand, de aceeasi latime pentru orice text, fara marca KINSTEAD',
-      JSON.stringify({ l1100: { latime: r.latime, marca: r.marca, cate: r.cate, despliate: r.despliate, variante: r.variante, celMaiStramt: r.celMaiStramt, celMaiLat: r.celMaiLat, celMaiIngust: r.celMaiIngust, rele: r.rele }, l1280: { latime: r2.latime, cate: r2.cate, despliate: r2.despliate, celMaiStramt: r2.celMaiStramt, rele: r2.rele } }))
+      'bara de sus la 1.100 si la 1.280 px, in cazul cel mai rau (oricare din cele 5 insigne, cu 12 pe fiecare, pliate peste una / trei in „N alerte"; cel mai lat text al prognozei hranei, masurat printre toate ale lui textZile; „≈1,2×"; cel mai lat calendar al fiecarui anotimp): nimic nu iese din bara, calendarul e pe un rand, de aceeasi latime pentru orice text, fara marca KINSTEAD',
+      JSON.stringify({ l1100: { latime: r.latime, marca: r.marca, cate: r.cate, despliate: r.despliate, variante: r.variante, prognoza: r.progLat, celMaiStramt: r.celMaiStramt, celMaiLat: r.celMaiLat, celMaiIngust: r.celMaiIngust, rele: r.rele }, l1280: { latime: r2.latime, cate: r2.cate, despliate: r2.despliate, prognoza: r2.progLat, celMaiStramt: r2.celMaiStramt, rele: r2.rele } }))
     // EXACT ce scrie baraDeSus la tickul lumii (recenzia t.2a, L2-3), nu doar formatul: regexul de dinainte accepta prin
     // constructie o sageata inversata, tooltip-ul din iarna socotit pana la urmatoarea iarna si clima altei lumi.
     bifa('bara-sus-calendar', r.asteptat !== null && r.text === r.asteptat.text && r.titlu === r.asteptat.titlu
@@ -1037,10 +1060,13 @@ async function ruleaza() {
   // (ancora, T, rest) ale fiecarei componente (§7), deci vede si mutantii M5 pe care T-ul de la incarcare nu-i vede (restul
   // nescris, faza socotita de la incarcare, resetul lenes — UI-4). DUPA capturile de mai sus: pionii lucreaza in avans, iar
   // „incarca-desemnari" iesea rosie cu avansul inaintea lor (UI-4). Pe o lume fara componente hash-ul n-ar vedea temperatura.
+  // Hrana (t.3, UI-8): hash-ul schemei 9 cuprinde S-ul alterarii; preconditia e ca Σ S (mormane + maini) sa fie ≠ 0 la salvare
+  // si sa se fi SCHIMBAT in fereastra (orice hrana peste prag il schimba la fiecare pas de 1 Hz) — „s-a stricat o unitate"
+  // pica in ~16% din fazele salvarii (mormanele identice pierd sincron), Σ S nu.
   const hashDupaAvans = (k) => `(async () => {
     const H = await import('/@fs/${REPO}/src/sim/hash.ts')
-    const K = __kinstead, t0 = K.world.tick, r = K.avanseaza(${k})
-    return { t0, tick: r.tick, rulate: r.rulate, hash: H.hashWorld(K.world), componente: K.world.camere.comp.size, pasi: K.world.temperatura.stat.pasi, simMs: Math.round(r.simMs) }
+    const K = __kinstead, t0 = K.world.tick, s0 = K.hrana.sumaS(), r = K.avanseaza(${k})
+    return { t0, tick: r.tick, rulate: r.rulate, hash: H.hashWorld(K.world), componente: K.world.camere.comp.size, pasi: K.world.temperatura.stat.pasi, simMs: Math.round(r.simMs), s0, s1: K.hrana.sumaS() }
   })()`
   let m5Joc = null
   if (salvare !== null) await pas('incarca-m5', async () => { m5Joc = await p.js(hashDupaAvans(1687)) })
@@ -1069,8 +1095,9 @@ async function ruleaza() {
     bifa('incarca-pauza', r2.stare?.pauza === true && r2.stare?.viteza === 3 && r2.tick === salvare.tick, 'incarcarea porneste in pauza, cu viteza salvata (3×)', JSON.stringify(r2))
     // M5 (9a): aceleasi 1687 de tickuri reale pe lumea incarcata → acelasi tick, acelasi hash.
     const m5 = await q.js(hashDupaAvans(NEGATIVA === 'incarca-m5' ? 1686 : 1687))
-    bifa('incarca-m5', m5Joc !== null && m5.t0 === salvare.tick && m5Joc.t0 === salvare.tick && m5.rulate === m5.tick - m5.t0 && m5.tick === m5Joc.tick && m5.hash === m5Joc.hash && m5.componente >= 1 && m5Joc.pasi > 0 && m5.pasi > 0,
-      'M5 pe ecran: dupa 1687 de tickuri reale, lumea incarcata are acelasi tick si acelasi hash (cu temperaturile componentelor) ca lumea care a mers mai departe dupa Ctrl+S', JSON.stringify({ joc: m5Joc, incarcat: m5 }))
+    bifa('incarca-m5', m5Joc !== null && m5.t0 === salvare.tick && m5Joc.t0 === salvare.tick && m5.rulate === m5.tick - m5.t0 && m5.tick === m5Joc.tick && m5.hash === m5Joc.hash && m5.componente >= 1 && m5Joc.pasi > 0 && m5.pasi > 0
+      && m5Joc.s0 > 0 && m5Joc.s1 !== m5Joc.s0 && m5.s0 === m5Joc.s0 && m5.s1 === m5Joc.s1,
+      'M5 pe ecran: dupa 1687 de tickuri reale, lumea incarcata are acelasi tick si acelasi hash (cu temperaturile componentelor si S-ul alterarii) ca lumea care a mers mai departe dupa Ctrl+S; Σ S ≠ 0 la salvare, incarcat la fel, si schimbat in fereastra (preconditia, UI-8)', JSON.stringify({ joc: m5Joc, incarcat: m5 }))
     // --- 10. tastele tastate intr-un camp nu comanda nimic ---
     await q.tasta('Escape')
     const deschis = await q.js(`!!document.querySelector('.ui-fereastra')`)
@@ -1118,6 +1145,9 @@ async function ruleaza() {
   if (ej.length) bifa('consola-joc-nou', false, 'fara erori in consola (jocul nou)', ej.join(' | '))
   // --- 11. temperatura, pe pagina ei ---
   await paginaTermica()
+  // --- 12. hrana (t.3 §8), pe paginile ei ---
+  await paginaHranei()
+  await paginaAlterarii()
 }
 
 /**
@@ -1725,4 +1755,676 @@ async function paginaTermica() {
     for (let i = pT.erori.length - 1; i >= n0; i--) if (pT.erori[i].startsWith('[simulare] exceptie in tick')) pT.erori.splice(i, 1)
   })
   if (pT.erori.length) bifa('consola-termica', false, 'fara erori in consola (pagina termica)', pT.erori.join(' | '))
+}
+
+/**
+ * Ajutoarele paginilor hranei (t.3 §8): modulele simularii si ale ecranului — ACELEASI instante ca ale aplicatiei (src/ si
+ * viewer/ se servesc pe /@fs/, ca la `paginaTermica`) — si citirile pe care le compara bifele. Nimic de aici nu scrie in
+ * lume; lumea se schimba doar prin comenzi (`__h.cmd`) si prin `__kinstead.avanseaza(n)` (tickuri reale).
+ */
+async function ajutoareHrana(pg) {
+  await pg.js(`(async () => {
+    const imp = (f) => import('/@fs/${REPO}/' + f)
+    const [M, T, Cmd, St, It, Te, Cam, P, CA, Po, Z, Cl] = await Promise.all(['viewer/ui/model.ts', 'viewer/ui/texte.ts', 'src/sim/commands.ts', 'src/sim/state.ts', 'src/sim/iteme.ts', 'src/sim/temperatura.ts', 'src/sim/camere.ts', 'src/sim/prognoza.ts', 'src/sim/camara.ts', 'viewer/ui/pornire.ts', 'src/sim/zone.ts', 'src/sim/clima.ts'].map(imp))
+    globalThis.__h = {
+      M, T, Cmd, St, It, Te, Cam, P, CA, Po, Z, Cl,
+      cmd(c) { return Cmd.applyCommand(__kinstead.world, c) },
+      // Mormanele de hrana vii, cu S (PERSISTED) si locul lor; Σ S, stricat, unitatile (mormane + maini): pe ele se fac
+      // comparatiile alterarii (UI-7: unitatile nu se misca in ferestrele probelor, S da).
+      instantaneu() {
+        const K = __kinstead, w = K.world, it = w.iteme, a = w.agents, H = St.Item.HRANA
+        const mormane = []
+        let unitati = 0
+        for (let i = 0; i < it.count; i++) {
+          if (it.alive[i] !== 1 || it.kind[i] !== H) continue
+          unitati += it.cantitate[i]
+          mormane.push({ id: it.id[i], wx: it.wx[i], wy: it.wy[i], z: it.z[i], q: it.cantitate[i], S: it.alterare[i], loc: Te.loculCelulei(w, it.wx[i], it.wy[i], it.z[i]) })
+        }
+        for (let i = 0; i < a.count; i++) if (a.alive[i] === 1 && a.caraKind[i] === H) unitati += a.caraCantitate[i]
+        return { tick: w.tick, pauza: K.stare().pauza, sumaS: K.hrana.sumaS(), stricat: w.hranaStricata, unitati, mormane, tAfara: Cl.tAfara(w.seed, w.tick, K.rules) }
+      },
+      // Pixelul pe care clicul chiar tinteste celula (x, y, z; z null = orice cota), in jurul punctului proiectat (px, py, pz),
+      // la peste 30 px de orice om (un clic la cel mult 14 px de un om il selecteaza pe el).
+      pixelCelula(x, y, z, px, py, pz, raza = 40) {
+        const K = __kinstead, q = __f.proj(px, py, pz), a = K.world.agents
+        const pioni = []
+        for (let i = 0; i < a.count; i++) if (a.alive[i] === 1) pioni.push(__f.proj(a.x[i] / 1000, a.z[i] + 0.7, a.y[i] / 1000))
+        for (let r = 0; r <= raza; r++) for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue
+          const sx = Math.round(q.x) + dx, sy = Math.round(q.y) + dy
+          if (document.elementFromPoint(sx, sy) !== K.renderer.domElement) continue
+          if (pioni.some((p) => Math.hypot(p.x - sx, p.y - sy) < 30)) continue
+          const t = K.tintaLa(sx, sy, { ctrl: false, shift: false, alt: false })
+          if (t.ok && t.wx === x && t.wy === y && (z === null || t.z === z)) return { x: sx, y: sy, z: t.z }
+        }
+        return null
+      },
+      // O celula de sub cer fara morman, pe suprafata, cat mai aproape de (cx, cy) (dar nu pe ea): pentru un morman nou.
+      celulaSubCer(cx, cy) {
+        const K = __kinstead, w = K.world
+        for (let r = 1; r < 24; r++) for (let dx = -r; dx <= r; dx++) for (const dy of [-r, r]) {
+          const x = cx + dx, y = cy + dy, s = K.suprafata(x, y)
+          if (s === null || It.itemLaCelula(w.iteme, x, y, s + 1) !== -1) continue
+          if (Te.loculCelulei(w, x, y, s + 1) !== Te.LOC_CER) continue
+          return { x, y, z: s + 1 }
+        }
+        return null
+      },
+      // Ce scrie inspectorul pe mormanul de pe ecran (cantitatea si randul de alterare) si ce ASTEAPTA functia ecranului
+      // (__kinstead.hrana.morman) pe celula inspectata (x, y, z): mormanul e pe z + 1.
+      mormanDom() {
+        const a = document.querySelector('[data-alterare]'), c = document.querySelector('[data-morman-cantitate]')
+        return { cant: c && c.isConnected ? c.textContent : null, clasa: a && a.isConnected && !a.hidden ? (a.getAttribute('data-clasa') ?? null) : null, eticheta: a && a.isConnected && !a.hidden ? (a.children[0]?.textContent ?? null) : null, valoare: a && a.isConnected && !a.hidden ? (a.children[1]?.textContent ?? null) : null }
+      },
+      mormanFunctie(x, y, z) {
+        const m = __kinstead.hrana.morman(x, y, z)
+        if (m === null) return { cant: null, clasa: null, eticheta: null, valoare: null }
+        const a = m.alterare
+        return { cant: m.cantitate, clasa: a === null ? null : a.clasa === null ? 'necunoscuta' : String(a.clasa), eticheta: a === null ? null : a.eticheta, valoare: a === null ? null : a.valoare }
+      },
+      // Motivul din sectiunea mormanului (titlul si actiunea), din DOM.
+      motivMorman() {
+        const s = document.querySelector('[data-morman-cantitate]')?.closest('section')
+        const m = s?.querySelector('.ui-motiv')
+        return m ? { titlu: m.children[0]?.textContent ?? '', actiune: m.querySelector('.actiune')?.textContent ?? '' } : null
+      },
+      // Oamenii nu mananca in fereastra urmatoare: niciunul nu mananca acum si fiecare are FOAMEA cu cel putin 60 peste prag.
+      satui() {
+        const K = __kinstead, a = K.world.agents, f = St.Nevoie.FOAME, prag = K.rules.nevoi[f].prag
+        for (let i = 0; i < a.count; i++) if (a.alive[i] === 1 && a.faction[i] === St.Faction.ASEZARE && (a.jobKind[i] === St.FelJob.MANANCA || a.nevoi[i * St.NEVOI + f] < prag + 60)) return false
+        return true
+      },
+      nivelAfisat() { const t = document.querySelector('.ui-nivel .cota')?.textContent ?? ''; const m = /^(-?[0-9]+) m$/.exec(t.replace('−', '-')); return m ? Number(m[1]) : null },
+      dreptunghi(e) { if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height } },
+    }
+    return true
+  })()`)
+}
+
+/** Nivelul afisat („N m" din coloana Nivel, = nivelul overlay-urilor) dus la `z`, cu Q/E reale; dupa fiecare tasta se ASTEAPTA eticheta noua. */
+async function laNivel(pg, z) {
+  const citeste = () => pg.js('__h.nivelAfisat()')
+  if ((await citeste()) === null) {
+    await pg.tasta('q')
+    for (let j = 0; j < 30 && (await citeste()) === null; j++) await astepta(50)
+  }
+  for (let i = 0; i < 24; i++) {
+    const n = await citeste()
+    if (n === z || n === null) break
+    const inainte = n
+    await pg.tasta(n > z ? 'q' : 'e')
+    for (let j = 0; j < 30 && (await citeste()) === inainte; j++) await astepta(50)
+  }
+  return citeste()
+}
+
+/**
+ * Hrana pe ecran (t.3 §8), pe PAGINA EI: jocul nou implicit (`?joc=nou&seed=7&oameni=12&piatra=1000&hrana=2760`), pus pe
+ * pauza cu Spatiu; toata hrana de start sta sub cer, toamna (alterarea merge). Bifele: bara cu prognoza (UI-1, UI-9; proba
+ * negativa: textul FARA alterare), alerta „Hrana se strică" cu clicul care ajunge desi N se schimba intre mousedown si mouseup
+ * (UI-4), F3, Primii pasi (pasul camarii, cu prognoza), unealta Camara (presetul, comutatorul scris pe loc, FEL_REFUZAT, groapa
+ * dintr-un clic, „Se strică aici; cămara are loc"), dialogul Joc nou (UI-9). Timpul trece doar prin `__kinstead.avanseaza(n)`.
+ */
+async function paginaHranei() {
+  let pH = null
+  let loc = null
+  await pas('pagina-hranei', async () => {
+    pH = await pagina('?joc=nou&seed=7&oameni=12&piatra=1000&hrana=2760')
+    if (!(await pH.js('__kinstead.stare().pauza'))) await pH.tasta(' ')
+    await ajutoareHrana(pH)
+    loc = await pH.js(`(() => { const a = __kinstead.world.agents; return { x: Math.floor(a.x[0] / 1000), y: Math.floor(a.y[0] / 1000), z: a.z[0] } })()`)
+    const r = await pH.js(`(() => { const K = __kinstead, i = __h.instantaneu(); return { pauza: i.pauza, pioni: __f.pioni(), unitati: i.unitati, mormane: i.mormane.length, subCer: i.mormane.filter((m) => m.loc === __h.Te.LOC_CER).length, zone: __f.zone(), tick: i.tick } })()`)
+    bifa('pagina-hranei', r.pauza && r.pioni.c === 12 && r.unitati === 2760 && r.mormane > 0 && r.subCer === r.mormane && r.zone === 0,
+      'pagina hranei (jocul nou implicit, pe pauza): 12 oameni, 2.760 de hrana toata sub cer (toamna: se strica), nicio zona', JSON.stringify(r))
+  })
+  if (pH === null || loc === null) return
+  const sol = loc.z - 1
+  const camera = async (x, y, z, d = 14) => { await pH.js(`__f.centreaza(${x + 0.5}, ${y + 0.5}, ${z}, ${d})`); await astepta(250) }
+
+  // --- h0. Primii pasi: pasul camarii INAINTEA depozitului general, cu prognoza (aceeasi `PrognozaHrana` ca bara, UI-9),
+  // scrisa PE LOC: dupa ore de tickuri reale, textul e al starii noi, in ACELASI nod (pe codul D1 textul ramanea cel de la
+  // prima desenare: cheia listei e doar pe bife — fum-1, reparat in panouri.ts) ---
+  await pas('primii-pasi-camara', async () => {
+    const citeste = () => pH.js(`(() => {
+      const K = __kinstead, M = __h.M, li = [...document.querySelectorAll('.ui-pasi ol li')], hr = document.querySelector('.ui-pasi .hrana'), ec = M.hranaEcran(K.world, K.rules)
+      globalThis.__li0 ??= li[0] ?? null
+      return { vizibil: !document.querySelector('.ui-pasi').hidden, n: li.length, texte: li.map((e) => e.textContent), facut: li.map((e) => e.classList.contains('facut')), asteptat: M.textPasulCamarii(K.rules, ec.stare.colonisti, __h.Po.HRANA_PE_OM, ec.prognoza), bara: K.hrana.bara(), fara: K.hrana.baraFaraAlterare(), hranaAscunsa: hr ? hr.hidden : null, acelasi: li[0] === globalThis.__li0, tick: K.world.tick }
+    })()`)
+    await pH.js('delete globalThis.__li0; true')
+    await astepta(400)
+    const r0 = await citeste()
+    // Ore reale (in pauza, prin avanseaza) pana cand prognoza din pas se schimba; cel mult 6.
+    let r1 = r0
+    let rulate = 0
+    for (let k = 0; k < 6 && r1.asteptat === r0.asteptat; k++) { rulate += (await pH.js('__kinstead.avanseaza(1680)')).rulate; await astepta(400); r1 = await citeste() }
+    const bun = (r) => {
+      const acum = r.bara.endsWith(' zile') ? r.bara.slice(0, -5) : r.bara
+      return r.vizibil && r.n === 5 && r.texte[0] === r.asteptat && /^Cămară: Zone \(K\) ▸ Cămară în pivniță \(sub 5 °C\), ~/.test(r.texte[0]) && r.texte[0].endsWith(`hrana ține ${r.fara}, nu ${acum}`)
+        && r.texte[1] === 'Depozit pentru piatră: Zone (K) ▸ Depozit' && !r.facut[0] && !r.facut[1] && r.hranaAscunsa === true
+    }
+    bifa('primii-pasi-camara', bun(r0) && bun(r1) && r1.asteptat !== r0.asteptat && r1.acelasi && rulate >= 1680,
+      'Primii pasi: pasul camarii e PRIMUL, inaintea depozitului general („Depozit pentru piatră: Zone (K) ▸ Depozit"), cu prognoza barei („hrana ține ~3,6 zile, nu ~2,9" — fara alterare, apoi cu ea) == functia; dupa ore de tickuri reale, prognoza noua, scrisa PE LOC (acelasi nod); randul „Nu mai ai hrană" ascuns',
+      JSON.stringify({ r0: { ...r0, texte: r0.texte.slice(0, 2) }, r1: { ...r1, texte: r1.texte.slice(0, 2) }, rulate }))
+  })
+
+  // --- h1. bara cu prognoza (UI-1, UI-9, UI-14): textul == functia ecranului pe starea de acum, in pauza; si dupa o ora REALA ---
+  await pas('bara-prognoza', async () => {
+    const citeste = () => pH.js(`(() => {
+      const K = __kinstead, H = K.hrana, e = document.querySelector('.ui-sus .prognoza'), rad = e?.closest('.ui-res'), ec = H.ecran()
+      return { text: e?.textContent ?? null, cls: e ? [...e.classList] : [], titlu: rad?.title ?? '', bara: H.bara(), fara: H.baraFaraAlterare(), zile: ec.prognoza.zile, clasa: __h.M.clasaPrognozei(ec.prognoza), coada: __h.M.tooltipHrana(K.rules, ec) + ' · nu se poate produce încă', tick: K.world.tick, pauza: K.stare().pauza }
+    })()`)
+    await astepta(400)
+    const r = await citeste()
+    const av = await pH.js('__kinstead.avanseaza(1680)')
+    await astepta(400)
+    const r2 = await citeste()
+    // Proba negativa: textul asteptat e cel FARA alterare (aceeasi hrana tinuta la rata 0) — diferit, cat timp hrana sta sub cer.
+    const asteptat = (x) => (NEGATIVA === 'bara-prognoza' ? x.fara : x.bara)
+    const clase = (x) => x.cls.includes('critic') === (x.clasa === 'critic') && x.cls.includes('atentie') === (x.clasa === 'atentie')
+    bifa('bara-prognoza', r.pauza && r.bara !== r.fara && /^~[0-9]+,[0-9] zile$/.test(r.bara) && r.text === asteptat(r) && clase(r) && r.titlu.endsWith(r.coada) && r.titlu.includes(`ajunge ${r.bara}`)
+      && av.rulate === 1680 && r2.pauza && r2.text === asteptat(r2) && clase(r2) && r2.titlu.endsWith(r2.coada),
+      'bara de sus, in pauza: prognoza hranei == functia ecranului pe starea de acum (pe VALOARE, cu alterarea; diferita de cea fara alterare), clasa atentie/critic dupa pragurile in zile, tooltip-ul cu „hrănește cât … · ajunge …" si „nu se poate produce încă"; la fel dupa o ora de tickuri reale',
+      JSON.stringify({ r: { ...r, titlu: r.titlu.slice(-120) }, r2: { text: r2.text, bara: r2.bara, fara: r2.fara, tick: r2.tick }, rulate: av.rulate }))
+    await pH.poza('h1-bara-prognoza.png')
+  })
+
+  // --- h2. alerta „Hrana se strică" (UI-4): textul scris pe loc, cheia listei pe id-uri; clicul real ajunge (camera si
+  // inspectorul pe tinta citita LA CLIC) desi N se schimba intre mousedown si mouseup (un morman nou sub cer + 700 ms) ---
+  await pas('alerta-alterare', async () => {
+    // Intarzierea alertei e de 10 s de joc: semnalul vazut in pauza, apoi 220 de tickuri reale, apoi o reimprospatare (2 Hz).
+    const av = await pH.js('__kinstead.avanseaza(220)')
+    await astepta(700)
+    const a0 = await pH.js(`(() => {
+      const b = document.querySelector('button[data-alerta="hrana-se-strica"]'), L = document.querySelector('.ui-alerte'), s = __kinstead.hrana.alerta()
+      globalThis.__alertaBtn = b
+      if (!b) return { buton: false, semnal: s, cheie: L?.dataset.cheie ?? null }
+      const r = b.getBoundingClientRect(), x = r.x + r.width / 2, y = r.y + r.height / 2
+      return { buton: true, text: b.children[1]?.textContent ?? '', semnal: s, cheie: L?.dataset.cheie ?? null, x, y, peButon: document.elementFromPoint(x, y)?.closest('button') === b }
+    })()`)
+    if (!a0.buton) { bifa('alerta-alterare', false, 'alerta „Hrana se strică" nu e pe ecran', JSON.stringify({ av, a0 })); return }
+    // Spionul pe `ui.inspecteazaCelula` (pe care il cheama clicul pe alerta, `duLaTinta`): ce celula a cerut clicul.
+    await pH.js(`(() => { const U = __kinstead.ui; globalThis.__spion = []; if (!U.__inspecteazaOriginal) U.__inspecteazaOriginal = U.inspecteazaCelula; U.inspecteazaCelula = function (...a) { globalThis.__spion.push(a.slice(0, 3)); return U.__inspecteazaOriginal.apply(this, a) }; return true })()`)
+    await pH.muta(a0.x, a0.y)
+    await pH.apasa(a0.x, a0.y)
+    const nou = await pH.js(`(() => {
+      const c = __h.celulaSubCer(${loc.x}, ${loc.y + 9})
+      if (c === null) return { ok: false }
+      const out = __h.cmd({ kind: 'lasaItem', fel: __h.St.Item.HRANA, cantitate: 75, wx: c.x, wy: c.y, z: c.z })
+      return { ok: out.ok, c, pericol: __kinstead.hrana.ecran().pericol }
+    })()`)
+    // Proba negativa: lista refacuta FORTAT intre mousedown si mouseup (cheia golita: urmatoarea reimprospatare scoate butoanele
+    // din DOM si le pune la loc) — Chromium nu mai trimite clicul unui buton scos intre apasare si eliberare.
+    if (NEGATIVA === 'alerta-alterare') await pH.js(`(() => { document.querySelector('.ui-alerte').dataset.cheie = ''; return true })()`)
+    await astepta(700)
+    const a1 = await pH.js(`(() => { const b = document.querySelector('button[data-alerta="hrana-se-strica"]'); return { acelasi: b === globalThis.__alertaBtn, text: b?.children[1]?.textContent ?? '', semnal: __kinstead.hrana.alerta(), cheie: document.querySelector('.ui-alerte')?.dataset.cheie ?? null } })()`)
+    await pH.elibereaza(a0.x, a0.y)
+    await astepta(500)
+    const a2 = await pH.js(`(() => {
+      const K = __kinstead, s = K.hrana.alerta(), t = s?.tinta ?? null
+      return { spion: globalThis.__spion, tinta: t, camera: [+K.controls.target.x.toFixed(3), +K.controls.target.z.toFixed(3)], dom: __h.mormanDom(), functie: t === null ? null : __h.mormanFunctie(t.wx, t.wy, t.z), sertar: document.querySelector('.ui-sertar h2')?.textContent ?? null }
+    })()`)
+    await pH.js(`(() => { const U = __kinstead.ui; if (U.__inspecteazaOriginal) { U.inspecteazaCelula = U.__inspecteazaOriginal; delete U.__inspecteazaOriginal } return true })()`)
+    const t = a2.tinta
+    const ajuns = t !== null && a2.spion.length === 1 && a2.spion[0][0] === t.wx && a2.spion[0][1] === t.wy && a2.spion[0][2] === t.z
+      && Math.abs(a2.camera[0] - (t.wx + 0.5)) < 0.01 && Math.abs(a2.camera[1] - (t.wy + 0.5)) < 0.01
+      && a2.dom.cant !== null && JSON.stringify(a2.dom) === JSON.stringify(a2.functie) && a2.dom.clasa === '2'
+    bifa('alerta-alterare', av.rulate === 220 && a0.text === a0.semnal?.text && /^Hrana se strică: /.test(a0.text) && a0.peButon && nou.ok && a1.text !== a0.text && a1.text === a1.semnal?.text && a1.acelasi && a1.cheie === a0.cheie && ajuns,
+      'alerta „Hrana se strică: N mormane" (dupa 220 de tickuri reale): textul == semnalul; intre mousedown si mouseup N se schimba (un morman nou sub cer), textul se rescrie PE LOC in ACELASI buton, cheia listei (id-urile) nu se schimba; clicul ajunge: camera si inspectorul pe tinta citita la clic, cu randul de alterare == functia',
+      JSON.stringify({ av: av.rulate, a0: { text: a0.text, cheie: a0.cheie, peButon: a0.peButon }, nou, a1: { text: a1.text, acelasi: a1.acelasi, cheie: a1.cheie }, a2 }))
+    await pH.poza('h2-alerta-inspector.png')
+  })
+
+  // --- h3. F3: randul „hrana" din Diagnostic == functia ecranului, si dupa o ora reala ---
+  await pas('f3-hrana', async () => {
+    const hud0 = await pH.js(`!document.getElementById('hud').hidden`)
+    await pH.tasta('F3')
+    await astepta(600)
+    const citeste = () => pH.js(`({ hud: !document.getElementById('hud').hidden, text: document.getElementById('hrana')?.textContent ?? null, f3: __kinstead.hrana.f3(), stricat: __kinstead.world.hranaStricata, tick: __kinstead.world.tick })`)
+    const r = await citeste()
+    // Randul se VEDE: eticheta si valoarea lui nu sunt acoperite de coloana stanga a UI-ului (hit-test, nu doar textul).
+    const vede = await pH.js(`(() => {
+      const v = document.getElementById('hrana'), l = v?.previousElementSibling ?? null
+      const ok = (e) => { if (!e) return null; const q = e.getBoundingClientRect(); if (q.width === 0) return null; const x = q.x + Math.min(q.width / 2, 12), y = q.y + q.height / 2, t = document.elementFromPoint(x, y); return t === e || e.contains(t) ? 'da' : (t?.className || t?.tagName || 'nimic') }
+      return { eticheta: ok(l), valoare: ok(v), textEticheta: l?.textContent ?? null }
+    })()`)
+    await pH.poza('h3-f3.png')
+    // Ore reale pana cand se strica ceva (mormanele identice pierd SINCRON, deci o unitate vine pe toate odata).
+    let r2 = r
+    const av = { rulate: 0 }
+    for (let k = 0; k < 4 && r2.stricat === r.stricat; k++) { av.rulate += (await pH.js('__kinstead.avanseaza(1680)')).rulate; await astepta(600); r2 = await citeste() }
+    await pH.tasta('F3')
+    await astepta(300)
+    const hud2 = await pH.js(`!document.getElementById('hud').hidden`)
+    const forma = (s) => /^stricat [0-9.]+ · în pericol [0-9.]+ · [0-9]+,[0-9]%\/zi$/.test(s ?? '')
+    bifa('f3-hrana', !hud0 && r.hud && vede.eticheta === 'da' && vede.valoare === 'da' && vede.textEticheta === 'hrana' && r.text === r.f3 && forma(r.text) && av.rulate >= 1680 && av.rulate % 1680 === 0 && r2.text === r2.f3 && r2.text !== r.text && r2.stricat > r.stricat && !hud2,
+      'F3: randul „hrana" din Diagnostic („stricat N · în pericol M · R%/zi") se VEDE (eticheta si valoarea, hit-test: nu le acopera coloana stanga) si == functia ecranului; dupa ore de tickuri reale se schimba (stricat creste) si e tot functia; F3 il ascunde la loc',
+      JSON.stringify({ hud0, vede, r, r2, hud2, rulate: av.rulate }))
+  })
+
+  // --- h5. unealta Camara: presetul (DEPOZIT + filtrul „doar hrană"), indiciul, pictura cu filtrul in ACELASI tick, toast-ul ---
+  let camara = null
+  await pas('camara-unealta', async () => {
+    await pH.tasta('v')
+    await pH.tasta('k')
+    await astepta(200)
+    const bC = await pH.js(`__h.dreptunghi(document.querySelector('.ui-sub button[data-zona="camara"]'))`)
+    // Proba negativa: gestul fara clicul pe „Cămară" — unealta ramane Zone ▸ Depozit (un depozit general).
+    if (bC !== null && NEGATIVA !== 'camara') await pH.click(bC.x, bC.y)
+    await astepta(200)
+    const u = await pH.js(`({ filtru: __kinstead.ui.zonaFiltru, fel: __kinstead.ui.zonaFel, unealta: __kinstead.ui.unealta, camara: document.querySelector('.ui-sub button[data-zona="camara"]')?.getAttribute('aria-pressed') ?? null, depozit: document.querySelector('.ui-sub button[data-zona="0"]')?.getAttribute('aria-pressed') ?? null, indiciu: document.querySelector('.ui-indiciu')?.textContent ?? '' })`)
+    const inainte = await pH.js(`({ zone: __f.zoneFel().map((z) => z.id), tick: __kinstead.world.tick })`)
+    // Peste randul de sus al inelului de mormane (piatra si hrana) si ce e dincolo de el: molozul pentru groapa de moloz.
+    await pH.trage([loc.x - 6, loc.y - 9], [loc.x - 3, loc.y - 6], sol + 1)
+    await astepta(400)
+    const dupa = await pH.js(`(() => {
+      const K = __kinstead, w = K.world, s = w.zone, vechi = ${JSON.stringify(inainte.zone)}
+      const noi = __f.zoneFel().filter((z) => !vechi.includes(z.id))
+      const z = noi[0] ?? null, zs = z === null ? -1 : __h.Z.slotZona(s, z.id)
+      let celule = 0
+      for (let i = 0; i < s.celule.count; i++) if (s.celule.alive[i] === 1 && z !== null && s.celule.zonaId[i] === z.id) celule++
+      const li = [...document.querySelectorAll('.ui-pasi ol li')]
+      return { noi: noi.length, id: z?.id ?? null, fel: zs === -1 ? null : s.kind[zs], refuzate: zs === -1 ? null : s.refuzate[zs], celule, tick: w.tick, toast: __f.toast(), pasi: li.map((e) => e.classList.contains('facut')) }
+    })()`)
+    camara = dupa.id
+    bifa('camara-unealta', bC !== null && u.filtru === 7 && u.fel === 0 && u.camara === 'true' && u.depozit === 'false' && u.indiciu.startsWith('Cămară')
+      && dupa.noi === 1 && dupa.fel === 0 && dupa.refuzate === 7 && dupa.celule >= 12 && dupa.tick === inainte.tick && dupa.toast.includes(' · cămară: doar hrană') && dupa.pasi[0] === true && dupa.pasi[1] === false,
+      'Zone ▸ Cămară (clic real): presetul — un DEPOZIT cu filtrul „doar hrană" (7), butonul apasat, indiciul „Cămară …"; dreptunghiul tras picteaza o zona cu masca 7 in ACELASI tick (pauza: niciun tick intre pictura si filtru), toast „· cămară: doar hrană"; Primii pasi bifeaza pasul camarii, nu pe al depozitului general',
+      JSON.stringify({ bC, u, inainte: inainte.tick, dupa }))
+    await pH.poza('h4-camara-unealta.png')
+  })
+
+  /** Clic real (Selectează) pe celula (x, y) a suprafetei; intoarce celula tintita (x, y, z) sau null. */
+  const clicCelula = async (x, y) => {
+    await pH.tasta('v')
+    await camera(x, y, sol + 1, 12)
+    const s = await pH.js(`__kinstead.suprafata(${x}, ${y})`)
+    const px = await pH.js(`__h.pixelCelula(${x}, ${y}, null, ${x + 0.5}, ${(s ?? sol) + 1}, ${y + 0.5})`)
+    if (px === null) return null
+    await pH.click(px.x, px.y)
+    await astepta(400)
+    return { x, y, z: px.z }
+  }
+  // --- h6. comutatorul „Primește: Tot · Doar hrană" din inspectorul zonei: clicuri reale, setFiltruZona, scris PE LOC ---
+  await pas('camara-comutator', async () => {
+    if (camara === null) { bifa('camara-comutator', false, 'fara camara (h5)'); return }
+    // O celula a camarii fara morman (inspectorul arata doar zona).
+    const c = await pH.js(`(() => { const s = __kinstead.world.zone, it = __kinstead.world.iteme; for (let i = 0; i < s.celule.count; i++) if (s.celule.alive[i] === 1 && s.celule.zonaId[i] === ${camara} && __h.It.itemLaCelula(it, s.celule.wx[i], s.celule.wy[i], s.celule.z[i]) === -1) return { x: s.celule.wx[i], y: s.celule.wy[i], z: s.celule.z[i] }; return null })()`)
+    const tinta = c === null ? null : await clicCelula(c.x, c.y)
+    const citeste = () => pH.js(`(() => {
+      const K = __kinstead, w = K.world, zs = __h.Z.slotZona(w.zone, ${camara}), q = (s) => document.querySelector(s)
+      const tot = q('[data-comutator-filtru] button[data-filtru="tot"]'), hr = q('[data-comutator-filtru] button[data-filtru="hrana"]'), prim = q('[data-primeste]'), cap = q('[data-capacitate]')
+      globalThis.__comut ??= { tot, hr, prim, cap }
+      const n = globalThis.__comut
+      const refuzate = w.zone.refuzate[zs]
+      return { refuzate, primeste: prim?.textContent ?? null, primesteAsteptat: __h.T.textPrimeste(refuzate, __h.St.ITEME), nume: prim?.closest('section')?.querySelector('.ui-kv span:last-child')?.textContent ?? null,
+        tot: tot?.getAttribute('aria-pressed') ?? null, hrana: hr?.getAttribute('aria-pressed') ?? null, cap: cap ? (cap.hidden ? null : cap.textContent) : undefined,
+        capAsteptat: __h.M.esteCamara(w, zs) ? __h.T.textCapacitateCamara(__h.M.capacitateCamara(w, K.rules, zs, __h.Po.HRANA_PE_OM)) : null,
+        aceleasi: tot === n.tot && hr === n.hr && prim === n.prim && cap === n.cap, xTot: __h.dreptunghi(tot), xHrana: __h.dreptunghi(hr) }
+    })()`)
+    await pH.js('delete globalThis.__comut; true')
+    const r0 = await citeste()
+    const pasi = []
+    for (const [f, m] of [['xTot', 0], ['xHrana', 7]]) {
+      const b = (pasi.length === 0 ? r0 : pasi[pasi.length - 1])[f]
+      if (b) await pH.click(b.x, b.y)
+      await astepta(400)
+      pasi.push({ ...(await citeste()), cerut: m })
+    }
+    const [r1, r2] = pasi
+    const bun = (r, m) => r.refuzate === m && r.primeste === r.primesteAsteptat && r.tot === (m === 0 ? 'true' : 'false') && r.hrana === (m === 7 ? 'true' : 'false') && r.cap === r.capAsteptat && r.aceleasi
+    bifa('camara-comutator', tinta !== null && r0.primeste === r0.primesteAsteptat && bun(r1, 0) && r1.primeste === 'tot' && r1.cap === null && bun(r2, 7) && r2.primeste === 'doar hrană' && r2.nume === 'Cămară' && /^Ține hrana a /.test(r2.cap ?? ''),
+      'inspectorul camarii (clic real pe o celula a ei): „Primește" si comutatorul; clic pe „Tot" → masca 0 in lume, „tot", butonul apasat, capacitatea ascunsa; clic pe „Doar hrană" → masca 7, „doar hrană", „Cămară", „Ține hrana a N oameni (cât au la început)" == functia — scrise PE LOC (aceleasi noduri)',
+      JSON.stringify({ tinta, r0, r1, r2 }))
+    await pH.poza('h5-camara-comutator.png')
+  })
+
+  // --- h7. FEL_REFUZAT: piatra din camara, cand niciun depozit nu primeste piatra (motivul inspectorului == functia) ---
+  await pas('camara-fel-refuzat', async () => {
+    const m = await pH.js(`(() => { const w = __kinstead.world, it = w.iteme, s = w.zone; for (let i = 0; i < it.count; i++) { if (it.alive[i] !== 1 || it.kind[i] !== __h.St.Item.PIATRA) continue; const cs = __h.Z.celulaDeZonaLa(s, it.wx[i], it.wy[i], it.z[i]); if (cs !== -1 && s.celule.zonaId[cs] === ${camara ?? -1}) return { x: it.wx[i], y: it.wy[i], z: it.z[i] } } return null })()`)
+    const tinta = m === null ? null : await clicCelula(m.x, m.y)
+    const r = tinta === null ? null : await pH.js(`(() => { const K = __kinstead, c = __h.M.inspecteazaCelula(K.world, K.rules, ${tinta?.x}, ${tinta?.y}, ${tinta?.z}, null); return { dom: __h.motivMorman(), asteptat: c.morman?.stare ?? null, alterare: document.querySelector('[data-alterare]')?.hidden ?? null } })()`)
+    bifa('camara-fel-refuzat', r !== null && r.dom !== null && r.asteptat !== null && r.dom.titlu === r.asteptat.titlu && r.dom.actiune === r.asteptat.actiune && r.dom.titlu.startsWith('Niciun depozit nu primește piatră.') && r.alterare === true,
+      'piatra de pe camara (clic real), cand niciun depozit nu primeste piatra: motivul „Niciun depozit nu primește piatră." + „Schimbă filtrul…" (FEL_REFUZAT) == functia inspectorului; fara rand de alterare (piatra nu se strica)',
+      JSON.stringify({ m, tinta, r }))
+  })
+
+  // --- h8. groapa de moloz dintr-un clic: propunerea (cu cifrele `groapaDeMoloz`), clicul real picteaza L × L la `locGroapa`,
+  // cu filtrul gropii; dupa, propunerea dispare ---
+  await pas('groapa-clic', async () => {
+    const c = await pH.js(`(() => { const s = __kinstead.world.zone, it = __kinstead.world.iteme; for (let i = 0; i < s.celule.count; i++) if (s.celule.alive[i] === 1 && s.celule.zonaId[i] === ${camara ?? -1} && __h.It.itemLaCelula(it, s.celule.wx[i], s.celule.wy[i], s.celule.z[i]) === -1) return { x: s.celule.wx[i], y: s.celule.wy[i] }; return null })()`)
+    const tinta = c === null ? null : await clicCelula(c.x, c.y)
+    const r0 = await pH.js(`(() => {
+      const K = __kinstead, w = K.world, g = __h.CA.groapaDeMoloz(w, K.rules, ${camara ?? -1}), el = document.querySelector('div[data-groapa]'), b = document.querySelector('button[data-groapa]')
+      const loc = g === null || g.latura === 0 ? null : __h.M.locGroapa(w, K.rules, ${camara ?? -1}, g.latura)
+      return { g, loc, vizibil: !!el && !el.hidden, text: el?.children[0]?.textContent ?? null, asteptat: g === null ? null : __h.T.textGroapa(g), buton: b?.textContent ?? null, x: __h.dreptunghi(b), zone: __f.zoneFel().map((z) => z.id) }
+    })()`)
+    await pH.poza('h6-groapa-propusa.png')
+    if (r0.x) await pH.click(r0.x.x, r0.x.y)
+    await astepta(500)
+    const r1 = await pH.js(`(() => {
+      const K = __kinstead, w = K.world, s = w.zone, vechi = ${JSON.stringify(r0.zone)}, noi = __f.zoneFel().filter((z) => !vechi.includes(z.id))
+      const z = noi[0] ?? null, zs = z === null ? -1 : __h.Z.slotZona(s, z.id)
+      const celule = []
+      for (let i = 0; i < s.celule.count; i++) if (s.celule.alive[i] === 1 && z !== null && s.celule.zonaId[i] === z.id) celule.push([s.celule.wx[i], s.celule.wy[i], s.celule.z[i]])
+      const el = document.querySelector('div[data-groapa]'), g = __h.CA.groapaDeMoloz(w, K.rules, ${camara ?? -1})
+      return { noi: noi.length, fel: zs === -1 ? null : s.kind[zs], refuzate: zs === -1 ? null : s.refuzate[zs], celule, toast: __f.toast(), propusaDupa: g?.propusa ?? null, vizibilDupa: !!el && !el.hidden }
+    })()`)
+    const L = r0.g?.latura ?? 0
+    const asteptate = r0.loc === null ? [] : Array.from({ length: L * L }, (_, k) => [r0.loc.x0 + (k % L), r0.loc.y0 + Math.floor(k / L), r0.loc.z].join()).sort()
+    bifa('groapa-clic', tinta !== null && r0.g !== null && r0.g.propusa > 0 && r0.vizibil && r0.text === r0.asteptat && r0.buton === `Pictează groapa de moloz (${L} × ${L})` && r0.loc !== null
+      && r1.noi === 1 && r1.fel === 0 && r1.refuzate === r0.g.refuzate && JSON.stringify(r1.celule.map((x) => x.join()).sort()) === JSON.stringify(asteptate) && r1.toast.startsWith(`Groapa de moloz: ${L} × ${L}, primește `) && r1.propusaDupa === 0 && !r1.vizibilDupa,
+      'inspectorul camarii cu molozul ei: propunerea gropii („Molozul săpat n-are unde pleca…" == textGroapa(groapaDeMoloz)) si butonul „Pictează groapa de moloz (L × L)"; clicul real picteaza L × L celule la locGroapa, cu filtrul gropii (doar felurile molozului), toast „Groapa de moloz: …"; apoi propunerea dispare',
+      JSON.stringify({ tinta, r0: { ...r0, x: undefined, zone: undefined }, r1 }))
+  })
+
+  // --- h9. „Se strică aici; cămara are loc." — hrana dintr-un depozit general cu prioritatea PESTE a camarii ---
+  await pas('camara-strica-aici', async () => {
+    await pH.tasta('v')
+    await pH.tasta('k')
+    await astepta(200)
+    const bD = await pH.js(`__h.dreptunghi(document.querySelector('.ui-sub button[data-zona="0"]'))`)
+    if (bD) await pH.click(bD.x, bD.y)
+    const inainte = await pH.js('__f.zoneFel().map((z) => z.id)')
+    // Un morman de hrana sub cer cu vecinatatea 3×3 fara nicio zona (pionii au mancat din inel: ales din lume, nu dintr-o harta).
+    const ales = await pH.js(`(() => {
+      const w = __kinstead.world, it = w.iteme, s = w.zone
+      let best = null
+      for (let i = 0; i < it.count; i++) {
+        if (it.alive[i] !== 1 || it.kind[i] !== __h.St.Item.HRANA || __h.Te.loculCelulei(w, it.wx[i], it.wy[i], it.z[i]) !== __h.Te.LOC_CER) continue
+        let liber = true
+        for (let dx = -2; dx <= 2 && liber; dx++) for (let dy = -2; dy <= 2 && liber; dy++) for (let dz = -2; dz <= 2; dz++) if (__h.Z.celulaDeZonaLa(s, it.wx[i] + dx, it.wy[i] + dy, it.z[i] + dz) !== -1) { liber = false; break }
+        if (!liber) continue
+        const d = Math.abs(it.wx[i] - ${loc.x - 6}) + Math.abs(it.wy[i] - ${loc.y})
+        if (best === null || d < best.d) best = { x: it.wx[i], y: it.wy[i], d }
+      }
+      return best
+    })()`)
+    if (ales !== null) await pH.trage([ales.x - 1, ales.y - 1], [ales.x + 1, ales.y + 1], sol + 1)
+    await astepta(400)
+    const dep = await pH.js(`(() => { const vechi = ${JSON.stringify(inainte)}; const z = __f.zoneFel().filter((x) => !vechi.includes(x.id))[0] ?? null; if (z === null) return null; const w = __kinstead.world, it = w.iteme, s = w.zone; for (let i = 0; i < it.count; i++) { if (it.alive[i] !== 1 || it.kind[i] !== __h.St.Item.HRANA) continue; const cs = __h.Z.celulaDeZonaLa(s, it.wx[i], it.wy[i], it.z[i]); if (cs !== -1 && s.celule.zonaId[cs] === z.id) return { id: z.id, x: it.wx[i], y: it.wy[i] } } return { id: z.id, x: null } })()`)
+    const tinta = dep === null || dep.x === null ? null : await clicCelula(dep.x, dep.y)
+    const citeste = () => pH.js(`(() => { const K = __kinstead, c = __h.M.inspecteazaCelula(K.world, K.rules, ${tinta?.x}, ${tinta?.y}, ${tinta?.z}, null); return { dom: __h.motivMorman(), asteptat: c.morman?.stare ?? null, prio: c.zona?.prioritate ?? null, plus: __h.dreptunghi([...document.querySelectorAll('.ui-inspector button')].find((b) => b.textContent === '+ prioritate')) } })()`)
+    const r0 = tinta === null ? null : await citeste()
+    if (r0?.plus) await pH.click(r0.plus.x, r0.plus.y)
+    await astepta(400)
+    const r1 = tinta === null ? null : await citeste()
+    const asteptat = await pH.js(`__h.T.textStricaCamaraAreLoc(3, 4)`)
+    bifa('camara-strica-aici', r0 !== null && r1 !== null && r0.prio === 3 && r0.dom?.titlu === 'În depozit.' && r1.prio === 4 && r1.dom !== null && r1.asteptat !== null && r1.dom.titlu === r1.asteptat.titlu && r1.dom.actiune === r1.asteptat.actiune && r1.dom.titlu === asteptat.titlu && r1.dom.actiune === asteptat.actiune,
+      'hrana sub cer intr-un depozit general (Zone ▸ Depozit, tras): la prioritate egala cu camara, „În depozit." (camara o trage oricum, rangul ei e mai mare); dupa „+ prioritate" (clic real, 4 > 3): „Se strică aici; cămara are loc." + „Ridică prioritatea cămării peste a depozitului ăstuia (cămara 3, aici 4)." == functia',
+      JSON.stringify({ ales, dep, tinta, r0: r0 && { ...r0, plus: undefined }, r1: r1 && { ...r1, plus: undefined } }))
+    await pH.poza('h7-strica-aici.png')
+  })
+
+  // --- h10. dialogul Joc nou: textul de sub formular == prognoza jocului nou (sub cer si intr-o camara), si dupa tastare reala ---
+  await pas('joc-nou-dialog', async () => {
+    await pH.js('document.activeElement?.blur(); true')
+    // Esc pana se deschide meniul (Esc renunta intai la unealta, apoi la selectie, apoi deschide meniul).
+    for (let i = 0; i < 5 && !(await pH.js('__kinstead.ui.modalDeschis()')); i++) { await pH.tasta('Escape'); await astepta(150) }
+    await pH.js(`[...document.querySelectorAll('.ui-fereastra button')].find((b) => b.textContent.startsWith('Joc nou'))?.click(); true`)
+    await astepta(300)
+    const citeste = () => pH.js(`(() => {
+      const f = document.querySelector('.ui-fereastra'), v = (n) => f?.querySelector('input[name=' + n + ']')?.value ?? null
+      const cat = [...(f?.querySelectorAll('.sub') ?? [])].find((e) => e.previousElementSibling?.classList.contains('ui-form')) ?? null
+      const s = Number(v('seed')), o = Number(v('oameni')), h = Number(v('hrana'))
+      return { seed: s, oameni: o, hrana: h, text: cat?.textContent ?? null, asteptat: __kinstead.hrana.jocNou(s, o, h), oameniX: __h.dreptunghi(f?.querySelector('input[name=oameni]')), hranaX: __h.dreptunghi(f?.querySelector('input[name=hrana]')) }
+    })()`)
+    const r0 = await citeste()
+    // Tastare reala in campul Oameni (selectat), „6": hrana se trage dupa oameni (230 pe om) cat n-a fost atinsa.
+    if (r0.oameniX) { await pH.click(r0.oameniX.x, r0.oameniX.y); await pH.js(`document.querySelector('.ui-fereastra input[name=oameni]').select(); true`); await pH.tasta('6') }
+    await astepta(200)
+    const r1 = await citeste()
+    // 6 oameni cu 1.380 tin cat 12 cu 2.760 (230 pe om): textul nu se schimba. Hrana tastata (2.760 pentru 6) il schimba.
+    if (r1.hranaX) { await pH.click(r1.hranaX.x, r1.hranaX.y); await pH.js(`document.querySelector('.ui-fereastra input[name=hrana]').select(); true`); for (const k of '2760') await pH.tasta(k) }
+    await astepta(200)
+    const r2 = await citeste()
+    await pH.poza('h8-joc-nou-dialog.png')
+    await pH.js('document.activeElement?.blur(); true')
+    for (let i = 0; i < 4 && await pH.js('__kinstead.ui.modalDeschis()'); i++) await pH.tasta('Escape')
+    const forma = (t) => /^Hrana ajunge .+ de joc dacă stă sub cer, .+ într-o cămară\. Hrana nu se poate produce încă: după aceea oamenii pleacă\.$/.test(t ?? '')
+    bifa('joc-nou-dialog', r0.text === r0.asteptat && forma(r0.text) && r0.oameni === 12 && r1.oameni === 6 && r1.hrana === 1380 && r1.text === r1.asteptat && r2.oameni === 6 && r2.hrana === 2760 && r2.text === r2.asteptat && forma(r2.text) && r2.text !== r1.text,
+      'dialogul Joc nou: textul de sub formular == prognoza jocului nou (aceeasi proiectie: sub cer la tickul 0 si intr-o camara) pentru campurile de acum; dupa „6" tastat real in Oameni (hrana se trage la 1.380) si „2760" tastat in Hrană, textul nou == functia',
+      JSON.stringify({ r0: { ...r0, oameniX: undefined, hranaX: undefined }, r1: { ...r1, oameniX: undefined, hranaX: undefined }, r2: { ...r2, oameniX: undefined, hranaX: undefined } }))
+  })
+  if (pH.erori.length) bifa('consola-hranei', false, 'fara erori in consola (pagina hranei)', pH.erori.join(' | '))
+}
+
+/**
+ * Alterarea pe ecran (t.3 §8; UI-2, UI-5, UI-6, UI-7, UI-10), pe PAGINA EI: `?joc=nou&seed=7&oameni=1&piatra=0&hrana=230`
+ * (adresa paginii termice; 4 mormane sub cer), pe pauza. CONTRACTUL LUMII, facut prin comenzile simularii, in pauza: doua
+ * pivnite sapate cu `dig` (A — un strat 3×3 de 1 m la 1 m sub suprafata; B — acelasi strat la 2 m, pe un sit cu suprafata cu 1
+ * mai sus: straturile lor sunt pe ACELASI nivel), fiecare cu un put de o celula in mijloc (singura celula calcabila: o hrana
+ * are nevoie de doi metri de aer). Ordinea sapatului lasa putul GOL (molozul iese la suprafata), apoi in el se pune hrana
+ * (`lasaItem`): 75 in A, 45 in B. Pivnitele se inchid reci (C3: proveninta din solul lor), B ramane sub prag, iar A se
+ * incalzeste spre ~5,4 °C: tickuri reale (`avanseaza`, ora cu ora) pana cand A e „aproape" (peste prag, sub 0,1% pe zi) si
+ * aerul de afara strica (λ > 0). Masurat in node (agentul D2): A trece pragul la ~14 h, B ramane la ~3 °C.
+ */
+async function paginaAlterarii() {
+  let pA = null
+  let sc = null
+  await pas('pagina-alterarii', async () => {
+    pA = await pagina('?joc=nou&seed=7&oameni=1&piatra=0&hrana=230')
+    if (!(await pA.js('__kinstead.stare().pauza'))) await pA.tasta(' ')
+    await ajutoareHrana(pA)
+    sc = await pA.js(`(() => {
+      const K = __kinstead, w = K.world, a = w.agents, lx = Math.floor(a.x[0] / 1000), ly = Math.floor(a.y[0] / 1000)
+      const ocupat = (x0, y0) => {
+        const it = w.iteme; for (let i = 0; i < it.count; i++) if (it.alive[i] === 1 && it.wx[i] >= x0 - 2 && it.wx[i] <= x0 + 4 && it.wy[i] >= y0 - 2 && it.wy[i] <= y0 + 4) return true
+        for (let i = 0; i < a.count; i++) if (a.alive[i] === 1) { const x = Math.floor(a.x[i] / 1000), y = Math.floor(a.y[i] / 1000); if (x >= x0 - 3 && x <= x0 + 5 && y >= y0 - 3 && y <= y0 + 5) return true }
+        return false
+      }
+      const luate = []
+      const sit = (s) => {
+        for (let r = 10; r < 70; r++) for (let dx = -r; dx <= r; dx++) for (const dy of [-r, r]) {
+          const x0 = lx + dx, y0 = ly + dy, s0 = K.suprafata(x0, y0)
+          if (s0 === null || (s !== null && s0 !== s) || ocupat(x0, y0)) continue
+          if (luate.some((e) => Math.abs(e.x0 - x0) < 8 && Math.abs(e.y0 - y0) < 8)) continue
+          let plat = true
+          for (let i = -1; i <= 3 && plat; i++) for (let j = -1; j <= 3; j++) if (K.suprafata(x0 + i, y0 + j) !== s0) { plat = false; break }
+          if (plat) { luate.push({ x0, y0 }); return { x0, y0, s: s0 } }
+        }
+        return null
+      }
+      const pivnita = (st, d, q) => {
+        let ok = true
+        const dig = (i, j, z) => { ok = __h.cmd({ kind: 'dig', wx: st.x0 + i, wy: st.y0 + j, z }).ok && ok }
+        const zS = st.s - d, zP = zS - 1
+        dig(1, 1, zP)
+        dig(1, 1, zS)
+        const lasa = __h.cmd({ kind: 'lasaItem', fel: __h.St.Item.HRANA, cantitate: q, wx: st.x0 + 1, wy: st.y0 + 1, z: zP })
+        for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if (i !== 1 || j !== 1) dig(i, j, zS)
+        const sl = __h.It.itemLaCelula(w.iteme, st.x0 + 1, st.y0 + 1, zP)
+        const c = __h.Cam.componentaLa(w.camere, st.x0 + 1, st.y0 + 1, zP)
+        return { ...st, d, zS, zP, ok: ok && lasa.ok, hrana: sl === -1 ? null : w.iteme.id[sl], q: sl === -1 ? null : w.iteme.cantitate[sl], comp: c?.id ?? null, volum: c?.volum ?? null, deschise: c?.deschise ?? null }
+      }
+      const A = sit(null)
+      const B = A === null ? null : sit(A.s + 1)
+      if (A === null || B === null) return { A, B }
+      const subCer = __h.instantaneu().mormane.filter((m) => m.loc === __h.Te.LOC_CER).map((m) => m.id)
+      return { lx, ly, A: pivnita(A, 1, 75), B: pivnita(B, 2, 45), subCer }
+    })()`)
+    if (sc.A === null || sc.B === null || !sc.A.ok || !sc.B.ok) { bifa('pagina-alterarii', false, 'pagina alterarii: pivnitele A si B', JSON.stringify(sc)); sc = null; return }
+    // Ora cu ora (tickuri reale), pana cand A e „aproape" si aerul de afara strica; cel mult 30 h.
+    const stare = () => pA.js(`(() => { const K = __kinstead, w = K.world, sc = ${JSON.stringify({ A: sc.A, B: sc.B })}, t = (p) => { const c = __h.Cam.componentaLa(w.camere, p.x0 + 1, p.y0 + 1, p.zP); return c === null ? null : { id: c.id, t: __h.Te.temperaturaAcum(w, c.id) } }; const a = t(sc.A), b = t(sc.B), tA = __h.Cl.tAfara(w.seed, w.tick, K.rules); return { tick: w.tick, A: a, B: b, clasaA: a?.t == null ? null : K.hrana.clasaLaT(a.t), clasaB: b?.t == null ? null : K.hrana.clasaLaT(b.t), afara: tA, lambdaAfara: __h.P.rataZilnica(K.rules, tA) } })()`)
+    let st = await stare()
+    const ore = []
+    const gata = (s) => s.clasaA === 1 && s.A.t >= 344064 && s.clasaB === 0 && s.lambdaAfara > 0
+    for (let h = 0; h < 30 && !gata(st); h++) { ore.push((await pA.js('__kinstead.avanseaza(1680)')).rulate); st = await stare() }
+    sc.comp = { A: st.A?.id ?? null, B: st.B?.id ?? null }
+    bifa('pagina-alterarii', gata(st) && sc.A.volum === 10 && sc.B.volum === 10 && sc.A.deschise === 0 && sc.B.deschise === 0 && sc.A.q === 75 && sc.B.q === 45 && sc.subCer.length === 4 && ore.every((n) => n === 1680),
+      'pagina alterarii (contractul lumii): pivnitele A si B sapate prin comenzi in pauza (10 m³ fiecare, inchise), hrana in puturile lor; dupa ore de tickuri reale A e „aproape" (peste prag, ≥ 5,25 °C, sub 0,1% pe zi), B sub prag, iar aerul de afara strica (λ > 0)',
+      JSON.stringify({ A: sc.A, B: sc.B, ore: ore.length, stare: { ...st, tA: st.A?.t / 65536, tB: st.B?.t / 65536, afara: st.afara / 65536 } }))
+    if (!(st.clasaA === 1 && st.clasaB === 0)) sc = null
+  })
+  if (pA === null || sc === null) return
+  const N = 40
+  const ONE = await pA.js('__h.St.ONE_ALTERARE')
+  /** Ce s-a acumulat pe un morman intre doua instantanee: S + ONE·(unitatile realizate), adica S-ul care nu mai scade la realizare. */
+  const acumulat = (m0, m1) => (m1.S - m0.S) + ONE * (m0.q - m1.q)
+
+  // --- a1. alterare-timp: dupa avanseaza(N ≥ 20) S creste pe fiecare morman de sub cer; in pauza nu se schimba nimic ---
+  /** Pana cand nimeni nu mananca (cel mult 30 × 200 de tickuri reale): fereastra de N tickuri nu atinge mormanele prin mancat. */
+  const satui = async () => { let n = 0; for (let k = 0; k < 30 && !(await pA.js('__h.satui()')); k++) n += (await pA.js('__kinstead.avanseaza(200)')).rulate; return { satui: await pA.js('__h.satui()'), avans: n } }
+  await pas('alterare-timp', async () => {
+    const sat = await satui()
+    const s0 = await pA.js('__h.instantaneu()')
+    await astepta(3000)
+    const s1 = await pA.js('__h.instantaneu()')
+    // Proba negativa: timpul SARIT (`world.tick +=`) in locul avansului real — S ramane pe loc.
+    const av = NEGATIVA === 'alterare-timp' ? await pA.js(`(() => { __kinstead.world.tick += ${N}; return { tick: __kinstead.world.tick, rulate: 0 } })()`) : await pA.js(`__kinstead.avanseaza(${N})`)
+    const s2 = await pA.js('__h.instantaneu()')
+    const subCer = s1.mormane.filter((m) => m.loc === -1)
+    const crestere = subCer.map((m) => { const d = s2.mormane.find((x) => x.id === m.id); return { id: m.id, q: [m.q, d?.q ?? null], dS: d ? acumulat(m, d) : null } })
+    const lambda = await pA.js(`__h.P.rataZilnica(__kinstead.rules, ${s1.tAfara})`)
+    bifa('alterare-timp', sat.satui && s0.pauza && s1.pauza && JSON.stringify(s0) === JSON.stringify(s1) && lambda > 0 && subCer.length >= 2 && s2.unitati + s2.stricat === s1.unitati + s1.stricat
+      && av.rulate === N && crestere.every((c) => c.dS !== null && c.dS > 0) && s2.sumaS + ONE * s2.stricat > s1.sumaS + ONE * s1.stricat,
+      `alterarea pe S (UI-7): in pauza, 3 s fara nicio schimbare (tick, S, stricat); dupa avanseaza(${N}) (tickuri REALE, nimeni n-a mancat: unitatile + stricatele conservate), S-ul acumulat (S + ONE·unitatile realizate) creste pe FIECARE morman de sub cer (aerul de afara peste prag)`,
+      JSON.stringify({ sat, tick: [s1.tick, s2.tick], rulate: av.rulate, afara: s1.tAfara / 65536, lambdaZi: lambda, crestere, sumaS: [s1.sumaS, s2.sumaS], stricat: [s1.stricat, s2.stricat] }))
+  })
+
+  // --- a2. alterare-pastrata: hrana pusa in pivnita B (sub prag) isi pastreaza S si unitatile pe aceleasi N tickuri reale, in timp
+  // ce hrana de sub cer se strica (controlul ferestrei) ---
+  await pas('alterare-pastrata', async () => {
+    const sat = await satui()
+    // Proba negativa: hrana pusa la SUPRAFATA (sub cer) in locul pivnitei.
+    const pus = await pA.js(`(() => {
+      const B = ${JSON.stringify(sc.B)}, c = ${NEGATIVA === 'pastrare' ? `__h.celulaSubCer(${sc.lx}, ${sc.ly + 9})` : 'null'}
+      const unde = c ?? { x: B.x0 + 1, y: B.y0 + 1, z: B.zP }
+      const out = __h.cmd({ kind: 'lasaItem', fel: __h.St.Item.HRANA, cantitate: 30, wx: unde.x, wy: unde.y, z: unde.z })
+      const w = __kinstead.world, sl = __h.It.itemLaCelula(w.iteme, unde.x, unde.y, unde.z)
+      return { ok: out.ok, unde, id: sl === -1 ? null : w.iteme.id[sl], loc: __h.Te.loculCelulei(w, unde.x, unde.y, unde.z) }
+    })()`)
+    const s1 = await pA.js('__h.instantaneu()')
+    const t1 = pus.loc >= 0 ? await pA.js(`__h.Te.temperaturaAcum(__kinstead.world, ${pus.loc})`) : null
+    const av = await pA.js(`__kinstead.avanseaza(${N})`)
+    const s2 = await pA.js('__h.instantaneu()')
+    const m1 = s1.mormane.find((m) => m.id === pus.id) ?? null, m2 = s2.mormane.find((m) => m.id === pus.id) ?? null
+    const control = s1.mormane.filter((m) => m.loc === -1).map((m) => { const d = s2.mormane.find((x) => x.id === m.id); return d ? acumulat(m, d) : null })
+    bifa('alterare-pastrata', sat.satui && pus.ok && m1 !== null && m2 !== null && av.rulate === N && control.length >= 2 && control.every((d) => d !== null && d > 0) && m2.S === m1.S && m2.q === m1.q,
+      `hrana pusa in pivnita B (lasaItem in put): pe aceleasi ${N} tickuri reale, S-ul si unitatile ei raman EXACT pe loc, in timp ce S-ul acumulat creste pe fiecare morman de sub cer (controlul ferestrei)`,
+      JSON.stringify({ sat, pus, T: t1 === null ? null : t1 / 65536, morman: [m1, m2], control, rulate: av.rulate }))
+  })
+
+  // --- a3. inspectorul pe morman, in cele trei clase (clic real pe fiecare): cantitatea si randul de alterare == functia;
+  // apoi, cu jocul pornit la 3×, fiecare scriere a randului (MutationObserver) == functia in clipa scrierii, in aceleasi noduri ---
+  await pas('alterare-inspector', async () => {
+    const tinte = []
+    const citesteLa = async (t) => pA.js(`({ dom: __h.mormanDom(), functie: __h.mormanFunctie(${t.x}, ${t.y}, ${t.z}) })`)
+    // Sub cer: primul morman de start (cel mai mic id), cu nivelurile oprite.
+    const m0 = await pA.js(`(() => { const ids = ${JSON.stringify(sc.subCer)}; const m = __h.instantaneu().mormane.filter((x) => ids.includes(x.id)).sort((a, b) => a.id - b.id)[0]; return m ?? null })()`)
+    await pA.tasta('v')
+    await pA.tasta('r')
+    const clic = async (x, y, z, pz) => {
+      await pA.js(`__f.centreaza(${x + 0.5}, ${y + 0.5}, ${pz}, 9)`)
+      await astepta(300)
+      const px = await pA.js(`__h.pixelCelula(${x}, ${y}, ${z === null ? 'null' : z}, ${x + 0.5}, ${pz}, ${y + 0.5})`)
+      if (px === null) return null
+      await pA.click(px.x, px.y)
+      await astepta(450)
+      return { x, y, z: px.z }
+    }
+    const tCer = m0 === null ? null : await clic(m0.wx, m0.wy, null, m0.z)
+    const rCer = tCer === null ? null : await citesteLa(tCer)
+    await pA.poza('a1-inspector-se-strica.png')
+    // Pivnitele: nivelul stratului lor (zS), apoi clic pe podeaua putului (zP − 1).
+    const nivel = await laNivel(pA, sc.A.zS)
+    const tA = await clic(sc.A.x0 + 1, sc.A.y0 + 1, sc.A.zP - 1, sc.A.zP)
+    const rA = tA === null ? null : await citesteLa(tA)
+    await pA.poza('a2-inspector-aproape.png')
+    const tB = await clic(sc.B.x0 + 1, sc.B.y0 + 1, sc.B.zP - 1, sc.B.zP)
+    const rB = tB === null ? null : await citesteLa(tB)
+    await pA.poza('a3-inspector-pastreaza.png')
+    tinte.push({ t: tCer, r: rCer }, { t: tA, r: rA }, { t: tB, r: rB })
+    const egal = (r) => r !== null && r.dom.cant !== null && JSON.stringify(r.dom) === JSON.stringify(r.functie)
+    const clase = tinte.map((x) => x.r?.dom.clasa ?? null)
+    // La 3×: din nou mormanul de sub cer; observatorul compara fiecare scriere cu functia in clipa ei (nicio bifa nu se
+    // reimprospateaza intre pasul simularii si scriere: aceeasi sarcina de cadru, microtask-ul de dupa ea).
+    await pA.tasta('r')
+    const tCer2 = m0 === null ? null : await clic(m0.wx, m0.wy, null, m0.z)
+    const start = tCer2 === null ? null : await pA.js(`(() => {
+      const K = __kinstead, t = ${JSON.stringify(tCer2)}, el = document.querySelector('[data-alterare]'), cant = document.querySelector('[data-morman-cantitate]')
+      const g = globalThis.__peLoc = { el, cant, istoric: [], scrieri: [], oprit: false, saboteaza: ${NEGATIVA === 'alterare-inspector'} }
+      const f = () => JSON.stringify(__h.mormanFunctie(t.x, t.y, t.z))
+      // Istoricul functiei, la fiecare cadru (dupa pasul simularii): sabotajul compara scrierea cu starea de acum 400 ms.
+      const cadru = () => { if (g.oprit) return; g.istoric.push({ t: performance.now(), f: f() }); if (g.istoric.length > 900) g.istoric.shift(); requestAnimationFrame(cadru) }
+      requestAnimationFrame(cadru)
+      g.obs = new MutationObserver(() => {
+        const dom = JSON.stringify(__h.mormanDom())
+        let asteptat = f()
+        if (g.saboteaza) { const lim = performance.now() - 400; let e = null; for (const x of g.istoric) if (x.t <= lim) e = x; asteptat = e === null ? null : e.f }
+        g.scrieri.push({ tick: K.world.tick, dom, asteptat })
+      })
+      for (const e of [el, cant]) g.obs.observe(e, { subtree: true, characterData: true, childList: true, attributes: true })
+      return { tick: K.world.tick, dom: JSON.stringify(__h.mormanDom()), functie: f() }
+    })()`)
+    const citiri = []
+    if (start !== null) {
+      await pA.tasta('3')
+      await astepta(300)
+      for (let k = 0; k < 60; k++) {
+        const c = await pA.js(`(() => { const g = __peLoc; return { tick: __kinstead.world.tick, aceleasi: document.querySelector('[data-alterare]') === g.el && document.querySelector('[data-morman-cantitate]') === g.cant, scrieri: g.scrieri.length, valori: new Set(g.scrieri.map((s) => s.dom).concat(${JSON.stringify(start?.dom ?? '')})).size } })()`)
+        citiri.push(c)
+        if (c.valori >= 3) break
+        await astepta(170)
+      }
+      await pA.tasta(' ')
+      await astepta(400)
+    }
+    const fin = start === null ? null : await pA.js(`(() => { const g = __peLoc; g.oprit = true; g.obs.disconnect(); return { pauza: __kinstead.stare().pauza, scrieri: g.scrieri, dom: JSON.stringify(__h.mormanDom()), functie: JSON.stringify(__h.mormanFunctie(${tCer2?.x}, ${tCer2?.y}, ${tCer2?.z})) } })()`)
+    const valori = fin === null ? 0 : new Set([start.dom, ...fin.scrieri.map((s) => s.dom)]).size
+    const gresite = fin === null ? [] : fin.scrieri.filter((s) => s.dom !== s.asteptat)
+    const laTrei = start !== null && fin !== null && citiri.length >= 1 && citiri.length <= 60 && citiri.every((c) => c.aceleasi) && valori >= 2 && gresite.length === 0 && fin.pauza && fin.dom === fin.functie && citiri[citiri.length - 1].tick - start.tick >= 100
+    bifa('alterare-inspector', nivel === sc.A.zS && tinte.every((x) => egal(x.r)) && JSON.stringify(clase) === '["2","1","0"]'
+      && /^Se strică$/.test(rCer.dom.eticheta) && / azi · acum −?[0-9]+,[0-9] °C$/.test(rCer.dom.valoare) && rA.dom.eticheta === 'Se păstrează aproape' && / · la 5,[0-9] °C$/.test(rA.dom.valoare) && rB.dom.eticheta === 'Se păstrează' && / · cu [0-9]+,[0-9] sub prag$/.test(rB.dom.valoare) && laTrei,
+      'inspectorul pe morman, clic real pe fiecare: sub cer „Se strică | ~N azi · acum T °C", in pivnita A „Se păstrează aproape | … · la 5,x °C", in pivnita B „Se păstrează | T °C · cu D sub prag" — cantitatea si randul == functia (clasele 2 / 1 / 0); apoi la 3×, pana la 60 de citiri: fiecare scriere a randului == functia in clipa ei, aceleasi noduri, ≥ 2 valori',
+      JSON.stringify({ nivel, tinte, laTrei: { citiri: citiri.length, valori, scrieri: fin?.scrieri.length ?? null, gresite: gresite.slice(0, 3), tick: [start?.tick, citiri[citiri.length - 1]?.tick], pauza: fin?.pauza, final: fin && fin.dom === fin.functie } }))
+  })
+
+  // --- a4. U-prag: pe nivelul pivnitelor, clasa fiecarei componente == clasa T-ului ei din stare, alfa punctelor din tabel
+  // (1 / 0,45 / 0, pe varfurile plasei `puncte-pastrare`), randurile de prag din legenda si cifrele ei neschimbate ---
+  await pas('U-prag', async () => {
+    await pA.tasta('v')
+    await pA.js(`__f.centreaza(${(sc.A.x0 + sc.B.x0) / 2 + 1.5}, ${(sc.A.y0 + sc.B.y0) / 2 + 1.5}, ${sc.A.zS}, 22)`)
+    await astepta(300)
+    // Proba negativa: gestul pe ALT nivel (trei mai sus: aerul de deasupra solului, fara pivnite).
+    const nivel = await laNivel(pA, NEGATIVA === 'U-prag' ? sc.A.zS + 3 : sc.A.zS)
+    if (!(await pA.js('__kinstead.tempOverlay.visible'))) await pA.tasta('u')
+    await astepta(600)
+    // Legenda DESCHISA: randurile ei (si cele de prag) apar dupa „Ce înseamnă culorile" (clic real).
+    const bL = await pA.js(`(() => { const b = document.querySelector('.ui-legenda h3 button'); return b && /Ce înseamnă/.test(b.textContent) ? __h.dreptunghi(b) : null })()`)
+    if (bL !== null) { await pA.click(bL.x, bL.y); await astepta(400) }
+    const r = await pA.js(`(() => {
+      const K = __kinstead, o = K.tempOverlay, w = K.world, H = K.hrana, comp = ${JSON.stringify(sc.comp)}
+      const g = K.scene.getObjectByName('overlay-temperatura'), p = g?.getObjectByName('puncte-pastrare') ?? null
+      const col = p?.geometry?.getAttribute('color') ?? null, pos = p?.geometry?.getAttribute('position') ?? null
+      const ALFA = [1, 0.45, 0]
+      const clase = [...o.clase].sort((a, b) => a[0] - b[0])
+      const gresiteClase = clase.filter(([id, c]) => c !== H.clasaLaT(w.temperatura.slot.t[id]))
+      let gresiteAlfa = 0, quaduri = 0
+      if (col !== null) for (let i = 0; i < o.quadComp.length; i++) {
+        quaduri++
+        const c = o.clase.get(o.quadComp[i]), a = c === undefined ? 0 : ALFA[c]
+        for (let k = 0; k < 6; k++) if (Math.abs(col.array[(i * 6 + k) * 4 + 3] - a) > 1e-6) gresiteAlfa++
+      }
+      const n = [0, 0, 0]
+      for (const [, c] of o.clase) n[c]++
+      const L = document.querySelector('.ui-legenda'), plin = L?.querySelector('li[data-prag="plin"]'), slab = L?.querySelector('li[data-prag="slab"]'), cifre = L?.querySelector('.cifre')
+      const randuri = __h.T.randuriPragU(__h.P.pragAlterare(K.rules), __h.T.textProcent1(__h.M.PRAG_APROAPE_ZI))
+      let nT = 0, mn = Infinity, mx = -Infinity
+      for (const id of o.valori.keys()) { const t = __h.Te.temperaturaAcum(w, id); if (t === null) continue; nT++; mn = Math.min(mn, t); mx = Math.max(mx, t) }
+      return { vizibil: o.visible, nivel: o.nivel, clase, clasaA: o.clase.get(comp.A) ?? null, clasaB: o.clase.get(comp.B) ?? null, gresiteClase, quaduri, varfuri: pos?.count ?? 0, itemSize: col?.itemSize ?? null, gresiteAlfa, puncte: o.puncte, numarate: n,
+        plin: plin?.textContent ?? null, slab: slab?.textContent ?? null, randuri: randuri.map((x) => x.t), cifre: cifre?.textContent ?? null, cifreInLi: !!cifre?.closest('li'), cifreAsteptate: __h.T.textIntervalTemperatura(nT, mn, mx, __h.Cl.tAfara(w.seed, w.tick, K.rules)) }
+    })()`)
+    await pA.poza('a4-harta-U-legenda.png')
+    await pA.js(`__f.centreaza(${sc.A.x0 + 1.5}, ${sc.A.y0 + 1.5}, ${sc.A.zS}, 6)`)
+    await astepta(400)
+    await pA.poza('a5-harta-U-aproape.png')
+    await pA.js(`__f.centreaza(${sc.B.x0 + 1.5}, ${sc.B.y0 + 1.5}, ${sc.B.zS}, 6)`)
+    await astepta(400)
+    await pA.poza('a6-harta-U-pastreaza.png')
+    bifa('U-prag', r.vizibil && r.nivel === sc.A.zS && nivel === sc.A.zS && r.clasaA === 1 && r.clasaB === 0 && r.gresiteClase.length === 0 && r.itemSize === 4 && r.quaduri >= 18 && r.varfuri === r.quaduri * 6 && r.gresiteAlfa === 0
+      && JSON.stringify(r.puncte) === JSON.stringify(r.numarate) && r.plin === r.randuri[0] && r.slab === r.randuri[1] && r.cifre === r.cifreAsteptate && !r.cifreInLi,
+      'harta U pe nivelul pivnitelor (Q/E reale, apoi U): clasa fiecarei componente == clasaLaT(T din stare) — A „aproape", B „se păstrează"; alfa punctelor pe cele 6 varfuri ale fiecarei celule == 1 / 0,45 / 0 dupa clasa; contoarele punctelor; in legenda randurile de prag (li[data-prag] plin / slab) == randuriPragU, iar cifrele (element separat) == intervalul T-urilor din stare',
+      JSON.stringify({ nivel, legendaDeschisa: bL !== null, ...r }))
+  })
+  if (pA.erori.length) bifa('consola-alterarii', false, 'fara erori in consola (pagina alterarii)', pA.erori.join(' | '))
 }

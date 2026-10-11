@@ -99,6 +99,10 @@
 .ui-legenda .cifre { margin-top: 6px; font: 12px var(--ui-mono); color: var(--ui-ink-2); overflow-wrap: anywhere; }
 /* Jos-stanga, langa bara de unelte: in coloana de 138 px textul se rupea pe 5 randuri si iesea din ecran la 720. */
 .ui-pasi { position: fixed; left: 10px; bottom: 64px; z-index: 14; width: 300px; }
+/* Diagnosticul (F3, index.html) in jocul cu UI: sub bara de sus si PESTE coloana stanga. Fara z-index statea sub Nivel,
+   Hărți si Primii pași, iar etichetele randurilor (hrana, temperatura) nu se vedeau — si „Spune-i dezvoltatorului
+   (Diagnostic, F3)" trimite jucatorul exact aici (ui-fum, „f3-hrana": hit-test pe eticheta randului, t.3). */
+#hud { top: 50px; z-index: 16; max-height: calc(100vh - 120px); overflow: auto; }
 .ui-pasi ol { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; }
 .ui-pasi li.facut { color: var(--ui-ink-3); text-decoration: line-through; }
 .ui-pasi .hrana { margin-top: 6px; font-size: 12px; color: var(--ui-warn); }
