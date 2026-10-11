@@ -582,26 +582,39 @@ test('HRANA ECRAN presetul Cămară: pictura si filtrul „doar hrană" in ACELA
   assert.equal(r3.refuzuri.length, 1)
 })
 
-test('HRANA ECRAN „Se strică aici; cămara are loc": doar pe hrana care se strica intr-un depozit pe care caraușii nu-l golesc spre camara', () => {
-  const { w, sit } = laSit(4242, 1)
-  const d = patratPlat(w, sit, 2, 4, 12)!
-  const c = patratPlat(w, sit, 3, 14, 30)!
-  const general = picteaza(w, d.x0, d.y0, 2, 4)
-  const id = lasaItem(w, H, 75, d.x0, d.y0)
-  const slot = w.iteme.laId.get(id)!
-  const insp = () => inspecteazaCelula(w, R, d.x0, d.y0, w.iteme.z[slot]! - 1, null).morman!.stare
-  assert.equal(insp().titlu, 'În depozit.', 'fara camara')
-  const camara = picteaza(w, c.x0, c.y0, 3, 3)
+test('HRANA ECRAN „Se strică aici; cămara are loc": doar pe hrana care se strica intr-un depozit pe care caraușii nu-l golesc spre o camara care PASTREAZA', () => {
+  // Pivnita de sub casa (casaTermica cu 1 m de pamant): camara „doar hrana" pe fundul ei, la 3 °C (scris in stare, ca in
+  // testele inspectorului); casa la 16 °C. Hrana sub cer, intr-un depozit general langa casa, toamna: se strica (17%/24 h).
+  const s = casaTermica({ k: 1 })
+  const w = s.w
+  const T = w.temperatura.slot.t
+  const piv = compLa(s, 'pivnita')
+  const casa = compLa(s, 'casa')
+  T[piv] = mcLaQ16(3000)
+  T[casa] = mcLaQ16(16000)
+  const [px, py, pz] = s.rep.pivnita!
+  const camara = bun(applyCommand(w, { kind: 'picteazaZona', x0: px - 1, y0: py - 1, x1: px + 1, y1: py + 1, z: pz, prioritate: 3 }, R), 'camara in pivnita')
   bun(applyCommand(w, { kind: 'setFiltruZona', id: camara, refuzate: MASCA_DOAR_HRANA }, R), 'filtrul')
-  // Sub cer, toamna: se strica (17%/24 h); camara 3 (rang 7) ≤ generalul 4 (rang 8): caraușii n-o muta.
-  assert.equal(clasaMormanului(R, mormanulDeHrana(w, R, slot)!), Clasa.STRICA)
+  const dx0 = s.x0 + 9, dy0 = s.y0
+  const general = picteaza(w, dx0, dy0, 2, 4)
+  const slot = w.iteme.laId.get(lasaItem(w, H, 75, dx0, dy0))!
+  const insp = () => inspecteazaCelula(w, R, dx0, dy0, w.iteme.z[slot]! - 1, null).morman!.stare
+  assert.equal(clasaMormanului(R, mormanulDeHrana(w, R, slot)!), Clasa.STRICA, 'sub cer, toamna: se strica')
+  // Camara rece 3 (rang 7) ≤ generalul 4 (rang 8): caraușii n-o muta — sfatul.
   assert.deepEqual(insp(), { titlu: 'Se strică aici; cămara are loc.', actiune: 'Ridică prioritatea cămării peste a depozitului ăstuia (cămara 3, aici 4).' })
-  // Camara la 4 (rang 9 > 8): caraușii o duc singuri — „În depozit.".
-  bun(applyCommand(w, { kind: 'setPrioritateZona', id: camara, prioritate: 4 }, R), 'prioritatea')
+  // Generalul la 3 (rang 6 < 7): caraușii o duc singuri — „În depozit.".
+  bun(applyCommand(w, { kind: 'setPrioritateZona', id: general, prioritate: 3 }, R), 'prioritatea')
   assert.equal(insp().titlu, 'În depozit.')
-  // Iarna, cand aerul nu trece de prag 24 h: hrana nu se strica, deci niciun sfat.
-  bun(applyCommand(w, { kind: 'setPrioritateZona', id: camara, prioritate: 3 }, R), 'prioritatea')
+  bun(applyCommand(w, { kind: 'setPrioritateZona', id: general, prioritate: 4 }, R), 'prioritatea')
   assert.equal(insp().titlu, 'Se strică aici; cămara are loc.')
+  // ECRAN-2: o camara care se strica si ea (pivnita la 16 °C: clasa „se strică") nu e un sfat — ar muta doar marfa.
+  T[piv] = mcLaQ16(16000)
+  assert.deepEqual(insp(), { titlu: 'În depozit.', actiune: '' }, 'camara calda: niciun sfat')
+  // „Aproape" (5,3 °C: ~1 la 87 de zile) pastreaza: sfatul revine.
+  T[piv] = mcLaQ16(5300)
+  assert.equal(insp().titlu, 'Se strică aici; cămara are loc.', 'camara „aproape": sfatul')
+  T[piv] = mcLaQ16(3000)
+  // Iarna, cand aerul nu trece de prag 24 h: hrana nu se strica, deci niciun sfat.
   const t0 = w.tick
   // Cautarea are PLAFON, un an (PORTI-5): o clima fara nicio zi de iarna sub prag ar fi facut-o infinita.
   const iarna0 = tickLa(0, 3, 1, 0)
@@ -612,20 +625,43 @@ test('HRANA ECRAN „Se strică aici; cămara are loc": doar pe hrana care se st
   assert.equal(clasaMormanului(R, mormanulDeHrana(w, R, slot)!), Clasa.PASTREAZA)
   assert.equal(insp().titlu, 'În depozit.', 'iarna: se pastreaza')
   w.tick = t0
-  // Camara plina: nu mai are loc.
-  for (let k = 0; k < 9; k++) lasaItem(w, H, 75, c.x0 + (k % 3), c.y0 + Math.floor(k / 3))
+  // ECRAN-2, prioritatea maxima: hrana intr-o camara CALDA (casa, 16 °C) la prioritatea 5 (rang 11). Camara rece n-o poate
+  // depasi nici la 5 (tot 11): sfatul e sa coboare locul, nu „Ridică … (cămara 3, aici 5)", care cerea o prioritate inexistenta.
+  const [cx, cy, cz] = s.rep.casa!
+  const calda = bun(applyCommand(w, { kind: 'picteazaZona', x0: cx, y0: cy, x1: cx, y1: cy, z: cz, prioritate: R.zonePriorityLevels }, R), 'camara calda')
+  bun(applyCommand(w, { kind: 'setFiltruZona', id: calda, refuzate: MASCA_DOAR_HRANA }, R), 'filtrul')
+  bun(applyCommand(w, { kind: 'lasaItem', fel: H, cantitate: 75, wx: cx, wy: cy, z: cz }, R), 'hrana in casa')
+  const slotC = itemLaCelula(w, cx, cy, cz)
+  assert.equal(clasaMormanului(R, mormanulDeHrana(w, R, slotC)!), Clasa.STRICA, 'in casa, la 16 °C: se strica')
+  const inspC = () => inspecteazaCelula(w, R, cx, cy, cz - 1, null).morman!.stare
+  assert.deepEqual(inspC(), { titlu: 'Se strică aici; cămara are loc.', actiune: `Coboară prioritatea depozitului ăstuia sub a cămării (cămara 3, aici ${R.zonePriorityLevels}).` })
+  // Camara calda la 4 (rang 9): camara rece, ridicata la 5, ar trece de ea (11) — „Ridică" e din nou posibil.
+  bun(applyCommand(w, { kind: 'setPrioritateZona', id: calda, prioritate: R.zonePriorityLevels - 1 }, R), 'prioritatea')
+  assert.deepEqual(inspC(), { titlu: 'Se strică aici; cămara are loc.', actiune: `Ridică prioritatea cămării peste a depozitului ăstuia (cămara 3, aici ${R.zonePriorityLevels - 1}).` })
+  // Hrana care se strica IN camara rece, pe o bucata a ei de la suprafata (sub cer), cu loc in pivnita: camara nu-si e singura
+  // sfat (PORTI-4) — fara `faraZs`, ea insasi „are loc" la rangul locului (7 ≤ 7) si inspectorul cerea „Ridică prioritatea
+  // cămării peste a depozitului ăstuia (cămara 3, aici 3)".
+  const [bx, by] = [s.x0 + 9, s.y0 + 3]
+  bun(applyCommand(w, { kind: 'picteazaZona', x0: bx, y0: by, x1: bx, y1: by, z: solid(w, bx, by)! + 1, zonaId: camara }, R), 'bucata de sus a camarii')
+  const slotB = w.iteme.laId.get(lasaItem(w, H, 75, bx, by))!
+  assert.equal(clasaMormanului(R, mormanulDeHrana(w, R, slotB)!), Clasa.STRICA, 'bucata de sus: se strica')
+  assert.deepEqual(inspecteazaCelula(w, R, bx, by, w.iteme.z[slotB]! - 1, null).morman!.stare, { titlu: 'În depozit.', actiune: '' }, 'in camara: niciun sfat spre ea insasi')
+  // Camara rece plina: nu mai are loc.
+  for (let k = 0; k < 9; k++) bun(applyCommand(w, { kind: 'lasaItem', fel: H, cantitate: 75, wx: px - 1 + (k % 3), wy: py - 1 + Math.floor(k / 3), z: pz }, R), 'pivnita plina')
   assert.equal(insp().titlu, 'În depozit.')
-  void general
-  // Hrana care se strica IN camara (o camara de suprafata, toamna), cu loc in ea: camara nu-si e singura sfat (PORTI-4) —
-  // fara `faraZs`, ea insasi „are loc" la rangul locului (7 ≤ 7) si inspectorul cerea „Ridică prioritatea cămării peste a
-  // depozitului ăstuia (cămara 3, aici 3)".
-  const s2 = laSit(4242, 1)
-  const c2 = patratPlat(s2.w, s2.sit, 3, 14, 30)!
-  const cam2 = picteaza(s2.w, c2.x0, c2.y0, 3, 3)
-  bun(applyCommand(s2.w, { kind: 'setFiltruZona', id: cam2, refuzate: MASCA_DOAR_HRANA }, R), 'filtrul')
-  const slot2 = s2.w.iteme.laId.get(lasaItem(s2.w, H, 75, c2.x0, c2.y0))!
-  assert.equal(clasaMormanului(R, mormanulDeHrana(s2.w, R, slot2)!), Clasa.STRICA, 'sub cer, toamna: se strica')
-  assert.deepEqual(inspecteazaCelula(s2.w, R, c2.x0, c2.y0, s2.w.iteme.z[slot2]! - 1, null).morman!.stare, { titlu: 'În depozit.', actiune: '' }, 'in camara: niciun sfat spre ea insasi')
+  assert.equal(inspC().titlu, 'În depozit.')
+  void casa
+  // ECRAN-2, scena recenziei: o camara la SUPRAFATA (sub cer, toamna — se strica la fel ca locul de acum) la 3, generalul la 4:
+  // niciun sfat (inainte: „Ridică prioritatea cămării peste a depozitului ăstuia (cămara 3, aici 4).").
+  const s1 = laSit(4242, 1)
+  const d1 = patratPlat(s1.w, s1.sit, 2, 4, 12)!
+  const c1 = patratPlat(s1.w, s1.sit, 3, 14, 30)!
+  picteaza(s1.w, d1.x0, d1.y0, 2, 4)
+  const slot1 = s1.w.iteme.laId.get(lasaItem(s1.w, H, 75, d1.x0, d1.y0))!
+  const cam1 = picteaza(s1.w, c1.x0, c1.y0, 3, 3)
+  bun(applyCommand(s1.w, { kind: 'setFiltruZona', id: cam1, refuzate: MASCA_DOAR_HRANA }, R), 'filtrul')
+  assert.equal(clasaMormanului(R, mormanulDeHrana(s1.w, R, slot1)!), Clasa.STRICA)
+  assert.deepEqual(inspecteazaCelula(s1.w, R, d1.x0, d1.y0, s1.w.iteme.z[slot1]! - 1, null).morman!.stare, { titlu: 'În depozit.', actiune: '' }, 'camara de suprafata: niciun sfat')
 })
 
 test('HRANA ECRAN groapa de moloz dintr-un clic: locul langa camara, filtrul gropii, avertismentul si cauza pe moloz cu cifrele; dupa groapa, nimic', () => {

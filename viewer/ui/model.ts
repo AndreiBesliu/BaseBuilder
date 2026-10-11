@@ -23,8 +23,8 @@ import { rezervariPentru, Strat } from '../../src/sim/rezervari.ts'
 import { categoriiActive, celulaDeZonaPosibila, constructiaPrevizualizata, StareRatiune, tintaDispozitiei } from '../../src/sim/joburi.ts'
 import { groapaDeMoloz } from '../../src/sim/camara.ts'
 import type { GroapaDeMoloz } from '../../src/sim/camara.ts'
-import { mormanulDeHrana, pragAlterare, prognozaFaraAlterare, proiecteaza, rataZilnica, stareaHranei } from '../../src/sim/prognoza.ts'
-import type { MormanHrana, Prognoza, StareHrana } from '../../src/sim/prognoza.ts'
+import { evaluatorDeLoc, mormanulDeHrana, pragAlterare, prognozaFaraAlterare, proiecteaza, rataZilnica, stareaHranei } from '../../src/sim/prognoza.ts'
+import type { LocHrana, MormanHrana, Prognoza, StareHrana } from '../../src/sim/prognoza.ts'
 import { tickuriPeAn } from '../../src/sim/calendar.ts'
 import { CHUNK_CELLS, isSolid } from '../../src/sim/terrain/chunk.ts'
 import { chunkKey, groundLevelM, voxelRangeM } from '../../src/sim/terrain/terrain.ts'
@@ -160,7 +160,7 @@ export function clasaLaT(rules: Rules, tQ16: number): ClasaId {
  * Clasa unui morman de hrana: in incaperi si in toc, a T-ului locului (`clasaLaT`); sub cer, a pierderii URMATOARELOR 24 h
  * (UI-5: noaptea, „se pastreaza" cu T-ul de acum, iar ziua care vine pierdea 0,37–7,95 u). null = neperisabil sau loc fara T.
  */
-export function clasaMormanului(rules: Rules, m: MormanHrana): ClasaId | null {
+export function clasaMormanului(rules: Rules, m: Pick<MormanHrana, 'kind' | 'loc' | 'tQ16' | 'rataZi'>): ClasaId | null {
   if (rules.perisabil[m.kind] !== true) return null
   if (m.loc === LOC_CER) return m.rataZi === 0 ? Clasa.PASTREAZA : m.rataZi < PRAG_APROAPE_ZI ? Clasa.APROAPE : Clasa.STRICA
   if (m.tQ16 === null) return null
@@ -345,9 +345,9 @@ export function capacitateCamara(w: World, rules: Rules, zs: number, hranaPeOm: 
 /**
  * Locul pentru felul `fel` in zona `zs`, in unitati — aceeasi idee de celula libera ca indexul si groapa de moloz
  * (`groapaDeMoloz`): nerezervata ca destinatie (LUCRU), nu sub un santier viu; goala = `itemStackMax`, una partiala doar pe
- * felul ei. Citire pura (indexul nu se reconstruieste din UI).
+ * felul ei. `pastreaza` (optional) lasa doar celulele care trec de el. Citire pura (indexul nu se reconstruieste din UI).
  */
-function locInZona(w: World, rules: Rules, zs: number, fel: number): number {
+function locInZona(w: World, rules: Rules, zs: number, fel: number, pastreaza: ((x: number, y: number, z: number) => boolean) | null = null): number {
   const s = w.zone
   if (!primesteFel(s, zs, fel)) return 0
   const c = s.celule
@@ -359,24 +359,35 @@ function locInZona(w: World, rules: Rules, zs: number, fel: number): number {
     if (rezervariPentru(w.rezervari, c.id[cs]!, Strat.LUCRU).length > 0) continue
     if (subSantier(w, rules, c.wx[cs]!, c.wy[cs]!, c.z[cs]!)) continue
     const i = itemLaCelula(it, c.wx[cs]!, c.wy[cs]!, c.z[cs]!)
-    if (i === -1) loc += rules.itemStackMax
-    else if (it.kind[i] === fel && it.cantitate[i]! < rules.itemStackMax) loc += rules.itemStackMax - it.cantitate[i]!
+    if (i !== -1 && (it.kind[i] !== fel || it.cantitate[i]! >= rules.itemStackMax)) continue
+    if (pastreaza !== null && !pastreaza(c.wx[cs]!, c.wy[cs]!, c.z[cs]!)) continue
+    loc += i === -1 ? rules.itemStackMax : rules.itemStackMax - it.cantitate[i]!
   }
   return loc
 }
 
 /**
  * Cea mai buna camara (rang maxim, id mic) care are loc pentru `fel`, ALTA decat zona `faraZs` (cea in care sta deja
- * mormanul: o camara calda nu-si e singura sfat); prioritatea si rangul ei; null = niciuna.
+ * mormanul: o camara calda nu-si e singura sfat); prioritatea si rangul ei; null = niciuna. Pentru un fel perisabil, locul
+ * se numara doar pe celulele care PASTREAZA — clasa locului lor (ca a unui morman asezat acolo: `evaluatorDeLoc`, aceeasi
+ * evaluare) e mai buna decat „se strică" (ECRAN-2): o camara la suprafata, toamna, „avea loc", iar sfatul muta hrana dintr-un
+ * loc care strica ~17% pe zi in altul la fel.
  */
 export function camaraCuLoc(w: World, rules: Rules, fel: number, faraZs = -1): { readonly zs: number; readonly rang: number; readonly prioritate: number; readonly loc: number } | null {
   const s = w.zone
+  let ev: ((x: number, y: number, z: number) => LocHrana) | null = null
+  const pastreaza = (x: number, y: number, z: number): boolean => {
+    ev ??= evaluatorDeLoc(w, rules)
+    const c = clasaMormanului(rules, { kind: fel, ...ev(x, y, z) })
+    return c !== null && c !== Clasa.STRICA
+  }
+  const filtru = rules.perisabil[fel] === true ? pastreaza : null
   let best: { zs: number; rang: number; prioritate: number; loc: number } | null = null
   for (let zs = 0; zs < s.count; zs++) {
     if (zs === faraZs || !esteCamara(w, zs) || !primesteFel(s, zs, fel)) continue
     const rang = rangZona(s, zs)
     if (best !== null && (rang < best.rang || (rang === best.rang && s.id[zs]! > s.id[best.zs]!))) continue
-    const loc = locInZona(w, rules, zs, fel)
+    const loc = locInZona(w, rules, zs, fel, filtru)
     if (loc > 0) best = { zs, rang, prioritate: s.prioritate[zs]!, loc }
   }
   return best
@@ -937,12 +948,18 @@ function stareMorman(w: World, rules: Rules, is: number, vedere: VedereFaraDepoz
   }
   const aici = prioritateaLocului(w.zone, it.wx[is]!, it.wy[is]!, it.z[is]!, it.kind[is]!)
   if (aici > 0) {
-    // Se strica intr-un depozit, iar o camara are loc pe care caraușii nu-l folosesc: rangul ei nu e mai mare (UI-3).
+    // Se strica intr-un depozit, iar o camara care PASTREAZA are loc pe care caraușii nu-l folosesc: rangul ei nu e mai mare
+    // (UI-3). Cand nici la prioritatea maxima rangul camarii n-ar trece de al locului (un depozit ingust la maxim), sfatul e
+    // sa coboare locul — „Ridică … (cămara 5, aici 5)" cerea o prioritate care nu exista (ECRAN-2).
     const m = rules.perisabil[it.kind[is]!] === true ? mormanulDeHrana(w, rules, is) : null
     if (m !== null && clasaMormanului(rules, m) === Clasa.STRICA) {
       const zs = slotZona(w.zone, w.zone.celule.zonaId[celulaDeZonaLa(w.zone, it.wx[is]!, it.wy[is]!, it.z[is]!)]!)
       const cam = camaraCuLoc(w, rules, it.kind[is]!, zs)
-      if (cam !== null && cam.rang <= aici) return textStricaCamaraAreLoc(cam.prioritate, zs === -1 ? 0 : w.zone.prioritate[zs]!)
+      const prioAici = zs === -1 ? 0 : w.zone.prioritate[zs]!
+      if (cam !== null && cam.rang <= aici) {
+        if (rules.zonePriorityLevels * 2 + 1 > aici) return textStricaCamaraAreLoc(cam.prioritate, prioAici, false)
+        if (prioAici > 1) return textStricaCamaraAreLoc(cam.prioritate, prioAici, true)
+      }
     }
     return { titlu: 'În depozit.', actiune: '' }
   }

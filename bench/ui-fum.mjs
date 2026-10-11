@@ -63,6 +63,7 @@ const NEGATIVA = NEG === undefined ? null : NEG.includes('=') ? NEG.slice(NEG.in
  * avansului; pastrare — hrana „din pivnita" pusa la suprafata; alerta-alterare — lista de alerte refacuta FORTAT intre
  * mousedown si mouseup; U-prag — gestul (Q/E, U) pe alt nivel decat al pivnitelor; camara — Zone fara clicul pe „Cămară";
  * groapa — podeaua gropii sapata dupa clic (celulele ei nu mai sunt calcabile: nu ajunge niciun moloz, ca pe un acoperis).
+ * Recenzia t.3, ECRAN (ECRAN-2): strica-aici / strica-aici-rece — gestul fara clicul pe „+ prioritate" (depozitul ramane la 3).
  */
 const TINTE_NEGATIVE = {
   sapa: 'sapa', pauza: 'pauza', salvare: 'salvare', desen: 'casa-desenata', exceptie: 'joc-nou',
@@ -72,7 +73,7 @@ const TINTE_NEGATIVE = {
   'filtru-bucla': 'filtru-bucla', 'exceptie-tick': 'exceptie-tick', latime: 'latime-inspector',
   'bara-prognoza': 'bara-prognoza', 'alterare-inspector': 'alterare-inspector', 'alterare-timp': 'alterare-timp',
   pastrare: 'alterare-pastrata', 'alerta-alterare': 'alerta-alterare', 'U-prag': 'U-prag', camara: 'camara-unealta',
-  groapa: 'groapa-clic',
+  groapa: 'groapa-clic', 'strica-aici': 'camara-strica-aici', 'strica-aici-rece': 'camara-strica-aici-rece',
 }
 if (NEGATIVA !== null && !Object.hasOwn(TINTE_NEGATIVE, NEGATIVA)) { console.log(`proba negativa necunoscuta: ${NEGATIVA} (sunt: ${Object.keys(TINTE_NEGATIVE).join(', ')})`); process.exit(2) }
 const POZE = argv.find((a) => a.startsWith('--poze='))?.slice('--poze='.length) ?? null
@@ -2160,14 +2161,25 @@ async function paginaHranei() {
     await astepta(400)
     const dep = await pH.js(`(() => { const vechi = ${JSON.stringify(inainte)}; const z = __f.zoneFel().filter((x) => !vechi.includes(x.id))[0] ?? null; if (z === null) return null; const w = __kinstead.world, it = w.iteme, s = w.zone; for (let i = 0; i < it.count; i++) { if (it.alive[i] !== 1 || it.kind[i] !== __h.St.Item.HRANA) continue; const cs = __h.Z.celulaDeZonaLa(s, it.wx[i], it.wy[i], it.z[i]); if (cs !== -1 && s.celule.zonaId[cs] === z.id) return { id: z.id, x: it.wx[i], y: it.wy[i] } } return { id: z.id, x: null } })()`)
     const tinta = dep === null || dep.x === null ? null : await clicCelula(dep.x, dep.y)
-    const citeste = () => pH.js(`(() => { const K = __kinstead, c = __h.M.inspecteazaCelula(K.world, K.rules, ${tinta?.x}, ${tinta?.y}, ${tinta?.z}, null); return { dom: __h.motivMorman(), asteptat: c.morman?.stare ?? null, prio: c.zona?.prioritate ?? null, plus: __h.dreptunghi([...document.querySelectorAll('.ui-inspector button')].find((b) => b.textContent === '+ prioritate')) } })()`)
+    // Clasa locului camarii (o celula a ei, ca un morman asezat acolo) si a mormanului: aceeasi evaluare ca sfatul (ECRAN-2).
+    const citeste = () => pH.js(`(() => {
+      const K = __kinstead, w = K.world, c = __h.M.inspecteazaCelula(w, K.rules, ${tinta?.x}, ${tinta?.y}, ${tinta?.z}, null), s = w.zone, H = __h.St.Item.HRANA
+      let clasaCamarei = null
+      for (let i = 0; i < s.celule.count && clasaCamarei === null; i++) if (s.celule.alive[i] === 1 && s.celule.zonaId[i] === ${camara ?? -1}) clasaCamarei = __h.M.clasaMormanului(K.rules, { kind: H, ...__h.P.evaluatorDeLoc(w, K.rules)(s.celule.wx[i], s.celule.wy[i], s.celule.z[i]) })
+      const sl = __h.It.itemLaCelula(w.iteme, ${tinta?.x}, ${tinta?.y}, ${(tinta?.z ?? 0) + 1}), m = sl === -1 ? null : __h.P.mormanulDeHrana(w, K.rules, sl)
+      return { dom: __h.motivMorman(), asteptat: c.morman?.stare ?? null, prio: c.zona?.prioritate ?? null, clasaCamarei, clasaMormanului: m === null ? null : __h.M.clasaMormanului(K.rules, m), plus: __h.dreptunghi([...document.querySelectorAll('.ui-inspector button')].find((b) => b.textContent === '+ prioritate')) }
+    })()`)
     const r0 = tinta === null ? null : await citeste()
-    if (r0?.plus) await pH.click(r0.plus.x, r0.plus.y)
+    // Proba negativa: gestul fara clicul pe „+ prioritate" (depozitul ramane la 3).
+    if (r0?.plus && NEGATIVA !== 'strica-aici') await pH.click(r0.plus.x, r0.plus.y)
     await astepta(400)
     const r1 = tinta === null ? null : await citeste()
-    const asteptat = await pH.js(`__h.T.textStricaCamaraAreLoc(3, 4)`)
-    bifa('camara-strica-aici', r0 !== null && r1 !== null && r0.prio === 3 && r0.dom?.titlu === 'În depozit.' && r1.prio === 4 && r1.dom !== null && r1.asteptat !== null && r1.dom.titlu === r1.asteptat.titlu && r1.dom.actiune === r1.asteptat.actiune && r1.dom.titlu === asteptat.titlu && r1.dom.actiune === asteptat.actiune,
-      'hrana sub cer intr-un depozit general (Zone ▸ Depozit, tras): la prioritate egala cu camara, „În depozit." (camara o trage oricum, rangul ei e mai mare); dupa „+ prioritate" (clic real, 4 > 3): „Se strică aici; cămara are loc." + „Ridică prioritatea cămării peste a depozitului ăstuia (cămara 3, aici 4)." == functia',
+    // ECRAN-2: camara paginii e la SUPRAFATA (sub cer, toamna): se strica la fel ca depozitul general, deci la 4 > 3 nu e un
+    // sfat spre ea — „În depozit." (inainte: „Se strică aici; cămara are loc." + „Ridică … (cămara 3, aici 4)."). Sfatul spre o
+    // camara RECE e bifa `camara-strica-aici-rece`, pe pagina alterarii.
+    const egal = (r) => r !== null && r.dom !== null && r.asteptat !== null && r.dom.titlu === r.asteptat.titlu && r.dom.actiune === r.asteptat.actiune
+    bifa('camara-strica-aici', r0 !== null && r1 !== null && r0.prio === 3 && egal(r0) && r0.dom.titlu === 'În depozit.' && r1.prio === 4 && egal(r1) && r1.dom.titlu === 'În depozit.' && r1.dom.actiune === '' && r1.clasaCamarei === 2 && r1.clasaMormanului === 2,
+      'hrana sub cer intr-un depozit general (Zone ▸ Depozit, tras): la prioritate egala cu camara, „În depozit." (camara o trage oricum, rangul ei e mai mare); dupa „+ prioritate" (clic real, 4 > 3) tot „În depozit." == functia: camara paginii e la suprafata si se strica la fel (clasa ei „se strică", ca a mormanului) — niciun sfat spre ea (ECRAN-2)',
       JSON.stringify({ ales, dep, tinta, r0: r0 && { ...r0, plus: undefined }, r1: r1 && { ...r1, plus: undefined } }))
     await pH.poza('h7-strica-aici.png')
   })
@@ -2442,6 +2454,80 @@ async function paginaAlterarii() {
       && JSON.stringify(r.puncte) === JSON.stringify(r.numarate) && r.plin === r.randuri[0] && r.slab === r.randuri[1] && r.cifre === r.cifreAsteptate && !r.cifreInLi,
       'harta U pe nivelul pivnitelor (Q/E reale, apoi U): clasa fiecarei componente == clasaLaT(T din stare) — A „aproape", B „se păstrează"; alfa punctelor pe cele 6 varfuri ale fiecarei celule == 1 / 0,45 / 0 dupa clasa; contoarele punctelor; in legenda randurile de prag (li[data-prag] plin / slab) == randuriPragU, iar cifrele (element separat) == intervalul T-urilor din stare',
       JSON.stringify({ nivel, legendaDeschisa: bL !== null, ...r }))
+  })
+  // --- a5. „Se strică aici; cămara are loc" spre o camara RECE (ECRAN-2): pivnita C de 2 m sapata prin comenzi (ca B; 20 de
+  // hrana in put: putul are loc, iar molozul stratului nu intra in el), camara „doar hrană" pe put (3); un depozit general (3)
+  // pe un morman de sub cer. Clic real pe morman: „În depozit." (rangul camarii e mai mare); clic real pe „+ prioritate"
+  // (4 > 3): „Se strică aici; cămara are loc." + „Ridică prioritatea cămării peste a depozitului ăstuia (cămara 3, aici 4)."
+  // == functia. Pe pagina hranei, camara de la suprafata NU primeste sfatul (`camara-strica-aici`). ---
+  await pas('camara-strica-aici-rece', async () => {
+    await pA.tasta('v')
+    if (await pA.js('__kinstead.tempOverlay.visible')) { await pA.tasta('u'); await astepta(300) }
+    // Nivelurile oprite (R), ca pentru mormanul de sub cer din alterare-inspector.
+    for (let k = 0; k < 3 && (await pA.js('__h.nivelAfisat()')) !== null; k++) { await pA.tasta('r'); await astepta(250) }
+    const c = await pA.js(`(() => {
+      const K = __kinstead, w = K.world, a = w.agents, sc = ${JSON.stringify({ A: sc.A, B: sc.B })}, H = __h.St.Item.HRANA
+      const lx = Math.floor(a.x[0] / 1000), ly = Math.floor(a.y[0] / 1000)
+      const ocupat = (x0, y0) => {
+        const it = w.iteme; for (let i = 0; i < it.count; i++) if (it.alive[i] === 1 && it.wx[i] >= x0 - 2 && it.wx[i] <= x0 + 4 && it.wy[i] >= y0 - 2 && it.wy[i] <= y0 + 4) return true
+        for (let i = 0; i < a.count; i++) if (a.alive[i] === 1) { const x = Math.floor(a.x[i] / 1000), y = Math.floor(a.y[i] / 1000); if (x >= x0 - 3 && x <= x0 + 5 && y >= y0 - 3 && y <= y0 + 5) return true }
+        return [sc.A, sc.B].some((e) => Math.abs(e.x0 - x0) < 8 && Math.abs(e.y0 - y0) < 8)
+      }
+      let C = null
+      for (let r = 10; r < 70 && C === null; r++) for (let dx = -r; dx <= r && C === null; dx++) for (const dy of [-r, r]) {
+        const x0 = lx + dx, y0 = ly + dy, s0 = K.suprafata(x0, y0)
+        if (s0 === null || ocupat(x0, y0)) continue
+        let plat = true
+        for (let i = -1; i <= 3 && plat; i++) for (let j = -1; j <= 3; j++) if (K.suprafata(x0 + i, y0 + j) !== s0) { plat = false; break }
+        if (plat) { C = { x0, y0, s: s0 }; break }
+      }
+      if (C === null) return { C }
+      // Ca pivnita de la inceputul paginii (d = 2): putul (zP), deasupra lui (zS), hrana in put, apoi restul stratului.
+      let ok = true
+      const dig = (i, j, z) => { ok = __h.cmd({ kind: 'dig', wx: C.x0 + i, wy: C.y0 + j, z }).ok && ok }
+      const zS = C.s - 2, zP = zS - 1
+      dig(1, 1, zP)
+      dig(1, 1, zS)
+      const lasa = __h.cmd({ kind: 'lasaItem', fel: H, cantitate: 20, wx: C.x0 + 1, wy: C.y0 + 1, z: zP })
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if (i !== 1 || j !== 1) dig(i, j, zS)
+      const cam = __h.cmd({ kind: 'picteazaZona', x0: C.x0 + 1, y0: C.y0 + 1, x1: C.x0 + 1, y1: C.y0 + 1, z: zP, prioritate: 3 })
+      const fil = cam.ok ? __h.cmd({ kind: 'setFiltruZona', id: cam.value, refuzate: __h.M.MASCA_DOAR_HRANA }) : { ok: false }
+      const comp = __h.Cam.componentaLa(w.camere, C.x0 + 1, C.y0 + 1, zP), t = comp === null ? null : __h.Te.temperaturaAcum(w, comp.id)
+      const sl = __h.It.itemLaCelula(w.iteme, C.x0 + 1, C.y0 + 1, zP)
+      // Un morman de sub cer, cu vecinatatea fara zone: depozitul general (o celula, prioritatea 3) pe el.
+      const ids = __h.instantaneu().mormane.filter((m) => m.loc === __h.Te.LOC_CER).sort((p, q) => p.id - q.id)
+      let m = null
+      for (const x of ids) { let liber = true; for (let i = -2; i <= 2 && liber; i++) for (let j = -2; j <= 2; j++) if (__h.Z.celulaDeZonaLa(w.zone, x.wx + i, x.wy + j, x.z) !== -1) { liber = false; break } if (liber) { m = x; break } }
+      const gen = m === null ? { ok: false } : __h.cmd({ kind: 'picteazaZona', x0: m.wx, y0: m.wy, x1: m.wx, y1: m.wy, z: m.z, prioritate: 3 })
+      const ms = m === null ? -1 : __h.It.itemLaCelula(w.iteme, m.wx, m.wy, m.z)
+      const mh = ms === -1 ? null : __h.P.mormanulDeHrana(w, K.rules, ms)
+      return { C: { ...C, zS, zP }, ok: ok && lasa.ok && cam.ok && fil.ok && gen.ok, camara: cam.ok ? cam.value : null, q: sl === -1 ? null : w.iteme.cantitate[sl], volum: comp?.volum ?? null, deschise: comp?.deschise ?? null,
+        t, clasaC: t === null ? null : K.hrana.clasaLaT(t), m: m && { id: m.id, wx: m.wx, wy: m.wy, z: m.z, q: w.iteme.cantitate[ms] }, clasaM: mh === null ? null : __h.M.clasaMormanului(K.rules, mh), tick: w.tick, pauza: K.stare().pauza }
+    })()`)
+    if (c.C === null || !c.ok || c.m === null) { bifa('camara-strica-aici-rece', false, 'pivnita C, camara si depozitul general', JSON.stringify(c)); return }
+    const clic = async (x, y, pz) => {
+      await pA.js(`__f.centreaza(${x + 0.5}, ${y + 0.5}, ${pz}, 9)`)
+      await astepta(300)
+      const px = await pA.js(`__h.pixelCelula(${x}, ${y}, null, ${x + 0.5}, ${pz}, ${y + 0.5})`)
+      if (px === null) return null
+      await pA.click(px.x, px.y)
+      await astepta(450)
+      return { x, y, z: px.z }
+    }
+    const tinta = await clic(c.m.wx, c.m.wy, c.m.z)
+    const citeste = () => pA.js(`(() => { const K = __kinstead, c = __h.M.inspecteazaCelula(K.world, K.rules, ${tinta?.x}, ${tinta?.y}, ${tinta?.z}, null); return { dom: __h.motivMorman(), asteptat: c.morman?.stare ?? null, prio: c.zona?.prioritate ?? null, plus: __h.dreptunghi([...document.querySelectorAll('.ui-inspector button')].find((b) => b.textContent === '+ prioritate')) } })()`)
+    const r0 = tinta === null ? null : await citeste()
+    // Proba negativa: gestul fara clicul pe „+ prioritate" (depozitul ramane la 3, rangul camarii ramane mai mare).
+    if (r0?.plus && NEGATIVA !== 'strica-aici-rece') await pA.click(r0.plus.x, r0.plus.y)
+    await astepta(400)
+    const r1 = tinta === null ? null : await citeste()
+    await pA.poza('a7-strica-aici-rece.png')
+    const asteptat = await pA.js(`__h.T.textStricaCamaraAreLoc(3, 4)`)
+    const egal = (r) => r !== null && r.dom !== null && r.asteptat !== null && r.dom.titlu === r.asteptat.titlu && r.dom.actiune === r.asteptat.actiune
+    bifa('camara-strica-aici-rece', c.pauza && c.q === 20 && c.volum === 10 && c.deschise === 0 && c.clasaC === 0 && c.clasaM === 2 && r0 !== null && r1 !== null && r0.prio === 3 && egal(r0) && r0.dom.titlu === 'În depozit.'
+      && r1.prio === 4 && egal(r1) && r1.dom.titlu === asteptat.titlu && r1.dom.actiune === asteptat.actiune,
+      'o camara RECE (pivnita C de 2 m, sapata prin comenzi, clasa „se păstrează"; 20 de hrana in put) si un depozit general pe un morman de sub cer („se strică"): clic real pe morman — „În depozit." (rangul camarii e mai mare); clic real pe „+ prioritate" (4 > 3) — „Se strică aici; cămara are loc." + „Ridică prioritatea cămării peste a depozitului ăstuia (cămara 3, aici 4)." == functia (ECRAN-2: sfatul doar spre o camara care pastreaza)',
+      JSON.stringify({ c, tinta, r0: r0 && { ...r0, plus: undefined }, r1: r1 && { ...r1, plus: undefined } }))
   })
   if (pA.erori.length) bifa('consola-alterarii', false, 'fara erori in consola (pagina alterarii)', pA.erori.join(' | '))
 }

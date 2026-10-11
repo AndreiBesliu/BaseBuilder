@@ -837,9 +837,18 @@ export function textMolozInCamara(fel: number, g: { readonly lipsa: number; read
   }
 }
 
-/** Hrana care se strica intr-un depozit, cand o camara are loc dar caraușii n-o duc acolo (rangul ei nu e mai mare; UI-3). */
-export function textStricaCamaraAreLoc(prioCamara: number, prioAici: number): TextMotiv {
-  return { titlu: 'Se strică aici; cămara are loc.', actiune: `Ridică prioritatea cămării peste a depozitului ăstuia (cămara ${prioCamara}, aici ${prioAici}).` }
+/**
+ * Hrana care se strica intr-un depozit, cand o camara care pastreaza are loc dar caraușii n-o duc acolo (rangul ei nu e mai
+ * mare; UI-3). `coboara`: nici la prioritatea maxima camara n-ar trece de locul asta (un depozit ingust la maxim) — sfatul e
+ * sa coboare el (ECRAN-2).
+ */
+export function textStricaCamaraAreLoc(prioCamara: number, prioAici: number, coboara = false): TextMotiv {
+  return {
+    titlu: 'Se strică aici; cămara are loc.',
+    actiune: coboara
+      ? `Coboară prioritatea depozitului ăstuia sub a cămării (cămara ${prioCamara}, aici ${prioAici}).`
+      : `Ridică prioritatea cămării peste a depozitului ăstuia (cămara ${prioCamara}, aici ${prioAici}).`,
+  }
 }
 
 /** Randurile de prag din legenda lui U (UI-2, UI-11: elemente SEPARATE de cifre). `procent` = pragul „aproape", ca text. */

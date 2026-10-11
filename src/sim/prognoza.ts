@@ -333,23 +333,26 @@ function context(w: World, rules: Rules): Context {
   return { tA: tAfara(w.seed, w.tick, rules), fCer: fractiaSubCer(w.seed, w.tick, rules, 24), stampilaOk: verificaStampila(w).ok, peComponenta: new Map() }
 }
 
-/** Mormanul de hrana din slotul `i` (viu, nutritie > 0), cu T-ul si rata locului lui; null altfel. */
-function evalueazaMorman(w: World, rules: Rules, i: number, cx: Context): MormanHrana | null {
-  const it = w.iteme
-  if (it.alive[i] !== 1) return null
-  const kind = it.kind[i]!
-  const nut = rules.nutritie[kind] ?? 0
-  if (nut <= 0) return null
-  const q = it.cantitate[i]!
-  const perisabil = rules.perisabil[kind] === true
-  const loc = loculCelulei(w, it.wx[i]!, it.wy[i]!, it.z[i]!)
+/** Locul unei celule, cu T-ul lui de ACUM si rata zilnica a unui fel (perisabil sau nu) asezat acolo (vezi `MormanHrana`). */
+export interface LocHrana {
+  readonly loc: number
+  readonly tQ16: number | null
+  readonly rataZi: number
+}
+
+/**
+ * Locul celulei (x, y, z): componenta (T-ul din stare), tocul (partea calda) sau cerul (pierderea urmatoarelor 24 h). O SINGURA
+ * evaluare pentru un morman si pentru o celula goala — „cămara are loc" intreaba de locul ei cu aceeasi functie (ECRAN-2).
+ */
+function evalueazaLocul(w: World, rules: Rules, x: number, y: number, z: number, perisabil: boolean, cx: Context): LocHrana {
+  const loc = loculCelulei(w, x, y, z)
   let t: number | null
   let rataZi = 0
   if (loc === LOC_CER) {
     t = cx.tA
     if (perisabil) rataZi = cx.fCer
   } else {
-    if (loc === LOC_TOC) t = tTocului(w, it.wx[i]!, it.wy[i]!, it.z[i]!, cx.tA, cx.stampilaOk)
+    if (loc === LOC_TOC) t = tTocului(w, x, y, z, cx.tA, cx.stampilaOk)
     else {
       let tc = cx.peComponenta.get(loc)
       if (tc === undefined) {
@@ -360,7 +363,28 @@ function evalueazaMorman(w: World, rules: Rules, i: number, cx: Context): Morman
     }
     if (perisabil && t !== null) rataZi = rataZilnica(rules, t)
   }
+  return { loc, tQ16: t, rataZi }
+}
+
+/** Mormanul de hrana din slotul `i` (viu, nutritie > 0), cu T-ul si rata locului lui; null altfel. */
+function evalueazaMorman(w: World, rules: Rules, i: number, cx: Context): MormanHrana | null {
+  const it = w.iteme
+  if (it.alive[i] !== 1) return null
+  const kind = it.kind[i]!
+  const nut = rules.nutritie[kind] ?? 0
+  if (nut <= 0) return null
+  const q = it.cantitate[i]!
+  const { loc, tQ16: t, rataZi } = evalueazaLocul(w, rules, it.wx[i]!, it.wy[i]!, it.z[i]!, rules.perisabil[kind] === true, cx)
   return { slot: i, id: it.id[i]!, kind, cantitate: q, valoare: nutritieEfectiva(q, it.alterare[i]!, nut), loc, tQ16: t, rataZi }
+}
+
+/**
+ * Locurile unor celule GOALE, ca pentru un fel perisabil asezat acolo (aceeasi evaluare ca un morman, `evalueazaLocul`), cu
+ * aerul si stampila citite o data: „cămara are loc" (ECRAN-2) intreaba daca locul ei pastreaza. Citire pura.
+ */
+export function evaluatorDeLoc(w: World, rules: Rules): (x: number, y: number, z: number) => LocHrana {
+  const cx = context(w, rules)
+  return (x, y, z) => evalueazaLocul(w, rules, x, y, z, true, cx)
 }
 
 /** Un singur morman (inspectorul), cu ACEEASI evaluare ca `stareaHranei`; null daca slotul nu tine hrana vie. */

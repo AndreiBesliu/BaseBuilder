@@ -394,8 +394,8 @@ export const MUTATII = [
   {
     n: '„Se strică aici" si cand caraușii o duc singuri in camara (rangul ei mai mare)',
     f: M,
-    a: '      if (cam !== null && cam.rang <= aici) return textStricaCamaraAreLoc(cam.prioritate, zs === -1 ? 0 : w.zone.prioritate[zs]!)',
-    b: '      if (cam !== null) return textStricaCamaraAreLoc(cam.prioritate, zs === -1 ? 0 : w.zone.prioritate[zs]!)',
+    a: '      if (cam !== null && cam.rang <= aici) {',
+    b: '      if (cam !== null) {',
     t: T, e: 'HRANA ECRAN „Se strică aici',
   },
   {
@@ -406,10 +406,47 @@ export const MUTATII = [
     t: T, e: 'HRANA ECRAN „Se strică aici',
   },
   {
-    n: 'locul din camara numara si celulele ocupate de alt fel (camara plina „are loc")',
+    n: 'locul din camara numara si celulele ocupate (camara plina „are loc")',
     f: M,
-    a: '    if (i === -1) loc += rules.itemStackMax\n',
-    b: '    if (i === -1 || true) loc += rules.itemStackMax\n',
+    a: '    if (i !== -1 && (it.kind[i] !== fel || it.cantitate[i]! >= rules.itemStackMax)) continue\n',
+    b: '',
+    e2: [{ f: M, a: '    loc += i === -1 ? rules.itemStackMax : rules.itemStackMax - it.cantitate[i]!', b: '    loc += rules.itemStackMax' }],
+    t: T, e: 'HRANA ECRAN „Se strică aici',
+  },
+  // ECRAN-2 (recenzia): sfatul doar spre o camara care PASTREAZA; la prioritatea maxima, „Coboară".
+  {
+    n: 'ECRAN-2: locul camarii fara intrebarea „pastreaza?" (o camara la suprafata, toamna, „are loc")',
+    f: M,
+    a: '  const filtru = rules.perisabil[fel] === true ? pastreaza : null',
+    b: '  const filtru = null',
+    t: T, e: 'HRANA ECRAN „Se strică aici',
+  },
+  {
+    n: 'ECRAN-2: o camara care se strica si ea (clasa „se strică") trece drept loc care pastreaza',
+    f: M,
+    a: '    return c !== null && c !== Clasa.STRICA',
+    b: '    return c !== null',
+    t: T, e: 'HRANA ECRAN „Se strică aici',
+  },
+  {
+    n: 'ECRAN-2: o camara „aproape" (5,3 °C) nu pastreaza (doar ≤ prag)',
+    f: M,
+    a: '    return c !== null && c !== Clasa.STRICA',
+    b: '    return c === Clasa.PASTREAZA',
+    t: T, e: 'HRANA ECRAN „Se strică aici',
+  },
+  {
+    n: 'ECRAN-2: la prioritatea maxima tot „Ridică … (cămara 3, aici 5)" — o prioritate care nu exista',
+    f: M,
+    a: '        if (rules.zonePriorityLevels * 2 + 1 > aici) return textStricaCamaraAreLoc(cam.prioritate, prioAici, false)',
+    b: '        return textStricaCamaraAreLoc(cam.prioritate, prioAici, false)',
+    t: T, e: 'HRANA ECRAN „Se strică aici',
+  },
+  {
+    n: 'ECRAN-2: „Coboară" scris ca „Ridică"',
+    f: X,
+    a: '    actiune: coboara\n',
+    b: '    actiune: false\n',
     t: T, e: 'HRANA ECRAN „Se strică aici',
   },
   {
