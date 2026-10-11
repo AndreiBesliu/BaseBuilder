@@ -11,3 +11,5 @@ Thumbs.db
 .env.local
 saves/
 .prof/
+# worktree-urile agenților (Claude Code); un rest după o ștergere eșuată nu apare în git status
+.claude/worktrees/
