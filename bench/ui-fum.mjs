@@ -1720,7 +1720,12 @@ async function paginaTermica() {
   await pas('exceptie-tick', async () => {
     const n0 = pT.erori.length
     const salvari = async () => (await pT.js('__f.salvari()')).map((s) => `${s.id}@${s.tick}`).sort()
-    const s0 = await salvari()
+    // O salvare automata pornita INAINTEA exceptiei nu e a pasului: pasii de dinainte trec de intervalul ei, iar scrierea in
+    // IndexedDB e asincrona. Lista se citeste dupa ce s-a linistit (doua citiri la 1,2 s, egale; jocul e pe pauza, deci
+    // salvarea automata scadenta se scrie in prima reimprospatare). Fara asta bifa pica rar si fara legatura cu exceptia:
+    // agentul D2, o data din 11 rulari („egale: false" cu acelasi numar de salvari — slotul auto-7 rescris).
+    let s0 = await salvari()
+    for (let k = 0; k < 5; k++) { await astepta(1200); const s = await salvari(); if (JSON.stringify(s) === JSON.stringify(s0)) break; s0 = s }
     const j0 = await pT.js(`document.querySelector('.ui-alerte-antet button')?.textContent ?? ''`)
     if (NEGATIVA !== 'exceptie-tick') await pT.js(`(() => { const st = __kinstead.world.temperatura, v = st.pragBigInt; let rau = 1; Object.defineProperty(st, 'pragBigInt', { configurable: true, get() { if (rau > 0 && __kinstead.world.tick % 20 === 0) { rau--; throw new Error('proba: eroare in pas') } return v } }); return true })()`)
     if (await pT.js('__kinstead.stare().pauza')) await pT.tasta(' ')
