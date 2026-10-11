@@ -19,7 +19,7 @@ import { mcLaQ16, tAfara } from '../src/sim/clima.ts'
 import { tickuriPeAn, tickuriPeOra } from '../src/sim/calendar.ts'
 import { nutritieEfectiva } from '../src/sim/iteme.ts'
 import { groapaDeMoloz } from '../src/sim/camara.ts'
-import { celulaDeZonaLa, slotZona, Zona } from '../src/sim/zone.ts'
+import { celulaDeZonaLa, indexZone, slotZona, Zona } from '../src/sim/zone.ts'
 import { celulaDeZonaPosibila } from '../src/sim/joburi.ts'
 import { componentaLa } from '../src/sim/camere.ts'
 import {
@@ -35,7 +35,7 @@ import {
 import { cheieListei } from '../viewer/ui/alerte.ts'
 import type { StareAlerta } from '../viewer/ui/alerte.ts'
 import { cheieInspectorCelula } from '../viewer/ui/memorie-incapere.ts'
-import { textFeluri, textHranaF3, textPierdere, textPrimeste, textZecimi, textZile } from '../viewer/ui/texte.ts'
+import { textCapacitateCamara, textFeluri, textGroapa, textHranaF3, textMolozInCamara, textPasCamara, textPierdere, textPrimeste, textTooltipCamara, textZecimi, textZile } from '../viewer/ui/texte.ts'
 import { actualizeazaTemperaturaOverlay, ALFA_PUNCT, createTemperaturaOverlay, culoarePunct, NUME_PUNCTE, PUNCT_DESCHIS, PUNCT_INCHIS } from '../viewer/overlay-temperatura.ts'
 import { Material } from '../src/sim/terrain/chunk.ts'
 import { dig, fill } from '../src/sim/terrain/terrain.ts'
@@ -426,6 +426,38 @@ test('HRANA ECRAN textele: zile de calendar, pierderea pe zi, F3, ce primeste un
   assert.deepEqual([0, MASCA_DOAR_HRANA, (1 << ITEME) - 1 & ~((1 << Item.PIATRA) | (1 << Item.PAMANT)), (1 << ITEME) - 1].map((m) => textPrimeste(m, ITEME)),
     ['tot', 'doar hrană', 'piatră și pământ', 'nimic'])
   assert.equal(textFeluri((1 << Item.PIATRA) | (1 << Item.PAMANT) | (1 << Item.LEMN)), 'piatră, pământ și lemn')
+})
+
+test('HRANA ECRAN textele camarii (ECRAN-4): „unui om", „lipsește 1", „să-i primească", pragul din content in tooltip, „nu ~20" fara „de"', () => {
+  // Capacitatea: o camara 2×2 tine 4 × 75 / 230 = 1 om — „a un om" inainte.
+  assert.equal(textCapacitateCamara(1), 'Ține hrana unui om (cât are la început).')
+  assert.equal(textCapacitateCamara(5), 'Ține hrana a 5 oameni (cât au la început).')
+  assert.equal(textCapacitateCamara(20), 'Ține hrana a 20 de oameni (cât au la început).')
+  assert.equal(textCapacitateCamara(0), 'Prea mică: nu ține hrana nici unui om.')
+  // Lipsa de 1 (un morman de 76 pe doua celule, 75 de loc): „lipsește 1", nu „lipsesc 1" — in avertisment si pe moloz.
+  const g1 = { feluri: 1 << Item.PIATRA, unitati: 76, celuleOcupate: 2, loc: 75, lipsa: 1, lipsaCelule: 1 }
+  assert.equal(textGroapa(g1), 'Molozul săpat n-are unde pleca: 76 de piatră pe 2 celule; în alte depozite mai încap 75, lipsește 1 (o celulă).')
+  assert.equal(textMolozInCamara(Item.PIATRA, g1).titlu, 'Cămara nu primește piatră, iar în depozite nu mai e loc: lipsește 1 (o celulă).')
+  assert.equal(textMolozInCamara(Item.PIATRA, { lipsa: 285, lipsaCelule: 4 }).titlu, 'Cămara nu primește piatră, iar în depozite nu mai e loc: lipsesc 285 (4 celule).')
+  // Alerta fara-depozit cu UN morman de un fel refuzat: „să-i primească" (plural: „să le primească", poarta-camara). Alertele
+  // tac fara oameni.
+  const { w, sit } = laSit(4242, 3)
+  const p = patratPlat(w, sit, 2, 4, 12)!
+  assert.ok(p, 'fixtura: patrat plat')
+  const cam = picteaza(w, p.x0, p.y0, 2)
+  bun(applyCommand(w, { kind: 'setFiltruZona', id: cam, refuzate: MASCA_DOAR_HRANA }, R), 'filtrul')
+  lasaItem(w, Item.PIATRA, 20, sit.wx + 2, sit.wy - 4)
+  indexZone(w, R)
+  const a = semnaleAlerte(w, R, null).get('fara-depozit')!
+  assert.ok(a.activ, 'alerta aprinsa')
+  assert.equal(a.text, 'Un morman n-are niciun depozit care să-i primească felul. Schimbă filtrul unui depozit sau pictează unul nou.')
+  // Tooltip-ul butonului Cămară: pragul curbei din content (cu alt prag, alt text), nu „sub 5 °C" scris in cod.
+  assert.match(textTooltipCamara(pragAlterare(R)), /pivniță rece \(sub 5 °C\), hrana nu se strică/)
+  assert.match(textTooltipCamara(mcLaQ16(6000)), /pivniță rece \(sub 6 °C\), hrana nu se strică/)
+  // Pasul camarii: unitatea o data, cu tot cu „de" — „~25 de zile, nu ~20", nu „nu ~20 de".
+  assert.equal(textPasCamara(pragAlterare(R), 37, '~20 de zile', '~25 de zile'), 'Cămară: Zone (K) ▸ Cămară în pivniță (sub 5 °C), ~37 de celule — hrana ține ~25 de zile, nu ~20')
+  assert.equal(textPasCamara(pragAlterare(R), 37, '~2,9 zile', '~3,6 zile'), 'Cămară: Zone (K) ▸ Cămară în pivniță (sub 5 °C), ~37 de celule — hrana ține ~3,6 zile, nu ~2,9')
+  assert.equal(textPasCamara(pragAlterare(R), 37, '~23 de ore', '~3,6 zile'), 'Cămară: Zone (K) ▸ Cămară în pivniță (sub 5 °C), ~37 de celule — hrana ține ~3,6 zile, nu ~23 de ore')
 })
 
 // --- 6. alerta, bara, un adevar --------------------------------------------------------------------------------------

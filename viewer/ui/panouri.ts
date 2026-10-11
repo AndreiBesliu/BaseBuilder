@@ -27,7 +27,7 @@ import type { UsilePropuse } from './memorie-incapere.ts'
 import type { Bara, FiltruOameni, IncapereLa, InspectieCelula, NormalaFetei, Previz, RandOm } from './model.ts'
 import { actualizeaza, cheieListei, creeazaAlerte, eveniment, REGULI_ALERTE, Severitate } from './alerte.ts'
 import type { StareAlerta, Tinta } from './alerte.ts'
-import { baraDeSus, cant, NUME_ITEM, NUME_MATERIAL, NUME_PIESA, NUME_ZONA, randuriPragU, textCapacitateCamara, textFeluri, textGroapa, textIncapere, textIndiciuUsa, textNumar, textPrimeste, textPrioritatePersonala, textProcent1, textTimp } from './texte.ts'
+import { baraDeSus, cant, NUME_ITEM, NUME_MATERIAL, NUME_PIESA, NUME_ZONA, randuriPragU, textCapacitateCamara, textFeluri, textGradeIntregi, textGroapa, textIncapere, textIndiciuUsa, textNumar, textPrimeste, textPrioritatePersonala, textProcent1, textTimp, textTooltipCamara } from './texte.ts'
 import { conturImplicit, Unealta } from './dreptunghi.ts'
 import type { UnealtaId } from './dreptunghi.ts'
 import { eTimpulSalvariiAutomate, idAutomata, salvareAutomataPermisa } from './salvari-plic.ts'
@@ -486,7 +486,7 @@ export function monteazaUI(ctx: ContextUI): UI {
   const CAMARA = -2
   const btnZona = new Map<number, HTMLButtonElement>([
     [Zona.DEPOZIT, iconBtn(ICON.depozit, 'Depozit', '', 'Depozit: aici se duc mormanele')],
-    [CAMARA, iconBtn(ICON.depozit, 'Cămară', '', 'Cămară: un depozit doar pentru hrană. Pictată într-o pivniță rece (sub 5 °C), hrana nu se strică; la prioritate egală, cărăușii aduc hrana și din depozitul general')],
+    [CAMARA, iconBtn(ICON.depozit, 'Cămară', '', textTooltipCamara(pragAlterare(rules)))],
     [Zona.DORMIT, iconBtn(ICON.dormit, 'Loc de dormit', '', 'Loc de dormit: cine doarme aici nu doarme pe jos')],
     [-1, iconBtn(ICON.stergeZona, 'Șterge zona', '', 'Șterge zonele atinse — ÎNTREGI (nu se poate șterge o singură celulă)')],
   ])
@@ -550,10 +550,6 @@ export function monteazaUI(ctx: ContextUI): UI {
     scrieIndiciu()
   }
 
-  function textGradeIntregiPrag(): string {
-    return String(Math.round(pragAlterare(rules) / 65536))
-  }
-
   function scrieIndiciu(): void {
     clasa(indiciu, 'rosu', dreptunghi?.rosu ?? false)
     if (dreptunghi !== null) { indiciu.textContent = dreptunghi.text; return }
@@ -565,7 +561,7 @@ export function monteazaUI(ctx: ContextUI): UI {
       [Unealta.CONSTRUIESTE]: ui.piesa === Piesa.USA ? textIndiciuUsa(n.cota) : `<b>${NUME_PIESA[ui.piesa]}</b> ${unde} · trage = dreptunghi (${ui.contur ? 'contur' : 'plin'}) · P = altă piesă · Esc`,
       [Unealta.ANULEAZA]: '<b>Anulează</b> · clic pe o lucrare sau trage peste ele (doar ce se vede) · Esc',
       [Unealta.ZONA]: ui.zonaFiltru !== 0
-        ? `<b>Cămară</b> ${unde} · doar hrană: într-o pivniță sub ${textGradeIntregiPrag()} °C nu se strică · clic = o celulă · trage = dreptunghi · Esc`
+        ? `<b>Cămară</b> ${unde} · doar hrană: într-o pivniță sub ${textGradeIntregi(pragAlterare(rules))} °C nu se strică · clic = o celulă · trage = dreptunghi · Esc`
         : `<b>${NUME_ZONA[ui.zonaFel]}</b> ${unde} · clic = o celulă · trage = dreptunghi · Esc`,
       [Unealta.STERGE_ZONA]: '<b>Șterge zona</b> · clic sau dreptunghi: zonele atinse se șterg ÎNTREGI · Esc',
     }

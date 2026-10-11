@@ -455,6 +455,42 @@ export const MUTATII = [
     b: '  for (let d = 5; d <= RAZA_GROAPA; d++) {',
     t: T, e: 'HRANA ECRAN groapa de moloz',
   },
+  // ECRAN-4 (recenzia): textele camarii.
+  {
+    n: 'ECRAN-4: capacitatea unui om „Ține hrana a un om"',
+    f: X,
+    a: "  return oameni === 1 ? 'Ține hrana unui om (cât are la început).' : `Ține hrana a ${cant(oameni, 'oameni')} (cât au la început).`",
+    b: "  return `Ține hrana a ${cant(oameni, 'oameni', 'un om')} (cât au la început).`",
+    t: T, e: 'HRANA ECRAN textele camarii',
+  },
+  {
+    n: 'ECRAN-4: „lipsesc 1" in avertismentul gropii si pe moloz',
+    f: X,
+    a: "  return n === 1 ? 'lipsește 1' : `lipsesc ${textNumar(n)}`",
+    b: "  return `lipsesc ${textNumar(n)}`",
+    t: T, e: 'HRANA ECRAN textele camarii',
+  },
+  {
+    n: 'ECRAN-4: alerta cu un singur morman refuzat „să le primească"',
+    f: M,
+    a: "      ? `${faraDepozit === 1 ? 'Un morman n-are niciun depozit care să-i primească felul' : `${cant(faraDepozit, 'mormane')} n-au niciun depozit care să le primească felul`}. Schimbă filtrul unui depozit sau pictează unul nou.`",
+    b: "      ? `${faraDepozit === 1 ? 'Un morman n-are' : `${cant(faraDepozit, 'mormane')} n-au`} niciun depozit care să le primească felul. Schimbă filtrul unui depozit sau pictează unul nou.`",
+    t: T, e: 'HRANA ECRAN textele camarii',
+  },
+  {
+    n: 'ECRAN-4: tooltip-ul Camarii cu „sub 5 °C" scris in cod (pragul din content ignorat)',
+    f: X,
+    a: '(sub ${textGradeIntregi(pragQ16)} °C), hrana nu se strică',
+    b: '(sub 5 °C), hrana nu se strică',
+    t: T, e: 'HRANA ECRAN textele camarii',
+  },
+  {
+    n: 'ECRAN-4: pasul camarii taie doar „ zile" („nu ~20 de")',
+    f: X,
+    a: "cu.replace(/( de)? zile$/, '')",
+    b: 'cu.slice(0, -5)',
+    t: T, e: 'HRANA ECRAN textele camarii',
+  },
 
   // --- harta U, memoria, cheia ---
   {

@@ -1905,7 +1905,7 @@ async function paginaHranei() {
     let rulate = 0
     for (let k = 0; k < 6 && r1.asteptat === r0.asteptat; k++) { rulate += (await pH.js('__kinstead.avanseaza(1680)')).rulate; await astepta(400); r1 = await citeste() }
     const bun = (r) => {
-      const acum = r.bara.endsWith(' zile') ? r.bara.slice(0, -5) : r.bara
+      const acum = r.bara.endsWith(' zile') && r.fara.endsWith(' zile') ? r.bara.replace(/( de)? zile$/, '') : r.bara
       return r.vizibil && r.n === 5 && r.texte[0] === r.asteptat && /^Cămară: Zone \(K\) ▸ Cămară în pivniță \(sub 5 °C\), ~/.test(r.texte[0]) && r.texte[0].endsWith(`hrana ține ${r.fara}, nu ${acum}`)
         && r.texte[1] === 'Depozit pentru piatră: Zone (K) ▸ Depozit' && !r.facut[0] && !r.facut[1] && r.hranaAscunsa === true
     }
@@ -2018,7 +2018,7 @@ async function paginaHranei() {
     // Proba negativa: gestul fara clicul pe „Cămară" — unealta ramane Zone ▸ Depozit (un depozit general).
     if (bC !== null && NEGATIVA !== 'camara') await pH.click(bC.x, bC.y)
     await astepta(200)
-    const u = await pH.js(`({ filtru: __kinstead.ui.zonaFiltru, fel: __kinstead.ui.zonaFel, unealta: __kinstead.ui.unealta, camara: document.querySelector('.ui-sub button[data-zona="camara"]')?.getAttribute('aria-pressed') ?? null, depozit: document.querySelector('.ui-sub button[data-zona="0"]')?.getAttribute('aria-pressed') ?? null, indiciu: document.querySelector('.ui-indiciu')?.textContent ?? '' })`)
+    const u = await pH.js(`({ filtru: __kinstead.ui.zonaFiltru, fel: __kinstead.ui.zonaFel, unealta: __kinstead.ui.unealta, camara: document.querySelector('.ui-sub button[data-zona="camara"]')?.getAttribute('aria-pressed') ?? null, depozit: document.querySelector('.ui-sub button[data-zona="0"]')?.getAttribute('aria-pressed') ?? null, indiciu: document.querySelector('.ui-indiciu')?.textContent ?? '', titlu: document.querySelector('.ui-sub button[data-zona="camara"]')?.title ?? null, titluAsteptat: __h.T.textTooltipCamara(__h.P.pragAlterare(__kinstead.rules)) })`)
     const inainte = await pH.js(`({ zone: __f.zoneFel().map((z) => z.id), tick: __kinstead.world.tick })`)
     // Peste randul de sus al inelului de mormane (piatra si hrana) si ce e dincolo de el: molozul pentru groapa de moloz.
     await pH.trage([loc.x - 6, loc.y - 9], [loc.x - 3, loc.y - 6], sol + 1)
@@ -2033,9 +2033,9 @@ async function paginaHranei() {
       return { noi: noi.length, id: z?.id ?? null, fel: zs === -1 ? null : s.kind[zs], refuzate: zs === -1 ? null : s.refuzate[zs], celule, tick: w.tick, toast: __f.toast(), pasi: li.map((e) => e.classList.contains('facut')) }
     })()`)
     camara = dupa.id
-    bifa('camara-unealta', bC !== null && u.filtru === 7 && u.fel === 0 && u.camara === 'true' && u.depozit === 'false' && u.indiciu.startsWith('Cămară')
+    bifa('camara-unealta', bC !== null && u.filtru === 7 && u.fel === 0 && u.camara === 'true' && u.depozit === 'false' && u.indiciu.startsWith('Cămară') && u.titlu === u.titluAsteptat
       && dupa.noi === 1 && dupa.fel === 0 && dupa.refuzate === 7 && dupa.celule >= 12 && dupa.tick === inainte.tick && dupa.toast.includes(' · cămară: doar hrană') && dupa.pasi[0] === true && dupa.pasi[1] === false,
-      'Zone ▸ Cămară (clic real): presetul — un DEPOZIT cu filtrul „doar hrană" (7), butonul apasat, indiciul „Cămară …"; dreptunghiul tras picteaza o zona cu masca 7 in ACELASI tick (pauza: niciun tick intre pictura si filtru), toast „· cămară: doar hrană"; Primii pasi bifeaza pasul camarii, nu pe al depozitului general',
+      'Zone ▸ Cămară (clic real): presetul — un DEPOZIT cu filtrul „doar hrană" (7), butonul apasat (tooltip-ul cu pragul din content, ECRAN-4), indiciul „Cămară …"; dreptunghiul tras picteaza o zona cu masca 7 in ACELASI tick (pauza: niciun tick intre pictura si filtru), toast „· cămară: doar hrană"; Primii pasi bifeaza pasul camarii, nu pe al depozitului general',
       JSON.stringify({ bC, u, inainte: inainte.tick, dupa }))
     await pH.poza('h4-camara-unealta.png')
   })

@@ -1451,7 +1451,7 @@ export function semnaleAlerte(w: World, rules: Rules, previz: Previz | null, h: 
   const textFaraDepozit = vedere.depozite === 0
     ? `${faraDepozit === 1 ? 'Un morman n-are unde fi dus' : `${cant(faraDepozit, 'mormane')} n-au unde fi duse`}: niciun depozit. Pictează unul (Zone ▸ Depozit).`
     : refuzate === faraDepozit
-      ? `${faraDepozit === 1 ? 'Un morman n-are' : `${cant(faraDepozit, 'mormane')} n-au`} niciun depozit care să le primească felul. Schimbă filtrul unui depozit sau pictează unul nou.`
+      ? `${faraDepozit === 1 ? 'Un morman n-are niciun depozit care să-i primească felul' : `${cant(faraDepozit, 'mormane')} n-au niciun depozit care să le primească felul`}. Schimbă filtrul unui depozit sau pictează unul nou.`
       : refuzate > 0
         ? `${cant(faraDepozit, 'mormane')} n-au unde fi duse: ${cant(refuzate, 'mormane', 'unul')} de un fel pe care nu-l primește niciun depozit, restul nu încap. Schimbă filtrul sau mărește depozitele.`
         : `${faraDepozit === 1 ? 'Un morman nu încape' : `${cant(faraDepozit, 'mormane')} nu încap`} în depozite. Mărește-le.`

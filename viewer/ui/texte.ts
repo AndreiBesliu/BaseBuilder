@@ -807,9 +807,18 @@ export function textPrimeste(refuzate: number, feluri: number): string {
   return (primite & (primite - 1)) === 0 ? `doar ${nume}` : nume
 }
 
-/** Capacitatea unei camare in oameni (J-11): „Ține hrana a 12 oameni" — `celule × itemStackMax / hranaPeOm`. */
+/**
+ * Capacitatea unei camare in oameni (J-11): „Ține hrana a 12 oameni" — `celule × itemStackMax / hranaPeOm`; la unul, „unui om"
+ * (ECRAN-4: „a un om").
+ */
 export function textCapacitateCamara(oameni: number): string {
-  return oameni <= 0 ? 'Prea mică: nu ține hrana nici unui om.' : `Ține hrana a ${cant(oameni, 'oameni', 'un om')} (cât au la început).`
+  if (oameni <= 0) return 'Prea mică: nu ține hrana nici unui om.'
+  return oameni === 1 ? 'Ține hrana unui om (cât are la început).' : `Ține hrana a ${cant(oameni, 'oameni')} (cât au la început).`
+}
+
+/** „lipsesc 285", dar „lipsește 1" (ECRAN-4: „lipsesc 1"): unitatile care nu mai incap, in avertismentul gropii si pe moloz. */
+function textLipsesc(n: number): string {
+  return n === 1 ? 'lipsește 1' : `lipsesc ${textNumar(n)}`
 }
 
 /**
@@ -817,13 +826,13 @@ export function textCapacitateCamara(oameni: number): string {
  * cat mai incape in celelalte depozite, cat lipseste.
  */
 export function textGroapa(g: { readonly feluri: number; readonly unitati: number; readonly celuleOcupate: number; readonly loc: number; readonly lipsa: number; readonly lipsaCelule: number }): string {
-  return `Molozul săpat n-are unde pleca: ${cant(g.unitati, textFeluri(g.feluri))} pe ${cant(g.celuleOcupate, 'celule', 'o celulă')}; în alte depozite mai încap ${textNumar(g.loc)}, lipsesc ${textNumar(g.lipsa)} (${cant(g.lipsaCelule, 'celule', 'o celulă')}).`
+  return `Molozul săpat n-are unde pleca: ${cant(g.unitati, textFeluri(g.feluri))} pe ${cant(g.celuleOcupate, 'celule', 'o celulă')}; în alte depozite mai încap ${textNumar(g.loc)}, ${textLipsesc(g.lipsa)} (${cant(g.lipsaCelule, 'celule', 'o celulă')}).`
 }
 
 /** Cauza de pe un morman de moloz din camara (§5): aceleasi cifre ca avertismentul camarii. */
 export function textMolozInCamara(fel: number, g: { readonly lipsa: number; readonly lipsaCelule: number }): TextMotiv {
   return {
-    titlu: `Cămara nu primește ${NUME_ITEM_MIC[fel] ?? 'marfa asta'}, iar în depozite nu mai e loc: lipsesc ${textNumar(g.lipsa)} (${cant(g.lipsaCelule, 'celule', 'o celulă')}).`,
+    titlu: `Cămara nu primește ${NUME_ITEM_MIC[fel] ?? 'marfa asta'}, iar în depozite nu mai e loc: ${textLipsesc(g.lipsa)} (${cant(g.lipsaCelule, 'celule', 'o celulă')}).`,
     actiune: 'Pictează groapa de moloz din inspectorul cămării, sau mărește un depozit.',
   }
 }
@@ -852,9 +861,14 @@ export function randuriPragU(pragQ16: number, procent: string): readonly { reado
 export function textPasCamara(pragQ16: number, celule: number, cu: string, fara: string): string {
   const baza = `Cămară: Zone (K) ▸ Cămară în pivniță (sub ${textGradeIntregi(pragQ16)} °C), ~${cant(celule, 'celule', 'o celulă')}`
   if (cu === '' || fara === '') return baza
-  // „~3,6 zile, nu ~2,9": unitatea o data, cand e aceeasi.
-  const acum = cu.endsWith(' zile') && fara.endsWith(' zile') ? cu.slice(0, -5) : cu
+  // „~3,6 zile, nu ~2,9": unitatea o data, cand e aceeasi — cu tot cu „de" („~25 de zile, nu ~20", nu „nu ~20 de", ECRAN-4).
+  const acum = cu.endsWith(' zile') && fara.endsWith(' zile') ? cu.replace(/( de)? zile$/, '') : cu
   return cu === fara ? `${baza} — hrana ține ${cu}` : `${baza} — hrana ține ${fara}, nu ${acum}`
+}
+
+/** Tooltip-ul butonului „Cămară" din Zone, cu pragul curbei din content (ECRAN-4: „sub 5 °C" era scris in cod). */
+export function textTooltipCamara(pragQ16: number): string {
+  return `Cămară: un depozit doar pentru hrană. Pictată într-o pivniță rece (sub ${textGradeIntregi(pragQ16)} °C), hrana nu se strică; la prioritate egală, cărăușii aduc hrana și din depozitul general`
 }
 
 /** Dialogul „Joc nou" (UI-9): hrana de start sta sub cer; aceeasi proiectie, si cea dintr-o camara. */
