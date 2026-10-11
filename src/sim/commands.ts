@@ -492,9 +492,11 @@ export function applyCommand(w: World, cmd: Command, rules: Rules = DEFAULT_RULE
         return refuse(Reason.VALOARE_INVALIDA, { camp: 'id', valoare: cmd.id, motiv: 'doar un depozit are filtru', fel: w.zone.kind[zs]! })
       }
       // Aceleasi conditii ca decode (save.ts): un intreg, biti doar pe felurile cunoscute. Un bit in afara ar trece prin
-      // Uint8Array trunchiat (256 → 0 = „primeste tot") sau ar face encode sa arunce la urmatoarea salvare.
+      // Uint8Array trunchiat (256 → 0 = „primeste tot") sau ar face encode sa arunce la urmatoarea salvare. Pe INTERVAL, nu
+      // pe biti: `&` vede numarul prin int32, deci 2^32 ar fi trecut ca 0 si s-ar fi scris 0 (STARE-1). Masca e plina
+      // (2^ITEME − 1), deci `r ≤ feluri` e exact „niciun bit in afara".
       const feluri = (1 << ITEME) - 1
-      if (!Number.isInteger(cmd.refuzate) || cmd.refuzate < 0 || (cmd.refuzate & ~feluri) !== 0) {
+      if (!Number.isInteger(cmd.refuzate) || cmd.refuzate < 0 || cmd.refuzate > feluri) {
         return refuse(Reason.VALOARE_INVALIDA, { camp: 'refuzate', valoare: String(cmd.refuzate), min: 0, max: feluri, motiv: 'biti in afara felurilor' })
       }
       w.zone.refuzate[zs] = cmd.refuzate

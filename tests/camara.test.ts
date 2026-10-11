@@ -80,7 +80,9 @@ test('setFiltruZona: refuzurile (zona inexistenta, un dormitor, masca neintreaga
   const oDorm = applyCommand(w, { kind: 'setFiltruZona', id: dorm, refuzate: DOAR_HRANA }, R)
   refuz(oDorm, Reason.VALOARE_INVALIDA, 'id')
   assert.ok(!oDorm.ok && oDorm.params.motiv === 'doar un depozit are filtru')
-  for (const v of [1.5, -1, 16, 255, Number.NaN]) refuz(applyCommand(w, { kind: 'setFiltruZona', id: dep, refuzate: v }, R), Reason.VALOARE_INVALIDA, 'refuzate')
+  // 2^32 (si 2^32 + 7, 2^40 + 8): un test pe BITI (`& ~feluri`) le vede prin int32 ca 0 / 7 / 8, iar Uint8Array ar scrie
+  // ultimul octet — 2^32 → 0 = „primeste tot". decode le refuza (0..255), deci si comanda (STARE-1).
+  for (const v of [1.5, -1, 16, 255, Number.NaN, 2 ** 32, 2 ** 32 + 7, 2 ** 40 + 8]) refuz(applyCommand(w, { kind: 'setFiltruZona', id: dep, refuzate: v }, R), Reason.VALOARE_INVALIDA, 'refuzate')
   const zs = slotZona(w.zone, dep)
   assert.equal(w.zone.refuzate[zs], 0, 'un refuz nu scrie nimic')
   // Efectul: o piatra cu racire „n-are unde" (scrisa ca de scanare), indexul curat.

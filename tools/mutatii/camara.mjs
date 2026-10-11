@@ -226,8 +226,15 @@ export const MUTATII = [
   {
     n: 'setFiltruZona primeste biti in afara felurilor',
     f: 'src/sim/commands.ts',
-    a: '      if (!Number.isInteger(cmd.refuzate) || cmd.refuzate < 0 || (cmd.refuzate & ~feluri) !== 0) {',
+    a: '      if (!Number.isInteger(cmd.refuzate) || cmd.refuzate < 0 || cmd.refuzate > feluri) {',
     b: '      if (!Number.isInteger(cmd.refuzate) || cmd.refuzate < 0) {',
+    t: T, e: 'setFiltruZona: refuzurile',
+  },
+  {
+    n: 'STARE-1: setFiltruZona verifica bitii prin int32 (`& ~feluri`): 2^32 trece ca 0 si se scrie „primeste tot"',
+    f: 'src/sim/commands.ts',
+    a: '      if (!Number.isInteger(cmd.refuzate) || cmd.refuzate < 0 || cmd.refuzate > feluri) {',
+    b: '      if (!Number.isInteger(cmd.refuzate) || cmd.refuzate < 0 || (cmd.refuzate & ~feluri) !== 0) {',
     t: T, e: 'setFiltruZona: refuzurile',
   },
   {
