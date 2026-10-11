@@ -50,7 +50,8 @@ const NEG = argv.find((a) => a.startsWith('--proba-negativa'))
 const NEGATIVA = NEG === undefined ? null : NEG.includes('=') ? NEG.slice(NEG.indexOf('=') + 1) : 'sapa'
 /**
  * Proba negativa → bifa pe care o face rosie. Ale temperaturii (t.2b §8) si ale sertarului saboteaza GESTUL bifei, nu
- * produsul: se-misca — timpul sarit (`world.tick +=`) in locul avansului real; inertie — gaura din acoperis nu se
+ * produsul: se-misca — timpul sarit (`world.tick +=`) in locul avansului real, raportat ca n tickuri rulate (rosul vine doar
+ * din T si din cifra lui U, nu din contor: recenzia t.3, PORTI-1); inertie — gaura din acoperis nu se
  * sapa; temperatura-pauza — a doua apasare pe Spatiu lipseste (jocul merge cele 3 s); incapere-noua — Alt+clic-ul pe bloc
  * lipseste; U-la-3x — cifrele lui U se citesc la 400 ms DUPA starea cu care se compara (o cifra ramasa un pas in urma ar
  * arata asa, UI-3); alerta — invariantul nu se provoaca; incarca-m5 — lumea incarcata avanseaza 1686 de tickuri, nu 1687;
@@ -60,7 +61,7 @@ const NEGATIVA = NEG === undefined ? null : NEG.includes('=') ? NEG.slice(NEG.in
  * ale inspectorului (`nowrap` pe cele trei randuri, cele 3 randuri minime ale descompunerii) e anulat printr-un stil.
  * Hrana (t.3 §8; UI-7, UI-8): bara-prognoza — textul asteptat e cel FARA alterare; alterare-inspector — fiecare scriere a
  * randului de alterare, la 3×, se compara cu starea de acum 400 ms; alterare-timp — timpul sarit (`world.tick +=`) in locul
- * avansului; pastrare — hrana „din pivnita" pusa la suprafata; alerta-alterare — lista de alerte refacuta FORTAT intre
+ * avansului, raportat ca N tickuri rulate (rosul vine doar din S; PORTI-1); pastrare — hrana „din pivnita" pusa la suprafata; alerta-alterare — lista de alerte refacuta FORTAT intre
  * mousedown si mouseup; U-prag — gestul (Q/E, U) pe alt nivel decat al pivnitelor; camara — Zone fara clicul pe „Cămară";
  * groapa — podeaua gropii sapata dupa clic (celulele ei nu mai sunt calcabile: nu ajunge niciun moloz, ca pe un acoperis).
  * Recenzia t.3, ECRAN (ECRAN-2): strica-aici / strica-aici-rece — gestul fara clicul pe „+ prioritate" (depozitul ramane la 3).
@@ -1224,11 +1225,13 @@ async function paginaTermica() {
           const g = (s) => document.querySelector(s)
           return { inc: g('.ui-incapere')?.textContent ?? '', h2: g('.ui-sertar h2')?.textContent ?? '', linie: g('.ui-termic-t')?.textContent ?? '', num: g('.ui-termic-t')?.classList.contains('num') ?? false, tragere: g('.ui-termic-x')?.textContent ?? '', oameni: g('.ui-termic-o')?.textContent ?? '', canale: g('.ui-termic-canale')?.textContent ?? '' }
         },
-        // Avansul REAL (sau, doar pentru sabotajul „se-misca", timpul sarit), cu editarile din amprenta caselor A si B.
+        // Avansul REAL (sau, doar pentru sabotajul „se-misca", timpul sarit — raportat totusi ca n tickuri rulate, ca un
+        // avanseaza stricat: rosul bifei vine atunci doar din T si din cifra lui U, nu din contor; PORTI-1), cu editarile din
+        // amprenta caselor A si B.
         avans(n, sari = false) {
           const K = __kinstead, t = K.world.terrain, e0 = t.editari, c = this.casa
           let r
-          if (sari) { K.world.tick += n; r = { tick: K.world.tick, rulate: 0, simMs: 0, remeshMs: 0 } } else r = K.avanseaza(n)
+          if (sari) { K.world.tick += n; r = { tick: K.world.tick, rulate: n, simMs: 0, remeshMs: 0 } } else r = K.avanseaza(n)
           const e1 = t.editari
           let inAmprenta = 0
           for (let m = Math.max(e0, e1 - 65536); m < e1; m++) {
@@ -2298,8 +2301,10 @@ async function paginaAlterarii() {
     const s0 = await pA.js('__h.instantaneu()')
     await astepta(3000)
     const s1 = await pA.js('__h.instantaneu()')
-    // Proba negativa: timpul SARIT (`world.tick +=`) in locul avansului real — S ramane pe loc.
-    const av = NEGATIVA === 'alterare-timp' ? await pA.js(`(() => { __kinstead.world.tick += ${N}; return { tick: __kinstead.world.tick, rulate: 0 } })()`) : await pA.js(`__kinstead.avanseaza(${N})`)
+    // Proba negativa: un `avanseaza` stricat — timpul SARIT (`world.tick +=`), raportat totusi ca N tickuri rulate. S ramane pe
+    // loc, iar rosul poate veni DOAR din S (cresterea pe fiecare morman, Σ S + ONE·stricat): cu `rulate: 0` venea din contorul
+    // pe care il falsifica sabotajul, deci o verificare pe S slabita (`dS >= 0`) sau stearsa trecea neobservata (PORTI-1).
+    const av = NEGATIVA === 'alterare-timp' ? await pA.js(`(() => { __kinstead.world.tick += ${N}; return { tick: __kinstead.world.tick, rulate: ${N} } })()`) : await pA.js(`__kinstead.avanseaza(${N})`)
     const s2 = await pA.js('__h.instantaneu()')
     const subCer = s1.mormane.filter((m) => m.loc === -1)
     const crestere = subCer.map((m) => { const d = s2.mormane.find((x) => x.id === m.id); return { id: m.id, q: [m.q, d?.q ?? null], dS: d ? acumulat(m, d) : null } })
