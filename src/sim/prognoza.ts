@@ -100,11 +100,38 @@ export function pragAlterare(rules: Rules): number {
 }
 
 /**
+ * Cel mai mare exponent pe care `scadereOra` il da direct aproximantului Padé (eroarea ~a³/12: 1,3·10^-3 aici); peste el,
+ * exponentul se injumatateste, iar `proiecteazaPeOre` imparte ora in sub-pasi. Continutul implicit sta sub el: λ-ul unei ore
+ * la 45 °C e ~0,115 (ECRAN-3).
+ */
+export const PRAG_PADE = 0.25
+
+/**
  * e^(−a) pentru a ≥ 0, cu aproximantul Padé (1,1): (1 − a/2)/(1 + a/2) — doar + − × ÷, eroarea ~a³/12 (2·10^-6 pe o ora la
  * 25 °C, a = 0,029). Scaderea unei ore: o rata constanta pe ora, fara Euler (Euler pe ora gresea cu −0,026 zile la 25 °C).
+ * Peste `PRAG_PADE`: e^(−a) = (e^(−a/2^k))^(2^k) — Padé singur cadea la 0 EXACT de la a = 2 (si la 0,026 in loc de 0,150 la
+ * 1,9), iar fractia de sub cer devenea 0/0 (ECRAN-3). 0 doar de la 10^4 (e^(−10^4) e oricum sub cel mai mic double).
  */
 export function scadereOra(a: number): number {
-  return a >= 2 ? 0 : (1 - a / 2) / (1 + a / 2)
+  if (!(a < 1e4)) return 0
+  let x = a
+  let k = 0
+  while (x > PRAG_PADE) {
+    x /= 2
+    k++
+  }
+  let e = (1 - x / 2) / (1 + x / 2)
+  for (; k > 0; k--) e *= e
+  return e
+}
+
+/**
+ * (1 − e^(−a))/a, cu E = `scadereOra(a)`: cat din consumul unei ore ramane mancat, la rata constanta a. Sub `PRAG_PADE`, exact
+ * identitatea aproximantului, 1/(1 + a/2); scazut ca (1 − E)/a pierdea cifrele unui a mic (o fractie de sub cer ajunsa la
+ * 10^-17: 0, adica fara consum — un amestec cu pivnita tinea mai mult decat toata hrana fara alterare, ECRAN-3). 1 la a = 0.
+ */
+export function consumulScaderii(a: number, E: number): number {
+  return a > PRAG_PADE ? (1 - E) / a : 1 / (1 + a / 2)
 }
 
 /**
@@ -166,6 +193,9 @@ function rezultat(ticuri: number, rules: Rules, formaInchisa: boolean): Prognoza
   return { zile: ticuri / rules.calendar.ziTicks, plafonat: false, formaInchisa }
 }
 
+/** Cei mai multi sub-pasi dintr-o ora (`proiecteazaPeOre`): 1.024 acopera un exponent de 256 pe ora (o baza de ~2.000 de ori valoarea). */
+const SUBPASI_MAX = 1024
+
 /**
  * Proiectia cu pasul ORAR (vezi antetul), oricare ar fi bazinele: aici se testeaza si forma inchisa contra ei.
  *
@@ -173,6 +203,13 @@ function rezultat(ticuri: number, rules: Rules, formaInchisa: boolean): Prognoza
  * de rate: fractia sub cer f evolueaza singura, iar valoarea totala urmeaza dV/dt = −C − a(t)·V, cu a = f·a_cer + (1 − f)·a_inc.
  * Pe o ora, cu a constant, solutia e exacta: V₁ = V·e^(−a) − C·H·(1 − e^(−a))/a, iar daca hrana se termina in ora asta,
  * dupa ln(1 + a·V/(C·H))/a ore (`lnUnuPlus`). e^(−a) e `scadereOra`. Fara cer, iteratia da forma inchisa.
+ *
+ * Cand exponentul unei ore trece de `PRAG_PADE` (faramituri aproape stricate sub cer: baza/valoare mare; o incapere foarte
+ * calda), ora se imparte in 2^k sub-pasi egali, fiecare sub prag (ECRAN-3): trapezul pe f presupune ca f se schimba putin in
+ * pas, iar intr-o ora in care cerul se goleste el strica si hrana din pivnita (un amestec cu pivnita la rata 0 iesea sub cat
+ * tine pivnita singura). Sub prag (continutul implicit) ramane un singur pas, cu aceeasi aritmetica. La plafonul de sub-pasi
+ * (`SUBPASI_MAX`), un pas care tot trece de prag goleste cerul INTAI (pierderea lui exacta), apoi merge fara el; cand nu ramane
+ * nimic, fractia de sub cer e 0, nu 0/0 (Padé singur cadea la 0 exact de la a = 2, iar f devenea NaN: alterarea disparea).
  */
 export function proiecteazaPeOre(b: Bazine, rules: Rules): Prognoza {
   const C = b.consumPeTick
@@ -189,22 +226,41 @@ export function proiecteazaPeOre(b: Bazine, rules: Rules): Prognoza {
   let f = b.subCer.valoare / V
   for (let h = 0; h < ore; h++) {
     const ac = cer !== null && f > 0 ? cer(h) * ks : 0
-    // Fractia de sub cer la capatul orei; rata medie a orei, pe fractia de la mijloc (trapez: f scade in ora).
-    let f1 = f
-    if (f > 0) {
-      const Ec = scadereOra(ac)
-      f1 = (f * Ec) / (f * Ec + (1 - f) * Ei)
+    let n = 1
+    while (n < SUBPASI_MAX && Math.max(ac, ai) / n > PRAG_PADE) n *= 2
+    const acn = ac / n
+    const ain = ai / n
+    const CHn = CH / n
+    const Ein = n === 1 ? Ei : scadereOra(ain)
+    for (let j = 0; j < n; j++) {
+      let acj = acn
+      if (acj > PRAG_PADE && f > 0) {
+        // Doar la plafonul de sub-pasi (o baza de mii de ori valoarea): cerul se goleste in pas — pierderea lui intai, apoi pasul
+        // fara el; trapezul ar fi stricat si pivnita.
+        const fc = f * scadereOra(acj)
+        const ramas = fc + (1 - f)
+        V *= ramas
+        f = ramas > 0 ? fc / ramas : 0
+        acj = 0
+      }
+      // Fractia de sub cer la capatul pasului; rata medie a pasului, pe fractia de la mijloc (trapez: f scade in pas).
+      let f1 = f
+      if (f > 0) {
+        const Ec = scadereOra(acj)
+        f1 = (f * Ec) / (f * Ec + (1 - f) * Ein)
+      }
+      const fm = (f + f1) / 2
+      const a = fm * acj + (1 - fm) * ain
+      const E = scadereOra(a)
+      const V1 = V * E - CHn * consumulScaderii(a, E)
+      if (V1 <= 0) return rezultat((h + (j + Math.min(1, a > 0 ? lnUnuPlus((a * V) / CHn) / a : V / CHn)) / n) * H, rules, false)
+      f = f1
+      V = V1
     }
-    const fm = (f + f1) / 2
-    const a = fm * ac + (1 - fm) * ai
-    const E = scadereOra(a)
-    const V1 = a > 0 ? V * E - (CH * (1 - E)) / a : V - CH
-    if (V1 <= 0) return rezultat((h + Math.min(1, a > 0 ? lnUnuPlus((a * V) / CH) / a : V / CH)) * H, rules, false)
-    f = f1
-    V = V1
   }
   return rezultat(tickuriPeAn(rules), rules, false)
 }
+
 
 /**
  * Prognoza: cand nimic perisabil nu e sub cer, forma INCHISA (O(1)): t = V·ln(1 + L/C)/L, cu L pierderea pe tick a

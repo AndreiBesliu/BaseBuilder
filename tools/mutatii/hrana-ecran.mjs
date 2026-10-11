@@ -56,8 +56,8 @@ export const MUTATII = [
   {
     n: 'scaderea pe ora cu Euler (1 − a), nu e^(−a): −0,026 zile la 25 °C',
     f: P,
-    a: '  return a >= 2 ? 0 : (1 - a / 2) / (1 + a / 2)',
-    b: '  return a >= 1 ? 0 : 1 - a',
+    a: '  let e = (1 - x / 2) / (1 + x / 2)',
+    b: '  let e = 1 - x',
     t: T, e: 'HRANA ECRAN forma inchisa contra pasului orar',
   },
   {
@@ -77,16 +77,52 @@ export const MUTATII = [
   {
     n: 'fractia de sub cer nu scade: stocul amestecat pierde ca la inceput',
     f: P,
-    a: '      f1 = (f * Ec) / (f * Ec + (1 - f) * Ei)',
-    b: '      f1 = f',
+    a: '        f1 = (f * Ec) / (f * Ec + (1 - f) * Ein)',
+    b: '        f1 = f',
     t: T, e: 'HRANA ECRAN pasul orar sub cer',
   },
   {
     n: 'rata medie a orei pe fractia de la inceputul orei, nu de la mijloc',
     f: P,
-    a: '    const fm = (f + f1) / 2',
-    b: '    const fm = f',
+    a: '      const fm = (f + f1) / 2',
+    b: '      const fm = f',
     t: T, e: 'HRANA ECRAN pasul orar sub cer',
+  },
+  // ECRAN-3 (recenzia): cazurile limita ale pasului orar — faramituri aproape stricate (baza de zeci … mii de ori valoarea).
+  {
+    n: 'ECRAN-3: scadereOra fara injumatatire (Padé singur: 0,026 in loc de 0,150 la a = 1,9, 0 exact de la 2)',
+    f: P,
+    a: '  while (x > PRAG_PADE) {',
+    b: '  while (false && x > PRAG_PADE) {',
+    t: T, e: 'HRANA ECRAN cazurile limita',
+  },
+  {
+    n: 'ECRAN-3: ora intreaga, fara sub-pasi (trapezul pe o ora in care cerul se goleste: −0,009 zile la ks 30)',
+    f: P,
+    a: '    while (n < SUBPASI_MAX && Math.max(ac, ai) / n > PRAG_PADE) n *= 2',
+    b: '    while (false) n *= 2',
+    t: T, e: 'HRANA ECRAN cazurile limita',
+  },
+  {
+    n: 'ECRAN-3: fara golirea cerului la plafonul de sub-pasi (trapezul strica si pivnita; f = 0/0 sub cer)',
+    f: P,
+    a: '      if (acj > PRAG_PADE && f > 0) {',
+    b: '      if (false) {',
+    t: T, e: 'HRANA ECRAN cazurile limita',
+  },
+  {
+    n: 'ECRAN-3: cerul golit de tot da f = 0/0 (NaN: alterarea dispare, prognoza sare la plafon)',
+    f: P,
+    a: '        f = ramas > 0 ? fc / ramas : 0',
+    b: '        f = fc / ramas',
+    t: T, e: 'HRANA ECRAN cazurile limita',
+  },
+  {
+    n: 'ECRAN-3: consumul pasului scazut ca (1 − E)/a si sub prag (o fractie de 10^-17 da 0: fara consum)',
+    f: P,
+    a: '  return a > PRAG_PADE ? (1 - E) / a : 1 / (1 + a / 2)',
+    b: '  return a > 0 ? (1 - E) / a : 1',
+    t: T, e: 'HRANA ECRAN cazurile limita',
   },
   {
     n: 'forma inchisa fara ln: V/(C + L) in loc de V·ln(1 + L/C)/L',

@@ -24,7 +24,7 @@ import { celulaDeZonaPosibila } from '../src/sim/joburi.ts'
 import { componentaLa } from '../src/sim/camere.ts'
 import {
   fractiaSubCer, lnUnuPlus, mormanulDeHrana, pierdereaOreiSubCer, pragAlterare, prognozaFaraAlterare, prognozaHranei, proiecteaza,
-  proiecteazaPeOre, rataZilnica, stareaHranei,
+  proiecteazaPeOre, rataZilnica, scadereOra, stareaHranei,
 } from '../src/sim/prognoza.ts'
 import type { Bazine } from '../src/sim/prognoza.ts'
 import {
@@ -201,6 +201,49 @@ test('HRANA ECRAN monotonia: mai multa hrana — mai multe zile; mai multi oamen
   const intreaga = proiecteaza(subCer(7, 0, 1500, 1), R).zile
   const faramitata = proiecteaza({ ...subCer(7, 0, 1500, 1), subCer: { valoare: 1500, baza: 750 * NUT } }, R).zile
   assert.ok(faramitata < intreaga, `faramitata ${faramitata}, intreaga ${intreaga}`)
+})
+
+test('HRANA ECRAN cazurile limita ale pasului orar (ECRAN-3): e^(−a) nu cade la 0 la a = 2, faramitele pierd monoton, amestecul tine cel putin cat pivnita', () => {
+  // scadereOra: sub PRAG_PADE exact Padé (continutul implicit); peste, injumatatita — nu 0 EXACT de la a = 2 (0,150 la 1,9:
+  // Padé singur dadea 0,026). Eroarea absoluta, masurata: sub 0,0014 pana la a = 1000.
+  for (const a of [0, 0.01, 0.1, 0.25]) assert.equal(scadereOra(a), (1 - a / 2) / (1 + a / 2), `a = ${a}`)
+  let inainte = 1
+  for (const a of [0.26, 0.5, 1, 1.9, 2, 2.5, 3, 5, 10, 30, 100, 700]) {
+    const e = scadereOra(a)
+    assert.ok(e > 0 && e < inainte, `a = ${a}: ${e} (inainte ${inainte})`)
+    assert.ok(Math.abs(e - Math.exp(-a)) < 0.002, `a = ${a}: ${e} vs ${Math.exp(-a)}`)
+    inainte = e
+  }
+  assert.equal(scadereOra(Infinity), 0)
+  // Monotonia pe raportul baza/valoare (faramituri aproape stricate: masurat la B, 100 u de valoare in 750 de unitati): mai
+  // multa baza — cel mult tot atatea zile, mereu un numar. Inainte: la 300 (toamna) si 100 (vara), f = 0/0 = NaN, alterarea
+  // disparea si prognoza sarea la V/C (1,55 zile in loc de ~0,07).
+  const pivnitaSingura = 750 / OM / ZI
+  for (const [nume, tk] of [['toamna', 0], ['vara', tickLa(0, 1, 2, 14)]] as const) {
+    let cer = Infinity
+    let amestec = Infinity
+    for (const ks of [1, 2, 7.5, 30, 100, 300, 1000, 1e5, 1e12]) {
+      const zc = proiecteaza({ seed: 7, tick: tk, subCer: { valoare: 1500, baza: 1500 * ks }, incaperi: { valoare: 0, pierderePeTick: 0 }, consumPeTick: OM }, R).zile
+      assert.ok(Number.isFinite(zc) && zc <= cer + 1e-12, `${nume}, cer, ks ${ks}: ${zc} (inainte ${cer})`)
+      cer = zc
+      // Jumatate sub cer, jumatate intr-o pivnita la rata 0: nu tine NICIODATA mai putin decat pivnita singura (consumul ia din
+      // pivnita cel mult C pe tick), nici mai mult decat toata hrana fara alterare. Inainte: 0,04 zile la ks 1.000 (trapezul pe o
+      // ora in care cerul se goleste strica si pivnita) si 2,77 la ks 300 (o fractie de 10^-17: (1 − E)/a = 0, fara consum).
+      const b: Bazine = { seed: 7, tick: tk, subCer: { valoare: 750, baza: 750 * ks }, incaperi: { valoare: 750, pierderePeTick: 0 }, consumPeTick: OM }
+      const za = proiecteaza(b, R).zile
+      assert.ok(za >= pivnitaSingura - 1e-9 && za <= 1500 / OM / ZI + 1e-9, `${nume}, amestec, ks ${ks}: ${za} (pivnita singura ${pivnitaSingura})`)
+      assert.ok(za <= amestec + 1e-12, `${nume}, amestec, ks ${ks}: ${za} (inainte ${amestec})`)
+      amestec = za
+      // Si contra modelului de 1 Hz, pana la ks 300 (masurat: |dif| ≤ 0,0012 zile; inainte pana la 1,52).
+      if (ks <= 300) {
+        const adevar = proiectiaPe1Hz(b) / ZI
+        assert.ok(Math.abs(za - adevar) < 0.005, `${nume}, amestec, ks ${ks}: ${za} vs 1 Hz ${adevar}`)
+        const bc: Bazine = { ...b, subCer: { valoare: 1500, baza: 1500 * ks }, incaperi: { valoare: 0, pierderePeTick: 0 } }
+        const ac = proiectiaPe1Hz(bc) / ZI
+        assert.ok(Math.abs(zc - ac) < 0.005, `${nume}, cer, ks ${ks}: ${zc} vs 1 Hz ${ac}`)
+      }
+    }
+  }
 })
 
 test('HRANA ECRAN plafonul: un an de calendar („peste un an"), in ambele forme', () => {
