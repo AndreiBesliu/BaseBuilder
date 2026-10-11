@@ -15,7 +15,8 @@
  * ## Ce numara
  *
  * - `unitati`: din felurile pe care camara le REFUZA, ce sta pe celulele ei si nu e deja promis unui caraus (cantitatea minus
- *   rezervarile CARAT) — ce a plecat deja nu mai cere loc.
+ *   rezervarile CARAT) — ce a plecat deja nu mai cere loc. Felurile perisabile (hrana) nu sunt moloz: nu intra niciodata
+ *   (pe un depozit care refuza hrana, locul ei e camara, nu o groapa — JOC-4).
  * - `loc`: locul pentru ele in CELELALTE depozite vii care le primesc felul — aceeasi idee de celula libera ca indexul
  *   (nerezervata ca destinatie, nu sub un santier viu): o celula goala da `itemStackMax` daca zona ei primeste macar unul
  *   din felurile de moloz, una partiala doar pe felul ei. Orice depozit e strict mai bun decat camara pentru un fel refuzat
@@ -74,7 +75,8 @@ export function groapaDeMoloz(w: World, rules: Rules, zonaId: number): GroapaDeM
     const i = itemLaCelula(it, c.wx[cs]!, c.wy[cs]!, c.z[cs]!)
     if (i === -1) continue
     const k = it.kind[i]!
-    if (primesteFel(s, zc, k)) continue
+    // Hrana nu e moloz (JOC-4): pe un depozit care o refuza (groapa insasi), locul ei e camara, nu o groapa noua.
+    if (primesteFel(s, zc, k) || rules.perisabil[k] === true) continue
     celuleOcupate++
     const liber = Math.max(0, it.cantitate[i]! - sumaRezervata(w.rezervari, it.id[i]!, Strat.CARAT))
     if (liber === 0) continue

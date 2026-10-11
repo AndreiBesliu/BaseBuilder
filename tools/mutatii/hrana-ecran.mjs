@@ -455,6 +455,28 @@ export const MUTATII = [
     b: '  for (let d = 5; d <= RAZA_GROAPA; d++) {',
     t: T, e: 'HRANA ECRAN groapa de moloz',
   },
+  // JOC-4 (recenzia): doar camara propune groapa; hrana nu e moloz.
+  {
+    n: 'JOC-4: orice depozit cu filtru isi propune groapa (si groapa insasi, pentru hrana si pamantul de pe ea)',
+    f: M,
+    a: '  return esteCamara(w, zs) ? groapaDeMoloz(w, rules, w.zone.id[zs]!) : null',
+    b: '  return groapaDeMoloz(w, rules, w.zone.id[zs]!)',
+    t: T, e: 'HRANA ECRAN groapa doar pe camara',
+  },
+  {
+    n: 'JOC-4: hrana de pe un depozit care o refuza (groapa) numarata ca moloz',
+    f: 'src/sim/camara.ts',
+    a: '    if (primesteFel(s, zc, k) || rules.perisabil[k] === true) continue\n',
+    b: '    if (primesteFel(s, zc, k)) continue\n',
+    t: T, e: 'HRANA ECRAN groapa doar pe camara',
+  },
+  {
+    n: 'JOC-4: felul PRIMIT de depozit (piatra pe groapa) numarat ca moloz',
+    f: 'src/sim/camara.ts',
+    a: '    if (primesteFel(s, zc, k) || rules.perisabil[k] === true) continue\n',
+    b: '    if (rules.perisabil[k] === true) continue\n',
+    t: T, e: 'HRANA ECRAN groapa doar pe camara',
+  },
   // ECRAN-4 (recenzia): textele camarii.
   {
     n: 'ECRAN-4: capacitatea unui om „Ține hrana a un om"',

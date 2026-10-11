@@ -29,7 +29,7 @@ import {
 import type { Bazine } from '../src/sim/prognoza.ts'
 import {
   alterareaMormanului, aplicaZona, capacitateCamara, Clasa, clasaLaT, clasaMormanului, clasaPrognozei, creeazaMemorieHrana, esteCamara,
-  hranaEcran, inspecteazaCelula, locGroapa, MASCA_DOAR_HRANA, mormanPeLoc, PRAG_APROAPE_ZI, PRAG_ATENTIE_ZILE, PRAG_CRITIC_ZILE,
+  groapaCamarei, hranaEcran, inspecteazaCelula, locGroapa, MASCA_DOAR_HRANA, mormanPeLoc, PRAG_APROAPE_ZI, PRAG_ATENTIE_ZILE, PRAG_CRITIC_ZILE,
   prognozaJocNou, rezumatColonie, semnaleAlerte, suprafataColoanei, textPasiHrana, textPasulCamarii, textPrognozaBara,
 } from '../viewer/ui/model.ts'
 import { cheieListei } from '../viewer/ui/alerte.ts'
@@ -677,6 +677,44 @@ test('HRANA ECRAN groapa de moloz dintr-un clic: locul langa camara, filtrul gro
   assert.equal(lh.z, h.g + 1, `groapa pe sol, nu pe acoperis: ${JSON.stringify({ dx: lh.x0 - h.hx, dy: lh.y0 - h.hy, dz: lh.z - h.g })}`)
   const peste = lh.x0 + gh.latura > h.hx && lh.x0 < h.hx + 7 && lh.y0 + gh.latura > h.hy && lh.y0 < h.hy + 7
   assert.equal(peste, false, 'in afara amprentei casei')
+})
+
+test('HRANA ECRAN groapa doar pe camara (JOC-4): pe groapa insasi, hrana si pamantul lasate pe ea nu sunt „moloz" — fara „Cămara nu primește", fara propunere; camara o propune in continuare', () => {
+  const { w, sit } = laSit(4242, 1)
+  const c = patratPlat(w, sit, 2, 4, 12)!
+  const g = patratPlat(w, sit, 2, 14, 30)!
+  const d = patratPlat(w, sit, 1, 32, 48)!
+  assert.ok(c && g && d, 'fixtura: trei patrate plate')
+  // Camara 2×2: trei celule pline de hrana, una cu 20 de piatra (molozul ei).
+  const camara = picteaza(w, c.x0, c.y0, 2)
+  bun(applyCommand(w, { kind: 'setFiltruZona', id: camara, refuzate: MASCA_DOAR_HRANA }, R), 'filtrul camarii')
+  for (const [dx, dy] of [[0, 0], [1, 0], [0, 1]] as const) lasaItem(w, H, 75, c.x0 + dx, c.y0 + dy)
+  lasaItem(w, Item.PIATRA, 20, c.x0 + 1, c.y0 + 1)
+  // Groapa 2×2 „doar piatră": 50 de hrana si 30 de pamant lasate pe ea (un caraus intrerupt), doua celule pline de piatra.
+  const groapa = picteaza(w, g.x0, g.y0, 2)
+  bun(applyCommand(w, { kind: 'setFiltruZona', id: groapa, refuzate: ((1 << ITEME) - 1) & ~(1 << Item.PIATRA) }, R), 'filtrul gropii')
+  lasaItem(w, H, 50, g.x0, g.y0)
+  lasaItem(w, Item.PAMANT, 30, g.x0 + 1, g.y0)
+  for (const dx of [0, 1]) lasaItem(w, Item.PIATRA, 75, g.x0 + dx, g.y0 + 1)
+  // Un depozit general de o celula, plin de pamant: pamantul si hrana sunt primite undeva, dar nu mai au loc.
+  picteaza(w, d.x0, d.y0, 1)
+  lasaItem(w, Item.PAMANT, 75, d.x0, d.y0)
+  indexZone(w, R)
+  const zsG = slotZona(w.zone, groapa)
+  const zsC = slotZona(w.zone, camara)
+  // Groapa nu e camara: nicio propunere (inainte: avertismentul si butonul, pentru hrana si pamant).
+  assert.equal(groapaCamarei(w, R, zsG), null, 'groapa nu propune o groapa')
+  // Hrana nu e moloz nici in functia simularii (a doua plasa): pe groapa, doar pamantul e „refuzat si fara loc".
+  assert.equal(groapaDeMoloz(w, R, groapa)!.feluri, 1 << Item.PAMANT, 'hrana nu intra in felurile molozului')
+  // Pe mormanele de pe groapa, nicio cauza „Cămara nu primește …" (zona nu e camara).
+  for (const [nume, dx] of [['hrana', 0], ['pamantul', 1]] as const) {
+    const t = inspecteazaCelula(w, R, g.x0 + dx, g.y0, g.g, null).morman!.stare.titlu
+    assert.doesNotMatch(t, /^Cămara/, `${nume} de pe groapa: ${t}`)
+  }
+  // Controlul: camara isi propune groapa pentru piatra ei (fara loc: groapa e plina), cu cauza pe morman.
+  const gc = groapaCamarei(w, R, zsC)!
+  assert.ok(gc !== null && gc.propusa > 0 && gc.feluri === 1 << Item.PIATRA, `camara: ${JSON.stringify(gc)}`)
+  assert.equal(inspecteazaCelula(w, R, c.x0 + 1, c.y0 + 1, c.g, null).morman!.stare.titlu, 'Cămara nu primește piatră, iar în depozite nu mai e loc: lipsesc 20 (o celulă).')
 })
 
 /**

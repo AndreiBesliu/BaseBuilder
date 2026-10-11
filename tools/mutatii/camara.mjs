@@ -268,9 +268,11 @@ export const MUTATII = [
     t: T, e: 'groapaDeMoloz pe hartie',
   },
   {
+    // Toata linia (felul primit SI cel perisabil): hrana de pe camara iese „moloz". Fiecare jumatate are proba ei in hrana-ecran
+    // (JOC-4: groapa cu piatra si hrana pe ea).
     n: 'groapa: felurile PRIMITE de camara se numara ca moloz',
     f: 'src/sim/camara.ts',
-    a: '    if (primesteFel(s, zc, k)) continue\n',
+    a: '    if (primesteFel(s, zc, k) || rules.perisabil[k] === true) continue\n',
     b: '',
     t: T, e: 'groapaDeMoloz pe hartie',
   },

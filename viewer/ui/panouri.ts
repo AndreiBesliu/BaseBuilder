@@ -17,11 +17,10 @@ import type { Rules } from '../../src/sim/content.ts'
 import type { World } from '../../src/sim/state.ts'
 import { CATEGORII, Faction, Item, ITEME, Piesa } from '../../src/sim/state.ts'
 import { slotZona, Zona } from '../../src/sim/zone.ts'
-import { groapaDeMoloz } from '../../src/sim/camara.ts'
 import { pragAlterare } from '../../src/sim/prognoza.ts'
 import { ascuns, attr, clasa, h, text } from './dom.ts'
 import { ICON } from './iconite.ts'
-import { capacitateCamara, cauzaGolirii, clasaPrognozei, creeazaMemorieHrana, creeazaMemorieTermica, creeazaPrevizualizare, esteCamara, golita, insigneBara, inspecteazaCelula, locGroapa, MASCA_DOAR_HRANA, mormanPeLoc, PRAG_APROAPE_ZI, prognozaJocNou, refacePrevizualizarea, inspecteazaPion, randuriOameni, rezumatColonie, semnaleAlerte, textPasiHrana, textPasulCamarii, textPrognozaBara, tooltipHrana } from './model.ts'
+import { capacitateCamara, cauzaGolirii, clasaPrognozei, creeazaMemorieHrana, creeazaMemorieTermica, creeazaPrevizualizare, esteCamara, golita, groapaCamarei, insigneBara, inspecteazaCelula, locGroapa, MASCA_DOAR_HRANA, mormanPeLoc, PRAG_APROAPE_ZI, prognozaJocNou, refacePrevizualizarea, inspecteazaPion, randuriOameni, rezumatColonie, semnaleAlerte, textPasiHrana, textPasulCamarii, textPrognozaBara, tooltipHrana } from './model.ts'
 import { cheieInspectorCelula, creeazaMemorieIncapere, usilePropuse } from './memorie-incapere.ts'
 import type { UsilePropuse } from './memorie-incapere.ts'
 import type { Bara, FiltruOameni, IncapereLa, InspectieCelula, NormalaFetei, Previz, RandOm } from './model.ts'
@@ -724,7 +723,8 @@ export function monteazaUI(ctx: ContextUI): UI {
   }
   function picteazaGroapa(): void {
     if (zonaInspectata < 0) return
-    const g = groapaDeMoloz(w, rules, zonaInspectata)
+    const zs = slotZona(w.zone, zonaInspectata)
+    const g = zs === -1 ? null : groapaCamarei(w, rules, zs)
     if (g === null || g.propusa <= 0) { scrieInspector(true); return }
     const loc = locGroapa(w, rules, zonaInspectata, g.latura)
     if (loc === null) {
@@ -747,7 +747,8 @@ export function monteazaUI(ctx: ContextUI): UI {
     attr(btnDoarHrana, 'aria-pressed', z.refuzate === MASCA_DOAR_HRANA ? 'true' : 'false')
     ascuns(zonaCapacitate, !cam)
     if (cam) text(zonaCapacitate, textCapacitateCamara(capacitateCamara(w, rules, zs, HRANA_PE_OM)))
-    const g = z.refuzate !== 0 ? groapaDeMoloz(w, rules, z.id) : null
+    // Doar o camara propune groapa (JOC-4): nu groapa insasi, nici alt depozit cu filtru.
+    const g = zs === -1 ? null : groapaCamarei(w, rules, zs)
     const propune = g !== null && g.propusa > 0
     ascuns(groapaEl, !propune)
     if (g !== null && propune) {

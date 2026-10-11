@@ -382,14 +382,24 @@ export function camaraCuLoc(w: World, rules: Rules, fel: number, faraZs = -1): {
   return best
 }
 
-/** Groapa de moloz a zonei de pe celula (wx, wy, z), daca e o camara: `groapaDeMoloz` (src/sim/camara.ts). */
+/**
+ * Groapa de moloz a CAMARII din slotul `zs` (`groapaDeMoloz`, src/sim/camara.ts); null daca zona nu e o camara. Doar camara
+ * propune groapa (§5): inainte, orice depozit cu filtru — si groapa insasi („doar piatră"), cu hrana sau pamant lasate pe
+ * ea si fara loc in alta parte — primea avertismentul si butonul, iar pe mormanul ei cauza „Cămara nu primește …"; butonul
+ * picta pentru hrana o a doua camara, la suprafata (JOC-4). Inspectorul (avertismentul, butonul, clicul) si cauza de pe
+ * moloz citesc de aici.
+ */
+export function groapaCamarei(w: World, rules: Rules, zs: number): GroapaDeMoloz | null {
+  return esteCamara(w, zs) ? groapaDeMoloz(w, rules, w.zone.id[zs]!) : null
+}
+
+/** Groapa de moloz a zonei de pe celula (wx, wy, z), daca e o camara (`groapaCamarei`). */
 function groapaZoneiLa(w: World, rules: Rules, wx: number, wy: number, z: number): { readonly zs: number; readonly g: GroapaDeMoloz } | null {
   const cs = celulaDeZonaLa(w.zone, wx, wy, z)
   if (cs === -1) return null
-  const zid = w.zone.celule.zonaId[cs]!
-  const zs = slotZona(w.zone, zid)
-  if (zs === -1 || w.zone.kind[zs] !== Zona.DEPOZIT || w.zone.refuzate[zs] === 0) return null
-  const g = groapaDeMoloz(w, rules, zid)
+  const zs = slotZona(w.zone, w.zone.celule.zonaId[cs]!)
+  if (zs === -1) return null
+  const g = groapaCamarei(w, rules, zs)
   return g === null ? null : { zs, g }
 }
 
