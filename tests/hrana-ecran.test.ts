@@ -162,10 +162,13 @@ test('HRANA ECRAN pasul orar sub cer, pe AERUL VIITOR: la 0,005 zile de modelul 
     assert.ok(Math.abs(p.zile - adevar) < 0.005, `${nume}: prognoza ${p.zile}, modelul de 1 Hz ${adevar}`)
   }
   // Iarna: o fereastra in care aerul nu trece de banda moarta 2 zile intregi — sub cer nu se pierde nimic, deci V/C.
-  let tk = tickLa(0, 3, 1, 0)
+  // Cautarea are PLAFON (PORTI-5): fara el, o clima cu +3 °C (nicio fereastra de 48 h tot anul, masurat) facea bucla
+  // infinita — `node --test` n-are timeout implicit, deci `check` si CI atarnau in loc sa iasa rosii.
+  const iarna0 = tickLa(0, 3, 1, 0)
   const zero = (t0: number): boolean => { for (let h = 0; h < 48; h++) if (pierdereaOreiSubCer(7, t0, R, h) > 0) return false; return true }
-  while (!zero(tk)) tk += ORA
-  assert.ok(tk < tickLa(0, 3, 1, 0) + 4 * ZI, 'fixtura: iarna are 2 zile fara pierdere sub cer')
+  let tk = iarna0
+  for (; tk < iarna0 + 4 * ZI && !zero(tk); tk += ORA) { /* cauta fereastra */ }
+  assert.ok(tk < iarna0 + 4 * ZI, 'fixtura: iarna are 2 zile fara pierdere sub cer')
   const C = 41400 / ZI
   const b = { seed: 7, tick: tk, subCer: { valoare: 41400, baza: 41400 }, incaperi: { valoare: 0, pierderePeTick: 0 }, consumPeTick: C }
   assert.ok(Math.abs(proiecteaza(b, R).zile - 1) < 1e-9, `iarna: ${proiecteaza(b, R).zile}`)
@@ -208,6 +211,16 @@ test('HRANA ECRAN plafonul: un an de calendar („peste un an"), in ambele forme
   assert.equal(sub.plafonat, false)
 })
 
+/** Unitatile de mancare (nutritie > 0) ale lumii: pe mormane si in mainile oricui — fara nimic din prognoza.ts. */
+function unitatiDeHrana(w: World): number {
+  let n = 0
+  const it = w.iteme
+  for (let i = 0; i < it.count; i++) if (it.alive[i] === 1 && (R.nutritie[it.kind[i]!] ?? 0) > 0) n += it.cantitate[i]!
+  const a = w.agents
+  for (let i = 0; i < a.count; i++) if (a.alive[i] === 1 && a.caraCantitate[i]! > 0 && (R.nutritie[a.caraKind[i]!] ?? 0) > 0) n += a.caraCantitate[i]!
+  return n
+}
+
 test('HRANA ECRAN oracolul: prognoza contra simularii reale (6 pioni mananca, hrana sub cer se strica), ora cu ora — eroare in ±0,25 zile', () => {
   const seed = 7
   const { w, sit } = laSit(seed, 6)
@@ -220,13 +233,18 @@ test('HRANA ECRAN oracolul: prognoza contra simularii reale (6 pioni mananca, hr
     pus += c
   }
   const prog: [number, number][] = []
+  const t0 = w.tick
   let fin = -1
   for (let t = 0; t < 8 * ZI; t++) {
     if (w.tick % ORA === 0) prog.push([w.tick, prognozaHranei(w, R).zile])
     tick(w, R)
-    if (w.tick % TPS === 0 && stareaHranei(w, R).valoare <= 0) { fin = w.tick; break }
+    // Adevarul vine din LUME, nu din prognoza.ts (PORTI-3): `stareaHranei` e chiar intrarea prognozei, deci o valoare 0 acolo
+    // dadea „0 zile" si „s-a terminat la 20 de tickuri" — eroare −0,0005, verde. Aici: unitatile de hrana ramase. Masurat pe
+    // 7 / 42 / 2026: acelasi tick ca „valoarea ≤ 0" (un morman viu are valoare > 0).
+    if (w.tick % TPS === 0 && unitatiDeHrana(w) === 0) { fin = w.tick; break }
   }
-  assert.ok(fin > 0, 'hrana trebuie sa se termine')
+  // Simularea trebuie sa fi DURAT (masurat: 2,88–2,95 zile, 70–71 de ore prognozate): altfel oracolul compara nimic cu nimic.
+  assert.ok(fin > 0 && fin - t0 > 2 * ZI && prog.length >= 48, `hrana trebuie sa se termine dupa peste 2 zile: fin ${fin}, ${prog.length} ore`)
   const erori = prog.map(([t, z]) => z - (fin - t) / ZI)
   // Masurat (seminte 7 / 42 / 2026, aceeasi scena): −0,166 … +0,172 zile; la t = 0, 2,852 prognozate, 2,882–2,947 reale
   // (restul e rezerva de foame a pionilor). Fara alterare ar fi 3,565: prognoza veche gresea cu +0,62…+0,68 zile.
@@ -507,8 +525,11 @@ test('HRANA ECRAN „Se strică aici; cămara are loc": doar pe hrana care se st
   bun(applyCommand(w, { kind: 'setPrioritateZona', id: camara, prioritate: 3 }, R), 'prioritatea')
   assert.equal(insp().titlu, 'Se strică aici; cămara are loc.')
   const t0 = w.tick
-  let iarna = tickLa(0, 3, 1, 0)
-  while (fractiaSubCer(w.seed, iarna, R, 24) > 0) iarna += ORA
+  // Cautarea are PLAFON, un an (PORTI-5): o clima fara nicio zi de iarna sub prag ar fi facut-o infinita.
+  const iarna0 = tickLa(0, 3, 1, 0)
+  let iarna = iarna0
+  for (; iarna < iarna0 + AN && fractiaSubCer(w.seed, iarna, R, 24) > 0; iarna += ORA) { /* cauta fereastra */ }
+  assert.ok(iarna < iarna0 + AN, 'fixtura: un an are 24 h fara pierdere sub cer')
   w.tick = iarna
   assert.equal(clasaMormanului(R, mormanulDeHrana(w, R, slot)!), Clasa.PASTREAZA)
   assert.equal(insp().titlu, 'În depozit.', 'iarna: se pastreaza')
@@ -517,6 +538,16 @@ test('HRANA ECRAN „Se strică aici; cămara are loc": doar pe hrana care se st
   for (let k = 0; k < 9; k++) lasaItem(w, H, 75, c.x0 + (k % 3), c.y0 + Math.floor(k / 3))
   assert.equal(insp().titlu, 'În depozit.')
   void general
+  // Hrana care se strica IN camara (o camara de suprafata, toamna), cu loc in ea: camara nu-si e singura sfat (PORTI-4) —
+  // fara `faraZs`, ea insasi „are loc" la rangul locului (7 ≤ 7) si inspectorul cerea „Ridică prioritatea cămării peste a
+  // depozitului ăstuia (cămara 3, aici 3)".
+  const s2 = laSit(4242, 1)
+  const c2 = patratPlat(s2.w, s2.sit, 3, 14, 30)!
+  const cam2 = picteaza(s2.w, c2.x0, c2.y0, 3, 3)
+  bun(applyCommand(s2.w, { kind: 'setFiltruZona', id: cam2, refuzate: MASCA_DOAR_HRANA }, R), 'filtrul')
+  const slot2 = s2.w.iteme.laId.get(lasaItem(s2.w, H, 75, c2.x0, c2.y0))!
+  assert.equal(clasaMormanului(R, mormanulDeHrana(s2.w, R, slot2)!), Clasa.STRICA, 'sub cer, toamna: se strica')
+  assert.deepEqual(inspecteazaCelula(s2.w, R, c2.x0, c2.y0, s2.w.iteme.z[slot2]! - 1, null).morman!.stare, { titlu: 'În depozit.', actiune: '' }, 'in camara: niciun sfat spre ea insasi')
 })
 
 test('HRANA ECRAN groapa de moloz dintr-un clic: locul langa camara, filtrul gropii, avertismentul si cauza pe moloz cu cifrele; dupa groapa, nimic', () => {

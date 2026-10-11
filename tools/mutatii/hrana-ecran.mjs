@@ -377,11 +377,12 @@ export const MUTATII = [
     t: T, e: 'HRANA ECRAN „Se strică aici',
   },
   {
+    // Trimisa spre testul ei (PORTI-4): inainte o prindea doar cheia inspectorului, prin textul starii din JSON-ul cheii.
     n: 'camara isi e singura sfat: mormanul din camara calda „cămara are loc"',
     f: M,
     a: '    if (zs === faraZs || !esteCamara(w, zs) || !primesteFel(s, zs, fel)) continue',
     b: '    if (!esteCamara(w, zs) || !primesteFel(s, zs, fel)) continue',
-    t: T, e: 'HRANA ECRAN cheia inspectorului',
+    t: T, e: 'HRANA ECRAN „Se strică aici',
   },
   {
     n: 'cauza gropii si cand niciun depozit nu primeste felul („nu mai e loc" in loc de FEL_REFUZAT)',
@@ -468,5 +469,29 @@ export const MUTATII = [
     a: '  return `stricat ${textNumar(stricat)} · în pericol ${textNumar(pericol)} · ${textProcent1(pierdereZi)}/zi`',
     b: '  return `stricat ${textNumar(stricat)} · în pericol ${textNumar(stricat)} · ${textProcent1(pierdereZi)}/zi`',
     t: T, e: 'HRANA ECRAN F3',
+  },
+
+  // --- plasele testelor (recenzia t.3, SIM): un oracol cu adevar propriu; o fixtura care nu mai exista iese ROSIE, nu atarna ---
+  {
+    n: 'PORTI-3: evalueazaMorman da valoarea 0 — prognoza „0 zile"; oracolul care lua sfarsitul din stareaHranei trecea gol',
+    f: P,
+    a: '  return { slot: i, id: it.id[i]!, kind, cantitate: q, valoare: nutritieEfectiva(q, it.alterare[i]!, nut), loc, tQ16: t, rataZi }',
+    b: '  return { slot: i, id: it.id[i]!, kind, cantitate: q, valoare: 0, loc, tQ16: t, rataZi }',
+    t: T, e: 'HRANA ECRAN oracolul',
+  },
+  {
+    n: 'PORTI-5: clima +3 °C — nicio fereastra de iarna de 48 h tot anul: cautarea din „pasul orar" (fara plafon atarna)',
+    f: 'src/sim/content.ts',
+    a: '    tMedieMc: 9400,',
+    b: '    tMedieMc: 12400,',
+    t: T, e: 'HRANA ECRAN pasul orar sub cer',
+  },
+  {
+    n: 'PORTI-5: clima +3 °C fara valul de frig — nicio zi de iarna sub prag: cautarea din „Se strică aici" (fara plafon atarna)',
+    f: 'src/sim/content.ts',
+    a: '    tMedieMc: 9400,',
+    b: '    tMedieMc: 12400,',
+    e2: [{ f: 'src/sim/content.ts', a: '    valFrig: { amplitudineMc: -10000,', b: '    valFrig: { amplitudineMc: 0,' }],
+    t: T, e: 'HRANA ECRAN „Se strică aici',
   },
 ]
