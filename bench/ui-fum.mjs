@@ -64,7 +64,8 @@ const NEGATIVA = NEG === undefined ? null : NEG.includes('=') ? NEG.slice(NEG.in
  * avansului, raportat ca N tickuri rulate (rosul vine doar din S; PORTI-1); pastrare — hrana „din pivnita" pusa la suprafata; alerta-alterare — lista de alerte refacuta FORTAT intre
  * mousedown si mouseup; U-prag — gestul (Q/E, U) pe alt nivel decat al pivnitelor; camara — Zone fara clicul pe „Cămară";
  * groapa — podeaua gropii sapata dupa clic (celulele ei nu mai sunt calcabile: nu ajunge niciun moloz, ca pe un acoperis).
- * Recenzia t.3, ECRAN (ECRAN-2): strica-aici / strica-aici-rece — gestul fara clicul pe „+ prioritate" (depozitul ramane la 3).
+ * Recenzia t.3, ECRAN (ECRAN-2): strica-aici / strica-aici-rece — gestul fara clicul pe „+ prioritate" (depozitul ramane la 3);
+ * (PORTI-2) bara-praguri — jocul implicit (2.760 de hrana) in locul celor cu putina hrana: nicio clasa.
  */
 const TINTE_NEGATIVE = {
   sapa: 'sapa', pauza: 'pauza', salvare: 'salvare', desen: 'casa-desenata', exceptie: 'joc-nou',
@@ -75,6 +76,7 @@ const TINTE_NEGATIVE = {
   'bara-prognoza': 'bara-prognoza', 'alterare-inspector': 'alterare-inspector', 'alterare-timp': 'alterare-timp',
   pastrare: 'alterare-pastrata', 'alerta-alterare': 'alerta-alterare', 'U-prag': 'U-prag', camara: 'camara-unealta',
   groapa: 'groapa-clic', 'strica-aici': 'camara-strica-aici', 'strica-aici-rece': 'camara-strica-aici-rece',
+  'bara-praguri': 'bara-praguri',
 }
 if (NEGATIVA !== null && !Object.hasOwn(TINTE_NEGATIVE, NEGATIVA)) { console.log(`proba negativa necunoscuta: ${NEGATIVA} (sunt: ${Object.keys(TINTE_NEGATIVE).join(', ')})`); process.exit(2) }
 const POZE = argv.find((a) => a.startsWith('--poze='))?.slice('--poze='.length) ?? null
@@ -1934,7 +1936,7 @@ async function paginaHranei() {
     const clase = (x) => x.cls.includes('critic') === (x.clasa === 'critic') && x.cls.includes('atentie') === (x.clasa === 'atentie')
     bifa('bara-prognoza', r.pauza && r.bara !== r.fara && /^~[0-9]+,[0-9] zile$/.test(r.bara) && r.text === asteptat(r) && clase(r) && r.titlu.endsWith(r.coada) && r.titlu.includes(`ajunge ${r.bara}`)
       && av.rulate === 1680 && r2.pauza && r2.text === asteptat(r2) && clase(r2) && r2.titlu.endsWith(r2.coada),
-      'bara de sus, in pauza: prognoza hranei == functia ecranului pe starea de acum (pe VALOARE, cu alterarea; diferita de cea fara alterare), clasa atentie/critic dupa pragurile in zile, tooltip-ul cu „hrănește cât … · ajunge …" si „nu se poate produce încă"; la fel dupa o ora de tickuri reale',
+      'bara de sus, in pauza: prognoza hranei == functia ecranului pe starea de acum (pe VALOARE, cu alterarea; diferita de cea fara alterare), clasa din DOM == clasaPrognozei (aici niciuna: ~2,8 zile; pragurile le probeaza `bara-praguri`), tooltip-ul cu „hrănește cât … · ajunge …" si „nu se poate produce încă"; la fel dupa o ora de tickuri reale',
       JSON.stringify({ r: { ...r, titlu: r.titlu.slice(-120) }, r2: { text: r2.text, bara: r2.bara, fara: r2.fara, tick: r2.tick }, rulate: av.rulate }))
     await pH.poza('h1-bara-prognoza.png')
   })
@@ -2216,6 +2218,28 @@ async function paginaHranei() {
     bifa('joc-nou-dialog', r0.text === r0.asteptat && forma(r0.text) && r0.oameni === 12 && r1.oameni === 6 && r1.hrana === 1380 && r1.text === r1.asteptat && r2.oameni === 6 && r2.hrana === 2760 && r2.text === r2.asteptat && forma(r2.text) && r2.text !== r1.text,
       'dialogul Joc nou: textul de sub formular == prognoza jocului nou (aceeasi proiectie: sub cer la tickul 0 si intr-o camara) pentru campurile de acum; dupa „6" tastat real in Oameni (hrana se trage la 1.380) si „2760" tastat in Hrană, textul nou == functia',
       JSON.stringify({ r0: { ...r0, oameniX: undefined, hranaX: undefined }, r1: { ...r1, oameniX: undefined, hranaX: undefined }, r2: { ...r2, oameniX: undefined, hranaX: undefined } }))
+  })
+  // --- h11. clasele barei sub praguri (UI-14; recenzia t.3, PORTI-2): pe pagina hranei prognoza (~2,8 zile) nu se apropie de
+  // 0,893 / 0,298 zile, deci `bara-prognoza` vedea doar „fara clasa" — o clasa inversata sau scoasa din panouri.ts ramanea verde.
+  // Doua jocuri noi cu putina hrana, pe pauza: 150 (~0,19 zile, „critic") si 400 (~0,48 zile, „atentie"); textul barei == functia,
+  // clasa din DOM == clasaPrognozei == cea asteptata, fara cealalta ---
+  await pas('bara-praguri', async () => {
+    const citiri = []
+    for (const [hrana, asteptata] of [[150, 'critic'], [400, 'atentie']]) {
+      // Proba negativa: gestul pe jocul implicit (2.760 de hrana, ~2,8 zile) in locul celui cu putina hrana — nicio clasa.
+      const pg = await pagina(`?joc=nou&seed=7&oameni=12&piatra=1000&hrana=${NEGATIVA === 'bara-praguri' ? 2760 : hrana}`)
+      if (!(await pg.js('__kinstead.stare().pauza'))) await pg.tasta(' ')
+      await ajutoareHrana(pg)
+      await astepta(400)
+      const r = await pg.js(`(() => { const K = __kinstead, H = K.hrana, e = document.querySelector('.ui-sus .prognoza'), ec = H.ecran(); return { text: e?.textContent ?? null, cls: e ? [...e.classList] : [], bara: H.bara(), zile: ec.prognoza.zile, clasa: __h.M.clasaPrognozei(ec.prognoza), critic: __h.M.PRAG_CRITIC_ZILE, atentie: __h.M.PRAG_ATENTIE_ZILE, pauza: K.stare().pauza } })()`)
+      citiri.push({ hrana, asteptata, ...r, erori: pg.erori.length })
+      await pg.poza(`h11-bara-${asteptata}.png`)
+    }
+    const bun = (x) => x.pauza && x.text !== null && x.text !== '' && x.text === x.bara && x.clasa === x.asteptata && x.cls.includes(x.asteptata) && !x.cls.includes(x.asteptata === 'critic' ? 'atentie' : 'critic') && x.erori === 0
+    const [c, a] = citiri
+    bifa('bara-praguri', citiri.length === 2 && citiri.every(bun) && c.zile < c.critic && a.zile >= a.critic && a.zile < a.atentie,
+      'clasele barei sub praguri (UI-14): jocul nou cu 150 de hrana (12 oameni) — sub 0,298 zile, clasa „critic"; cu 400 — intre 0,298 si 0,893, clasa „atentie"; textul barei == functia, clasa din DOM == clasaPrognozei, fara cealalta (pe pauza)',
+      JSON.stringify(citiri))
   })
   if (pH.erori.length) bifa('consola-hranei', false, 'fara erori in consola (pagina hranei)', pH.erori.join(' | '))
 }
