@@ -1,9 +1,12 @@
 <!-- Designul t.3 (hrana sub 5 °C), dupa harta pe HEAD si panoul adversarial din 10.10.2026. Dovezile (scripturi, loguri) au stat in scratchpad-ul sesiunii; rezumatul lor intra in DEVLOG. Caile raport-H*.md / panou-*.md / panou/verif-*.md citate aici nu sunt in repo. -->
 
-# Hrana sub 5 °C — t.3, design v2 (S24-27, tăietura 3)
+# Hrana sub 5 °C — t.3, livrat (design v2 + §13; S24-27, tăietura 3)
 
 *10.10.2026. v1 + panoul adversarial (4 lentile, 49 de constatări, 15 verificate independent; 4,91 M). Harta: [H1]…[H6];
 panoul: [STARE-n], [J-n], [UI-n], [Pn] (`panou-*.md`, `panou/verif-*.md`). Ce s-a schimbat față de v1 e marcat [v2: …].*
+
+*Livrat 11.10.2026 pe ramura `t3-sim` (20 de commit-uri peste `eae704d`): abaterile implementării, cifrele măsurate,
+corecțiile și recenzia codului sunt în §13; deciziile, cu cifrele de la livrare, în OWNER_VERIFY 18.*
 
 ## 0. Ce face felia
 
@@ -218,3 +221,175 @@ Producția de hrană (de ea depind foamea sezonieră și decizia reală „cât 
 strică" (după ce plafonul de 64 nu mai merge în ordinea slotului); `haulCarryMax 50 < itemStackMax 75`; vatra; confortul; ușa la
 trecere (traficul de mâncat în cămară); T pe bucată; capacitatea (o iarnă pentru 10 oameni ~6×6, la limita fără grindă);
 mormanele care pierd sincron.
+
+## 13. La livrare (11.10.2026): ce s-a schimbat față de v2
+
+După implementare (valul 1, simularea: A, B, C; valul 2, ecranul: D1, D2), recenzia codului (5 lentile + verificatori,
+14 constatări, toate confirmate, 1 MARE) și remediere (SIM și ECRAN în paralel; 9 commit-uri). 20 de commit-uri de cod peste
+`eae704d`, pe ramura `t3-sim`. Porțile finale (HEAD `ea29bba`): 1.178 de teste; 1.334/1.334 de probe de mutație (35 min 22 s,
+într-o clonă); `--izolare` 765/765; ui-fum 92/92 și 27/27 de probe negative exacte. Cifrele de mai jos înlocuiesc estimările
+designului acolo unde diferă.
+
+- **§1, starea:**
+  - două contoare în plus față de listă: `pierdutePeFel` (termenul „pierdut" al lui G1 pe fel: `itemePierdute` e al tuturor
+    felurilor și se resetează la un `lasaItem` refuzat) și `alterareNormalizata` (felurile neperisabile cu S ≠ 0, aduse la 0);
+  - `iaDinItem` își păstrează semnătura și lasă partea în `ItemStore.ultimaParte` (TRANSIENT), citită imediat de RIDICĂ și
+    MĂNÂNCĂ — ca să nu rupă API-ul și ancorele de mutație (`const luat = iaDinItem(...)` e tiparul a două probe);
+  - `asazaItem(…, id, alterare)` și `creeazaItem(…, alterare)` fără valori implicite: un apelant care uită S-ul sursei nu
+    compilează;
+  - S-ul zidit merge în `alterareDisparuta` (designul nu spunea unde; azi niciun fel perisabil nu se zidește — calea e
+    probată pe un content cu PIATRA perisabilă);
+  - refuzuri de formă în plus la `decode`: o alterare care nu e număr (null / bool / șir s-ar fi convertit tăcut) și o mască
+    peste 255 (Uint8 ar fi făcut 256 → 0 = „primește tot");
+  - `cautaMancare` caută exact cel mai mic k cu nutriția efectivă ≥ lipsa (căutare binară), nu o formulă închisă: produsul
+    `lipsa·q·ONE` trecea de 2^53 la maximele content-ului;
+  - `ONE_ALTERARE` stă în `state.ts` (reexportat de `iteme.ts`): un import din `iteme.ts` la parsare făcea ciclul
+    content → iteme → zone → content;
+  - fixtură golden nouă, de schema 8 cu hrană în mâini (regula „fiecare migrare cu fixtura ei, capturată ÎNAINTE"; fixturile
+    vechi n-aveau mâna plină), cu literalul ei, `9b8cdbd4`.
+- **§1 și §9, nutriția pe hârtie — cifrele designului (230 / 115 și 1) erau ale lui ONE = 2^24 cu `floor`.** Cu ONE = 2^29 și
+  `ceil` (STARE-11), la A: q = 30, S = 7·2^29 + 7 → **229, apoi 114**; q = 1, S = ONE − 1 → **0**; controlul S = 0 → 300 + 150.
+  La B, pasul realizează orice S ≥ ONE la tickul 0 (și la λ = 0, P14), deci starea lui A nu mai trăiește până la o îmbucătură:
+  testul final e pe S = 2^29 − 41 (același rest la 30) → **290, apoi 145**; mutanții familiei rămân distinși (floor 291 / 146,
+  nereduse 300 / 150, S-ul întreg 285 / 145, fără rest 290 / 144). Rezervarea pe valoare: 68 de unități în testul funcției
+  (q = 75, S = 30·ONE, lipsa 610; pe hrană proaspătă 41), 42 în lume (S = ONE − 1).
+- **§2, unde și cât de des:**
+  - **pragul e al content-ului**: primul punct al tabelului (pierderea 0), nu un 5 °C scris în cod; „λ(5,05 °C) ≥ 1" a devenit
+    λ(prag + 0,05 °C) ≥ 1 (cu content-ul implicit, același lucru);
+  - λ nu se scrie în content și nici în forma parsată: fișierul ține doar tabelul, λ se derivă la parsare (pentru banda moartă)
+    și se memorează pe obiectul de reguli (WeakMap) pentru pas; un test poate da rata 0 cu un tabel pe zero scris direct (`R0`);
+  - predicatul X doar pe stricăciune (`scadeStricate`), nu și pe `iaDinItem`: mâncatul și căratul își păstrează regula lor
+    (corectă, mai largă), deci nicio cale existentă nu s-a mișcat;
+  - tocul fără niciun vecin de aer → T_afara (designul nu spunea); un toc pe care un vecin îl are fără T → null;
+  - santinela „fără T" a ratei pe componentă e `null`, nu −1: o rată negativă sub prag (mutantul „pragul −0,1 °C") se citea
+    „fără T", iar mormanul sărea pasul tăcut;
+  - **cele două faze rămân fără poartă**: varianta într-o fază e echivalentă pe content-ul implicit (măsurat: același hash
+    standard, aceleași 124 de teste ale hranei verzi); o poartă ar cere material de construcție perisabil și un constructor care
+    abandonează pe un morman.
+- **§3, curba, măsurată pe tabelul din content:** λ ≥ 1 de la prag + 1.639 Q16 = **0,025 °C** (designul: ~5,02 °C);
+  λ(15 °C) = 46.147, λ(≥ 45 °C) = 738.354; raportul față de parabolă **×0,934 … ×1,125** pe toate valorile Q16 din
+  [5,2; 45] °C. Pe anotimpuri (primăvară / vară / toamnă / iarnă, %), înlocuind tabelul din §3:
+
+  | loc | tabelul din content | parabola (§3) | grila la 5 °C (control) |
+  |---|---|---|---|
+  | sub cer | 31,97 / 79,34 / 28,85 / 0,002 | 31,1 / 78,8 / 27,9 / 0 | 32,54 / 79,34 / 29,48 / 0,03 |
+  | casa de piatră | 6,27 / 46,60 / 20,36 / 0 | 5,9 / 45,3 / 19,1 / 0 | 7,52 / 46,60 / 21,35 / 0 |
+  | pivnița sub casă (1 m) | 0 / 0 / 0 / 0 | 0 | 0 |
+  | pivnița +1 °C | 0 / 0,093 / **0,282** / 0,001 | 0 / 0,09 / 0,28 / 0 | 0 / 0,89 / **2,09** / 0,03 |
+  | fără casă, 1 m | 0 / 0,079 / **0,269** / 0 | 0 / 0,08 / 0,27 / 0 | 0 / 0,72 / **1,88** / 0 |
+
+  Benzile porții (pivnița +1 °C și fără casă 1 m, toamna ≤ 0,35%) sunt verzi pe tabel și roșii pe grila la 5 °C. O pivniță
+  un anotimp (regimul periodic, T max 4,802 °C): mormanul proaspăt rămâne exact (75, 0).
+- **§4, oracolele:** G1S și G1 rulează pe scena cu ucideri, abandon, săpat sub morman, slot refolosit și LASĂ, și cu rata
+  implicită (246 de unități stricate de pas, 39 de mormane omorâte de pas); pompa de prospețime pe `R0`, cu S scris sub o
+  unitate și cu ce realizează pasul la λ = 0 după uniri numărat în bilanț.
+- **§5, cămara:**
+  - `prioritateaLocului(…, fel)` întoarce RANGUL (numele rămâne: e cel din design și din ancore); `maxRangLibera` e un câmp
+    DERIVED al indexului (nu un scratch de modul), comparat de oracolul indexului;
+  - „filtru îngust" = refuză măcar un fel; un depozit care refuză tot primește +1, dar nimic — stare inutilă, nu invalidă;
+  - `setFiltruZona` refuză un dormitor (un filtru pe o zonă fără marfă ar fi citit de rang ca „specializat") și, după
+    recenzie, verifică masca pe INTERVAL (`refuzate > feluri`), nu pe biți: `&` vedea 2^32 ca 0 = „primește tot" (STARE-1);
+  - `PREA_DEPARTE` îl scrie doar evaluarea scumpă (`cautaDestinatie`, pe item, cu răcire), nu indexul, care nu știe de distanțe;
+  - **groapa se dimensionează pe TOT molozul** (⌈u/75⌉ + `groapaMargineCelule` = 4, content, dintr-o singură măsurătoare),
+    nu pe lipsă: `loc` e o margine superioară (celulele goale sunt comune și hranei), deci lipsa e una inferioară și decide doar
+    DACĂ se propune. După recenzie (JOC-4), **doar cămara propune groapa, iar felurile perisabile nu sunt niciodată moloz** —
+    înainte, o groapă „doar piatră" cu hrană pe ea își propunea o „groapă" pentru hrană, adică o a doua cămară, caldă;
+  - presetul Cămară e un buton în Zone, nu o unealtă nouă; pictura și `setFiltruZona` pleacă în același pas JS
+    (`aplicaZona`), fără tick între ele;
+  - **groapa se pune singură** (`locGroapa`: primul pătrat liber pe sol, pe inele de până la 24 de celule în jurul cămării).
+    D1 a scris-o FĂRĂ probă de acces (abaterea D1-12), pe motivul „regiunile: `find` comprimă drumurile, adică scrie".
+    **Premisa era falsă**: `find` (`src/sim/regions.ts`:270–272) e citirea `s.component[a]`, iar `regionAt` e tot o citire pură.
+    Pe geometria canonică (pivnița sub o casă cu acoperiș) primul pătrat „pe suprafață" era acoperișul: groapa ieșea la
+    (0, 0, +4), unde nu ajunge nimeni, `groapaDeMoloz` număra acoperișul ca loc, iar propunerea dispărea cu molozul tot în
+    cămară — singurul defect MARE al recenziei (JOC-1; ECRAN-1 e același). Acum fiecare celulă a gropii e în aceeași
+    componentă de mers cu o celulă a cămării (`regionAt` + `find`); fără regiune, `null`. Pe H4: (dx −2, dy 7, dz +1), pe sol;
+  - **acceptanța cu oameni**: geometria H4 (casa 7×7 cu chepeng, pivnița 3×3×2 sub 1 m, săpată de pioni), ușile chepengului
+    puse prin `fill`, paturile = o zonă DORMIT, 4 pioni, 600 u, 3,5 zile, toamna și vara:
+
+    | varianta | stricat | plecați cu hrană în cămară |
+    |---|---|---|
+    | cămară + groapă (6 semințe), toamna / vara | 0,5–1,0% / 1,3–1,5% | 0 |
+    | fără filtru, toamna / vara | 13,8–16,3% / 26,8–29,0% | 0 |
+    | fără cămară, toamna / vara | 16,0–16,5% / 29,8–30,3% | 0 |
+
+    Rangul mută toată hrana din general în cămară în 250–350 de tickuri. A doua căutare de mâncare (J-8) NU e exercitată acolo
+    (pionii dorm lângă cămară; are proba ei la B); 0 re-desemnări (nicio prăbușire la 3×3 sub 1 m), deci „molozul tolerat prin
+    re-desemnare" s-a exercitat doar prin groapă. Testul inițial era orb la groapă (JOC-2: generalul avea loc pentru tot
+    molozul, iar groapa era pusă de mână); acum groapa vine pe calea butonului, cu generalul plin: 6/6, molozul iese în
+    497–801 de tickuri, cămara ajunge la 552–569, stricat 0–7 u; martorul fără groapă: molozul nu iese, stricat ≥ 5%;
+  - **„Se strică aici; cămara are loc"** exclude zona mormanului și cere clasa „se strică"; după recenzie (ECRAN-2), locul se
+    numără doar pe celulele cămării cu clasa mai bună decât „se strică" (o cămară „aproape" contează), iar când nici la
+    prioritatea maximă cămara n-ar trece de rangul locului, textul e „Coboară prioritatea depozitului ăstuia sub a cămării".
+- **§6, jocul:** scenariul × 1,25 e 563 pe sit (cele 6 mormane de 75 rămân pe loc, sfertul pe rândul al treilea), nu 6 × 94 —
+  o lume cu 450 e exact cea veche, deci măsurătorile au martor. Plecații pe semințele 1 / 2 / 3 / 12345: 1 / 2 / 2 / 7 la
+  referință, față de 2 / 3 / 2 / 8 fără alterare și 12 / 10 / 13 / 16 cu alterare și hrana veche (J-6 măsurase 1 / 1 / 1 / 7
+  pe alt prototip); stricat 18,5–18,7%. A doua rază de mâncare e un câmp de content (`mancareScanRadiusLargCells` = 384,
+  validat ≥ prima rază), nu „× 4" în cod. Jocul nou: prognoza la pornire 2,851 zile (fără alterare 3,565); cu pionii, hrana se
+  termină la 2,869–2,910 zile.
+- **§7, salvarea și hash-ul:** literalele s-au mutat o dată la format (A) și o dată la efect (B) — standard `b38229fd` →
+  `fd188574` → `c4a6c1dc`; acces-joc `fe597a27` → `c62b4aee` → `84be6e5e`; migrare `65883f04` → `f83bc5fb`; S+ `84d14adc` →
+  `82d32e8f`; noi: schema 8 cu hrană `9b8cdbd4` și „S+ hrană" `505346b7` (stricate: casa 3, tocul pivniței 3 — la T-ul
+  casei —, tocul casei 3, afară 2, pivnița 0; M5 salvat la 6 h + 7 tickuri dă același hash).
+- **§8, ecranul:**
+  - pasul orar nu e Euler, ci soluția exactă pe oră la rată constantă (e^(−a) din Padé): Euler greșea cu −0,026 zile la
+    25 °C; λ-ul orei e cel de la MIJLOCUL ei (Simpson a fost încercat și scos: nu câștigă nimic măsurabil). După recenzie
+    (ECRAN-3): peste un exponent de 0,25 pe oră, ora se împarte în sub-pași (cel mult 1.024), iar consumul pasului e
+    1/(1 + a/2) sub prag — înainte, `e^(−a)` cădea exact la 0 de la a = 2, cu tot stocul sub cer fracția devenea 0/0 și
+    prognoza sărea la V/C (1,55 zile față de 0,07). Content-ul implicit stă sub prag (λ-ul unei ore la 45 °C e ~0,115);
+  - **baza pierderii e pe unități** (`q·nut`), nu pe valoare: simularea strică q·λ pe pas, deci un morman fărâmițat pierde ca
+    unitățile lui. Prognoza și toate cifrele „cât ne hrănește" sunt pe VALOARE; cifra din bară rămâne în UNITĂȚI, iar
+    tooltip-ul le spune pe amândouă („hrănește cât … proaspete");
+  - forma închisă când nimic PERISABIL nu e sub cer (nu „nimic sub cer"); mâinile la rata 0, tocul la T-ul părții calde;
+  - plafonul e un an de calendar („peste un an");
+  - pragurile de prezentare stau în viewer, nu în content: 0,1%/zi pentru clase (pragul „aproape" cade la 377.450 Q16 =
+    5,759 °C), 1%/zi pentru alertă (întârziere 10 s, răcire 60 s de joc), 0,893 / 0,298 zile pentru bară;
+  - Primii pași: prognoza stă în pasul cămării, iar rândul „Nu mai ai hrană" apare doar când nu mai e hrană — altfel cardul
+    intra sub coloana Hărți (măsurat în pagină: 278 px față de 204);
+  - o singură temă (ui.css are doar tema închisă), CSS-ul nou doar pe tokenuri;
+  - F3 a urcat peste coloana stângă (`#hud`: `top: 50px`, `z-index: 16`, doar cu UI-ul de joc): eticheta „hrana" era
+    acoperită de cardul Hărți, găsit de ui-fum;
+  - prognoza contra simulării cu pioni (ora cu ora): jocul nou implicit −0,115 … +0,140 zile, 6 oameni −0,166 … +0,172,
+    3 oameni −0,357 … +0,095 (restul erorii e rezerva de foame a pionilor); după ECRAN-3, față de modelul de 1 Hz pe
+    fărâmituri, |dif| ≤ 0,0012 zile, iar pe 15.955 de cazuri ale jocului prognoza s-a mișcat cu cel mult 1,02·10⁻¹¹ zile.
+- **§9, porțile:**
+  - ui-fum rulează hrana pe două pagini ale ei (`paginaHranei`: jocul nou 12 / 1000 / 2760; `paginaAlterarii`: pivnițe
+    săpate prin comenzi), timpul doar prin `__kinstead.avanseaza(n)`, lumea doar prin comenzi, comparațiile pe S (PERSISTED);
+  - `alterare-inspector` compară fiecare SCRIERE a rândului cu funcția (`MutationObserver`), nu citirile: la 4 Hz, o citire
+    vede DOM-ul cu până la 250 ms în urmă (~4,5% din citiri la 3×);
+  - `bara-sus` probează cel mai lat dintre cele 122 de texte ale lui `textZile` („peste un an", 70,9 px), nu literalul
+    „~12 h 59 min";
+  - după recenzie: `groapa-clic` cere moloz nou în groapă (proba negativă `groapa` îi sapă podeaua), `bara-praguri` probează
+    clasele barei sub praguri (PORTI-2), sabotajele `alterare-timp` și `se-misca` raportează N tickuri rulate (PORTI-1),
+    oracolul prognozei ia sfârșitul hranei din lume (PORTI-3), garda „cămara nu-și e singură sfat" are testul ei (PORTI-4),
+    buclele de iarnă au plafon (PORTI-5).
+- **Recenzia codului, constatare cu constatare:**
+
+  | id | sev. | ce | ce s-a făcut |
+  |---|---|---|---|
+  | JOC-1 | MARE | groapa dintr-un clic pe acoperișul casei | reparat (`4f032d4`): aceeași componentă de mers cu cămara; probat pe calea butonului |
+  | ECRAN-1 | MEDIE | același defect, văzut din ecran | același commit |
+  | JOC-2 | MEDIE | acceptanța cu oameni oarbă la groapă | testul nou cu generalul plin și groapa de la buton; `groapa-clic` cu moloz ajuns; negativa `groapa` |
+  | JOC-3 | MICĂ | groapa (rang 7) trage pământul din depozitul general | **nereparat — decizie** (OWNER_VERIFY 18, decizia 19) |
+  | JOC-4 | MICĂ | logica gropii pe orice depozit cu filtru; hrana numită „moloz" | `8608b91`: doar cămara; perisabilul nu e moloz |
+  | STARE-1 | MICĂ | o mască ≥ 2^32 scrisă trunchiată (2^32 → „primește tot") | `817e111`: garda pe interval |
+  | ECRAN-2 | MICĂ | „Se strică aici" spre o cămară care se strică la fel, sau o prioritate imposibilă | `c96c532`: doar spre o cămară care păstrează; „Coboară" |
+  | ECRAN-3 | MICĂ | `scadereOra` = 0 de la a = 2; 0/0 cu tot stocul sub cer | `24ba63b`: sub-pași, consumul fără anulare |
+  | ECRAN-4 | MICĂ | „a un om", „lipsesc 1", „5 °C" scris în cod | `f2b747a` |
+  | PORTI-1 | MICĂ | sabotajul își inventa contorul | `b2bbd60` |
+  | PORTI-2 | MICĂ | clasele barei, neatinse de scenă | `ea29bba`: bifa `bara-praguri` |
+  | PORTI-3 | MICĂ | oracolul lua adevărul din aceeași funcție ca prognoza | `ae791d5` |
+  | PORTI-4 | MICĂ | garda „cămara nu-și e singură sfat" prinsă întâmplător | `ae791d5` |
+  | PORTI-5 | MICĂ | buclele de iarnă fără plafon: testul trecea sau atârna | `ae791d5` |
+
+- **§12, registrul, la zi.** Rămân din design: producția de hrană, gheața, „mănâncă întâi ce se strică", `haulCarryMax 50 <
+  itemStackMax 75`, vatra, confortul, ușa la trecere, T pe bucată, capacitatea, mormanele care pierd sincron. Noi:
+  - **JOC-3**: groapa ca „haldă" pentru tot molozul (rang 7, azi: cu generalul plin de pământ trage 375 u din el; cu generalul
+    gol, 120–140), ca preaplin (prioritatea implicită − 1: generalul rămâne neatins, dar 40–70 u fac cărat invers, iar molozul
+    iese în 668–834 de tickuri în loc de 523–736; cere și un câmp de prioritate prin UI) sau bonusul de rang doar pentru
+    filtrele care primesc un fel perisabil (schimbă regula din §5 pentru orice depozit specializat) — la owner;
+  - **a doua plasă a gropii**: `groapaDeMoloz` să numere `loc` doar pe celulele de depozit accesibile din cămară — un bloc de
+    regiune necalculat dă `NO_REGION`, deci locul ar ieși subnumărat (avertismente false); nemăsurat cât de des. Calea
+    butonului e închisă; rămâne doar un depozit pictat de mână pe un acoperiș;
+  - **costul F3** nu trece prin memoria hranei (doar cu HUD-ul vizibil, 2,5 Hz, ≤ 0,13 ms la 1.000 de mormane);
+  - stratul DOM al lui JOC-4 fără bifă ui-fum proprie (ar cere o lume construită anume; logica e probată în node);
+  - poarta celor două faze ale pasului (§2) și a doua căutare de mâncare în acceptanța cămării (§5).

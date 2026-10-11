@@ -54,8 +54,14 @@ Acoperă doar iterarea nesortată, **niciodată** interdicțiile dure. Te oblig�
   (`src/sim/temperatura.ts`): tickul, `dig`/`fill`, harnașamentul M10; decode trece prin `incarcaTemperaturi`. Altfel
   proveniența temperaturii se pierde. Două plase: testul AST pe nume (`tests/sincronizare-plasa.test.ts`) și ștampila
   `(idx, vazute, epoca, epocaFete)` verificată la rulare (un invariant încălcat se numără, nu aruncă din `tick()`).
+- **Ordinea tickului:** `stepAgents` → `sincronizeazaLumea` → `pasTermic` → `pasAlterare` → `w.tick++`; cei doi pași de
+  1 Hz au aceeași fază globală (`w.tick % tps === 0`), fiecare pe linia lui (ancore de mutație). Alterarea hranei (t.3)
+  citește T-ul de după pasul termic; prognoza ecranului (`src/sim/prognoza.ts`) e citire pură, `tick` n-o cheamă.
 - **Un număr de gameplay în cod e un bug de arhitectură.** Totul în `content/*.json`, validat
-  la încărcare, cu refuz explicit pentru câmpuri necunoscute.
+  la încărcare, cu refuz explicit pentru câmpuri necunoscute. Hrana (t.3): `alterare.pierderePeMilionZilnic` (tabelul
+  curbei; PRAGUL e primul punct, cu pierderea 0 — nu un 5 °C în cod; λ se derivă la parsare), `perisabil` (ce fel se
+  strică), `mancareScanRadiusLargCells` (a doua căutare de mâncare, 384), `groapaMargineCelule` (marginea gropii de moloz,
+  4). Pragurile de PREZENTARE ale hranei (0,1%/zi, 1%/zi, zilele barei) stau în viewer (`viewer/ui/model.ts`).
 - **Fiecare câmp de stare e PERSISTED, DERIVED sau TRANSIENT.** Ce e DERIVED nu se salvează,
   se reconstruiește la încărcare.
 
@@ -69,7 +75,8 @@ npm test             # node --test
 node src/harness/cli.ts --seed 12345 --ticks 100000 --agents 40
 ```
 
-**`npm test` NU face typecheck.** Testele pot fi verzi cu tipurile roșii. Poarta e `npm run check`.
+**`npm test` NU face typecheck.** Testele pot fi verzi cu tipurile roșii. Poarta e `npm run check` (11.10: 1.178 de
+teste; 162–179 s).
 
 Mormanele de resurse (plasele 3D și iconițele UI-ului) se generează în **Blender 4.3**, fără interfață,
 din `tools/assets/resurse.py`, și se comit în `viewer/public/resurse/`; contractul lor (nume, culoare
@@ -87,9 +94,13 @@ node_modules/electron/dist/electron.exe bench/ui-fum.mjs http://localhost:5175/ 
 ```
 
 Fiecare bifă are un nume; proba negativă strică pasul unei bife (`sapa`, `pauza`, `salvare`, … — lista e
-`TINTE_NEGATIVE`, 16 la 10.10) și iese verde doar dacă EXACT bifa aceea e roșie și nicio alta. Profilul e nou la
+`TINTE_NEGATIVE`, 27 la 11.10) și iese verde doar dacă EXACT bifa aceea e roșie și nicio alta. Profilul e nou la
 fiecare rulare. Temperatura rulează pe pagina ei, la final, pe o lume cu contract scris (`paginaTermica`): timpul trece
-doar prin `__kinstead.avanseaza(n)` (tickuri reale), niciodată prin `world.tick +=`. 74 de bife (10.10).
+doar prin `__kinstead.avanseaza(n)` (tickuri reale), niciodată prin `world.tick +=`. Hrana (t.3) rulează după ea, pe
+două pagini ale ei: `paginaHranei` (jocul nou 12 / 1000 / 2760) și `paginaAlterarii` (pivnițe săpate prin comenzi);
+comparațiile alterării se fac pe S (PERSISTED), nu pe unități, iar lumea se schimbă doar prin comenzi (`applyCommand`).
+92 de bife (11.10). Două rulări în paralel cer `TEMP` diferit: la pornire, ui-fum șterge orice `kin-ui-fum*` din
+`tmpdir()`.
 
 Pe Windows, `kinstead.bat` le adună pe toate: dublu-click deschide un meniu, iar cu un argument
 (`kinstead.bat check`) rulează o singură comandă și întoarce codul ei de ieșire.
@@ -98,10 +109,10 @@ Pe Windows, `kinstead.bat` le adună pe toate: dublu-click deschide un meniu, ia
 
 ```bash
 npm run mutatii -- --lista      # ce suite există
-npm run mutatii                 # toate cele 1.102, ~32 min (10.10; DOAR într-o CLONĂ în afara Drive-ului, vezi mai jos)
+npm run mutatii                 # toate cele 1.334, ~35–37 min (11.10; DOAR într-o CLONĂ în afara Drive-ului, vezi mai jos)
 npm run mutatii -- nevoi        # o singură suită
 npm run mutatii -- nevoi podeaua  # doar mutațiile al căror nume conține „podeaua"
-npm run mutatii -- --izolare    # fiecare test NUMIT de o probă, singur, pe cod nemutat (~2 min)
+npm run mutatii -- --izolare    # fiecare test NUMIT de o probă, singur, pe cod nemutat (~14 min: 765 de teste, 11.10)
 ```
 
 Strică pe rând câte o garanție din cod și verifică dacă se înroșește **exact** testul scris pentru
@@ -162,6 +173,9 @@ potrivește în două locuri editează altul decât cel gândit, rulează testel
 > scrise cu LF ies CRLF în clonă (`autocrlf=true`): fantomă, nu diferență (`git hash-object` == `HEAD:<f>`).
 > După t.2b și recenzia ei (10.10): **1.102 de probe în 31 min 42 s**, într-o clonă, arbore curat la final
 > (după remediere, `--izolare` 670/670 în 11 min 13 s sub încărcare — „~2 min” e cifra unei mașini libere).
+> După t.3 și recenzia ei (11.10): **1.334 de probe în 35 min 22 s** (37 min 15 s la rularea recenziei ECRAN), într-o
+> clonă, arbore curat la final; suitele noi `hrana` (100), `camara` (48), `hrana-ecran` (84). `--izolare` 765/765 în
+> 14 min 10 s fără altă muncă pe mașină: „~2 min” nu mai e adevărat nici pe o mașină liberă (~1,1 s pe test).
 >
 > `tools/check-mutatii.mjs` a fost scris ca înlocuitor static și rămâne util, dar nu mai e o
 > compensație: el răspunde la „proba ARE ce să măsoare?", nu la „măsoară?". A doua întrebare
