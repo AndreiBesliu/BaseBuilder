@@ -582,8 +582,9 @@ care nu se țintește, tenta chiar desenată, „Anulează" pe o jumătate de u�
 
 *(Rescris 10.10, după a doua jumătate a temperaturii, S24-27 t.2b. Temperatura e acum STARE: fiecare încăpere are
 temperatura ei de acum, se încălzește și se răcește în timp, se salvează, iar oamenii o încălzesc puțin. Încă nu are
-efect asupra oamenilor sau a hranei — hrana care se strică peste 5 °C vine în pasul următor. Codul a trecut prin două
-recenzii adversariale — una pe design, una pe cod; ce era greșit e reparat, iar unde a rămas o alegere, e mai jos.)*
+efect asupra oamenilor sau a hranei — hrana care se strică peste 5 °C vine în pasul următor (11.10: efectul asupra hranei
+a venit, §18). Codul a trecut prin două recenzii adversariale — una pe design, una pe cod; ce era greșit e reparat, iar
+unde a rămas o alegere, e mai jos.)*
 
 **Ce s-a schimbat pentru tine.**
 - **Bara de sus**: anotimpul, ziua, ora și temperatura de afară — „Toamnă 2/4 · 14:20 · 8° ↘" (săgeata = încotro merge
@@ -681,12 +682,13 @@ citește, dacă pivnița „se simte" rece și dacă răcirea casei la săpat e 
 
 *(Nou, 11.10, după S24-27 t.3 — primul efect al temperaturii. Hrana se strică peste 5 °C, treptat, cu atât mai repede cu
 cât e mai cald; la 5 °C și sub, deloc. O **cămară** (un depozit „doar hrană") pictată într-o pivniță rece e contrajocul.
-Hrana încă nu se poate produce, deci cămara e o lecție, nu o alegere. Codul a trecut prin panoul pe design și prin recenzia
-codului: 14 constatări, una MARE — groapa de moloz pusă pe acoperiș —, toate reparate în afară de una, lăsată ție (decizia 19).)*
+Hrana încă nu se poate produce, deci cămara e o lecție, nu o alegere. Designul a trecut printr-un panou adversarial, iar
+codul printr-o recenzie: 14 constatări, una MARE — groapa de moloz pusă pe acoperiș —, toate reparate în afară de una, lăsată
+ție (decizia 19).)*
 
 **Ce s-a schimbat pentru tine.**
-- **Bara de sus**: lângă hrană, cât mai ajunge, în zile de joc, CU alterarea — „Hrană 2.760 ~2,9 zile" la un joc nou (fără
-  alterare ar fi ~3,6). Tooltip-ul spune cât hrănește, cât se strică pe zi și cât ajunge.
+- **Bara de sus**: lângă hrană, cât mai ajunge, în zile de joc, CU alterarea — „Hrană 2.760 ~2,8 zile" la un joc nou, de la
+  prima secundă de joc (fără alterare ar fi ~3,6). Tooltip-ul spune cât hrănește, cât se strică pe zi și cât ajunge.
 - **Inspectorul unui morman de hrană** are un rând nou, cu una din trei stări: „**Se păstrează** | 3,0 °C · cu 2,0 sub prag",
   „**Se păstrează aproape** | ~1 în 7 ani · la 5,3 °C", „**Se strică** | ~13 azi · acum 16,1 °C" (sub cer, „azi" = următoarele
   24 de ore; într-o încăpere, „pe zi"). Cantitatea scade pe loc, fără să se redeseneze panoul.
@@ -699,28 +701,32 @@ codului: 14 constatări, una MARE — groapa de moloz pusă pe acoperiș —, to
 - **F3**: rândul „hrana" — „stricat N · în pericol M · R%/zi"; panoul F3 stă acum peste coloana din stânga.
 - **Primii pași** încep cu Cămara; **dialogul Joc nou** spune cât ține hrana sub cer și într-o cămară.
 
-**Pașii tăi** (verificările pe ecran, ~20 de minute; la fiecare, ce se strică dacă răspunsul e „nu"):
+**Pașii tăi** (verificările pe ecran; durata depinde mai ales de cât construiesc oamenii la pasul 6; la fiecare, ce se strică
+dacă răspunsul e „nu"):
 1. **Pornirea.** Dublu-clic pe `kinstead.bat` din dosarul proiectului, alege **6** (viewer), apoi deschide
    http://localhost:5175/ în browser (sau dublu-clic pe `Kinstead.cmd`, care îl deschide singur). Pe ecranul de titlu,
    **Joc nou…**, și lași valorile (12 oameni, 1000 de piatră, 2760 de hrană). **Bine:** sub formular scrie „Hrana ajunge ~2,9
    zile de joc dacă stă sub cer, ~3,6 zile într-o cămară. Hrana nu se poate produce încă: după aceea oamenii pleacă."
-   Apasă **Pornește**. **Dacă nu** (alte cifre decât în bară, la pasul 2): dialogul și bara socotesc diferit — se rupe regula
-   „o singură prognoză pentru toți cei patru cititori".
-2. **Bara.** **Bine:** „Hrană 2.760 ~2,9 zile"; cu mouse-ul pe Hrană, tooltip-ul conține „— hrănește cât … proaspete · se
-   strică ~17,…% pe zi · ajunge ~2,9 zile · nu se poate produce încă". Lasă jocul la 1× vreo trei minute (două ore de joc):
-   la 10:00, ceva de felul „Hrană 2.683 ~2,8 zile". **Dacă nu** (zilele stau pe loc sau cresc cât hrana stă sub cer):
+   Apasă **Pornește**. **Dacă nu** (dialogul arată altceva decât ~2,9 și ~3,6): dialogul nu mai socotește cu prognoza barei
+   — se rupe regula „o singură prognoză pentru toți cei patru cititori". Bara arată ~2,9 doar în prima secundă de joc (2,851
+   zile la 08:00, 2,849 după prima secundă), apoi ~2,8: asta nu e o nepotrivire.
+2. **Bara.** **Bine:** „Hrană 2.760 ~2,8 zile"; cu mouse-ul pe Hrană, tooltip-ul conține „— hrănește cât … de proaspete · se
+   strică ~17,…% pe zi · ajunge ~2,8 zile · nu se poate produce încă". Lasă jocul la 1× vreo trei minute (două ore de joc):
+   la 10:00, ceva de felul „Hrană 2.683 ~2,8 zile" — hrana scade, iar zilele rămân ~2,8 (în două ore prognoza coboară cu
+   ~0,06 zile, sub zecimea pe care o arată bara). **Dacă nu** (bara arată ~3,6 zile, cât ar ține hrana fără alterare):
    prognoza nu vede alterarea și îți promite hrană care va putrezi.
 3. **Primii pași** (stânga jos). **Bine:** primul pas e „Cămară: Zone (K) ▸ Cămară în pivniță (sub 5 °C), ~37 de celule —
-   hrana ține ~3,6 zile, nu ~2,9"; a doua cifră e cea din bară și se schimbă odată cu ea (la 10:00, „~3,4 zile, nu ~2,8").
-   **Dacă nu** (rămâne „~2,9" când bara arată „~2,8"): pasul a înghețat la prima desenare — defectul găsit de proba pe ecran
-   și reparat s-a întors, iar pasul te minte după prima oră.
-4. **Alerta.** După ~10 s de joc, în dreapta sus: „Hrana se strică: 37 de mormane." (poate fi 38). Clic pe ea. **Bine:**
+   hrana ține ~3,6 zile, nu ~2,8"; a doua cifră e cea din bară, iar pasul se rescrie odată cu prognoza (la 10:00, „~3,4 zile,
+   nu ~2,8"). **Dacă nu** (rămâne „~2,9" când bara arată „~2,8", sau tot „~3,6" la 10:00): pasul a înghețat la prima
+   desenare — defectul găsit de proba pe ecran și reparat s-a întors, iar pasul te minte de la prima secundă de joc.
+4. **Alerta.** După ~10 s de joc, în dreapta sus: „Hrana se strică: 37 de mormane." Clic pe ea. **Bine:**
    camera merge pe un morman de hrană, iar inspectorul îl arată cu „Morman | 75 de hrană" și, de exemplu, „Se strică | ~13 azi
    · acum 16,1 °C" (cifrele depind de oră). **Dacă nu** (camera merge altundeva, sau inspectorul arată alt lucru): ținta
    alertei e citită greșit, iar alerta nu te mai duce unde e problema.
-5. **F3.** Apasă **F3**. **Bine:** în panoul de diagnostic, rândul „hrana" spune „stricat N · în pericol M · R%/zi" (de
-   exemplu „stricat 36 · în pericol 38 · 16,4%/zi") și se citește întreg, peste coloana din stânga; **F3** îl ascunde. **Dacă
-   nu** (rândul e acoperit): tocmai rândul la care te trimite „Spune-i dezvoltatorului (Diagnostic, F3)" nu se poate citi.
+5. **F3.** Apasă **F3**. **Bine:** în panoul de diagnostic, rândul „hrana" spune „stricat N · în pericol M · R%/zi" (la
+   10:00, de exemplu, „stricat 36 · în pericol 37 · 16,5%/zi") și se citește întreg, peste coloana din stânga; **F3** îl
+   ascunde. **Dacă nu** (rândul e acoperit): tocmai rândul la care te trimite „Spune-i dezvoltatorului (Diagnostic, F3)"
+   nu se poate citi.
 6. **Pivnița și cămara.** Zidește casa și pivnița de sub ea ca la §17, „Pornirea" (casă 7×7 cu ușă și acoperiș; în ea, o
    pivniță 3×3 înaltă de 2 m, cu 1 m de pământ sub podeaua casei, scară, chepeng în gaura scării). Apoi **Spațiu** (pauză),
    Q/E până la podeaua pivniței, **Zone (K) ▸ Cămară** și trage peste podeaua pivniței. **Bine:** indiciul de jos spune
@@ -730,25 +736,26 @@ codului: 14 constatări, una MARE — groapa de moloz pusă pe acoperiș —, to
    au la început)." (8–9 celule × 75 / 230 de hrană pe om). **Dacă nu** (zona apare „Depozit" și primește tot): filtrul n-a
    plecat odată cu pictura, iar cămara s-ar umple cu pământul săpat.
 7. **„Se strică aici", tot în pauză.** Apasă **R** (toate nivelurile), **Zone (K) ▸ Depozit** și trage un dreptunghi peste
-   câteva mormane de hrană de sub cer. Clic pe un morman de hrană din el. **Bine:** „În depozit." (la prioritate egală
-   câștigă cămara, iar oamenii vor duce hrana în ea). În același inspector, **+ prioritate** o dată (3 → 4), apoi iar clic
-   pe mormanul de hrană. **Bine:** „Se strică aici; cămara are loc." și dedesubt „Ridică prioritatea cămării peste a
-   depozitului ăstuia (cămara 3, aici 4).". La final, **Șterge zona** pe depozitul ăsta (altfel ține hrana afară, la 4).
-   **Dacă nu** (sfatul lipsește la 4, sau apare și la 3): nimic nu-ți spune de ce hrana stă la cald cu cămara goală. Dacă
-   l-ai vedea spre o cămară pictată la suprafață, e defectul reparat de recenzie: sfat spre o cămară care se strică la fel.
-8. **Groapa de moloz.** Clic pe o celulă a cămării. Dacă pe ea a rămas pământ sau piatră din săpat și niciun alt depozit nu
-   mai are loc, inspectorul arată „Molozul săpat n-are unde pleca: … lipsesc N (M celule)." și butonul „Pictează groapa de
-   moloz (L × L)" (dacă nu apar, molozul a plecat deja — e în regulă, treci mai departe). Apasă butonul. **Bine:** mesajul
-   „Groapa de moloz: L × L, primește pământ." (sau „piatră și pământ"), cu **Arată**; groapa e PE SOL, lângă casă — nu pe
-   acoperiș. Apasă **Spațiu**: oamenii scot molozul din cămară în mai puțin de o oră de joc, iar propunerea dispare. Un clic
-   pe groapa însăși nu arată niciodată „Pictează groapa de moloz". **Dacă nu** (groapa pe acoperiș, sau molozul nu pleacă):
-   s-a întors defectul MARE al recenziei — cămara rămâne plină de moloz, iar propunerea dispare ca și cum totul ar fi
-   rezolvat.
+   câteva mormane de hrană de sub cer. Apoi **V** (Selectează) și clic pe un morman de hrană din el. **Bine:** „În
+   depozit." (la prioritate egală câștigă cămara, iar oamenii vor duce hrana în ea). În același inspector,
+   **+ prioritate** o dată (3 → 4), apoi iar clic pe mormanul de hrană. **Bine:** „Se strică aici; cămara are loc." și
+   dedesubt „Ridică prioritatea cămării peste a depozitului ăstuia (cămara 3, aici 4).". La final, **Șterge zona** pe
+   depozitul ăsta (altfel ține hrana afară, la 4). **Dacă nu** (sfatul lipsește la 4, sau apare și la 3): nimic nu-ți
+   spune de ce hrana stă la cald cu cămara goală. Dacă l-ai vedea spre o cămară pictată la suprafață, e defectul reparat
+   de recenzie: sfat spre o cămară care se strică la fel.
+8. **Groapa de moloz.** Cu **V**, clic pe o celulă a cămării. Dacă pe ea a rămas pământ sau piatră din săpat și niciun alt
+   depozit nu mai are loc, inspectorul arată „Molozul săpat n-are unde pleca: … lipsesc N (M celule)." și butonul
+   „Pictează groapa de moloz (L × L)" (dacă nu apar, molozul a plecat deja — e în regulă, treci mai departe). Apasă
+   butonul. **Bine:** mesajul „Groapa de moloz: L × L, primește pământ." (sau „piatră și pământ"), cu **Arată**; groapa e
+   PE SOL, lângă casă — nu pe acoperiș. Apasă **Spațiu**: oamenii scot molozul din cămară în mai puțin de o oră de joc,
+   iar propunerea dispare. Un clic pe groapa însăși nu arată niciodată „Pictează groapa de moloz". **Dacă nu** (groapa pe
+   acoperiș, sau molozul nu pleacă): s-a întors defectul MARE al recenziei — cămara rămâne plină de moloz, iar propunerea
+   dispare ca și cum totul ar fi rezolvat.
 9. **Hrana în cămară.** Cu jocul pornit, oamenii aduc hrana în cămară. Clic pe un morman din ea. **Bine:** de exemplu „Se
    păstrează | 3,0 °C · cu 2,0 sub prag" — sau, în prima zi după săpat, cât pivnița e încă puțin peste 5 °C, „Se păstrează
-   aproape | ~1 în 7 ani · la 5,3 °C"; zilele din bară urcă (o cămară de 3×3 ține 675 din cele 2.760). **Dacă nu** („Se
-   strică" în pivnița de sub casă): fie pivnița nu e rece, fie clasa din inspector nu e cea a pasului simulării — în ambele
-   cazuri, legătura temperaturii cu hrana s-a rupt.
+   aproape | ~1 în 7 ani · la 5,3 °C". În bară se vede puțin: 675 de hrană mutate în cămară adaugă prognozei 1,7–4,1 ore
+   de joc (cu cât mai târziu, cu atât mai puțin). **Dacă nu** („Se strică" în pivnița de sub casă): fie pivnița nu e rece,
+   fie clasa din inspector nu e cea a pasului simulării — în ambele cazuri, legătura temperaturii cu hrana s-a rupt.
 10. **Harta U.** Pe nivelul pivniței (Q/E), **U**, apoi „Ce înseamnă culorile". **Bine:** puncte pe celulele pivniței (pline
     la 5 °C sau sub, slabe dacă e „aproape"); în legendă, două rânduri separate: „Puncte: 5 °C sau mai puțin — hrana se
     păstrează" și „Puncte slabe: peste 5 °C, dar sub 0,1% pe zi — se strică foarte încet". **Dacă nu**: harta și inspectorul
@@ -767,8 +774,8 @@ citești de două ori.
    (pragul mai „tăios": o pivniță încălzită de oameni ar pierde 1–3% pe anotimp).
 2. **Alterarea e treptată**: unitățile dispar una câte una, iar mormanele la fel, în același loc, pierd odată. Alternativa:
    un termen de expirare pe morman, cu totul deodată.
-3. **Hrana pe jumătate stricată hrănește pe jumătate**; cine mănâncă nu câștigă niciodată partea stricată. Alternativa: o
-   unitate e întreagă până dispare — mai simplu, dar mâncătorul ar câștiga partea stricată.
+3. **Hrana pe jumătate stricată hrănește pe jumătate**; cine mănâncă nu câștigă niciodată partea stricată. Regulă, nu
+   opțiune: altfel mâncătorul ar câștiga partea stricată.
 4. **Hrana din mâna unui om nu se strică.** Alternativa: se strică și în mână, la temperatura locului în care e omul.
 5. **Tocul ușii**: hrana ajunge acolo doar când nu e alt loc, iar un morman rămas în toc (de exemplu sub o ușă zidită peste
    el) are temperatura părții mai calde — măsurat: în tocul pivniței, la temperatura casei. Alternativa: tocul interzis la
@@ -790,9 +797,10 @@ citești de două ori.
     aprinsă tot timpul cât hrana e sub cer.
 11. **Hrana stricată dispare**; totalul e în F3 („stricat N"). Alternativa: rămâne ca marfă nouă, „hrană stricată", de cărat
     undeva.
-12. **Scenariul de referință are hrana × 1,25** (563 pe sit în loc de 450), ca să nu descrie o colonie înfometată: plecații pe 4
-    semințe sunt 1 / 2 / 2 / 7, față de 2 / 3 / 2 / 8 fără alterare; fără × 1,25 se dublau (12 / 10 / 13 / 16), toți de foame;
-    se strică 18,5–18,7% din hrană. Alternativa: referința cu foamete, cu comentariul ei rescris.
+12. **Scenariul de referință are hrana × 1,25** (563 pe sit în loc de 450), ca să nu descrie o colonie înfometată:
+    plecații pe 4 semințe sunt 1 / 2 / 2 / 7, față de 2 / 3 / 2 / 8 fără alterare; fără × 1,25 și fără a doua căutare de
+    mâncare se dublau (12 / 10 / 13 / 16; cu a doua căutare, 11 / 14 / 12 / 15), toți de foame; se strică 18,5–18,7% din
+    hrană. Alternativa: referința cu foamete, cu comentariul ei rescris.
 13. **Iarna păstrează gratuit tot ce e sub cer** (măsurat: 0,002% pe iarnă). Alternativa: o pierdere mică și iarna, ca
     pivnița să conteze tot anul (gheața ar veni atunci odată cu producția).
 14. **Salvările vechi: hrana pornește proaspătă**, iar depozitele vechi primesc tot. Alternativa: o „vârstă" estimată pentru
@@ -814,11 +822,12 @@ Noi, de la livrare:
     din care oamenii ajung pe jos la cămară (probă de acces). Alternativa: unealta cu dreptunghiul — două clicuri, alegi tu
     locul.
 19. **Groapa e „haldă" pentru tot molozul coloniei** (constatarea JOC-3 a recenziei): are filtru, deci la prioritate egală bate
-    depozitul general și trage din el și pământul deja depozitat — măsurat, cu generalul plin de pământ, 375 de bucăți mutate în
-    groapă (585 în ea, 300 rămase în general); cu generalul gol, 120–140; molozul cămării iese în 523–736 de tickuri.
-    Alternativa: prioritatea gropii cu 1 mai mică — generalul rămâne neatins (675), dar 40–70 de bucăți fac drum dus-întors
-    (intră în groapă și se întorc în general când hrana pleacă spre cămară), iar molozul cămării iese mai târziu (668–834 de
-    tickuri).
+    depozitul general și trage din el și pământul deja depozitat. Măsurat: cu generalul plin de pământ, 375 de bucăți mutate în
+    groapă (585 în ea, 300 rămase în general), iar molozul cămării iese în 523–736 de tickuri; cu generalul gol la început,
+    groapa trage din el 120–140 de bucăți de moloz ajunse acolo (la final, 210 în groapă, 0 în general). Alternativa:
+    prioritatea gropii cu 1 mai mică — cu generalul plin, generalul rămâne neatins (675), dar molozul cămării iese mai târziu
+    (668–834 de tickuri); cu generalul gol, 40–70 de bucăți fac drum dus-întors (intră în groapă și se întorc în general când
+    hrana pleacă spre cămară; la final, 0 în groapă, 210 în general).
 20. **„Se strică aici; cămara are loc" doar spre o cămară care păstrează** (inclusiv una „aproape"); dacă nici la prioritatea
     maximă cămara n-ar trece de depozitul ăsta, sfatul e „Coboară prioritatea depozitului ăstuia sub a cămării". Alternativa:
     sfatul spre orice cămară mai rece decât mormanul — și o cămară caldă, doar puțin mai rece decât cerul, l-ar primi.
@@ -844,7 +853,8 @@ vede), unealta Cămară, comutatorul, groapa dintr-un clic (și că molozul chia
 iar fiecare din cele 27 de probe negative înroșește exact bifa ei. Că hrana se strică exact cât spune curba, că pivnița de sub
 casă nu pierde nimic într-un an, că salvarea păstrează starea și că nicio unitate de hrană nu apare sau dispare fără
 socoteală: testele (1.178) și 1.334 de mutații, toate prinse. Că prognoza nimerește: contra jocului cu oameni, −0,115…+0,140
-zile. Că ce exista nu s-a mișcat: scenariul de referință comparat pas cu pas, 100.000 de tickuri. Ce nu pot: dacă se citește
-fără să știi regula, dacă ritmul pierderii se simte corect și dacă groapa pusă automat e unde ai pune-o tu.
+zile. Că mecanismul, cu alterarea oprită, nu mișcă nimic din ce exista: scenariul de referință comparat pas cu pas, 100.000
+de tickuri, cu rata 0, hrana veche și fără a doua căutare — identic; efectul cu rata reală e cel din decizia 12. Ce nu pot:
+dacă se citește fără să știi regula, dacă ritmul pierderii se simte corect și dacă groapa pusă automat e unde ai pune-o tu.
 
 **Pornirea, pe scurt:** `kinstead.bat` ▸ 6, apoi http://localhost:5175/ ▸ **Joc nou…** ▸ **Pornește** (pașii 1–10 de mai sus).

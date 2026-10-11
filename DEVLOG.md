@@ -5009,10 +5009,11 @@ remedierii). Designul și abaterile: `research/hrana-t3.md` (§13 „La livrare"
 **Pe straturi.**
 - **Formatul, neutru (A: `aaa4a22`, `4dc55c7`).** `iteme.alterare` (Float64Array de întregi exacți, `ONE_ALTERARE = 2^29`
   dintr-o unitate, invariantul `S ≤ q·(ONE − 1)`), `agents.caraAlterare`, `zone.refuzate` (masca INVERSĂ: 0 = primește tot),
-  `w.hranaStricata`, `rules.perisabil`; contoarele oracolelor G1S (pe S) și G1 (pe unități), TRANSIENT. Toate căile lui S trec
-  printr-o funcție, `parteDinAlterare`: `asazaItem` și `creeazaItem` cu alterarea ca argument OBLIGATORIU, `iaDinItem` (partea
-  în `ultimaParte`), RIDICĂ, LASĂ, `mutaItem`, zidirea, mortul de la încărcare, `golesteMana` în toate locurile care golesc o
-  mână; realizarea e o funcție proprie, `scadeStricate`. Nutriția efectivă cu `ceil` (mâncătorul nu câștigă restul),
+  `w.hranaStricata`, `rules.perisabil`; contoarele oracolelor G1S (pe S) și G1 (pe unități), TRANSIENT. Împărțirea lui S are
+  o singură funcție, `parteDinAlterare` (`asazaItem`, `iaDinItem`, zidirea, `cautaMancare`); unirea (LASĂ) adună S-ul întreg
+  al mâinii, iar realizarea e o funcție proprie, `scadeStricate`. Căile: `asazaItem` și `creeazaItem` cu alterarea ca argument
+  OBLIGATORIU, `iaDinItem` (partea în `ultimaParte`), RIDICĂ, LASĂ, `mutaItem`, zidirea, mortul de la încărcare,
+  `golesteMana` în toate locurile care golesc o mână. Nutriția efectivă cu `ceil` (mâncătorul nu câștigă restul),
   `cautaMancare` pe valoare. `SCHEMA_VERSION = 9`, `MIGRATIONS[8]` pe zerouri (hrana veche pornește proaspătă),
   `valideazaAlterarea` comună pentru `encode` (aruncă) și `decode` (refuză), normalizarea felurilor neperisabile (cu contor),
   hash-ul pe hi/lo. Fixtură golden nouă: schema 8 cu hrană în mâini (`tests/fixtures/save-schema8-hrana.json`).
@@ -5041,7 +5042,9 @@ remedierii). Designul și abaterile: `research/hrana-t3.md` (§13 „La livrare"
   „hrana" acoperită de cardul Hărți). Plus un flak preexistent în `exceptie-tick` (o salvare automată asincronă, 1 din 11
   rulări), reparat în probă.
 - **Recenzia codului (5 lentile, verificatori, două felii de reparații și porțile de integrare; 12 agenți): 14 constatări,
-  toate confirmate — 1 MARE, 2 MEDII, 11 MICI.**
+  0 respinse — 1 MARE, 2 MEDII, 11 MICI.** Patru au trecut prin verificatori: JOC-1, JOC-2 și ECRAN-1 confirmate, PORTI-1
+  doar pe jumătate (partea despre `U-prag` respinsă: nivelul e citit din aplicație); celelalte 10, MICI, n-au fost
+  verificate independent — au fost reproduse sau măsurate pe codul vechi la reparație.
   - **JOC-1 (MARE; ECRAN-1, MEDIE, e același defect):** „Pictează groapa de moloz" punea groapa PE ACOPERIȘUL casei când
     cămara e în pivnița de sub ea — geometria de referință a designului. Acolo nu ajunge nimeni, `groapaDeMoloz` număra
     acoperișul ca loc, propunerea dispărea, iar molozul rămânea în cămară (pierderi de hrană de 10–20 de ori mai mari).
@@ -5060,8 +5063,9 @@ remedierii). Designul și abaterile: `research/hrana-t3.md` (§13 „La livrare"
     mai inventează contorul), PORTI-2 (bifa nouă `bara-praguri`), PORTI-3 (oracolul prognozei ia sfârșitul hranei din lume),
     PORTI-4 (garda „cămara nu-și e singură sfat" are testul ei), PORTI-5 (buclele de iarnă au plafon).
   - **JOC-3 (MICĂ), lăsată la decizie:** groapa are filtru, deci rang 7 la prioritate egală, și trage și pământul deja pus în
-    depozitul general (375 u cu generalul plin de pământ). Varianta „prioritatea gropii cu 1 mai mică" taie asta, dar aduce
-    un cărat invers (40–70 u). La owner: OWNER_VERIFY 18, decizia 19.
+    depozitul general (375 u cu generalul plin de pământ). Varianta „prioritatea gropii cu 1 mai mică" taie asta (generalul
+    plin rămâne neatins, 675; molozul iese în 668–834 de tickuri în loc de 523–736), dar cu generalul gol aduce un cărat
+    invers (40–70 u). La owner: OWNER_VERIFY 18, decizia 19.
 
 **Fișierele și logica atinse** (54 de fișiere, +8.736 / −248):
 - simularea: `src/sim/state.ts` (starea, `ONE_ALTERARE`, `golesteMana`), `iteme.ts` (căile lui S, nutriția efectivă,
@@ -5074,7 +5078,11 @@ remedierii). Designul și abaterile: `research/hrana-t3.md` (§13 „La livrare"
   `overlay-temperatura.ts` (punctele lui U), `index.html` (rândul F3);
 - porțile: `tests/hrana-format.test.ts`, `hrana-pas.test.ts`, `camara.test.ts`, `hrana-ecran.test.ts` (noi), fixtura și
   `tools/captura-fixtura-schema8-hrana.mjs`; suitele de mutații `hrana`, `camara`, `hrana-ecran` (noi) și tiparele
-  re-ancorate în `carat`, `drivere`, `recenzie-ui`, `stare`, `nevoi`, `ui`, `termic-ecran`, `constructie`; `bench/ui-fum.mjs`.
+  re-ancorate în `carat`, `drivere`, `recenzie-ui`, `stare`, `nevoi`, `ui`, `termic-ecran`, `constructie`; `bench/ui-fum.mjs`;
+- testele vechi atinse: literalele de hash (`acces-joc`, `migrare-incaperi`, `salvare-temperatura`), `usa.test.ts` (fixtura
+  tocului, lecția 2), `fixturi-pivnita.ts` (`geometriaFinala`), `viewer-ui-lume.test.ts`, apelurile cu alterarea și felul
+  obligatorii în `constructie`, `drivere`, `iteme`, `santier-depozit`; plus `viewer/ui/memorie-incapere.ts` (masca zonei în
+  afara cheii inspectorului) și `tools/mutatii/suite.mjs` (cele trei suite noi).
 
 **Cum s-a ajuns aici.**
 - **Harta pe HEAD** (6 agenți, 2,20 M): itemele și starea, temperatura mormanului, economia și curba, depozitarea, ecranul,
@@ -5083,10 +5091,11 @@ remedierii). Designul și abaterile: `research/hrana-t3.md` (§13 „La livrare"
   independent) a dat designul v2: ONE = 2^29; realizarea ca funcție proprie (regula lui `iaDinItem`, luată literal, golea
   mormanul de 26× mai repede); nutriția efectivă obligatorie; tocul ca regulă permanentă (o ușă se zidește peste un morman);
   predicatul exact al indexului (v1 dădea 112–130 de pași de index pe tick); curba pe grila deasă (un tabel la fiecare 5 °C
-  ar fi pierdut 2,08% în loc de 0,28% în pivnița +1 °C, toamna); rangul la prioritate egală; groapa de moloz; prognoza pe
-  aerul viitor.
+  ar fi pierdut 2,09% în loc de 0,28% în pivnița +1 °C, toamna — măsurat la B; designul estimase 2,08%); rangul la prioritate
+  egală; groapa de moloz; prognoza pe aerul viitor.
 - **Valul 1, simularea** (A, B, C în ordine; 1,97 M; 6 commit-uri), **valul 2, ecranul** (D1, D2; 1,45 M; 5 commit-uri).
-- **Recenzia, verificarea, remedierea** (SIM și ECRAN în paralel) **și porțile de integrare** (1,49 M pe reluare; 9 commit-uri).
+- **Recenzia, verificarea, remedierea** (SIM, apoi ECRAN de la `4f032d4`) **și porțile de integrare** (1,49 M pe reluare;
+  9 commit-uri).
 
 **Porți pe ramura finală (`t3-sim`, HEAD `ea29bba`; integrarea n-a avut nimic de reparat):** `npm run check` verde de două ori
 (1.178/1.178 de teste, 0 sărite; `mutatii:check` 1.334 de probe; hash `c4a6c1dc` = ci.yml; 179 s, apoi 162 s); mutațiile,
@@ -5104,10 +5113,10 @@ bife, 16 → 23 → 27 de probe negative.
   (≤ 0,35%) o înroșesc. Tabelul față de parabolă: ×0,934 … ×1,125 pe toate valorile Q16 din [5,2; 45] °C; λ ≥ 1 de la
   prag + 0,025 °C. O pivniță un anotimp (T max 4,802 °C): mormanul proaspăt rămâne exact (75, 0).
 - **Scenariul standard** (100.000 de tickuri, 40 de agenți; semințele 1 / 2 / 3 / 12345): plecații 2 / 3 / 2 / 8 fără
-  alterare, 12 / 10 / 13 / 16 cu alterare și hrana veche, **1 / 2 / 2 / 7 la referință** (× 1,25 și a doua căutare), toți
-  „foame, nicio hrană în 96 de celule"; stricat 18,5–18,7%. Pe 12345, față de format: mâncate 4.397 → 4.445, plecați 8 → 7,
-  hrana rămasă 628 → 696, stricate 0 → 1.164 (18,5% din 6.305 puse); 5.000 de pași de alterare, o evaluare de rată pe pas;
-  CLI-ul 9,7 s (97 µs/tick) la integrare.
+  alterare, 12 / 10 / 13 / 16 cu alterare, hrana veche și fără a doua căutare (11 / 14 / 12 / 15 cu ea), **1 / 2 / 2 / 7
+  la referință** (× 1,25 și a doua căutare), toți „foame, nicio hrană în 96 de celule"; stricat 18,5–18,7%. Pe 12345, față
+  de format: mâncate 4.397 → 4.445, plecați 8 → 7, hrana rămasă 628 → 696, stricate 0 → 1.164 (18,5% din 6.305 puse);
+  5.000 de pași de alterare, o evaluare de rată pe pas; CLI-ul 9,7 s (97 µs/tick) la integrare.
 - **Neutralitatea, în lockstep** (scenariul standard, la fiecare din cele 100.000 de tickuri): A față de `eae704d`, cu
   hash-ul proiectat pe schema 8 — 0 tickuri diferite; B cu rata 0, hrana 450 și fără a doua căutare, față de A — 0 (exact
   `fd188574`); C față de B — 0 (chiar și costul indexului: 984 de reconstrucții / 239.065 de pași). Recenzia n-a mișcat
@@ -5131,7 +5140,7 @@ bife, 16 → 23 → 27 de probe negative.
 | literal | înainte | după | de ce |
 |---|---|---|---|
 | standard (`ci.yml`) | `b38229fd` | `fd188574` (A) → `c4a6c1dc` (B) | schema 9 cu câmpurile noi pe zero; apoi efectul: alterarea, hrana × 1,25, a doua căutare |
-| acces-joc | `fe597a27` | `c62b4aee` (A) → `84be6e5e` (B) | formatul; apoi hrana casei cu pioni se strică |
+| acces-joc | `fe597a27` | `c62b4aee` (A) → `84be6e5e` (B) | formatul; apoi efectul: hrana scenei, sub cer 12.000 de tickuri, se strică (56 de unități) |
 | migrare (schema 7 cu încăperi) | `65883f04` | `f83bc5fb` (A) | doar formatul |
 | S+ | `84d14adc` | `82d32e8f` (A) | doar formatul |
 | schema 8 cu hrană (nou) | — | `9b8cdbd4` (A) | fixtura golden nouă, după migrare (proiectat `018d58c3` = captura) |

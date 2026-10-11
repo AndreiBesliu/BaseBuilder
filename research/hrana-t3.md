@@ -224,11 +224,12 @@ mormanele care pierd sincron.
 
 ## 13. La livrare (11.10.2026): ce s-a schimbat față de v2
 
-După implementare (valul 1, simularea: A, B, C; valul 2, ecranul: D1, D2), recenzia codului (5 lentile + verificatori,
-14 constatări, toate confirmate, 1 MARE) și remediere (SIM și ECRAN în paralel; 9 commit-uri). 20 de commit-uri de cod peste
-`eae704d`, pe ramura `t3-sim`. Porțile finale (HEAD `ea29bba`): 1.178 de teste; 1.334/1.334 de probe de mutație (35 min 22 s,
-într-o clonă); `--izolare` 765/765; ui-fum 92/92 și 27/27 de probe negative exacte. Cifrele de mai jos înlocuiesc estimările
-designului acolo unde diferă.
+După implementare (valul 1, simularea: A, B, C; valul 2, ecranul: D1, D2), recenzia codului (5 lentile + verificatori;
+14 constatări, 0 respinse, 1 MARE — 4 trecute prin verificatori: JOC-1, JOC-2, ECRAN-1 și, doar pe jumătate, PORTI-1;
+celelalte 10, MICI, reproduse sau măsurate pe codul vechi la reparație) și remediere (SIM, apoi ECRAN de la `4f032d4`;
+9 commit-uri). 20 de commit-uri de cod peste `eae704d`, pe ramura `t3-sim`. Porțile finale (HEAD `ea29bba`): 1.178 de
+teste; 1.334/1.334 de probe de mutație (35 min 22 s, într-o clonă); `--izolare` 765/765; ui-fum 92/92 și 27/27 de probe
+negative exacte. Cifrele de mai jos înlocuiesc estimările designului acolo unde diferă.
 
 - **§1, starea:**
   - două contoare în plus față de listă: `pierdutePeFel` (termenul „pierdut" al lui G1 pe fel: `itemePierdute` e al tuturor
@@ -303,6 +304,8 @@ designului acolo unde diferă.
     (0, 0, +4), unde nu ajunge nimeni, `groapaDeMoloz` număra acoperișul ca loc, iar propunerea dispărea cu molozul tot în
     cămară — singurul defect MARE al recenziei (JOC-1; ECRAN-1 e același). Acum fiecare celulă a gropii e în aceeași
     componentă de mers cu o celulă a cămării (`regionAt` + `find`); fără regiune, `null`. Pe H4: (dx −2, dy 7, dz +1), pe sol;
+  - **cauza gropii pe un morman de moloz** apare doar când alt depozit îi primește felul; altfel rămâne `FEL_REFUZAT`
+    („Schimbă filtrul…") — prima variantă înlocuia `FEL_REFUZAT` și a înroșit `poarta-camara: inspectorul` (D1-13);
   - **acceptanța cu oameni**: geometria H4 (casa 7×7 cu chepeng, pivnița 3×3×2 sub 1 m, săpată de pioni), ușile chepengului
     puse prin `fill`, paturile = o zonă DORMIT, 4 pioni, 600 u, 3,5 zile, toamna și vara:
 
@@ -312,20 +315,22 @@ designului acolo unde diferă.
     | fără filtru, toamna / vara | 13,8–16,3% / 26,8–29,0% | 0 |
     | fără cămară, toamna / vara | 16,0–16,5% / 29,8–30,3% | 0 |
 
-    Rangul mută toată hrana din general în cămară în 250–350 de tickuri. A doua căutare de mâncare (J-8) NU e exercitată acolo
-    (pionii dorm lângă cămară; are proba ei la B); 0 re-desemnări (nicio prăbușire la 3×3 sub 1 m), deci „molozul tolerat prin
-    re-desemnare" s-a exercitat doar prin groapă. Testul inițial era orb la groapă (JOC-2: generalul avea loc pentru tot
-    molozul, iar groapa era pusă de mână); acum groapa vine pe calea butonului, cu generalul plin: 6/6, molozul iese în
-    497–801 de tickuri, cămara ajunge la 552–569, stricat 0–7 u; martorul fără groapă: molozul nu iese, stricat ≥ 5%;
+    Rangul mută toată hrana din general în cămară în 250–350 de tickuri. A doua căutare de mâncare (J-8) NU e exercitată
+    acolo (pionii dorm lângă cămară; are proba ei la B); 0 re-desemnări (nicio prăbușire la 3×3 sub 1 m), deci „molozul
+    tolerat prin re-desemnare" s-a exercitat doar prin groapă. Testul inițial era orb la groapă (JOC-2: generalul avea loc
+    pentru tot molozul, iar groapa era pusă de mână); acum groapa vine pe calea butonului, cu generalul plin: 6/6, molozul
+    iese în 497–801 de tickuri, cămara ajunge la 552–569, stricat 0–7 u; martorul fără groapă (ce cere testul): molozul nu
+    iese, stricat ≥ 5%;
   - **„Se strică aici; cămara are loc"** exclude zona mormanului și cere clasa „se strică"; după recenzie (ECRAN-2), locul se
     numără doar pe celulele cămării cu clasa mai bună decât „se strică" (o cămară „aproape" contează), iar când nici la
     prioritatea maximă cămara n-ar trece de rangul locului, textul e „Coboară prioritatea depozitului ăstuia sub a cămării".
-- **§6, jocul:** scenariul × 1,25 e 563 pe sit (cele 6 mormane de 75 rămân pe loc, sfertul pe rândul al treilea), nu 6 × 94 —
-  o lume cu 450 e exact cea veche, deci măsurătorile au martor. Plecații pe semințele 1 / 2 / 3 / 12345: 1 / 2 / 2 / 7 la
-  referință, față de 2 / 3 / 2 / 8 fără alterare și 12 / 10 / 13 / 16 cu alterare și hrana veche (J-6 măsurase 1 / 1 / 1 / 7
-  pe alt prototip); stricat 18,5–18,7%. A doua rază de mâncare e un câmp de content (`mancareScanRadiusLargCells` = 384,
-  validat ≥ prima rază), nu „× 4" în cod. Jocul nou: prognoza la pornire 2,851 zile (fără alterare 3,565); cu pionii, hrana se
-  termină la 2,869–2,910 zile.
+- **§6, jocul:** scenariul × 1,25 e 563 pe sit (cele 6 mormane de 75 rămân pe loc, sfertul pe rândul al treilea), nu
+  6 × 94 — o lume cu 450 e exact cea veche, deci măsurătorile au martor. Plecații pe semințele 1 / 2 / 3 / 12345:
+  1 / 2 / 2 / 7 la referință (J-6 măsurase 1 / 1 / 1 / 7 pe alt prototip), față de 2 / 3 / 2 / 8 fără alterare și
+  12 / 10 / 13 / 16 cu alterare, hrana veche și fără a doua căutare (11 / 14 / 12 / 15 cu ea; J-6: 13 / 7 / 9 / 15);
+  stricat 18,5–18,7%. A doua rază de mâncare e un câmp de content (`mancareScanRadiusLargCells` = 384, validat ≥ prima
+  rază), nu „× 4" în cod. Jocul nou: prognoza la pornire 2,851 zile (fără alterare 3,565); cu pionii, hrana se termină
+  la 2,869–2,910 zile.
 - **§7, salvarea și hash-ul:** literalele s-au mutat o dată la format (A) și o dată la efect (B) — standard `b38229fd` →
   `fd188574` → `c4a6c1dc`; acces-joc `fe597a27` → `c62b4aee` → `84be6e5e`; migrare `65883f04` → `f83bc5fb`; S+ `84d14adc` →
   `82d32e8f`; noi: schema 8 cu hrană `9b8cdbd4` și „S+ hrană" `505346b7` (stricate: casa 3, tocul pivniței 3 — la T-ul
@@ -338,7 +343,7 @@ designului acolo unde diferă.
     prognoza sărea la V/C (1,55 zile față de 0,07). Content-ul implicit stă sub prag (λ-ul unei ore la 45 °C e ~0,115);
   - **baza pierderii e pe unități** (`q·nut`), nu pe valoare: simularea strică q·λ pe pas, deci un morman fărâmițat pierde ca
     unitățile lui. Prognoza și toate cifrele „cât ne hrănește" sunt pe VALOARE; cifra din bară rămâne în UNITĂȚI, iar
-    tooltip-ul le spune pe amândouă („hrănește cât … proaspete");
+    tooltip-ul le spune pe amândouă („hrănește cât … de proaspete");
   - forma închisă când nimic PERISABIL nu e sub cer (nu „nimic sub cer"); mâinile la rata 0, tocul la T-ul părții calde;
   - plafonul e un an de calendar („peste un an");
   - pragurile de prezentare stau în viewer, nu în content: 0,1%/zi pentru clase (pragul „aproape" cade la 377.450 Q16 =
@@ -361,7 +366,22 @@ designului acolo unde diferă.
   - după recenzie: `groapa-clic` cere moloz nou în groapă (proba negativă `groapa` îi sapă podeaua), `bara-praguri` probează
     clasele barei sub praguri (PORTI-2), sabotajele `alterare-timp` și `se-misca` raportează N tickuri rulate (PORTI-1),
     oracolul prognozei ia sfârșitul hranei din lume (PORTI-3), garda „cămara nu-și e singură sfat" are testul ei (PORTI-4),
-    buclele de iarnă au plafon (PORTI-5).
+    buclele de iarnă au plafon (PORTI-5);
+  - `groapa-clic` avansează după clic câte 120 de tickuri, cel mult 1.680, până apare moloz nou pe groapă, nu 2.000 fixe ca în
+    propunerea recenziei: pașii de după (`camara-strica-aici`, `joc-nou-dialog`) găsesc lumea aproape neschimbată; proba
+    negativă `groapa` sapă podeaua gropii după clic, fiindcă `locGroapa` nu mai alege o celulă deja inaccesibilă;
+  - sfatul pozitiv „Se strică aici; cămara are loc" se probează pe pagina alterării (bifa `camara-strica-aici-rece`: pivnița C
+    de 2 m, săpată prin comenzi, la 3,28 °C, cu cămara pe puțul ei); pe pagina hranei cămara e la suprafață și, după ECRAN-2,
+    corect nu mai primește sfatul;
+  - `camara-unealta` cere și tooltip-ul butonului Cămară egal cu funcția (ECRAN-4), dar pe content-ul implicit literalul vechi
+    coincidea cu funcția: conjuncția nu poate ieși roșie pe codul vechi; proba reală e testul din node cu pragul de 6 °C;
+  - `U-prag` n-are clasa 2 pe nivelul pivnițelor (sub pământ nu e nimic cald): pe nivel probează alfa 1 și 0,45 pe toate cele
+    18 celule, iar alfa 0 (clasa 2) rămâne probat în node (`hrana-ecran`, „U: punctul…") (D2-7);
+  - mărunte, cu motivul în rapoartele agenților: G1 fără contor nou de unități mâncate (testul adună
+    `lastJobReport().unitatiMancate` pe tick); proba „mâna nu se strică" a fost artificială la A (fără pas), iar mutantul real
+    (bucla pe mâini a pasului) apare la B, unde mâna rulează cu rata implicită; `Cifre.razaDepozit`, nouă, pentru textul
+    `PREA_DEPARTE`; literalul „S+ hrană" ține și un toc pe ușa casei și un morman de piatră; `geometriaFinala(tick)` exportată
+    din `fixturi-pivnita.ts`; probele omise ca echivalente stau scrise în antetul fiecărei suite.
 - **Recenzia codului, constatare cu constatare:**
 
   | id | sev. | ce | ce s-a făcut |
@@ -383,9 +403,10 @@ designului acolo unde diferă.
 
 - **§12, registrul, la zi.** Rămân din design: producția de hrană, gheața, „mănâncă întâi ce se strică", `haulCarryMax 50 <
   itemStackMax 75`, vatra, confortul, ușa la trecere, T pe bucată, capacitatea, mormanele care pierd sincron. Noi:
-  - **JOC-3**: groapa ca „haldă" pentru tot molozul (rang 7, azi: cu generalul plin de pământ trage 375 u din el; cu generalul
-    gol, 120–140), ca preaplin (prioritatea implicită − 1: generalul rămâne neatins, dar 40–70 u fac cărat invers, iar molozul
-    iese în 668–834 de tickuri în loc de 523–736; cere și un câmp de prioritate prin UI) sau bonusul de rang doar pentru
+  - **JOC-3**: groapa ca „haldă" pentru tot molozul (rang 7, azi: cu generalul plin de pământ trage 375 u din el, iar molozul
+    cămării iese în 523–736 de tickuri; cu generalul gol la început, 120–140 u), ca preaplin (prioritatea implicită − 1: cu
+    generalul plin, acesta rămâne neatins, 675, dar molozul iese în 668–834 de tickuri; cu generalul gol, 40–70 u fac cărat
+    invers — la final, 0 în groapă, 210 în general; cere și un câmp de prioritate prin UI) sau bonusul de rang doar pentru
     filtrele care primesc un fel perisabil (schimbă regula din §5 pentru orice depozit specializat) — la owner;
   - **a doua plasă a gropii**: `groapaDeMoloz` să numere `loc` doar pe celulele de depozit accesibile din cămară — un bloc de
     regiune necalculat dă `NO_REGION`, deci locul ar ieși subnumărat (avertismente false); nemăsurat cât de des. Calea

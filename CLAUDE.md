@@ -175,7 +175,8 @@ potrivește în două locuri editează altul decât cel gândit, rulează testel
 > (după remediere, `--izolare` 670/670 în 11 min 13 s sub încărcare — „~2 min” e cifra unei mașini libere).
 > După t.3 și recenzia ei (11.10): **1.334 de probe în 35 min 22 s** (37 min 15 s la rularea recenziei ECRAN), într-o
 > clonă, arbore curat la final; suitele noi `hrana` (100), `camara` (48), `hrana-ecran` (84). `--izolare` 765/765 în
-> 14 min 10 s fără altă muncă pe mașină: „~2 min” nu mai e adevărat nici pe o mașină liberă (~1,1 s pe test).
+> 14 min 10 s, fără altă muncă a agentului pe mașină (alte sesiuni, necontrolate): „~2 min” e de pe vremea când erau mai
+> puține teste numite (~1,1 s pe test; pe 10.10, tot ~1 s).
 >
 > `tools/check-mutatii.mjs` a fost scris ca înlocuitor static și rămâne util, dar nu mai e o
 > compensație: el răspunde la „proba ARE ce să măsoare?", nu la „măsoară?". A doua întrebare
