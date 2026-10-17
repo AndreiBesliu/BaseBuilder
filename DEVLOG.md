@@ -5221,3 +5221,44 @@ muncă pe toată colonia; cu adăpost, ~40% din dimineața valului. Nouă între
 
 **Ce urmează:** panoul adversarial pe design, apoi codul (A format, B efect, C ecran) și recenzia — doar cu acordul owner-ului și cu
 costul spus înainte.
+
+## Pauză — 17.10.2026 — S24-27 t.4: panoul pe design, designul v2
+
+**Prompt:** „Da, pornește panoul adversarial pe designul v1 (4 lentile + verificatori, ~3,5 M)."
+**Model:** Claude Opus 5.5 (claude-opus-5-5), Claude Code, Ultracode; panoul prin Workflow, cu acordul owner-ului.
+
+Consumul înainte: 5 ore 67%, săptămânal 18%. Panoul: 4 lentile independente (STARE — starea, salvarea, determinismul; JOC —
+jocul și calibrarea, cu prototipul mecanicii într-o clonă; COST — K05 și căutarea, cu prototip pe M10; ECRAN — ce vede jucătorul,
+ui-fum, verificarea owner-ului), apoi câte un verificator independent pe fiecare constatare CRITIC/MARE (cel mult 3 pe lentilă).
+**13 agenți, 3,65 M tokeni, 74 min, 0 erori**, față de ~3,5 M estimați. Repo-ul a rămas neatins; trei lentile și verificatorii au
+lucrat în clone cu joncțiunea scoasă întâi. Rapoartele și scripturile sondelor sunt în scratchpad-ul sesiunii.
+
+**51 de constatări** (STARE 12, JOC 14, COST 11, ECRAN 14): 2 CRITIC (aceeași rădăcină, din două lentile), 9 MARE înainte de
+verificare, 9 verificate (2 confirmate CRITIC, 2 confirmate MARE, una păstrată MARE pe jumătate, 4 coborâte la MEDIE); JOC-4 și COST-4 au trecut de plafon — le-am
+verificat pe cod. Ce a schimbat designul (`research/confort-t4.md`, acum v2, cu tabelul tuturor constatărilor la §13):
+
+- **CRITIC (STARE-1 = COST-1)**: căutarea adăpostului parcurgea „bucățile în ordinea lor", dar `Componenta.bucati` e sortat pe SLOTUL
+  bucății, iar sloturile vin LIFO din istoria indexului; la încărcare indexul se reface cu alte sloturi. Măsurat de verificator: pe o
+  sală săpată de sus în jos, ordinea diferă pe 90 din 92 de poziții, iar la plafon lumea continuă dă BUGET_DEPASIT și cea încărcată
+  GASIT, 10 din 10. Harta greșise sursa (ordinea Map-ului, pe care `listaComponente` o anulează deja) — corectată în H2. v2: căutarea pe
+  FELII, în ordinea (limita de jos, cheia), blocul de regiuni citit o dată pe felie, plafonul pe felii vizitate, candidatul întors la
+  plafon; pe M10 33–181 µs p50, aceeași celulă ca o căutare exhaustivă în 128/128;
+- **regula benzii fără condiție** (JOC-1) dădea „Dormit pe jos" 13% fără câștig termic: acum doar dacă există un loc în bandă;
+- **raza 96** (JOC-2) lăsa oameni înghețați la 100–130 de celule de casă — lecția J-8 a doua oară: a doua trecere la 384;
+- **buclele de drum refuzat** (STARE-2, JOC-3, STARE-4, COST-7): somnul mutat în adăpost — 37 / 504 de joburi de somn cu ușa blocată;
+  acum o singură intrare `adapostPentru` cu o singură răcire, scrisă și de `DOARME.incheie` și de drumul de hoinăreală refuzat în frig;
+- **toți intrau deodată** (JOC-4): o toleranță la frig pe om, funcție pură de id (750…1250‰);
+- **hoinăreala cu respingere** (COST-4) dubla tickul în val: filtrul doar în bandă, oprire la prima respingere;
+- **podeaua dispoziției** (JOC-10): cu „Înghețat" −300, înghețat + dormit pe jos + obosit pleca; acum −270, podeaua 80, poartă în parsare;
+- **fixtura casă + pivniță nu se poate intra pe jos** (JOC-9, COST-8): după ușă urmează rampa; acceptanțele cer o fixtură nouă;
+- `&start=val` la 12:00 în ajun (optimismul de la naștere îmblânzea valul), `&piatra=1500` (1.000 nu închid nicio casă); alerta valului
+  în trei categorii (casa fără ușă nu e adăpost; o mină fără ușă poate fi); ecranul pe un nucleu pur, fără contoare în World; „Căldură"
+  în loc de „Frig" pe bară; trei lumi pentru ui-fum.
+
+Ce a ținut din v1, confirmat de sonde: nevoia ca formă, determinismul eșantionului la tickul de nevoie (8/8 salvări identice),
+neutralitatea literalelor (6/6, cu hash-ul proiectat), `createWorld(…, tickStart)`, cămara fără regulă (+0,8 °C măsurat), ordinea
+nevoilor. Cifrele măsurate pe prototip: fără adăpost se pierde ~1/3 din munca zilei valului (63–64% față de 91,5%), cu o încăpere
+închisă aproape ~1/9 (80–81%); 0 plecări din frig singur.
+
+**Ce urmează:** implementarea (A format, B efect, C ecran — §11 din v2), apoi recenzia codului — doar cu acordul owner-ului și cu
+costul spus înainte. Decizia 8 (t.4 acum sau după producția de hrană) e la owner.

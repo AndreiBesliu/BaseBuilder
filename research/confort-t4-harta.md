@@ -98,7 +98,10 @@ din `rng.agents` pe încercare, doar în blocuri LEGATE (altfel acoperirea creș
   spre cer (are și el T, ventilat spre afară). Nu există bbox pe componentă și nici o listă de celule calcabile: `celuleComponentei`
   (:977) e O(volum + 256·bucăți), `listaComponente` (:972) sortează pe ancoră (ordinea canonică, independentă de istoria indexului).
   Ordinea de inserție a `idx.comp` DIFERĂ între lumea continuă și cea încărcată (indexul se reface la încărcare): orice parcurgere care
-  se taie la un plafon trebuie să meargă în ordinea canonică, altfel lumea încărcată alege altceva.
+  se taie la un plafon trebuie să meargă în ordinea canonică, altfel lumea încărcată alege altceva. **[Corectat de panou, 17.10 —
+  STARE-1, COST-1: sursa reală e alta. `listaComponente` anulează deja ordinea Map-ului; necanonică e ordinea bucăților DIN componentă —
+  `Componenta.bucati` e sortat pe slotul bucății (camere.ts:588, :675), iar sloturile vin LIFO din istoria indexului (camere.ts:403–405).
+  Măsurat: pe o sală săpată de sus în jos, ordinea diferă după encode/decode pe 90 din 92 de poziții. Designul v2 parcurge pe felii.]**
 - **Valul de frig e prognozabil**: `ziuaValului(seed, an, rules)` (clima.ts:188) și `valDeFrig` (:198) sunt pure de (seed, tick) —
   ecranul poate anunța valul oricât de devreme.
 

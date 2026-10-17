@@ -22,21 +22,23 @@ din depozitul general. Plus o linie nouă în §17, decizia 6. Fără răspuns l
 
 ## Felia în lucru: t.4 — confortul −8..34 °C
 
-**Făcute (17.10, inline, fără agenți):** harta pe HEAD — `research/confort-t4-harta.md` (H1–H7, măsurătorile M1–M4; scripturile în
-`research/masuratori-t4/`, `node <script>` din dosarul lui) — și **designul v1** — `research/confort-t4.md` (nevoia FRIG, jobul
-INCALZIRE, `cautaAdapost`, regula benzii pentru pat / somn / hoinăreală, schema 10, 11 decizii, 9 întrebări pentru panou la §13).
-Intrarea „Task Started — 17.10.2026" din DEVLOG le rezumă.
+**Făcute (17.10):** harta pe HEAD — `research/confort-t4-harta.md` (H1–H7, măsurătorile M1–M4; scripturile în
+`research/masuratori-t4/`, `node <script>` din dosarul lui), inline; **panoul adversarial** pe designul v1 (4 lentile + 9 verificatori,
+13 agenți, 3,65 M, 74 min, cu acordul owner-ului; 51 de constatări, 2 CRITIC cu aceeași rădăcină); **designul v2** —
+`research/confort-t4.md` (v1 e în `933cc96`): nevoia FRIG cu toleranța pe om, jobul INCALZIRE, `adapostPentru` (o singură intrare, o
+singură răcire) peste `cautaAdapostPur` (V3: pe felii, în ordinea distanței, două treceri 96 / 384), regula benzii condiționată de
+existența unui loc în bandă, „Înghețat" −270 cu podeaua păzită, schema 10, 11 decizii, tabelul constatărilor la §13. DEVLOG: „Task
+Started — 17.10.2026" și „Pauză — 17.10.2026".
 
-**Ce a găsit harta și schimbă felia:** banda e regula Going Medieval de ALEGERE A LOCULUI; clima o atinge doar în ziua valului de frig
-(afară ~16 h sub −8 °C, 0 h peste 34); aproape orice adăpost ține; oamenii încălzesc adăpostul vizibil (12 într-o casă 3×3: +19,8 °C la
-echilibru); **jocul nou implicit nu ajunge la val** (toți pleacă de foame până la 4,0 zile; valul la 4,667 / 5,667) — decizia 8 a
-designului (t.4 acum sau după S28-31) e la owner odată cu raportul.
+**Ce trebuie știut înainte de cod:** jocul nou implicit nu ajunge la val (decizia 8 la owner); fixtura casă + pivniță din
+`tests/fixturi-pivnita.ts` nu se poate intra pe jos (după ușă urmează rampa) — acceptanțele cer o fixtură nouă; `Componenta.bucati` NU e
+o ordine canonică (sloturi LIFO) — orice parcurgere cu plafon peste încăperi merge pe felii, în ordinea `idx.chei`; cifrele măsurate pe
+prototip (munca, timpii) sunt în §5 din v2; prototipurile panoului (diff-uri) au stat în scratchpad-ul sesiunii din 17.10.
 
-**Urmează, DOAR cu acordul owner-ului și cu costul spus înainte:** panoul adversarial pe design (v1 → v2), apoi codul în trei
-commit-uri (A formatul, B efectul, C ecranul — designul §11), apoi recenzia codului, documentația (OWNER_VERIFY §19 cu pașii rulați pe
-codul real). Lecțiile de aplicat: designul v2 cu fiecare număr care se poate schimba între scanare și salvare ca stare de job;
-acceptanțele pe drumul NATURAL (oamenii își caută singuri adăpostul), nu cu jobul pornit de mână; abaterile declarate de agenți se
-verifică pe cod.
+**Urmează, DOAR cu acordul owner-ului și cu costul spus înainte:** codul în trei commit-uri (A formatul, B efectul, C ecranul — §11
+din v2, cu listele locurilor atinse), apoi recenzia codului, documentația (OWNER_VERIFY §19 cu pașii rulați pe codul real). Lecțiile de
+aplicat: acceptanțele pe drumul NATURAL (oamenii își caută singuri adăpostul), nu cu jobul pornit de mână; porțile în PERECHE (lumea
+fără adăpost și aceeași lume cu adăpost), ca un filtru mort să nu treacă; abaterile declarate de agenți se verifică pe cod.
 
 Registrul S24-27 rămas după t.4: T pe bucată, modelul pasului pe deltă, vatra, ușa la trecere, gheața (cu producția de hrană), „mănâncă
 întâi ce se strică", a doua plasă a gropii. Apoi S28-31: lanțurile de producție.
@@ -47,7 +49,7 @@ Registrul S24-27 rămas după t.4: T pe bucată, modelul pasului pe deltă, vatr
   și se așteaptă „continua".
 - **Agenții (Workflow / Agent) DOAR cu acordul owner-ului, cu costul spus înainte.** Citește întâi consumul cu
   `get_usage` (ccd_session_mgmt; fereastra de 5 ore și săptămânalul). La 17.10: săptămânal 8%, 5 ore 34%; după harta
-  și designul t.4: săptămânal 12%, 5 ore 48%.
+  și designul t.4: săptămânal 12%; după panou și v2: săptămânal 24% (panoul singur 3,65 M).
 - Restul nu se mai întreabă: se face și se raportează (excepții: secrete, conturi, plăți, verificări vizuale).
 - Costul măsurat al unei felii cu metoda completă (t.3): harta 2,2 M, panoul adversarial pe design 4,9 M, valul de
   simulare 2,0 M, valul de ecran 1,45 M, recenzia + remedierea + porțile ~1,5 M, documentația 1,1 M — **~13 M**.
