@@ -1,18 +1,18 @@
-# Predare — starea la 17.10.2026
+# Predare — starea la 17.10.2026 (actualizată după harta și designul v1 ale t.4)
 
-Scris la închiderea sesiunii care a livrat S24-27 t.2b și t.3. **Faptele stabile sunt în CLAUDE.md, starea în
-DEVLOG / PLAN / OWNER_VERIFY**; aici e doar puntea spre sesiunea următoare. Când t.4 pornește, sesiunea care o
-pornește actualizează sau șterge fișierul ăsta — o predare veche citită ca instrucțiune trimite la muncă deja făcută.
+Scris la închiderea sesiunii care a livrat S24-27 t.2b și t.3; actualizat de sesiunea care a pornit t.4. **Faptele stabile sunt în
+CLAUDE.md, starea în DEVLOG / PLAN / OWNER_VERIFY**; aici e doar puntea spre sesiunea următoare. Când t.4 trece de panou, sesiunea care
+o duce mai departe actualizează sau șterge fișierul ăsta — o predare veche citită ca instrucțiune trimite la muncă deja făcută.
 
 ## Unde suntem
 
-- `main` = `40ebe1f`, CI verde (check + mutațiile complete). Arbore curat: nicio ramură în afară de `main`, niciun
-  worktree, nicio clonă. `.claude/worktrees/` e acum în `.gitignore`.
+- `main` = commit-ul „Confort (S24-27 t.4): harta și designul v1" peste `6611cc2` (doar documente și scripturi de măsurare, niciun cod
+  de joc). Nicio ramură în afară de `main`, niciun worktree, nicio clonă. `.claude/worktrees/` e în `.gitignore`.
 - S24-27 livrate: t.1 încăperile și ușa (28.09), t.2a regimul permanent (08.10), t.2b temperatura ca stare (10.10),
   **t.3 hrana sub 5 °C (11.10, `1b6f0b3`)** — alterarea, cămara, prognoza. Rezumatul t.3: rândul S24-27 din PLAN.md;
   detaliile, abaterile și registrul: `research/hrana-t3.md` §13; intrarea „Task Completed — 11.10.2026" din DEVLOG.
-- Hash-urile literale: `c4a6c1dc` standard (ci.yml + `tools/check-hash.mjs`), `84be6e5e` acces-joc, `f83bc5fb`
-  migrare, `82d32e8f` S+, `9b8cdbd4` schema 8 cu hrană, `505346b7` „S+ hrană".
+- Hash-urile literale (neschimbate de pasul ăsta): `c4a6c1dc` standard (ci.yml + `tools/check-hash.mjs`), `84be6e5e` acces-joc,
+  `f83bc5fb` migrare, `82d32e8f` S+, `9b8cdbd4` schema 8 cu hrană, `505346b7` „S+ hrană".
 
 ## Ce așteaptă la owner (nu blochează t.4)
 
@@ -20,30 +20,34 @@ OWNER_VERIFY **§18** (hrana): 10 pași pe ecran și 25 de decizii cu implicitul
 Singura decizie nouă care schimbă jocul vizibil e **19 (JOC-3)**: groapa de moloz e „haldă" și trage și pământul
 din depozitul general. Plus o linie nouă în §17, decizia 6. Fără răspuns la 17.10.
 
-## Următoarea felie: t.4 — confortul −8..34 °C
+## Felia în lucru: t.4 — confortul −8..34 °C
 
-Ultima bucată din S24-27 („Rămâne" din PLAN): efectul temperaturii asupra oamenilor. **Nimic început** — niciun
-design, nicio ramură. De citit întâi:
+**Făcute (17.10, inline, fără agenți):** harta pe HEAD — `research/confort-t4-harta.md` (H1–H7, măsurătorile M1–M4; scripturile în
+`research/masuratori-t4/`, `node <script>` din dosarul lui) — și **designul v1** — `research/confort-t4.md` (nevoia FRIG, jobul
+INCALZIRE, `cautaAdapost`, regula benzii pentru pat / somn / hoinăreală, schema 10, 11 decizii, 9 întrebări pentru panou la §13).
+Intrarea „Task Started — 17.10.2026" din DEVLOG le rezumă.
 
-- DESIGN.md:178 (nevoile v1: hrană, odihnă, recreere, confort, temperatură);
-- `research/_DIGEST.md`:137 (dispoziția ca țintă + bară reală cu rate asimetrice — lag-ul dă timp de reacție) și :561
-  (temperatura ca stare, nu ca bară);
-- nevoile de azi: `scurgeNevoile`, `verificaNevoi`, `miscaDispozitia`, `verificaPlecarea` în `src/sim/joburi.ts`
-  (chemate din `src/sim/agents.ts`, ~:332);
-- ce poate citi t.4: `temperaturaCelulei(w, x, y, z, tA)` (`src/sim/temperatura.ts`:1448, pură; `null` pe o
-  componentă fără T), aceeași funcție pe care o citește pasul alterării din t.3;
-- cuplajul deja livrat: oamenii încălzesc încăperile (100 W pe om, `oameniPeComponente`, t.2b) — un om care caută
-  căldura mută și căldura; registrul are **vatra** (sursa de căldură), care probabil intră în discuție aici.
+**Ce a găsit harta și schimbă felia:** banda e regula Going Medieval de ALEGERE A LOCULUI; clima o atinge doar în ziua valului de frig
+(afară ~16 h sub −8 °C, 0 h peste 34); aproape orice adăpost ține; oamenii încălzesc adăpostul vizibil (12 într-o casă 3×3: +19,8 °C la
+echilibru); **jocul nou implicit nu ajunge la val** (toți pleacă de foame până la 4,0 zile; valul la 4,667 / 5,667) — decizia 8 a
+designului (t.4 acum sau după S28-31) e la owner odată cu raportul.
 
-Registrul S24-27 rămas după t.4: T pe bucată, modelul pasului pe deltă, vatra, ușa la trecere, gheața (cu producția
-de hrană), „mănâncă întâi ce se strică", a doua plasă a gropii. Apoi S28-31: lanțurile de producție.
+**Urmează, DOAR cu acordul owner-ului și cu costul spus înainte:** panoul adversarial pe design (v1 → v2), apoi codul în trei
+commit-uri (A formatul, B efectul, C ecranul — designul §11), apoi recenzia codului, documentația (OWNER_VERIFY §19 cu pașii rulați pe
+codul real). Lecțiile de aplicat: designul v2 cu fiecare număr care se poate schimba între scanare și salvare ca stare de job;
+acceptanțele pe drumul NATURAL (oamenii își caută singuri adăpostul), nu cu jobul pornit de mână; abaterile declarate de agenți se
+verifică pe cod.
+
+Registrul S24-27 rămas după t.4: T pe bucată, modelul pasului pe deltă, vatra, ușa la trecere, gheața (cu producția de hrană), „mănâncă
+întâi ce se strică", a doua plasă a gropii. Apoi S28-31: lanțurile de producție.
 
 ## Cum se lucrează acum (regulile owner-ului, în vigoare la 17.10)
 
 - **Pași mari**: o felie întreagă (sau o fază mare a ei) pe pas, cu commit + push + CI + raport în română, apoi STOP
   și se așteaptă „continua".
 - **Agenții (Workflow / Agent) DOAR cu acordul owner-ului, cu costul spus înainte.** Citește întâi consumul cu
-  `get_usage` (ccd_session_mgmt; fereastra de 5 ore și săptămânalul). La 17.10: săptămânal 8%, 5 ore 34%.
+  `get_usage` (ccd_session_mgmt; fereastra de 5 ore și săptămânalul). La 17.10: săptămânal 8%, 5 ore 34%; după harta
+  și designul t.4: săptămânal 12%, 5 ore 48%.
 - Restul nu se mai întreabă: se face și se raportează (excepții: secrete, conturi, plăți, verificări vizuale).
 - Costul măsurat al unei felii cu metoda completă (t.3): harta 2,2 M, panoul adversarial pe design 4,9 M, valul de
   simulare 2,0 M, valul de ecran 1,45 M, recenzia + remedierea + porțile ~1,5 M, documentația 1,1 M — **~13 M**.

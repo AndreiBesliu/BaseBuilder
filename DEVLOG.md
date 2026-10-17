@@ -5189,3 +5189,35 @@ bife, 16 → 23 → 27 de probe negative.
 de decizii cu implicitul în față, între care groapa ca haldă (JOC-3); plus o linie în §17, decizia 6 (pivnița, în hrană).
 
 **Ce urmează:** ramura `t3-sim` intră în `main`; din S24-27 rămâne confortul −8..34 °C.
+
+## Task Started — 17.10.2026 — S24-27, tăietura 4: confortul −8..34 °C
+
+**Prompt:** „Kinstead. Citește HANDOFF.md, apoi continuă cu S24-27 t.4 (confortul −8..34 °C): fă harta și designul v1 fără agenți,
+comite-le și raportează-mi ce urmează, cu costul agenților (panoul pe design, implementarea, recenzia), înainte să pornești vreunul."
+**Model:** Claude Opus 5.5 (claude-opus-5-5), Claude Code, Ultracode pornit — dar fără agenți, la cererea owner-ului.
+
+Ultima bucată din S24-27: efectul temperaturii asupra oamenilor. Pasul ăsta e doar harta pe HEAD (`6611cc2`) și designul v1, scrise
+inline, fără panou: `research/confort-t4-harta.md` (H1–H7, măsurătorile M1–M4, scripturile în `research/masuratori-t4/`) și
+`research/confort-t4.md`. Ce a schimbat harta înainte de design:
+
+- **banda −8..34 °C e regula Going Medieval de ALEGERE A LOCULUI** („nu-și aleg locuri de stat, de mâncat sau de dormit în afara
+  benzii", `_propuneri.md`:619), nu un prag de rănire; DIGEST cere temperatura „ca stare, nu ca bară";
+- **clima atinge doar marginea de jos, și doar în ziua valului** (M1): afară 15,7–16,3 h pe an sub −8 °C, toate în ziua valului;
+  0 h peste 34 °C (max 25,5);
+- **aproape orice adăpost ține** (M3): casa 5×5 cu pivniță dedesubt nu coboară sub −3,95 °C în val, pivnița 2,6–3,9 °C toată iarna;
+  casele singure 5×5 / 3×3 la −8,19 / −9,32 °C (2,5 / 6,6 h sub −8);
+- **oamenii încălzesc adăpostul vizibil** (M4): 12 într-o casă 3×3 dau +19,8 °C la echilibru (τ 3,6 h; ~+5 °C în prima oră) — decizia
+  „imperceptibil" din §17 era pentru 4 oameni care dorm într-o casă 7×7;
+- **jocul nou implicit nu ajunge la val** (M2): hrana se termină la 2,75–3,0 zile, toți 12 pleacă de foame până la 4,0 zile; iarna
+  începe la 3,667, valul la 4,667 / 5,667 zile. Fără producție de hrană, efectul t.4 se vede doar cu `&hrana=` sau cu o pornire nouă
+  în ajunul valului (`&start=val`) — decizia 8 a designului întreabă dacă t.4 se face acum sau după S28-31.
+
+Designul v1, pe scurt: o nevoie nouă, FRIG (rândul 3 al tabelului; „nevoie de mediu" — scade cu 6 pe grad sub −8 °C pe tic de
+nevoie, se reface cu 80 oriunde peste −8; pornește plină), gândurile „Înfrigurat" −60 / „Înghețat" −300 (refuză munca, nu pleacă
+singur), jobul INCALZIRE spre cel mai apropiat loc acoperit în bandă (`cautaAdapost`, o funcție pentru toți cititorii, parcursă în
+ordinea canonică a componentelor), regula benzii pentru pat, somnul pe loc și hoinăreală; schema 10 prin lărgirea `nevoiFeluri` care
+există deja; literalele se mută o dată la format și deloc la efect (toate rulează toamna). Afară, fără adăpost, valul costă ~7,5 h de
+muncă pe toată colonia; cu adăpost, ~40% din dimineața valului. Nouă întrebări deschise pentru panou (§13).
+
+**Ce urmează:** panoul adversarial pe design, apoi codul (A format, B efect, C ecran) și recenzia — doar cu acordul owner-ului și cu
+costul spus înainte.
