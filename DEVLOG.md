@@ -5262,3 +5262,43 @@ nevoilor. Cifrele măsurate pe prototip: fără adăpost se pierde ~1/3 din munc
 
 **Ce urmează:** implementarea (A format, B efect, C ecran — §11 din v2), apoi recenzia codului — doar cu acordul owner-ului și cu
 costul spus înainte. Decizia 8 (t.4 acum sau după producția de hrană) e la owner.
+
+## Pauză — 29.10.2026 — S24-27 t.4: implementarea, oprită după A și B1
+
+**Prompt:** „Da, pornește implementarea t.4 pe designul v2 (A formatul, B efectul, C ecranul), cu agenții, ~3,5–4 M." (17.10, oprit
+atunci înainte de agenți la „termina ce ai inceput si opreste-te"), reluat pe 29.10 cu „contiuna", oprit cu „pauza".
+**Model:** Claude Opus 5.5 (claude-opus-5-5), Claude Code; implementarea prin Workflow, cu acordul owner-ului: cinci agenți pe rând
+(A → B1 → B2 → C1 → C2), într-o clonă în afara Drive-ului, ramura `t4` din `26a763b`, fiecare cu raportul etapelor de dinainte.
+
+Consumul: săptămânal 69% la pornire, **78% la oprire**. A + B1 + primele minute din B2: ~1,7 M în măsura panoului (suma
+contextelor finale ale agenților); B1 singur ~3/4 din tot. Oprit la începutul lui B2, cu arborele clonei curat (B2 nu scrisese nimic).
+
+**Pe ramura `t4`** (în repo, nu în `main`, neurcată):
+
+- `23565ab` (A): fixtura golden de schema 9, capturată pe `26a763b` înainte de orice cod.
+- `1c28f87` (A): formatul — FRIG (`NEVOI = 3`, `NEVOIE_DE_MEDIU`) plin și inert, gândurile INFRIGURAT −60 / INGHETAT −270,
+  INCALZIRE cu driverul întreg dar nepornit de nimeni, `nevoi.FRIG` + `confort` în content cu validarea din §1 și podeaua 80 în
+  `parseRules`, schema 10 (`MIGRATIONS[9]`), validarea tuturor nevoilor la decode și encode, literalele mutate o singură dată cu
+  proba hash-ului proiectat pe schema 9, suita de mutații `frig`. 1.178 → 1.200 de teste.
+- `0b9a397` (B1): efectul — scurgerea cu toleranța pe om, declanșatorul, INCALZIRE viu, `adapostPentru` peste `cautaAdapostPur`
+  (V3, pe felii, în `src/sim/confort.ts`). Poarta (prin înlocuitorul npm, vezi mai jos): **1.226/1.226 de teste**, hash standard
+  `41f36b83` (neschimbat față de A; standardul în pas cu A la fiecare din 100.000 de tickuri, 0 diferențe); 810 din 1.431 de probe
+  de mutație rulate, în 12 suite, toate prinse.
+- `ac2b7a9`: rapoartele agenților, `research/confort-t4-impl/A.md` și `B1.md` (abaterile cu dovada — A 11, B1 16 —, cifrele, ce rămâne).
+
+**Ce s-a aflat pe codul real:**
+
+- **Toți intră la cald în aceeași oră**: cu toleranța 250‰, 11–12 din 12 oameni (cu 500‰, maximul validat, 9–10). Acceptanța (b),
+  „cel mult jumătate din colonie", pică. Cauza: valul coboară în rampă (−5,3 °C la 00:00, −16,6 °C la 04:00), deci frigul se
+  adună în aceleași două ore, iar toleranța doar lățește fereastra. JOC-4 presupusese că toleranța rezolvă. De decis la B2 / owner.
+- **Căutarea adăpostului pe M10 costă mai mult decât pe prototip**: la 80 m, 1,1–1,8 ms p50 (prototipul panoului: 88 µs), 621
+  de felii vizitate, sub plafonul de 2.048; în colonie, 26–34 µs/tick. Contează la alerta valului (C), care caută pe cadre.
+- **npm e stricat pe mașină**: `C:\Program Files\nodejs\node_modules\npm` conține doar `npmrc` (dosarul modificat pe 26.10), iar
+  `npm run` cade cu „Cannot find module …\npm\bin\npm-cli.js". Agenții au rulat poarta printr-un înlocuitor care execută exact
+  scripturile din `package.json`. Reinstalarea Node/npm e a owner-ului.
+
+**Neverificat încă de sesiune:** abaterile declarate (se verifică pe cod la integrare), mutațiile complete, CI pe `t4`.
+
+**Rămâne:** B2 (patul și somnul pe loc cu regula benzii, hoinăreala, `createWorld(…, tickStart)`, fixtura casă + pivniță în care se
+intră pe jos, acceptanțele pe drumul natural, K05), C1 (ecranul), C2 (ui-fum), apoi integrarea (porțile întregi, mutațiile complete
+într-o clonă, `main` adus la `t4`, push, CI), recenzia codului și documentația — cu acordul owner-ului și costul spus înainte.
